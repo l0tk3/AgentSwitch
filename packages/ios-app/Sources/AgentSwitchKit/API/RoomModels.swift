@@ -150,14 +150,23 @@ public struct RoomSeat: Decodable, Sendable, Hashable, Identifiable {
     /// nil for the user, and for a state this app does not know (shown as it is, no mark).
     public let state: SeatState?
     public let card: SeatCard?
+    /// Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
+    /// there was a Kit, until it is resumed; nil for the user, and from a Mac that does not say.
+    public let kit: Bool?
 
     public var id: String { handle }
     public var here: Bool { left == nil }
+    /// It sits here, its session goes on, and it has no Kit: it can neither speak in the room nor be woken until the
+    /// user resumes it once.
+    public var needsResume: Bool { !isUser && here && kit == false && state != .exited }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, state, card }
+    /// What the user has to do for a seat without the Kit.
+    public static let noKitSays = "这个会话在 Chat Room 上线之前就已开着，身上没有 Chatroom Kit：它不能在房间里发言，也不会被消息唤醒。请将它恢复一次（记录不丢）。"
+
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, state, card, kit }
 
     public init(handle: String, isUser: Bool = false, terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = RoomSeat.you,
-                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil) {
+                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil) {
         self.handle = handle
         self.isUser = isUser
         self.terminal = terminal
@@ -169,10 +178,12 @@ public struct RoomSeat: Decodable, Sendable, Hashable, Identifiable {
         self.left = left
         self.state = state
         self.card = card
+        self.kit = kit
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        kit = (try? c.decodeIfPresent(Bool.self, forKey: .kit)).flatMap { $0 }
         handle = try c.decode(String.self, forKey: .handle)
         isUser = (try? c.decode(String.self, forKey: .kind)) == "user"
         terminal = (try? c.decodeIfPresent(String.self, forKey: .terminal)).flatMap { $0 }
@@ -196,13 +207,22 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
     public let text: String
     /// Milliseconds since 1970.
     public let at: Int64
+    /// Files it comes with, by where they are on the node (§3 附件).
+    public let files: [String]
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at }
+    /// A file's name, as the timeline shows it: the last part of where it is.
+    public static func fileName(_ path: String) -> String {
+        let name = path.split(separator: "/", omittingEmptySubsequences: true).last.map(String.init) ?? ""
+        return name.isEmpty ? path : name
+    }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0) {
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files }
+
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = []) {
+        self.files = files
         self.seq = seq
         self.from = from
         self.to = to
@@ -219,6 +239,24 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         replyTo = (try? c.decodeIfPresent(Int.self, forKey: .replyTo)).flatMap { $0 }
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         at = (try? c.decode(Int64.self, forKey: .at)) ?? 0
+        files = (try? c.decode([String].self, forKey: .files)) ?? []
+    }
+}
+
+/// The room's pinned notes (§9): one text every member reads and replaces whole.
+public struct RoomNotes: Decodable, Sendable, Hashable {
+    public let text: String
+    /// Milliseconds since 1970.
+    public let at: Int64
+    /// The seat that wrote them last.
+    public let by: String
+
+    public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
+
+    public init(text: String, at: Int64 = 0, by: String = RoomSeat.you) {
+        self.text = text
+        self.at = at
+        self.by = by
     }
 }
 
@@ -253,10 +291,19 @@ public struct RoomInfo: Decodable, Sendable, Hashable, Identifiable {
     public let createdAt: Int64
     public let lastSeq: Int
     public let readSeq: Int
+    /// Sessions have sent one another this many messages with no word from the user (§7); nil under the room's limit.
+    /// The user is told; nothing is stopped.
+    public let rounds: Int?
+    public let roundsLimit: Int
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, lastSeq, readSeq }
+    /// The notice's sentence.
+    public static func roundsSays(_ n: Int) -> String { "会话之间已经连续往返 \(n) 次，没有你参与。它们仍在继续，没有被打断。" }
 
-    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, lastSeq: Int = 0, readSeq: Int = 0) {
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, lastSeq, readSeq, rounds, roundsLimit }
+
+    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, lastSeq: Int = 0, readSeq: Int = 0, rounds: Int? = nil, roundsLimit: Int = 6) {
+        self.rounds = rounds
+        self.roundsLimit = roundsLimit
         self.id = id
         self.name = name
         self.topic = topic
@@ -275,6 +322,8 @@ public struct RoomInfo: Decodable, Sendable, Hashable, Identifiable {
         createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
         lastSeq = (try? c.decode(Int.self, forKey: .lastSeq)) ?? 0
         readSeq = (try? c.decode(Int.self, forKey: .readSeq)) ?? 0
+        rounds = (try? c.decodeIfPresent(Int.self, forKey: .rounds)).flatMap { $0 }
+        roundsLimit = (try? c.decode(Int.self, forKey: .roundsLimit)) ?? 6
     }
 }
 
@@ -287,10 +336,12 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
     public let receipts: [Int: [String: RoomReceipt]]
     /// Why a session named when the room was made could not be seated.
     public let problems: [String]
+    public let notes: RoomNotes?
 
-    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, problems }
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, problems, notes }
 
-    public init(room: RoomInfo, seats: [RoomSeat], messages: [RoomMessage] = [], receipts: [Int: [String: RoomReceipt]] = [:], problems: [String] = []) {
+    public init(room: RoomInfo, seats: [RoomSeat], messages: [RoomMessage] = [], receipts: [Int: [String: RoomReceipt]] = [:], problems: [String] = [], notes: RoomNotes? = nil) {
+        self.notes = notes
         self.room = room
         self.seats = seats
         self.messages = messages
@@ -305,6 +356,7 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
         messages = (try? c.decode([RoomMessage].self, forKey: .messages)) ?? []
         receipts = RoomDetail.receipts((try? c.decode([String: [String: String]].self, forKey: .receipts)) ?? [:])
         problems = (try? c.decode([String].self, forKey: .problems)) ?? []
+        notes = (try? c.decodeIfPresent(RoomNotes.self, forKey: .notes)).flatMap { $0 }
     }
 
     static func receipts(_ raw: [String: [String: String]]) -> [Int: [String: RoomReceipt]] {
@@ -356,10 +408,13 @@ public struct RoomSummary: Decodable, Sendable, Hashable, Identifiable {
     /// Messages after what the user has seen; `forYou`: one of them names the user.
     public let unread: Int
     public let forYou: Bool
+    /// Sessions talking among themselves with no word from the user (§7); nil under the room's limit.
+    public let rounds: Int?
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, members, faces, last, unread, forYou }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, members, faces, last, unread, forYou, rounds }
 
-    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, members: Int = 1, faces: [Sitter] = [], last: Last? = nil, unread: Int = 0, forYou: Bool = false) {
+    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, members: Int = 1, faces: [Sitter] = [], last: Last? = nil, unread: Int = 0, forYou: Bool = false, rounds: Int? = nil) {
+        self.rounds = rounds
         self.id = id
         self.name = name
         self.topic = topic
@@ -384,6 +439,7 @@ public struct RoomSummary: Decodable, Sendable, Hashable, Identifiable {
         last = (try? c.decodeIfPresent(Last.self, forKey: .last)).flatMap { $0 }
         unread = (try? c.decode(Int.self, forKey: .unread)) ?? 0
         forYou = (try? c.decode(Bool.self, forKey: .forYou)) ?? false
+        rounds = (try? c.decodeIfPresent(Int.self, forKey: .rounds)).flatMap { $0 }
     }
 
     /// The list's second line: who said the last thing and what; the topic before anything was said.
@@ -401,6 +457,8 @@ public struct RoomList: Decodable, Sendable, Hashable {
 
     /// Messages not seen yet, in all rooms: the tab's badge.
     public var unread: Int { rooms.reduce(0) { $0 + $1.unread } }
+    /// Something in a room waits for the user: a message that names them, or sessions' rounds they have not seen.
+    public var needsYou: Bool { rooms.contains { ($0.forYou && $0.unread > 0) || $0.rounds != nil } }
 }
 
 // MARK: - what the pages make of them

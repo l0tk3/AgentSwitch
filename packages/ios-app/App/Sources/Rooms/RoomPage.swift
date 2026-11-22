@@ -15,6 +15,7 @@ struct RoomPage: View {
     @State private var adding = false
     @State private var editing = false
     @State private var confirmDelete = false
+    @State private var notes = false
     @FocusState private var writing: Bool
 
     struct MembersRequest: Identifiable {
@@ -28,7 +29,7 @@ struct RoomPage: View {
         let detail = model.detail
         VStack(spacing: 0) {
             HairRule()
-            if let detail, detail.room.paused { pausedBanner }
+            if let detail, detail.room.paused { pausedBanner } else if let n = detail?.room.rounds { roundsBanner(n) }
             if let error = model.error {
                 ErrorText(message: Binding(get: { model.error }, set: { model.error = $0 }))
                     .padding(.horizontal, Theme.Space.l).padding(.vertical, 6).id(error)
@@ -67,6 +68,7 @@ struct RoomPage: View {
                     } else {
                         Button("Pause", systemImage: "pause") { Task { await model.run(app.api) { try await $0.updateRoom(model.id, paused: true) } } }
                     }
+                    Button(detail?.notes == nil ? "Notes" : "Notes ·", systemImage: "pin") { notes = true }
                     Button("Add Sessions…", systemImage: "plus") { adding = true }
                     Button("Rename…", systemImage: "pencil") { editing = true }
                     Section { Button("Delete Room…", systemImage: "trash", role: .destructive) { confirmDelete = true } }
@@ -100,6 +102,12 @@ struct RoomPage: View {
             }
             .followsLook()
         }
+        .sheet(isPresented: $notes) {
+            RoomNotesSheet(notes: detail?.notes) { text in
+                await model.run(app.api) { try await $0.setRoomNotes(model.id, text: text) }
+            }
+            .followsLook()
+        }
         #if DEBUG
         // The sample screens' sheets, as taps would open them.
         .onAppear {
@@ -109,6 +117,7 @@ struct RoomPage: View {
                 case "roommembers": members = MembersRequest()
                 case "roomcard": members = MembersRequest(card: "android")
                 case "roomadd": adding = true
+                case "roomnotes": notes = true
                 default: break
                 }
             }
@@ -134,6 +143,28 @@ struct RoomPage: View {
         .overlay(alignment: .bottom) { HairRule() }
     }
 
+    /// Sessions have gone back and forth this many times with no word from the user (§7; 2026-11-22, user: 多轮没我的
+    /// 参与就提醒我一下就行不用中断他们): told, with `OK` to count again from here and `Pause` to stop the handing over.
+    private func roundsBanner(_ n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                SeatStateMark(state: .waiting)
+                Text(RoomInfo.roundsSays(n)).font(.system(size: 13)).foregroundStyle(Theme.ink).frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: Theme.Space.s) {
+                Spacer(minLength: 0)
+                Button { Task { await model.run(app.api) { try await $0.updateRoom(model.id, paused: true) } } } label: { ButtonWord("Pause") }
+                    .buttonStyle(SquareButtonStyle(expand: false))
+                Button { Task { await model.run(app.api) { try await $0.roundsSeen(model.id) } } } label: { ButtonWord("OK") }
+                    .buttonStyle(SquareButtonStyle(prominent: true, expand: false))
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, 8)
+        .background(Theme.waiting.opacity(0.14))
+        .overlay(alignment: .bottom) { HairRule() }
+    }
+
     private func timeline(_ detail: RoomDetail) -> some View {
         let rows = RoomRow.rows(detail.messages)
         let handles = RoomText.handles(of: detail.seats)
@@ -152,7 +183,8 @@ struct RoomPage: View {
                                            forMe: row.message.to.contains(RoomSeat.you) && row.message.seq > (model.seenAtOpen ?? .max),
                                            openCard: { members = MembersRequest(card: $0) },
                                            reply: { model.replyTo = row.message.seq; writing = true },
-                                           mention: { mention($0) })
+                                           mention: { mention($0) },
+                                           openFile: { app.showInFiles(MacPath.parent($0) ?? $0) })
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 8).id("end")
@@ -200,6 +232,8 @@ private struct RoomMessageRow: View {
     let openCard: (String) -> Void
     let reply: () -> Void
     let mention: (String) -> Void
+    /// A file a message came with, by where it is on the node.
+    let openFile: (String) -> Void
     @Environment(\.interfaceLook) private var look
 
     private static let faceSide: CGFloat = 26
@@ -223,6 +257,7 @@ private struct RoomMessageRow: View {
                         .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
+                    if !m.files.isEmpty { files(m.files) }
                     receipts(m)
                 }
             }
@@ -273,6 +308,32 @@ private struct RoomMessageRow: View {
         .padding(.leading, look.isClassic ? 8 : 0)
         .overlay(alignment: .leading) { if look.isClassic { Theme.line.frame(width: 2) } }
         .padding(.bottom, 1)
+    }
+
+    /// The files it came with (§3 附件), by name; a tap shows the folder one is in on the Files page.
+    private func files(_ paths: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(paths, id: \.self) { path in
+                Button { openFile(path) } label: {
+                    HStack(spacing: 6) {
+                        if look.isClassic { Image(systemName: "doc").font(.system(size: 12)) } else { PixelSprite(rows: RoomArt.file, pixel: 2, color: Theme.secondaryInk) }
+                        Text(RoomMessage.fileName(path)).lineLimit(1).truncationMode(.middle)
+                    }
+                    .mono(12)
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).stroke(Theme.line, lineWidth: look.isClassic ? 0 : 1))
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Show in Files", systemImage: "folder") { openFile(path) }
+                    Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = path }
+                }
+                .accessibilityLabel(path)
+            }
+        }
+        .padding(.top, 3)
     }
 
     /// Said only while it matters: who it has not reached, and where it is; one that can not be handed over, in red.

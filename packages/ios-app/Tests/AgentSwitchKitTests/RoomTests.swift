@@ -224,6 +224,64 @@ final class RoomTests: XCTestCase {
         }
     }
 
+    /// What the service gained after the first pages: the rounds notice, a seat's Kit, the pinned notes, a message's files.
+    func testRoundsKitNotesAndFilesAreRead() throws {
+        let json = #"""
+        {"room":{"id":"a1b2c3d4e5","name":"r","topic":"","paused":false,"createdAt":1,"createdBy":"you","lastSeq":2,"readSeq":2,"rounds":7,"roundsLimit":6},
+         "seats":[
+           {"handle":"you","kind":"user","terminal":null,"face":null,"joinedAt":1,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":null,"card":null,"kit":null},
+           {"handle":"new","kind":"session","terminal":"t1","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"idle","card":null,"kit":true},
+           {"handle":"old","kind":"session","terminal":"t2","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"busy","card":null,"kit":false},
+           {"handle":"over","kind":"session","terminal":"t3","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"exited","card":null,"kit":false},
+           {"handle":"went","kind":"session","terminal":"t4","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":5,"state":"idle","card":null,"kit":false}],
+         "messages":[{"seq":1,"from":"new","to":["old"],"text":"@old 看这个","at":1,"files":["/w/docs/api.md","/w/a b/图.png","/"]},{"seq":2,"from":"old","to":[],"text":"好","at":2}],
+         "receipts":{},"notes":{"text":"接口：/login 返回 expiresAt","at":1763800000000,"by":"new"}}
+        """#
+        let room = try JSONDecoder().decode(RoomDetail.self, from: Data(json.utf8))
+        XCTAssertEqual(room.room.rounds, 7)
+        XCTAssertEqual(room.room.roundsLimit, 6)
+        XCTAssertTrue(RoomInfo.roundsSays(7).contains("7"))
+        // Only a seat whose session goes on without the Kit needs the user: not the user, not one with it, not one
+        // that is over or has left.
+        XCTAssertEqual(room.seats.filter(\.needsResume).map(\.handle), ["old"])
+        XCTAssertNil(room.seat("you")?.kit)
+        XCTAssertEqual(room.notes, RoomNotes(text: "接口：/login 返回 expiresAt", at: 1_763_800_000_000, by: "new"))
+        XCTAssertEqual(room.messages[0].files.map(RoomMessage.fileName), ["api.md", "图.png", "/"])
+        XCTAssertEqual(room.messages[1].files, [])
+
+        // An older Mac says none of it: no notice, no hint, no notes.
+        let before = try JSONDecoder().decode(RoomDetail.self, from: Data(Self.room.utf8))
+        XCTAssertNil(before.room.rounds)
+        XCTAssertNil(before.notes)
+        XCTAssertTrue(before.seats.allSatisfy { !$0.needsResume })
+
+        let list = try JSONDecoder().decode(RoomList.self, from: Data(#"{"rooms":[{"id":"a","name":"a","members":2,"faces":[],"last":null,"unread":0,"forYou":false,"rounds":6},{"id":"b","name":"b","members":2,"faces":[],"last":null,"unread":3,"forYou":false,"rounds":null}]}"#.utf8))
+        XCTAssertEqual(list.rooms.map(\.rounds), [6, nil])
+        XCTAssertTrue(list.needsYou)   // rounds the user has not seen
+        XCTAssertFalse(RoomList(rooms: [list.rooms[1]]).needsYou)   // unread, but none of it for the user
+        XCTAssertTrue(try JSONDecoder().decode(RoomList.self, from: Data(Self.list.utf8)).needsYou)   // a message names the user
+    }
+
+    func testRoundsAndNotesCallsAreAsTheServiceTakesThem() async throws {
+        let transport = FakeTransport { req, _ in
+            let path = req.url?.path ?? ""
+            if path.hasSuffix("/notes") {
+                let empty = (req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })?["text"] as? String == ""
+                return (Data((empty ? #"{"notes":null}"# : #"{"notes":{"text":"约定","at":5,"by":"you"}}"#).utf8), httpResponse(req.url, status: 200))
+            }
+            return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url, status: 200))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        try await api.roundsSeen("a1b2c3d4e5")
+        let notes = try await api.setRoomNotes("a1b2c3d4e5", text: "约定")
+        XCTAssertEqual(notes, RoomNotes(text: "约定", at: 5, by: "you"))
+        let none = try await api.setRoomNotes("a1b2c3d4e5", text: "")
+        XCTAssertNil(none)
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["POST /rooms/a1b2c3d4e5/rounds/ok", "PUT /rooms/a1b2c3d4e5/notes", "PUT /rooms/a1b2c3d4e5/notes"])
+        let sent = try XCTUnwrap(transport.requests[1].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(sent as NSDictionary, ["text": "约定"])
+    }
+
     func testAMacWithoutChatRoomIsSaidSo() async {
         for status in [403, 404] {
             let transport = FakeTransport { req, _ in (Data(#"{"error":"not allowed"}"#.utf8), httpResponse(req.url, status: status)) }

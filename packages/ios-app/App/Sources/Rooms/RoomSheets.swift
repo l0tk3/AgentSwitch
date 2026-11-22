@@ -83,6 +83,8 @@ private struct RoomMemberRow: View {
                 HStack(spacing: 0) {
                     Text(seat.state?.word(in: look) ?? "—").foregroundStyle(seat.state?.wordColor ?? Theme.secondaryInk)
                     if seat.canAdd { Text(" · Can Add").foregroundStyle(.secondary) }
+                    // Its session has no Chatroom Kit (§6): it needs the user to resume it once.
+                    if seat.needsResume { Text(" · No Kit").foregroundStyle(Theme.waiting) }
                 }
                 .mono(11.5).lineLimit(1)
             }
@@ -140,6 +142,17 @@ private struct SeatCardPage: View {
                     line("Seated By", RoomWords.who(seat.addedBy))
                 } footer: {
                     if seat.left == nil, let says = seat.state?.says { Text(says) }
+                }
+                if seat.needsResume {
+                    Section {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            SeatStateMark(state: .waiting)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("No Kit").font(.system(size: 14, weight: .semibold, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Theme.waiting)
+                                Text(RoomSeat.noKitSays).font(.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
                 }
                 if seat.left == nil {
                     Section {
@@ -349,5 +362,78 @@ struct RoomEditSheet: View {
             }
         }
         .presentationDetents([.medium])
+    }
+}
+
+/// The room's pinned notes (docs/chatroom-v0.md §9): one text every member reads and replaces whole — what was agreed.
+/// Shown as written, with who wrote them last and when; `Edit` makes them a box to write in, `Save` puts the whole
+/// text in place of what was there.
+struct RoomNotesSheet: View {
+    let notes: RoomNotes?
+    /// True once the Mac has them.
+    let save: (String) async -> Bool
+    @Environment(\.interfaceLook) private var look
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var editing = false
+    @State private var working = false
+    @FocusState private var writing: Bool
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let notes, !editing {
+                        Text("\(RoomWords.who(notes.by)) · \(RoomWords.day(notes.date)) \(RoomWords.time(notes.date))").mono(11.5).foregroundStyle(.secondary)
+                    }
+                    if editing {
+                        TextEditor(text: $text)
+                            .font(.system(size: 14, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .focused($writing)
+                            .frame(minHeight: 260)
+                            .padding(8)
+                            .grounded(look.isClassic ? Theme.panel : Color.clear, radius: Theme.Radius.card)
+                            .framed(Theme.line, radius: Theme.Radius.card)
+                        Text("所有成员都能读、能改这份笔记。保存会用这里的全文替换原来的内容。").font(.footnote).foregroundStyle(.secondary)
+                    } else if let notes {
+                        Text(notes.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.ink).lineSpacing(3)
+                            .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    } else {
+                        Text("这个房间还没有置顶笔记。可以把约定、接口、待办写在这里，所有成员都能读、能改。").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(Theme.Space.l)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background { Theme.base.ignoresSafeArea() }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) { Text("Notes").font(.headline) }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { if editing && notes != nil { editing = false } else { dismiss() } } label: {
+                        let word = editing ? "Cancel" : "Done"
+                        if look.isClassic { Text(word) } else { Text(word).mono(15) }
+                    }
+                    .tint(look.isClassic ? Theme.signal : Theme.ink)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if editing {
+                        Button {
+                            Task { working = true; let done = await save(text); working = false; if done { dismiss() } }
+                        } label: { if look.isClassic { Text("Save").fontWeight(.semibold) } else { Text("Save").mono(15, weight: .medium) } }
+                        .tint(look.isClassic ? Theme.signal : Theme.ink)
+                        .disabled(working || text == (notes?.text ?? ""))
+                    } else {
+                        Button { text = notes?.text ?? ""; editing = true; writing = true } label: { if look.isClassic { Text("Edit") } else { Text("Edit").mono(15, weight: .medium) } }
+                            .tint(look.isClassic ? Theme.signal : Theme.ink)
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(editing && text != (notes?.text ?? ""))
     }
 }

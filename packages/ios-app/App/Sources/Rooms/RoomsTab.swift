@@ -114,6 +114,9 @@ private struct RoomListRow: View {
                 Text(room.name).font(.system(size: 15.5, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 6)
                 if room.paused { Text("Paused").mono(11).foregroundStyle(Theme.inkDim) }
+                // Sessions talking among themselves with no word from the user (§7): told here too, in amber — it
+                // waits for the user's look, and stops nothing.
+                else if let n = room.rounds { Text("\(n) Rounds").mono(11).foregroundStyle(Theme.waiting).accessibilityLabel("\(n) rounds without you") }
                 if room.unread > 0 { count }
             }
             Text(room.lastLine).font(.system(size: 13.5)).foregroundStyle(.secondary).lineLimit(1)

@@ -14,6 +14,9 @@ private struct AddSeatBody: Encodable { let terminal: String; let canAdd: Bool? 
 private struct SetSeatBody: Encodable { let canAdd: Bool }
 private struct SayBody: Encodable { let text: String; let replyTo: Int? }
 private struct ReadBody: Encodable { let seq: Int }
+private struct NotesBody: Encodable { let text: String }
+private struct NotesReply: Decodable { let notes: RoomNotes? }
+private struct Nothing: Encodable {}
 private struct SeatReply: Decodable { let seat: RoomSeat }
 private struct SummaryReply: Decodable { let room: RoomSummary }
 private struct ReadReply: Decodable { let readSeq: Int }
@@ -90,5 +93,16 @@ extension AgentSwitchAPI {
     @discardableResult
     public func markRoomRead(_ room: String, upTo seq: Int) async throws -> Int {
         (try await post(["rooms", room, "read"], body: ReadBody(seq: seq)) as ReadReply).readSeq
+    }
+
+    /// The user has seen the sessions' rounds go by (`OK`): counted from here again. Nothing was stopped.
+    public func roundsSeen(_ room: String) async throws {
+        let _: Done = try await post(["rooms", room, "rounds", "ok"], body: Nothing())
+    }
+
+    /// The pinned notes, whole, in place of what was there; nil: they are empty now.
+    @discardableResult
+    public func setRoomNotes(_ room: String, text: String) async throws -> RoomNotes? {
+        (try await send("PUT", ["rooms", room, "notes"], body: NotesBody(text: text)) as NotesReply).notes
     }
 }
