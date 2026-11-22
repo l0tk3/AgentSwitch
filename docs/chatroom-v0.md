@@ -161,16 +161,43 @@ Reply to: #39
 - 因此 Claude Code **两种情形都不用往终端里打字**：没有“打进去的字答了一个正在显示的权限提问”的风险，也不和用户正在输入的内容抢。
 - 还没试：会话从启动起一次都没结束过一轮（没有 `Stop` 可挂）时怎么等——`SessionStart` 上挂同样的后台钩子，理应可以，未测。
 
-**Codex 0.171.0，读了源码，没有实跑**
+**Codex 0.171.0，实测**（用户：其他的 agent 都要做验证）
 
-- `codex-rs/hooks/src/events/stop.rs`（`rust-v0.171.0`）：`Stop` 钩子回 `decision: "block"` 加 `reason`，或以 2 退出并把话写在 stderr，都是 `should_block`，`reason` 成为接着做的那一段（`continuation_prompt`）。和 Claude Code 的第一种做法一样。
-- 没有实跑的原因：Codex 只运行受信任的钩子，信任是写在用户 `~/.codex/config.toml` 里的哈希；为一个实验钩子去改那份文件不合适。AgentSwitch 自己的 `Stop` 钩子本来就受信任，做的时候直接在它上面验证。
-- 没有找到相当于 `asyncRewake` 的东西：空闲时只能把消息作为一条输入打进终端（已有的 `/terminals/:id/input`），只在状态是空闲、且屏幕上没有待选的列表时打。
+| 情形 | 做法 | 结果 |
+|---|---|---|
+| 一轮结束时有排队的消息 | `Stop` 钩子回 `{"decision":"block","reason":"…"}` | 通。它接着做，照消息回了话；第二次进 `Stop` 时 `stop_hook_active` 是 `true`，和 Claude Code 一样 |
+| 空闲时来了消息 | 没有相当于 `asyncRewake` 的东西 | 只能把消息作为一条输入打进终端（已有的 `/terminals/:id/input`，用户每天从手机回复走的就是它）；只在状态是空闲、且屏幕上没有待选的列表时打 |
 
-**OpenCode、pi，只看了现有接法**
+- 实验用 `codex exec --ephemeral --dangerously-bypass-hook-trust`：一次运行内免信任、不留会话，没有动用户的 `~/.codex/config.toml`。真做的时候走 AgentSwitch 自己那条已受信任的 `Stop` 钩子。
+- 源码同此：`codex-rs/hooks/src/events/stop.rs`，`reason` 成为接着做的那一段（`continuation_prompt`）；以 2 退出并把话写在 stderr 亦然。
 
-- OpenCode 的终端背后是一个私有的服务（`opencode serve --stdio`），AgentSwitch 已经在轮询它；往会话里送一段话应当走这个服务，未测。
-- pi 靠 AgentSwitch 自己的扩展报告回合（`agent_settled`）；扩展在 pi 里面运行，理应能在那一刻送一段话，未测。
+**OpenCode 2.3.2，实测**
+
+OpenCode 没有钩子，但它的界面是一个服务的客户端，AgentSwitch 的每个 OpenCode 终端背后本来就有一个私有的服务。往会话里送一段话就是 `POST /api/session/:id/prompt {text}`（调度的执行器一直在用这个接口）。
+
+| 情形 | 结果 |
+|---|---|
+| 空闲时送 | 通：它开始新的一轮并照消息回了话 |
+| 忙的时候送 | 通：接口照收（200），排在正在做的那一件后面，做完再处理 |
+
+- 两种情形一个接口，不用区分，也不用打字。
+- **不同于另外两家**：这样送进去的是一条 `user` 消息，和用户打的字是同一种。来源只能靠信封的 `From` 说明。
+- 实验的会话事后用 `DELETE /api/session/:id` 删了（204）。
+
+**pi，只读了文档，没有实跑**
+
+- 这台 Mac 上没有装 pi，也没有它的登录，跑不了一轮真的。读的是它发布包里的文档（`@earendil-works/pi-coding-agent` 1.6.0，`docs/extensions.md`）。
+- AgentSwitch 自己的扩展在 pi 里面运行，可以调 `pi.sendMessage({ customType, content, display }, { triggerTurn: true, deliverAs: "followUp" })`：空闲时立刻起一轮，忙的时候等它做完再交。它送的是**自定义消息**，不是用户消息（`pi.sendUserMessage` 才是“像用户打的一样”），正合要求。
+- 要等装上并登录 pi 之后实测。
+
+**四家对照**
+
+| | 一轮结束时 | 空闲时 | 进去的身份 | 验证 |
+|---|---|---|---|---|
+| Claude Code | `Stop` 钩子的 `additionalContext` | 后台等着的 `asyncRewake` 钩子 | 钩子反馈，不是用户 | 实测 |
+| Codex | `Stop` 钩子的 `block` + `reason` | 打进终端 | 钩子反馈 / 用户输入 | 实测（空闲那条是现有功能） |
+| OpenCode | 服务的 `prompt` 接口（自动排队） | 同一个接口 | 用户消息 | 实测 |
+| pi | 扩展的 `sendMessage`，`followUp` | 同上，`triggerTurn` | 自定义消息 | 只读了文档 |
 
 **已有的地基（看代码确认）**
 
@@ -178,7 +205,7 @@ Reply to: #39
 - 每个终端各有自己的 MCP 配置和令牌（浏览器工具那一套），调用方是哪个终端由通道认定。
 - 往终端里送输入已有接口。
 
-**结论**：第一版先接 Claude Code，两种情形都有干净的办法；Codex 的回合结束同理，空闲靠打字；OpenCode、pi 放到后面。
+**结论**：四家都有路。Claude Code 最干净（两种情形都不打字、都不是用户身份）；OpenCode 最省事（一个接口）但进去的是用户消息；Codex 空闲时要打字；pi 待实测。
 
 ## 13. 没定的
 
