@@ -164,4 +164,52 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarPeople), "person.2")
         XCTAssertEqual(MainShortcut.action(for: MainShortcut.Press(key: "m", keyCode: 46, command: true, control: false, option: false, shift: true), on: .terminals, canGoBack: false), .page(.rooms))
     }
+
+    // MARK: rounds, the Kit, notes, files (docs/chatroom-v0.md §7, §6, §9, §3)
+
+    func testRoundsTheKitNotesAndFilesAreReadAndAnOlderServiceReadsAsWithout() throws {
+        let json = """
+        {"room":{"id":"ab12cd34ef","name":"r","topic":"","paused":false,"lastSeq":2,"readSeq":2,"rounds":7,"roundsLimit":6},
+         "seats":[
+          {"handle":"you","kind":"user","terminal":null,"face":null,"joinedAt":1,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":null,"card":null,"kit":null},
+          {"handle":"old","kind":"session","terminal":"t1","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"idle","card":null,"kit":false},
+          {"handle":"new","kind":"session","terminal":"t2","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"idle","card":null,"kit":true},
+          {"handle":"gone","kind":"session","terminal":"t3","face":null,"joinedAt":1,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"exited","card":null,"kit":false}],
+         "messages":[{"seq":1,"from":"old","to":["new"],"text":"@new 看这个","at":1000,"files":["/w/api.md","/w/a b.txt"]},{"seq":2,"from":"new","to":[],"text":"好","at":2000}],
+         "receipts":{},
+         "notes":{"text":"接口：expiresAt（毫秒）","at":1500.4,"by":"old"}}
+        """
+        let room = try JSONDecoder().decode(Room.self, from: Data(json.utf8))
+        XCTAssertEqual(room.room.rounds, 7)
+        XCTAssertEqual(room.room.roundsLimit, 6)
+        XCTAssertTrue(Room.roundsSays(7).contains("7"))
+        XCTAssertEqual(room.seats.map(\.needsResume), [false, true, false, false], "the user, one with the Kit and one that has ended need no resume")
+        XCTAssertEqual(room.messages[0].files, ["/w/api.md", "/w/a b.txt"])
+        XCTAssertEqual(room.messages[1].files, [])
+        XCTAssertEqual(room.notes, RoomNotes(text: "接口：expiresAt（毫秒）", at: 1500, by: "old"))
+        XCTAssertEqual(room.notes?.who, "@old")
+        XCTAssertEqual(RoomNotes(text: "x", at: 0, by: "you").who, "You")
+
+        // A service from before these: no rounds, no notes, no files, and a seat that does not say needs nothing.
+        let older = try self.room()
+        XCTAssertNil(older.room.rounds)
+        XCTAssertNil(older.notes)
+        XCTAssertNil(older.seat("daemon")?.kit)
+        XCTAssertFalse(older.seat("daemon")?.needsResume ?? true)
+
+        let list = try JSONDecoder().decode([RoomSummary].self, from: Data("""
+        [{"id":"a","name":"A","topic":"t","paused":false,"members":2,"unread":0,"forYou":false,"rounds":6,"last":null},
+         {"id":"b","name":"B","topic":"t","paused":false,"members":2,"unread":0,"forYou":false,"rounds":null,"last":null},
+         {"id":"c","name":"C","topic":"t","paused":false,"members":2,"unread":0,"forYou":false,"last":null}]
+        """.utf8))
+        XCTAssertEqual(list.map(\.rounds), [6, nil, nil])
+    }
+
+    func testWhatTheUserSaysCarriesFilesOnlyWhenThereAreSome() {
+        let plain = DaemonClient.sayBody("hi", replyTo: nil, files: [])
+        XCTAssertEqual(Set(plain.keys), ["text"], "the service refuses a body with anything it does not know")
+        let full = DaemonClient.sayBody("hi", replyTo: 3, files: ["/w/a.md"])
+        XCTAssertEqual(full["replyTo"] as? Int, 3)
+        XCTAssertEqual(full["files"] as? [String], ["/w/a.md"])
+    }
 }

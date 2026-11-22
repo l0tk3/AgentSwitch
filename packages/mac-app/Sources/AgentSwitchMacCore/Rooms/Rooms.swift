@@ -122,16 +122,23 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     /// The state as the service wrote it; one this app does not know reads as `error`.
     public let stateWord: String?
     public let card: SeatCard?
+    /// Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
+    /// there was a Kit, until it is resumed; nil for the user, and from a service that does not say.
+    public let kit: Bool?
 
     public var id: String { handle }
+    /// Seated, running, and without the Kit: it reads nothing and says nothing until it is resumed once.
+    public var needsResume: Bool { !isUser && here && kit == false && state != .exited }
+    public static let needsResumeSays = "这个会话是在 Chat Room 上线之前启动的，还没有 Chatroom Kit：恢复一次之后才能在房间里说话、被消息唤醒。"
     public var isUser: Bool { kind == "user" }
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, stateWord = "state" }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, stateWord = "state" }
 
     public init(handle: String, kind: String = "session", terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = Room.you,
-                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil) {
+                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil) {
+        self.kit = kit
         self.handle = handle
         self.kind = kind
         self.terminal = terminal
@@ -158,6 +165,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         left = RoomJSON.int(c, .left)
         stateWord = try? c.decodeIfPresent(String.self, forKey: .stateWord)
         card = try? c.decodeIfPresent(SeatCard.self, forKey: .card)
+        kit = try? c.decodeIfPresent(Bool.self, forKey: .kit)
     }
 }
 
@@ -168,13 +176,16 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
     public let replyTo: Int?
     public let text: String
     public let at: Int64
+    /// Files it comes with, by where they are on the room's node (§3 附件).
+    public let files: [String]
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = []) {
+        self.files = files
         self.seq = seq
         self.from = from
         self.to = to
@@ -191,7 +202,32 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
         replyTo = try? c.decodeIfPresent(Int.self, forKey: .replyTo)
         text = try c.decode(String.self, forKey: .text)
         at = RoomJSON.int(c, .at) ?? 0
+        files = (try? c.decodeIfPresent([String].self, forKey: .files)) ?? []
     }
+}
+
+/// The room's pinned notes (§9): one text every member reads and writes whole.
+public struct RoomNotes: Decodable, Equatable, Sendable {
+    public let text: String
+    public let at: Int64
+    public let by: String
+
+    public init(text: String, at: Int64, by: String) {
+        self.text = text
+        self.at = at
+        self.by = by
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        at = RoomJSON.int(c, .at) ?? 0
+        by = (try? c.decodeIfPresent(String.self, forKey: .by)) ?? Room.you
+    }
+
+    private enum CodingKeys: String, CodingKey { case text, at, by }
+    public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
+    public var who: String { by == Room.you ? "You" : "@\(by)" }
 }
 
 /// Where a message is on its way to a seat (§5); a seat that has dealt with it has none.
@@ -236,6 +272,23 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public let unread: Int
     /// One of the unread is for the user: amber.
     public let forYou: Bool
+    /// Sessions have exchanged this many messages with no word from the user (§7); nil under the room's limit.
+    public let rounds: Int?
+
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? ""
+        paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)) ?? false
+        members = (try? c.decodeIfPresent(Int.self, forKey: .members)) ?? 0
+        last = try? c.decodeIfPresent(Last.self, forKey: .last)
+        unread = (try? c.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
+        forYou = (try? c.decodeIfPresent(Bool.self, forKey: .forYou)) ?? false
+        rounds = try? c.decodeIfPresent(Int.self, forKey: .rounds)
+    }
 
     /// The list's second line: who said the last thing and what, on one line; the topic before anything is said.
     public var lastLine: String {
@@ -258,15 +311,34 @@ public struct Room: Decodable, Equatable, Sendable {
         public let paused: Bool
         public let lastSeq: Int
         public let readSeq: Int
+        /// Sessions have exchanged this many messages with no word from the user (§7); nil under the limit.
+        public let rounds: Int?
+        public let roundsLimit: Int?
     }
 
+    /// What the notice of many rounds says: nothing was stopped.
+    public static func roundsSays(_ n: Int) -> String { "这里的会话已经连续往返 \(n) 次，没有你参与。没有中断它们。" }
+
+    public let notes: RoomNotes?
     public let room: Head
     public let seats: [RoomSeat]
     public let messages: [RoomMessage]
     /// Message number → handle → where it is.
     public let receipts: [String: [String: String]]
 
-    public init(room: Head, seats: [RoomSeat], messages: [RoomMessage], receipts: [String: [String: String]] = [:]) {
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        room = try c.decode(Head.self, forKey: .room)
+        seats = try c.decode([RoomSeat].self, forKey: .seats)
+        messages = try c.decode([RoomMessage].self, forKey: .messages)
+        receipts = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .receipts)) ?? [:]
+        notes = try? c.decodeIfPresent(RoomNotes.self, forKey: .notes)
+    }
+
+    public init(room: Head, seats: [RoomSeat], messages: [RoomMessage], receipts: [String: [String: String]] = [:], notes: RoomNotes? = nil) {
+        self.notes = notes
         self.room = room
         self.seats = seats
         self.messages = messages
@@ -465,9 +537,26 @@ public extension DaemonClient {
         _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", timeout: 10)
     }
 
-    func say(_ text: String, replyTo: Int? = nil, in room: String) async throws {
+    /// The body of what the user says: `files` only when there are some (the service takes no unknown or empty extra).
+    static func sayBody(_ text: String, replyTo: Int?, files: [String]) -> [String: Any] {
         var object: [String: Any] = ["text": text]
         if let replyTo { object["replyTo"] = replyTo }
+        if !files.isEmpty { object["files"] = files }
+        return object
+    }
+
+    /// The user has seen the sessions' rounds go by (`OK`): counted from here again.
+    func roundsSeen(in room: String) async throws {
+        _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/rounds/ok", timeout: 10)
+    }
+
+    /// The pinned notes, whole, in place of what was there.
+    func writeNotes(_ text: String, in room: String) async throws {
+        _ = try await call("PUT", "/rooms/\(DaemonClient.segment(room))/notes", body: try JSONSerialization.data(withJSONObject: ["text": text]), timeout: 10)
+    }
+
+    func say(_ text: String, replyTo: Int? = nil, files: [String] = [], in room: String) async throws {
+        let object = DaemonClient.sayBody(text, replyTo: replyTo, files: files)
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/messages", body: try JSONSerialization.data(withJSONObject: object), timeout: 10)
     }
 

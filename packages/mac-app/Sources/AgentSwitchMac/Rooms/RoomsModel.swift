@@ -1,4 +1,5 @@
 import AgentSwitchMacCore
+import AppKit
 import Observation
 import SwiftUI
 
@@ -10,11 +11,13 @@ import SwiftUI
 final class RoomsModel {
     /// What floats over the page: a room being made, sessions being added to the one on screen, or its name and topic
     /// being changed.
-    enum Sheet: Equatable { case new, add, edit }
+    enum Sheet: Equatable { case new, add, edit, notes }
 
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// A made-up page for the design preview: shown as it is, the service never asked.
     @ObservationIgnored var demo = false
+    /// The rooms are this Mac's own: a file's path is one this Mac has, so files can be picked and shown in Finder.
+    var onThisMac = true
 
     private(set) var rooms: [RoomSummary] = []
     private(set) var room: Room?
@@ -32,6 +35,7 @@ final class RoomsModel {
             rows = []
             roomVersion = nil
             replyTo = nil
+            files = []
             card = nil
             if let selected { UserDefaults.standard.set(selected, forKey: "roomsSelected") }
         }
@@ -41,6 +45,8 @@ final class RoomsModel {
     var draft = "" { didSet { if draft != oldValue { typed() } } }
     var draftHeight: CGFloat = 0
     var replyTo: Int?
+    /// Files the next message comes with, by their paths on this Mac (§3 附件).
+    private(set) var files: [String] = []
     private(set) var focusRequests = 0
     private(set) var sending = false
     /// The names offered for the `@…` being typed, and the one the keys are on.
@@ -170,14 +176,38 @@ final class RoomsModel {
         focusRequests += 1
     }
 
+    /// Files dropped on the box or picked: added once each, ten at most (the service's limit).
+    func attach(urls: [URL]) {
+        guard onThisMac else { return }
+        for path in urls.filter(\.isFileURL).map(\.path) where !files.contains(path) && files.count < 10 { files.append(path) }
+        focusRequests += 1
+    }
+
+    func detach(_ path: String) { files.removeAll { $0 == path } }
+
+    func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.prompt = "Attach"
+        if panel.runModal() == .OK { attach(urls: panel.urls) }
+    }
+
+    func reveal(_ path: String) {
+        guard onThisMac else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
     func send() {
         guard canSend, let id = selected else { return }
-        let text = draft, reply = replyTo
+        let text = draft, reply = replyTo, sent = files
         sending = true
         Task {
             do {
-                try await client().say(text, replyTo: reply, in: id)
+                try await client().say(text, replyTo: reply, files: sent, in: id)
                 if draft == text { draft = "" }
+                if files == sent { files = [] }
                 replyTo = nil
                 problem = nil
             } catch {
@@ -208,6 +238,18 @@ final class RoomsModel {
         act { try await $0.updateRoom(id, paused: paused) }
     }
 
+    /// `OK` on the notice of many rounds: counted from here again; nothing was stopped.
+    func roundsSeen() {
+        guard let id = selected else { return }
+        act { try await $0.roundsSeen(in: id) }
+    }
+
+    func saveNotes(_ text: String) {
+        guard let id = selected else { return }
+        sheet = nil
+        act { try await $0.writeNotes(text, in: id) }
+    }
+
     func setCanAdd(_ on: Bool, seat: String) {
         guard let id = selected else { return }
         act { try await $0.setCanAdd(on, seat: seat, in: id) }
@@ -231,7 +273,7 @@ final class RoomsModel {
     func open(_ sheet: Sheet) {
         self.sheet = sheet
         card = nil
-        guard sheet != .edit, !demo else { return }
+        guard sheet == .new || sheet == .add, !demo else { return }
         Task {
             if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
         }
@@ -258,6 +300,7 @@ final class RoomsModel {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
+                case .notes: break
                 case .edit:
                     guard let id else { break }
                     try await client().updateRoom(id, name: name, topic: topic)

@@ -112,6 +112,8 @@ extension SeatState {
 struct RoomRowActions {
     var card: (String) -> Void = { _ in }
     var reply: (Int) -> Void = { _ in }
+    /// Shows a message's file in Finder; nil where the room is another node's (the path is that node's).
+    var reveal: ((String) -> Void)?
 }
 
 /// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
@@ -143,6 +145,7 @@ struct RoomMessageRow: View {
                     .foregroundStyle(Look.ink)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if !message.files.isEmpty { files }
                 receipts
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -195,6 +198,26 @@ struct RoomMessageRow: View {
         }
         .lineLimit(1)
         .foregroundStyle(Look.ink2)
+    }
+
+    /// The files a message comes with (§3 附件): each by its name, its whole path on hover; a click shows it in Finder
+    /// when the room is this Mac's.
+    private var files: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(message.files, id: \.self) { path in
+                Button { actions.reveal?(path) } label: {
+                    HStack(spacing: 6) {
+                        LookGlyph(glyph: "⎘", symbol: "paperclip", size: 12)
+                        Text((path as NSString).lastPathComponent).mono(12).lineLimit(1).truncationMode(.middle)
+                    }
+                    .foregroundStyle(Look.ink2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(path)
+            }
+        }
+        .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -290,7 +313,12 @@ struct RoomMemberRow: View {
                     }
                 VStack(alignment: .leading, spacing: 1) {
                     Text("@\(seat.handle)").mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
-                    Text(ClassicWords.phrase(sub, in: look)).mono(11).foregroundStyle(Look.faint).lineLimit(1)
+                    HStack(spacing: 0) {
+                        Text(ClassicWords.phrase(sub, in: look)).foregroundStyle(Look.faint)
+                        // Without the Kit it must be resumed once (§6): it needs the user, so amber, with its words.
+                        if seat.needsResume { Text(sub.isEmpty ? "No Kit" : " · No Kit").foregroundStyle(Color.waiting) }
+                    }
+                    .mono(11).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if let agent = seat.card?.agent { AgentSprite(harness: agent) }
@@ -338,6 +366,7 @@ struct RoomMemberCard: View {
                     if let mode = card.mode { line("Mode", ClassicWords.word(mode, in: look)) }
                 }
                 if let state = seat.state { line("State", ClassicWords.word(state.word, in: look), color: state.wordColor) }
+                if seat.needsResume { line("Kit", "No Kit", color: .waiting) }
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
             }
             .padding(.top, 10)
@@ -361,6 +390,13 @@ struct RoomMemberCard: View {
                 .buttonStyle(.plain)
                 .disabled(seat.byAgent)
                 HairRule(color: Look.line)
+                if seat.needsResume {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        BlinkingSquare()
+                        Text(RoomSeat.needsResumeSays).font(.system(size: 12)).foregroundStyle(Look.ink).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 8)
+                }
                 if let says = seat.byAgent ? "由别的会话拉起来的会话不能再拉人。" : seat.state?.says {
                     Text(says).font(.system(size: 12)).foregroundStyle(Look.faint).lineSpacing(3).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                 }

@@ -23,6 +23,7 @@ struct RoomsPage: View {
             .task(id: "\(shown)|\(state.nodeId ?? "")") {
                 let node = state.nodeId
                 model.client = { [app] in app.client(on: node) }
+                model.onThisMac = node == nil
                 if let demo {
                     model.show(demo: demo.rooms, room: demo.room)
                     tell()
@@ -101,7 +102,7 @@ private struct RoomsColumns: View {
     private var sheet: some View {
         ZStack {
             Color.black.opacity(0.45).contentShape(Rectangle()).onTapGesture { model.sheet = nil }
-            RoomSheet(model: model, kind: model.sheet ?? .new)
+            if model.sheet == .notes { RoomNotesSheet(model: model) } else { RoomSheet(model: model, kind: model.sheet ?? .new) }
         }
     }
 }
@@ -152,6 +153,8 @@ private struct RoomListRow: View {
                     Text(room.name).mono(13, weight: look.isClassic ? .semibold : .regular).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
                     if room.paused { Text("Paused").mono(11).foregroundStyle(Look.faint) }
+                    // Sessions went many rounds without the user (§7): the mark of what waits for you, where no count stands.
+                    if room.rounds != nil, room.unread == 0, !room.paused { BlinkingSquare().help("会话之间已经往返多次，没有你参与。") }
                     if room.unread > 0 { count }
                 }
                 Text(room.lastLine).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
@@ -195,6 +198,8 @@ private struct RoomView: View {
                 Text(room.room.name).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1).fixedSize()
                 Text(room.room.topic).font(.system(size: 12.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 8)
+                Button { model.open(.notes) } label: { BracketLabel(word: "Notes") }.buttonStyle(BracketButtonStyle(size: 12))
+                    .help(room.notes == nil ? "置顶笔记：成员都能读、能改的一份约定。" : "置顶笔记，\(room.notes!.who) 最后写于 \(TimeText.at(room.notes!.date))。")
                 Button { model.open(.edit) } label: { BracketLabel(word: "Edit") }.buttonStyle(BracketButtonStyle(size: 12))
                 Button { model.setPaused(!room.room.paused) } label: { BracketLabel(word: room.room.paused ? "Resume" : "Pause") }
                     .buttonStyle(BracketButtonStyle(size: 12))
@@ -202,7 +207,7 @@ private struct RoomView: View {
             .padding(.horizontal, 14)
             .frame(height: 40)
             HairRule(color: Look.line)
-            if room.room.paused { banner }
+            if room.room.paused { banner } else if let rounds = room.room.rounds { told(rounds) }
             if let said = model.problem ?? model.error { problem(said) }
             timeline
             HairRule(color: Look.line)
@@ -227,6 +232,21 @@ private struct RoomView: View {
             Text("房间已暂停。消息照写，不投递。").font(.system(size: 12.5)).foregroundStyle(Look.ink)
             Spacer()
             Button { model.setPaused(false) } label: { BracketLabel(word: "Resume") }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.waiting.opacity(look.isClassic ? 0.14 : 0.1))
+        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+    }
+
+    /// Many rounds without the user (§7): told, not stopped. `OK` counts again from here; `Pause` is the user's to press.
+    private func told(_ rounds: Int) -> some View {
+        HStack(spacing: 10) {
+            BlinkingSquare()
+            Text(Room.roundsSays(rounds)).font(.system(size: 12.5)).foregroundStyle(Look.ink)
+            Spacer()
+            Button { model.setPaused(true) } label: { BracketLabel(word: "Pause") }.buttonStyle(BracketButtonStyle(size: 12))
+            Button { model.roundsSeen() } label: { BracketLabel(word: "OK") }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -260,7 +280,7 @@ private struct RoomView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
-                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }))
+                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil))
                                 .id(row.id)
                         }
                     }
@@ -298,10 +318,29 @@ private struct RoomWriter: View {
                 }
                 .foregroundStyle(Look.ink2)
             }
+            if !model.files.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(model.files, id: \.self) { path in
+                        HStack(spacing: 6) {
+                            LookGlyph(glyph: "⎘", symbol: "paperclip", size: 12)
+                            Text((path as NSString).lastPathComponent).mono(12).lineLimit(1).truncationMode(.middle).help(path)
+                            Button { model.detach(path) } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 12) }.buttonStyle(.plain).help("Remove")
+                        }
+                        .foregroundStyle(Look.ink2)
+                    }
+                }
+            }
             HStack(alignment: .bottom, spacing: 8) {
+                if model.onThisMac {
+                    Button { model.pickFiles() } label: {
+                        LookGlyph(glyph: "+", symbol: "plus", size: 15).foregroundStyle(Look.ink2).frame(width: 30, height: look.isClassic ? 30 : 34).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Attach Files")
+                }
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, label: "Message",
                              placeholder: "Message — @ to mention", onKey: { model.key($0) },
-                             onSubmit: { model.send() }, onFiles: { _ in }, onPasteAttachments: {}, onFocus: { _ in })
+                             onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: {}, onFocus: { _ in })
                     .frame(height: min(max(model.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -419,6 +458,56 @@ private struct RoomMembers: View {
     }
 }
 
+// MARK: - the pinned notes
+
+/// The room's pinned notes (§9): one text every member reads and writes whole — what was agreed. The user edits it
+/// here; a session writes it with its tool. Who wrote it last and when stands under the title.
+private struct RoomNotesSheet: View {
+    @Bindable var model: RoomsModel
+    @State private var text = ""
+    @Environment(\.interfaceLook) private var look
+
+    private var notes: RoomNotes? { model.room?.notes }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Notes").mono(look.isClassic ? 14 : 12.5, weight: .semibold).foregroundStyle(Look.ink)
+                if let notes { Text("\(notes.who) · \(TimeText.at(notes.date))").mono(11.5).foregroundStyle(Look.faint) }
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(look.isClassic ? Color.clear : Look.raised)
+            HairRule(color: Look.line)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("房间里的成员都能读、能改的一份文本：约定、接口、待办。保存会整份替换。").font(.system(size: 12)).foregroundStyle(Look.faint)
+                TextEditor(text: $text)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Look.ink)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(height: 300)
+                    .grounded(Look.raised, radius: Look.controlRadius)
+                    .framed(Look.line, radius: Look.controlRadius)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            HairRule(color: Look.line)
+            HStack(spacing: 10) {
+                Spacer()
+                Button { model.sheet = nil } label: { BracketLabel(word: "Cancel", key: "esc") }.buttonStyle(BracketButtonStyle()).keyboardShortcut(.cancelAction)
+                Button { model.saveNotes(text) } label: { BracketLabel(word: "Save", key: "⌘↩") }
+                    .buttonStyle(BracketButtonStyle(role: .primary)).keyboardShortcut(.return, modifiers: .command).disabled(text == (notes?.text ?? ""))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .frame(width: 600)
+        .roomFloat()
+        .onAppear { text = notes?.text ?? "" }
+    }
+}
+
 // MARK: - a room made, sessions added, a room's name changed
 
 private struct RoomSheet: View {
@@ -434,6 +523,7 @@ private struct RoomSheet: View {
         case .new: "New Room"
         case .add: "Add Sessions"
         case .edit: "Edit Room"
+        case .notes: "Notes"
         }
     }
 
@@ -447,6 +537,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
+        case .notes: false
         }
     }
 
