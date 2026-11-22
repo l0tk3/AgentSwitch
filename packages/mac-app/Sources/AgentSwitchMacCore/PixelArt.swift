@@ -192,6 +192,18 @@ public enum PixelArt {
         ".#...........#.", "..##.......##..", "....#######....",
     ]
 
+    /// Chat Room (docs/chatroom-v0.md §10): a speech box with two lines in it and its tail.
+    public static let railRooms = [
+        "###############", "#.............#", "#.............#", "#..#########..#", "#.............#", "#.............#",
+        "#..######.....#", "#.............#", "#.............#", "#####..########", "...#..#........", "...#.#.........",
+        "...##..........", "...#...........",
+    ]
+    /// The room's members: two heads and shoulders.
+    public static let toolbarPeople = [
+        "...###.......", "..#####..###.", "..#####.#####", "..#####.#####", "...###...###.", ".............", ".#######.....",
+        "#########.###", "#########.###", "#########.###",
+    ]
+
     /// The lit cells of a sprite.
     public static func sprite(_ rows: [String]) -> [(x: Int, y: Int)] {
         rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c == "#" ? (x, y) : nil } }

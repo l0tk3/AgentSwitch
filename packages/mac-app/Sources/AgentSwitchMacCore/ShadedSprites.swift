@@ -77,6 +77,12 @@ public struct ShadedSprite: Equatable, Sendable {
         "W#kWWkkkkkkWWkmd", "W#kkW#kkkk#Wkkmd", "W#kkkkkkkkkkkkmd", "W#kkkkkmmkkkksmd", "##kkkkdkkdkkssmd", ".#kkkkkkkkksssd.",
         ".#mkkkkkkksssdd.", "..mmkkkkkssssd..", "...mmdddddddd...",
     ])
+    /// Chat Room's page, on the Mac alone for now: a speech box lit from above and left, a bright line and a dimmer one
+    /// in it, its tail below.
+    public static let rooms = ShadedSprite([
+        ".WWWWWWWWWWWWW#.", "W#kkkkkkkkkkkkmd", "W#kkkkkkkkkkkkmd", "W#kkWWWWWWWWkkmd", "W#kkkkkkkkkkkkmd", "W#kkmmmmmkkkksmd",
+        "W#kkkkkkkkkkssmd", "##kkkkkkkkksssmd", ".#mmm..mmmmmmmd.", "...#m.d.........", "...#md..........", "...#d...........",
+    ])
     /// Three sliders: the part each has travelled lighter, the rest dark, their knobs raised.
     public static let settings = ShadedSprite([
         "...WWW#.........", "mmmW##mkkkkkkkkk", "dddW##msssssssss", "...#mmd.........", "................", ".........WWW#...",
@@ -155,7 +161,7 @@ public struct ShadedSprite: Equatable, Sendable {
     }
 
     static let stands: [(rows: [String], sprite: ShadedSprite)] = [
-        (PixelArt.railDispatch, dispatch), (PixelArt.railTerminals, terminals), (PixelArt.railBrowser, browser), (PixelArt.railClash, clash),
+        (PixelArt.railDispatch, dispatch), (PixelArt.railTerminals, terminals), (PixelArt.railBrowser, browser), (PixelArt.railClash, clash), (PixelArt.railRooms, rooms),
         (PixelArt.toolbarSettings, settings), (PixelArt.toolbarList, list), (PixelArt.toolbarSplitRight, splitRight),
         (PixelArt.toolbarSplitDown, splitDown), (PixelArt.toolbarNew, new), (PixelArt.lock, lock),
     ] + PixelArt.agents.keys.sorted().compactMap { harness in agents[harness].map { (PixelArt.agents[harness]!, $0) } }

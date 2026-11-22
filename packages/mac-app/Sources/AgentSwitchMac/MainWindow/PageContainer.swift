@@ -51,7 +51,7 @@ extension MainPage {
     var ground: NSColor {
         switch self {
         // Clash too since 2026-11-11: the app's own ground, light or dark with the system (black whatever before).
-        case .dispatch, .clash: .dispatchGround
+        case .dispatch, .clash, .rooms: .dispatchGround
         case .terminals, .browser: .black
         }
     }

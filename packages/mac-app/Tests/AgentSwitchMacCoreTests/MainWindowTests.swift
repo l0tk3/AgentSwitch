@@ -21,17 +21,18 @@ final class MainWindowTests: XCTestCase {
     }
 
     func testPageWords() {
-        XCTAssertEqual(MainPage.allCases.map(\.title), ["Terminals", "Dispatch", "Browser", "Clash"], "the rail's order")
+        XCTAssertEqual(MainPage.allCases.map(\.title), ["Terminals", "Dispatch", "Chat Room", "Browser", "Clash"], "the rail's order")
     }
 
     func testTheRailSaysEachPageWithTheKeyThatGoesThere() {
-        XCTAssertEqual(MainPage.allCases.map(\.railHelp), ["Terminals ⌘1–9", "Dispatch ⌘0", "Browser ⌘⇧B", "Clash ⌘⇧K"])
+        XCTAssertEqual(MainPage.allCases.map(\.railHelp), ["Terminals ⌘1–9", "Dispatch ⌘0", "Chat Room ⌘⇧M", "Browser ⌘⇧B", "Clash ⌘⇧K"])
         for page in MainPage.allCases {
             let key = page.railHelp.split(separator: " ").last.map(String.init) ?? ""
             let press: MainShortcut.Press? = switch key {
             case "⌘0": press("0")
             case "⌘⇧B": press("b", shift: true)
             case "⌘⇧K": press("k", shift: true)
+            case "⌘⇧M": press("m", shift: true)
             case "⌘1–9": press("1")
             default: nil
             }
@@ -47,12 +48,14 @@ final class MainWindowTests: XCTestCase {
 
     func testPagesCycleBothWays() {
         XCTAssertEqual(MainPage.terminals.next, .dispatch)
-        XCTAssertEqual(MainPage.dispatch.next, .browser)
+        XCTAssertEqual(MainPage.dispatch.next, .rooms)
+        XCTAssertEqual(MainPage.rooms.next, .browser)
         XCTAssertEqual(MainPage.browser.next, .clash)
         XCTAssertEqual(MainPage.clash.next, .terminals)
         XCTAssertEqual(MainPage.terminals.previous, .clash)
         XCTAssertEqual(MainPage.clash.previous, .browser)
-        XCTAssertEqual(MainPage.browser.previous, .dispatch)
+        XCTAssertEqual(MainPage.browser.previous, .rooms)
+        XCTAssertEqual(MainPage.rooms.previous, .dispatch)
         XCTAssertEqual(MainPage.dispatch.previous, .terminals)
     }
 

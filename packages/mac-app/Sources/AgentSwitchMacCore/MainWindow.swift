@@ -10,12 +10,14 @@ import Foundation
 public enum MainPage: String, CaseIterable, Sendable {
     // Terminals first since 2026-11-11 (user: dispatch 的优先级现在比终端低，所以应该把dispatch的图标放在终端后面，默认
     // 安装打开的都是终端): the rail's order, ⌃⇥'s, and the page a new install opens on.
-    case terminals, dispatch, browser, clash
+    // Chat Room after Dispatch (docs/chatroom-v0.md §10).
+    case terminals, dispatch, rooms, browser, clash
 
     /// The page's name (the rail's, the menus').
     public var title: String {
         switch self {
         case .dispatch: "Dispatch"
+        case .rooms: "Chat Room"
         case .terminals: "Terminals"
         case .browser: "Browser"
         case .clash: "Clash"
@@ -38,6 +40,7 @@ public enum MainPage: String, CaseIterable, Sendable {
     public var railHelp: String {
         switch self {
         case .dispatch: "Dispatch ⌘0"
+        case .rooms: "Chat Room ⌘⇧M"
         case .terminals: "Terminals ⌘1–9"
         case .browser: "Browser ⌘⇧B"
         case .clash: "Clash ⌘⇧K"
@@ -87,7 +90,7 @@ public struct PageActivity: Equatable, Sendable {
         switch page {
         case .dispatch: kind = .task
         case .terminals: kind = .terminal
-        case .browser, .clash: return .none
+        case .browser, .clash, .rooms: return .none
         }
         // The node's own: what this Mac's service lists of the other nodes it uses (docs/mesh-v0.md §5.2 跨节点的提醒) is
         // for the menu bar's card, not for these pages' marks.
@@ -281,6 +284,7 @@ public enum MainShortcut: Equatable, Sendable {
         if press.command, press.option, !press.control, !press.shift, press.key == "b" { return .toggleRail }
         if press.command, press.shift, !press.control, !press.option, press.key == "b" { return .page(.browser) }
         if press.command, press.shift, !press.control, !press.option, press.key == "k" { return .page(.clash) }
+        if press.command, press.shift, !press.control, !press.option, press.key == "m" { return .page(.rooms) }
         if press.command, press.shift, !press.control, !press.option, press.key == "f" { return .files }
         if press.command, press.shift, !press.control, !press.option, press.key == "t" { return page == .browser ? .browser(.hold) : nil }
         // With shift or without: `+` is ⇧= on most layouts and a key of its own on others and on the keypad.
@@ -299,7 +303,7 @@ public enum MainShortcut: Equatable, Sendable {
         case "b": return page == .browser ? .browser(.toggleList) : nil
         case "t":
             switch page {
-            case .dispatch, .clash: return .newTerminal
+            case .dispatch, .clash, .rooms: return .newTerminal
             case .browser: return .browser(.newTab)
             case .terminals: return nil
             }

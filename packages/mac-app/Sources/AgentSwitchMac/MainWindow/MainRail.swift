@@ -264,6 +264,7 @@ extension MainPage {
         case .terminals: PixelArt.railTerminals
         case .browser: PixelArt.railBrowser
         case .clash: PixelArt.railClash
+        case .rooms: PixelArt.railRooms
         }
     }
 }

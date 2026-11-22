@@ -70,6 +70,28 @@ final class MainWindowState {
     private(set) var browserActivity = PageActivity.none
     /// The bar's centre on Browser: the tab on screen's mark and title; nil without a tab.
     private(set) var browserTitle: BarTitle?
+    // MARK: the Chat Room page says, and is asked (docs/chatroom-v0.md §10)
+
+    /// Rooms with something for the user: the rail's amber mark.
+    private(set) var roomsActivity = PageActivity.none
+    /// The status bar's words on Chat Room.
+    private(set) var roomsStatus: [String] = []
+    /// The room on screen, beside the page's name in the bar.
+    private(set) var roomsTitle: String?
+    /// The members' list is shown (the bar's button; kept).
+    var roomsMembers: Bool = UserDefaults.standard.object(forKey: "roomsMembersShown") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(roomsMembers, forKey: "roomsMembersShown") }
+    }
+    /// The bar's `New Room` was pressed: the page opens its sheet when this changes.
+    private(set) var newRoomRequests = 0
+    func askNewRoom() { newRoomRequests += 1 }
+
+    func roomsChanged(activity: PageActivity, status: [String], title: String?) {
+        if activity != roomsActivity { roomsActivity = activity }
+        if status != roomsStatus { roomsStatus = status }
+        if title != roomsTitle { roomsTitle = title }
+    }
+
     /// The task you are looking at: its result needs no telling (the Live Activity).
     var watchingTask: String? { dispatchShown && windowKey && windowVisible ? openTask : nil }
 
@@ -104,6 +126,9 @@ final class MainWindowState {
         dispatchActivity = .none
         terminalsActivity = .none
         browserActivity = .none
+        roomsActivity = .none
+        roomsStatus = []
+        roomsTitle = nil
     }
 
     // MARK: the bar's row
@@ -139,6 +164,7 @@ final class MainWindowState {
         case .terminals: terminalsActivity
         case .browser: browserActivity
         case .clash: .none
+        case .rooms: roomsActivity
         }
     }
 

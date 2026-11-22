@@ -1,0 +1,431 @@
+import AgentSwitchMacCore
+import SwiftUI
+
+// The Chat Room page's parts (docs/chatroom-v0.md §10; concept `docs/design/concepts/chatroom.html`): a seat's face, a
+// state's mark and word, a message's row, a member's row and card. Each is drawn in the look in force: pixels, keys and
+// `[ Word ]` in the pixel look; dots, round corners and standard buttons in the classic one.
+
+extension Color {
+    /// The ten colours a face comes in, by day and by night.
+    static let faces: [Color] = (0..<10).map { Color(nsColor: .dynamic(light: RoomFace.light[$0], dark: RoomFace.dark[$0], name: "AgentSwitchFace\($0)")) }
+}
+
+/// A seat's face (§1 头像): its pattern in its colour — squares in the pixel look, round dots in the classic one. The
+/// user is a fixed `YOU`. A seat without a face (an older service) is its handle's first letter.
+struct RoomFaceView: View {
+    let seat: RoomSeat?
+    /// The box's side; the cell is a fifth of what is left inside it.
+    var side: CGFloat = 26
+    var cell: CGFloat = 4
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        let classic = look.isClassic
+        let color = seat?.face.map { Color.faces[$0.colorIndex] } ?? Look.ink
+        Group {
+            if seat?.isUser == true {
+                Text("YOU").font(.system(size: side * 0.38, weight: .bold, design: classic ? .default : .monospaced))
+                    .foregroundStyle(classic ? Color.white : Look.ground)
+                    .frame(width: side, height: side)
+                    .background(classic ? Color.signal : Look.ink)
+            } else if let face = seat?.face, !face.cells.isEmpty {
+                pattern(face, color: color, classic: classic)
+                    .frame(width: side, height: side)
+                    .background(classic ? color.opacity(0.2) : Color.clear)
+                    .background(classic ? Look.raised : Color.clear)
+                    .overlay { if !classic { Rectangle().strokeBorder(color.opacity(0.45), lineWidth: 1) } }
+            } else {
+                Text(String(seat?.handle.prefix(1) ?? "?").uppercased()).mono(side * 0.45, weight: .semibold).foregroundStyle(Look.ink2)
+                    .frame(width: side, height: side)
+                    .overlay { if !classic { Rectangle().strokeBorder(Look.line, lineWidth: 1) } }
+                    .background(classic ? Look.raised : Color.clear)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: classic ? side * 0.3 : 0, style: .continuous))
+        .accessibilityLabel(seat.map { $0.isUser ? "You" : "@\($0.handle)" } ?? "")
+    }
+
+    private func pattern(_ face: RoomFace, color: Color, classic: Bool) -> some View {
+        let cells = face.cells
+        // The classic look's dots stand a point apart; the pixel look's squares touch.
+        let step = classic ? cell + 1 : cell
+        let size = classic ? 5 * step - 1 : 5 * cell
+        return Canvas { context, _ in
+            var path = Path()
+            for c in cells {
+                let rect = CGRect(x: CGFloat(c.x) * step, y: CGFloat(c.y) * step, width: cell, height: cell)
+                if classic { path.addRoundedRect(in: rect, cornerSize: CGSize(width: cell * 0.35, height: cell * 0.35)) } else { path.addRect(rect) }
+            }
+            context.fill(path, with: .color(color))
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// A seat's state as a mark (§6.1). Amber is what needs the user's hands, red what went wrong; what mends itself has no
+/// colour: a grey spinner while it tries again, a dithered key (a faded dot) while it only waits.
+struct SeatStateMark: View {
+    let state: SeatState
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Group {
+            switch state.tone {
+            case .working: BrailleSpinner()
+            case .retrying: BrailleSpinner().saturation(0)
+            case .needsYou: BlinkingSquare()
+            case .ready: StatusMark(level: .ok)
+            case .off: StatusMark(level: .off)
+            case .failed: StatusMark(level: .error)
+            case .held:
+                if look.isClassic {
+                    Circle().fill(Look.ink2.opacity(0.45)).frame(width: 8, height: 8)
+                } else {
+                    Canvas { context, _ in
+                        var path = Path()
+                        for y in 0..<4 { for x in 0..<4 where (x + y) % 2 == 0 { path.addRect(CGRect(x: x * 2, y: y * 2, width: 2, height: 2)) } }
+                        context.fill(path, with: .color(Look.ink2))
+                    }
+                    .frame(width: 8, height: 8)
+                }
+            }
+        }
+        .frame(width: 10, height: 10)
+        .accessibilityLabel(state.word)
+    }
+}
+
+extension SeatState {
+    /// The word's colour where a state is written out alone (the card): amber and red as the mark, the rest quiet.
+    var wordColor: Color {
+        switch tone {
+        case .needsYou: .waiting
+        case .failed: .failed
+        case .working, .retrying, .ready, .off, .held: Look.ink
+        }
+    }
+}
+
+// MARK: - a message
+
+/// What a message's row asks of the page.
+struct RoomRowActions {
+    var card: (String) -> Void = { _ in }
+    var reply: (Int) -> Void = { _ in }
+}
+
+/// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
+/// text with its `@names`; and, while anything is still on its way, one small line saying to whom.
+struct RoomMessageRow: View {
+    let row: RoomRow
+    let room: Room
+    let actions: RoomRowActions
+    @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
+
+    private var message: RoomMessage { row.message }
+    private var handles: Set<String> { Set(room.seats.map(\.handle)) }
+
+    var body: some View {
+        let seat = room.seat(message.from)
+        HStack(alignment: .top, spacing: 12) {
+            if row.continues {
+                Color.clear.frame(width: 26, height: 1)
+            } else {
+                Button { actions.card(message.from) } label: { RoomFaceView(seat: seat) }.buttonStyle(.plain).padding(.top, 1)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if let quoted = message.replyTo.flatMap({ n in room.messages.first { $0.seq == n } }) { quote(quoted) }
+                if !row.continues { head(seat) }
+                Text(RoomRich.text(message.text, handles: handles, look: look))
+                    .font(.system(size: Look.scaled(13.5)))
+                    .lineSpacing(4)
+                    .foregroundStyle(Look.ink)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                receipts
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, row.continues ? 1 : 9)
+        .padding(.bottom, 3)
+        .background(row.forYou && look.isClassic ? Color.waiting.opacity(0.09) : hovering ? Look.hover : Color.clear)
+        // For the user and not yet seen: amber, the colour of what waits for you.
+        .overlay(alignment: .leading) { if row.forYou { Rectangle().fill(Color.waiting).frame(width: 3) } }
+        .overlay(alignment: .topTrailing) {
+            if hovering {
+                HStack(spacing: 8) {
+                    Text("#\(message.seq)").mono(11).foregroundStyle(Look.faint)
+                    Button { actions.reply(message.seq) } label: { LookGlyph(glyph: "↩", symbol: "arrowshape.turn.up.left", size: 13) }
+                        .buttonStyle(.plain).foregroundStyle(Look.ink2).help("Reply")
+                }
+                .padding(.trailing, 14).padding(.top, row.continues ? 1 : 9)
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Reply") { actions.reply(message.seq) }
+            Button("Copy") { Clipboard.copy(message.text) }
+        }
+    }
+
+    private func head(_ seat: RoomSeat?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Button { actions.card(message.from) } label: {
+                Text(seat?.isUser == true ? "You" : message.from).mono(13, weight: .semibold).foregroundStyle(Look.ink)
+            }
+            .buttonStyle(.plain)
+            if let agent = seat?.card?.agent { AgentSprite(harness: agent).scaleEffect(0.8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
+            Text(TimeText.at(message.date)).mono(11.5).foregroundStyle(Look.faint)
+        }
+        .lineLimit(1)
+    }
+
+    private func quote(_ quoted: RoomMessage) -> some View {
+        HStack(spacing: 6) {
+            if look.isClassic {
+                Rectangle().fill(Look.line).frame(width: 2, height: 13)
+            } else {
+                Text("┌─").code(12).foregroundStyle(Look.faint)
+            }
+            Text(quoted.from == Room.you ? "You" : quoted.from).font(.system(size: 12, weight: .medium))
+            Text(RoomText.quote(quoted.text, handles: handles)).font(.system(size: 12)).truncationMode(.tail)
+        }
+        .lineLimit(1)
+        .foregroundStyle(Look.ink2)
+    }
+
+    @ViewBuilder
+    private var receipts: some View {
+        let open = room.receipts(of: message.seq)
+        if !open.isEmpty {
+            // Said only while it matters: what everyone has taken says nothing.
+            HStack(spacing: 12) {
+                ForEach(open, id: \.handle) { item in
+                    Text(RoomText.receipt(item.receipt, to: room.seat(item.handle), handle: item.handle, classic: look.isClassic))
+                        .foregroundStyle(RoomText.failed(item.receipt) ? Color.failed : item.receipt == .sent ? Look.faint : Look.ink2)
+                }
+            }
+            .mono(11.5)
+            .lineLimit(1)
+            .padding(.top, 1)
+        }
+    }
+}
+
+enum RoomRich {
+    /// A message's text as it is drawn: code in fixed-width letters on a wash, an `@name` bold in the pixel look and in
+    /// the accent in the classic one — never a status colour — and the user's own name alone on a ground.
+    static func text(_ text: String, handles: Set<String>, look: InterfaceLook) -> AttributedString {
+        var out = AttributedString()
+        let size = Look.scaled(13.5)
+        for piece in RoomText.pieces(text, handles: handles) {
+            switch piece {
+            case .plain(let s):
+                out += AttributedString(s)
+            case .code(let s):
+                var run = AttributedString(s)
+                run.font = .system(size: size - 1, design: .monospaced)
+                run.backgroundColor = Look.code
+                out += run
+            case .mention(let name):
+                var run = AttributedString("@\(name)")
+                let me = name == Room.you
+                if look.isClassic {
+                    run.font = .system(size: size, weight: .medium)
+                    run.foregroundColor = me ? .white : Color.signal
+                    if me { run.backgroundColor = Color.signal }
+                } else {
+                    run.font = .system(size: size - 0.5, weight: .semibold, design: .monospaced)
+                    run.foregroundColor = me ? Look.ground : Look.ink
+                    if me { run.backgroundColor = Look.ink }
+                }
+                out += run
+            }
+        }
+        return out
+    }
+}
+
+/// The day's line between messages of different days.
+struct RoomDayLine: View {
+    let day: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HairRule(color: Look.line)
+            Text(day).mono(11.5).foregroundStyle(Look.faint).fixedSize()
+            HairRule(color: Look.line)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+}
+
+// MARK: - members
+
+/// A member in the list: its face with its state's mark off the corner, `@handle` over its state in a word, its agent
+/// and its profile's dot at the row's end.
+struct RoomMemberRow: View {
+    let seat: RoomSeat
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                RoomFaceView(seat: seat, side: 22, cell: 3)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let state = seat.state {
+                            SeatStateMark(state: state).scaleEffect(0.9)
+                                .frame(width: 12, height: 12)
+                                .background(Look.ground)
+                                .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0))
+                                .offset(x: 4, y: 4)
+                        }
+                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("@\(seat.handle)").mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
+                    Text(ClassicWords.phrase(sub, in: look)).mono(11).foregroundStyle(Look.faint).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if let agent = seat.card?.agent { AgentSprite(harness: agent) }
+                if let color = seat.card?.profileColor { ProfileDot(color: color).help("配置 \(seat.card?.profile ?? "")") }
+            }
+            .padding(.horizontal, look.isClassic ? 6 : 12)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).fill(hovering ? Look.hover : Color.clear))
+            .padding(.horizontal, look.isClassic ? 6 : 0)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+
+    private var sub: String { [seat.state?.word, seat.canAdd ? "Can Add" : nil].compactMap { $0 }.joined(separator: " · ") }
+}
+
+/// A member's card (§1 名片): who it is, where, in what state, who seated it; the Kit's one switch (§6); and what the
+/// user can do with it. No account, no address.
+struct RoomMemberCard: View {
+    let seat: RoomSeat
+    let home: String
+    let setCanAdd: (Bool) -> Void
+    let mention: () -> Void
+    let remove: () -> Void
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                RoomFaceView(seat: seat)
+                Text("@\(seat.handle)").font(.system(size: 14, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
+                Spacer(minLength: 4)
+                if let state = seat.state { SeatStateMark(state: state) }
+                if let color = seat.card?.profileColor { ProfileDot(color: color) }
+            }
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {
+                if let card = seat.card {
+                    line("Agent", HarnessName.display(card.agent))
+                    if let model = card.model { line("Model", ModelName.display(model)) }
+                    line("Profile", card.profile ?? "Default")
+                    line("Node", card.node ?? "This Node")
+                    line("Folder", DisplayPath.short(card.cwd, home: home), mono: true)
+                    if let mode = card.mode { line("Mode", ClassicWords.word(mode, in: look)) }
+                }
+                if let state = seat.state { line("State", ClassicWords.word(state.word, in: look), color: state.wordColor) }
+                line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
+            }
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+            if seat.here {
+                HairRule(color: Look.line)
+                Button { setCanAdd(!seat.canAdd) } label: {
+                    HStack(spacing: 10) {
+                        Text("Can Add Sessions").mono(12.5)
+                        Spacer()
+                        if look.isClassic {
+                            Toggle("", isOn: .constant(seat.canAdd)).labelsHidden().toggleStyle(.switch).controlSize(.mini).allowsHitTesting(false)
+                        } else {
+                            Text(seat.canAdd ? "[x]" : "[ ]").code(12.5)
+                        }
+                    }
+                    .foregroundStyle(seat.byAgent ? Look.faint : Look.ink)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(seat.byAgent)
+                HairRule(color: Look.line)
+                if let says = seat.byAgent ? "由别的会话拉起来的会话不能再拉人。" : seat.state?.says {
+                    Text(says).font(.system(size: 12)).foregroundStyle(Look.faint).lineSpacing(3).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+                }
+                HStack(spacing: 8) {
+                    Button(action: mention) { BracketLabel(word: "Mention") }.buttonStyle(BracketButtonStyle())
+                    Spacer()
+                    Button(action: remove) { BracketLabel(word: "Remove") }.buttonStyle(BracketButtonStyle(role: .destructive))
+                }
+                .padding(.top, 10)
+            } else {
+                Text("已离开房间。").font(.system(size: 12)).foregroundStyle(Look.faint)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(width: 300)
+        .roomFloat()
+    }
+
+    private func line(_ label: String, _ value: String, mono: Bool = false, color: Color = Look.ink) -> some View {
+        GridRow {
+            Text(label).mono(12).foregroundStyle(Look.faint).gridColumnAlignment(.leading)
+            Text(value).font(.system(size: 12, design: mono ? .monospaced : .default)).foregroundStyle(color).lineLimit(1).truncationMode(.middle).help(value)
+        }
+    }
+}
+
+// MARK: - what floats
+
+extension View {
+    /// What floats over the page: a 1 px ink frame over a dithered hard shadow in the pixel look; a round card with a
+    /// soft shadow in the classic one.
+    func roomFloat() -> some View { modifier(RoomFloat()) }
+}
+
+private struct RoomFloat: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
+            let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+            content.background(shape.fill(Look.panel)).overlay(shape.strokeBorder(Look.line, lineWidth: 0.5)).clipShape(shape)
+                .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
+        } else {
+            content.background(Look.ground).overlay(Rectangle().strokeBorder(Look.ink, lineWidth: 1))
+                .background(Checker().offset(x: 6, y: 6))
+        }
+    }
+}
+
+/// A text field of a sheet: a framed box on the raised ground.
+struct RoomField: View {
+    let prompt: String
+    @Binding var text: String
+    var submit: () -> Void = {}
+
+    var body: some View {
+        TextField(prompt, text: $text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13))
+            .foregroundStyle(Look.ink)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .grounded(Look.raised, radius: Look.controlRadius)
+            .framed(Look.line, radius: Look.controlRadius)
+            .onSubmit(submit)
+    }
+}

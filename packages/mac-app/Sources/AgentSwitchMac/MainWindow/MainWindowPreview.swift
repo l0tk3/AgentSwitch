@@ -94,6 +94,14 @@ enum MainWindowPreview {
         try await shot(model: model, page: .clash, system: NSAppearance(named: .aqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-light.png"))
     }
 
+    /// `main-rooms`: the Chat Room page (docs/chatroom-v0.md §10) over a made-up room — its list, the timeline with a
+    /// reply, a message for the user and receipts still open, and the members in their states; in the look in force
+    /// (`-appearance classic` for the other).
+    static func renderRooms(model: AppModel, into directory: URL) async throws {
+        let name = InterfaceLook.current.isClassic ? "main-rooms-classic" : "main-rooms"
+        try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name).png"))
+    }
+
     static func renderRail(model: AppModel, into directory: URL) async throws {
         func file(_ base: String) -> URL { directory.appendingPathComponent("\(base).png") }
         let dark = NSAppearance(named: .darkAqua)
@@ -330,7 +338,8 @@ enum MainWindowPreview {
             .environment(\.dispatchPreviewRoute, open))
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
                                               .browser: BrowserPage.host(browser),
-                                              .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model))])
+                                              .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model)),
+                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: .demo).environment(model))])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head(list: rail != .bare), model: model, content: container,
                                                                 actions: MainBarActions(), browser: browser))
         host.sizingOptions = []

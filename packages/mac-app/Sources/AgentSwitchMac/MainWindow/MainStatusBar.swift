@@ -59,6 +59,8 @@ struct MainStatusBar: View {
                 }
             case .clash:
                 EmptyView()
+            case .rooms:
+                ForEach(state.roomsStatus, id: \.self) { Text(ClassicWords.phrase($0, in: look)) }
             case .dispatch:
                 ForEach(MainStatus.dispatch(router: state.dispatchRouter, topics: state.dispatchTopics), id: \.self) { Text($0) }
             }
