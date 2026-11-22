@@ -847,7 +847,7 @@ struct ProfilesSection: View {
         .confirmationDialog("重置 Default 的身份信息？", isPresented: $resettingIdentity) {
             Button("Reset Identity", role: .destructive) { resetIdentity?() }
         } message: {
-            Text("仅删除 ~/.claude.json 的 userID、machineID 和 oauthAccount，保留其他配置和历史记录。请先退出使用 Default 的 Claude Code。此操作不会清除登录凭据，账号资料可能在下次启动时重新写入。")
+            Text("删除 ~/.claude.json 的 userID、machineID 和 oauthAccount，并清除钥匙串中 Default 的登录凭据；其他配置和历史记录保留。之后需重新登录 Claude Code。请先退出使用 Default 的 Claude Code。")
         }
     }
 }

@@ -68,12 +68,14 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
   });
 
-  app.post("/profiles/claude-code/default/reset-identity", (c) => {
+  app.post("/profiles/claude-code/default/reset-identity", async (c) => {
     if (remoteCaller(c.env)) return c.json({ error: "identity is reset on the Mac" }, 403);
     if (deps.terminals?.host.list().some((t) => t.harness === "claude-code" && (!t.profile || t.profile.id === "default") && t.status !== "exited"))
       return c.json({ error: "请先结束使用 Default 的 Claude 终端，再重置身份信息。" }, 409);
     try { store.resetDefaultIdentity(); }
     catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+    // The sign-in goes with the identity (user, 2026-11-22): on a Mac it is in the keychain, not in the file above.
+    await deps.forgetClaudeLogin?.(null);
     return c.json({ agents: store.all() });
   });
 
@@ -227,16 +229,20 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     return c.json({ agents: store.all(), ...(problem ? { problem } : {}) });
   });
 
-  app.delete("/profiles/:agent/:id", (c) => {
+  app.delete("/profiles/:agent/:id", async (c) => {
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const id = c.req.param("id");
     // A terminal still running under it keeps its folder in use.
     if (deps.terminals?.host.list().some((t) => t.harness === agent.data && t.profile?.id === id && t.status !== "exited")) return c.json({ error: "有终端还在用这个配置：先结束它们。" }, 409);
+    // Its sign-in is not in its folder on a Mac but in the keychain, named after the folder: asked for before the
+    // folder goes, put away once it has.
+    const claudeHome = agent.data === "claude-code" && id !== "default" ? store.homeOf("claude-code", id) : null;
     try { store.remove(agent.data, id); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
     // Its browser goes with it, the folders too: the sign-ins in them were that profile's.
     void deps.profileBrowsers?.remove(exitKey(agent.data, id));
     void deps.exits?.drop(exitKey(agent.data, id));
+    if (claudeHome) await deps.forgetClaudeLogin?.(claudeHome);
     return c.json({ agents: store.all() });
   });
 }

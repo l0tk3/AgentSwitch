@@ -89,6 +89,7 @@ import { createRemoteApp } from "./remote/app.js";
 import { DEFAULT_REMOTE_PORT, discoverAddresses, macName, remoteRuntime, type RemoteRuntime } from "./remote/runtime.js";
 import { DEFAULT_PHONE_PORT, listenPhone, PHONE_PATH, type PhoneListener } from "./clash/phoneListener.js";
 import type { PhoneReach } from "./clash/integration.js";
+import { forgetClaudeLogin } from "./profiles/claudeLogin.js";
 import { isAllowedSource } from "./remote/address.js";
 import { listenRemote, type RemoteListener } from "./remote/server.js";
 import type { TargetRef } from "./core/target.js";
@@ -171,6 +172,10 @@ export type DaemonConfig = {
    *  §2; `workdir.json`, default ~/AgentSwitch) instead of a throw-away one in the data directory. On unless
    *  AGENTSWITCH_TASK_FOLDERS=0; tests build configs without it. */
   readonly taskFolders?: boolean;
+  /** A deleted Claude profile's sign-in, and Default's when its identity is reset, is taken out of the keychain
+   *  (profiles/claudeLogin.ts). On when the configuration is read from the environment; tests build configs without
+   *  it and never reach this Mac's keychain. */
+  readonly forgetLogins?: boolean;
   /** Watch the Mac's own Claude Code / Codex / OpenCode sessions (docs/control-v0.md §3). On unless
    *  AGENTSWITCH_SESSIONS=0; tests build configs without it. */
   readonly watchSessions?: boolean;
@@ -235,6 +240,8 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     ...((env.AGENTSWITCH_REMOTE === "1" || env.AGENTSWITCH_REMOTE === "true") && clashPhonePort(env.AGENTSWITCH_CLASH_PHONE_PORT) ? { clashPhonePort: clashPhonePort(env.AGENTSWITCH_CLASH_PHONE_PORT) } : {}),
     ...(env.AGENTSWITCH_APP_BUNDLE?.trim() ? { appBundle: env.AGENTSWITCH_APP_BUNDLE.trim() } : {}),
     taskFolders: env.AGENTSWITCH_TASK_FOLDERS !== "0",
+    // Never under a test runner, whatever a test builds its configuration from.
+    forgetLogins: !env.VITEST && env.NODE_ENV !== "test",
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
     terminals: env.AGENTSWITCH_TERMINALS !== "0",
     // docs/terminal-v0.md §10: each terminal's program on a pty its own holder holds, so that it outlives the service
@@ -620,7 +627,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

@@ -1156,3 +1156,41 @@ echo "codex itself"
     expect(readFileSync(seen, "utf8").split("\n")[1]).toBe(`-c cli_auth_credentials_store="file" login status|${out}`);
   });
 });
+
+describe("a Claude sign-in put away (profiles/claudeLogin.ts)", () => {
+  it("names the keychain entry after the config folder, and the user's own without one", async () => {
+    const { claudeKeychainService, forgetClaudeLogin } = await import("../src/profiles/claudeLogin.js");
+    expect(claudeKeychainService(null)).toBe("Claude Code-credentials");
+    // sha256("/tmp/x/home") starts 9b2f…: the first eight, as Claude Code names it.
+    expect(claudeKeychainService("/tmp/x/home")).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/);
+    expect(claudeKeychainService("/tmp/x/home")).not.toBe(claudeKeychainService("/tmp/y/home"));
+    const ran: string[][] = [];
+    await forgetClaudeLogin("/tmp/x/home", "/nowhere", "darwin", async (file, args) => { ran.push([file, ...args]); });
+    await forgetClaudeLogin(null, "/nowhere", "darwin", async () => { throw new Error("The specified item could not be found in the keychain."); });
+    expect(ran).toEqual([["/usr/bin/security", "delete-generic-password", "-s", claudeKeychainService("/tmp/x/home")]]);
+  });
+
+  it("is asked for when a Claude profile is deleted and when Default's identity is reset, and for nothing else", async () => {
+    const { mountProfiles } = await import("../src/api/profiles.js");
+    const { ProfileStore } = await import("../src/profiles/store.js");
+    const { Hono } = await import("hono");
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const home = mkdtempSync(join(tmpdir(), "as-login-")), userHome = mkdtempSync(join(tmpdir(), "as-login-user-"));
+    writeFileSync(join(userHome, ".claude.json"), JSON.stringify({ userID: "u" }));
+    const store = new ProfileStore({ home, userHome });
+    const forgotten: (string | null)[] = [];
+    const app = new Hono();
+    mountProfiles(app, { profiles: store, forgetClaudeLogin: async (dir: string | null) => { forgotten.push(dir); } } as never);
+    const claude = store.create("claude-code", "Work", "subscription"), codex = store.create("codex", "Work", "subscription");
+    const claudeHome = store.homeOf("claude-code", claude.id);
+    expect((await app.request(`/profiles/codex/${codex.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(forgotten).toEqual([]);
+    expect((await app.request(`/profiles/claude-code/${claude.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(forgotten).toEqual(claudeHome ? [claudeHome] : []);
+    expect(claudeHome).not.toBeNull();
+    expect((await app.request("/profiles/claude-code/default/reset-identity", { method: "POST" })).status).toBe(200);
+    expect(forgotten).toEqual([claudeHome, null]);
+  });
+});

@@ -47,6 +47,9 @@ export type ApiDeps = {
   readonly apiKeys?: import("../profiles/apiKeys.js").ApiKeys;
   /** What each profile has installed (profiles/addons.ts). */
   readonly addons?: import("../profiles/addons.js").Addons;
+  /** Puts a Claude config folder's sign-in away (profiles/claudeLogin.ts; null: the user's own). Absent: nothing is
+   *  done — a daemon built by a test must never reach this Mac's keychain. */
+  readonly forgetClaudeLogin?: (configDir: string | null) => Promise<void>;
   readonly profileHealth?: import("../profiles/health.js").ProfileHealthChecks;
   readonly store: Store;
   readonly bus: Bus;
