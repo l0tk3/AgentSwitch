@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Chat Room</title>
+<style>
+/* Chat Room, a concept (2026-11-22, docs/chatroom-v0.md; user: 类似于discord的一个页面，每个session相当于一个聊天的实体……每个agent都可以@某个
+   具体的session来指定传输信息). One set of made-up data drawn in both looks (ui-v0 §7 Pixel, §8 Classic), in the Mac's main
+   window (rail · list · page · members · status bar; fixed dark, §8 已定 3) and on the iPhone (follows the system's light or
+   dark). It works: pick a room, write with @, watch a message be queued, delivered and handled, open a member's card, make
+   a room, pause one.   ?style=pixel|classic&theme=dark|light&view=mac|phone|both&room=<id> */
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+input, textarea { font: inherit; color: inherit; background: none; border: 0; outline: 0; padding: 0; margin: 0; resize: none; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl .seg { display: inline-flex; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace; padding: 4px 10px; margin-left: -1px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.ctl .gap { width: 12px; }
+.note { max-width: 1080px; margin: 4px auto 14px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; }
+.stage { overflow-x: auto; padding: 6px 16px 26px; display: flex; gap: 28px; justify-content: center; align-items: flex-start; }
+.doc { max-width: 1080px; margin: 0 auto 70px; color: #a9a59e; font-size: 12.5px; line-height: 1.75; padding: 0 16px; }
+.doc h2 { font: 600 12px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #8d8a84; margin: 26px 0 8px; }
+.doc b { color: #e9e6df; font-weight: 600; }
+.doc ul { margin: 4px 0; padding-left: 18px; }
+.doc code { font: 11.5px "SF Mono", ui-monospace, Menlo, monospace; color: #d8d4cc; }
+
+/* ---------- tokens (ui-v0 §7.3 pixel; §8 classic: the main window one black surface, the phone the system's) ---------- */
+.app { flex: none; --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif; }
+.tok-pd { --bg: #000; --side: #000; --panel: #0b0b0b; --raise: #151515; --field: #0b0b0b; --hover: #121212; --sel: #1a1a1a;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524; --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d; --px-shadow: #2c2a28; }
+.tok-pl { --bg: #f3f1ea; --side: #f3f1ea; --panel: #ece8df; --raise: #e4dfd4; --field: #ece8df; --hover: #e9e5dc; --sel: #e4dfd4;
+  --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3; --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b; --px-shadow: #cfc9bc; }
+.tok-cd { --bg: #000; --side: #000; --panel: #141416; --raise: #232326; --field: rgba(255,255,255,.08); --hover: #18181b; --sel: #232326;
+  --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --ink4: #2a2a2d; --signal: #0a84ff; --cyan: #0a84ff; --green: #30d158; --amber: #ff9f0a; --red: #ff453a;
+  --shadow: 0 0 0 .5px rgba(255,255,255,.14), 0 12px 34px rgba(0,0,0,.5); }
+.tok-cl { --bg: #ffffff; --side: #f2f2f7; --panel: #ffffff; --raise: #f0f0f2; --field: rgba(0,0,0,.055); --hover: rgba(0,0,0,.045); --sel: rgba(0,0,0,.085);
+  --ink: #1d1d1f; --ink2: #6e6e73; --ink3: #a6a6ab; --ink4: rgba(0,0,0,.11); --signal: #007aff; --cyan: #007aff; --green: #34c759; --amber: #ff9500; --red: #ff3b30;
+  --shadow: 0 0 0 .5px rgba(0,0,0,.14), 0 12px 34px rgba(0,0,0,.18); }
+/* A profile's colour says who, not what state (§7.2 第 11 条): six, clear of the state colours and the signal. */
+.app { --p-violet: #b18cff; --p-sand: #e2c48d; --p-mint: #7fe3c0; --p-orchid: #e08ce8; --p-olive: #c3c95a; --p-slate: #9db2d9; }
+.tok-pl, .tok-cl { --p-violet: #7a4fe0; --p-sand: #9a7b3f; --p-mint: #1f9a75; --p-orchid: #b043bc; --p-olive: #7c8220; --p-slate: #5a719f; }
+
+/* ---------- the kit ---------- */
+.px { display: block; image-rendering: pixelated; flex: none; }
+.ci { display: block; flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.grow { flex: 1; min-width: 0; }
+.dim { color: var(--ink2); } .faint { color: var(--ink3); }
+.mono { font-family: var(--mono); }
+.cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* state marks: a key and a braille spinner (pixel), a dot and the system's spinner (classic) */
+.st { display: inline-grid; place-items: center; width: 10px; height: 10px; flex: none; }
+.s-pixel .st i { display: block; width: 8px; height: 8px; background: currentColor; box-shadow: inset 1px 1px 0 rgba(255,255,255,.45), inset -1px -1px 0 rgba(0,0,0,.35); }
+.s-pixel .st.exited i { background: none; box-shadow: inset 0 0 0 2px var(--ink3); }
+.s-pixel .st.busy { color: var(--cyan); font: 12px/10px var(--mono); }
+.s-pixel .st.waiting i { animation: blink 1.1s steps(1) infinite; }
+.s-classic .st i { display: block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.s-classic .st.exited i { background: none; box-shadow: inset 0 0 0 1.5px var(--ink3); }
+.s-classic .st.waiting i { animation: pulse 1.9s ease-out infinite; }
+.s-classic .st.busy svg { width: 11px; height: 11px; animation: cspin .8s steps(8) infinite; color: var(--ink2); }
+.st.idle { color: var(--green); } .st.waiting { color: var(--amber); } .st.failed { color: var(--red); } .st.exited { color: var(--ink3); }
+@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+@keyframes cspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .st i, .st svg { animation: none !important; } }
+/* a profile's spot: at the row's end, small, flat, with a ring of its own colour */
+.spot { width: 6px; height: 6px; flex: none; background: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 28%, transparent); }
+.s-classic .spot { width: 7px; height: 7px; border-radius: 50%; }
+/* buttons: [ Word ] (pixel), a standard button (classic) */
+.btn { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.s-pixel .btn { font: 12.5px var(--mono); color: var(--ink); padding: 1px 2px; }
+.s-pixel .btn::before { content: "[ "; color: var(--ink3); } .s-pixel .btn::after { content: " ]"; color: var(--ink3); }
+.s-pixel .btn:hover { background: var(--ink); color: var(--bg); } .s-pixel .btn:hover::before, .s-pixel .btn:hover::after { color: inherit; }
+.s-pixel .btn.pri { background: var(--ink); color: var(--bg); } .s-pixel .btn.pri::before, .s-pixel .btn.pri::after { color: inherit; opacity: .6; }
+.s-pixel .btn.pri:hover { background: var(--signal); color: #000; }
+.s-pixel .btn.danger { color: var(--red); } .s-pixel .btn.danger:hover { background: var(--red); color: #000; }
+.s-pixel .btn[disabled] { color: var(--ink3); pointer-events: none; background: none; }
+.s-classic .btn { font: 500 12.5px var(--ui); height: 26px; padding: 0 12px; border-radius: 7px; background: var(--raise); color: var(--ink); box-shadow: inset 0 0 0 .5px var(--ink4); }
+.s-classic .btn:hover { filter: brightness(1.12); }
+.s-classic .btn.pri { background: var(--signal); color: #fff; box-shadow: 0 .5px 1.5px rgba(0,0,0,.25); }
+.s-classic .btn.danger { color: var(--red); }
+.s-classic .btn[disabled] { opacity: .4; pointer-events: none; }
+.s-classic .btn.sm { height: 22px; padding: 0 9px; font-size: 11.5px; border-radius: 6px; }
+/* a group's label: // Label (pixel), a small heading (classic) */
+.label { color: var(--ink3); }
+.s-pixel .label { font: 11.5px var(--mono); letter-spacing: .04em; } .s-pixel .label::before { content: "// "; }
+.s-classic .label { font: 600 11.5px var(--ui); color: var(--ink2); }
+.line { height: 1px; background: var(--ink4); flex: none; }
+/* what floats: a 1px ink frame over a dithered hard shadow (pixel), a round card with a soft shadow (classic) */
+.float { position: absolute; z-index: 30; background: var(--bg); color: var(--ink); }
+.s-pixel .float { border: 1px solid var(--ink); }
+.s-pixel .float::after { content: ""; position: absolute; z-index: -1; left: 6px; top: 6px; right: -6px; bottom: -6px;
+  background: repeating-conic-gradient(var(--px-shadow) 0% 25%, transparent 0% 50%) 0 0 / 2px 2px; }
+.s-classic .float { background: var(--panel); border-radius: 12px; box-shadow: var(--shadow); }
+.veil { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.45); }
+.veil.clear { background: transparent; }
+
+/* ---------- the Mac window: bar · rail | rooms | room | members · status bar ---------- */
+.win { width: 1180px; height: 720px; flex: none; display: grid; grid-template-rows: var(--bar-h) minmax(0, 1fr) var(--status-h); background: var(--bg); color: var(--ink);
+  border-radius: 10px; overflow: hidden; position: relative; box-shadow: 0 0 0 .5px rgba(255,255,255,.22), 0 26px 70px rgba(0,0,0,.55); }
+.s-pixel .win { --bar-h: 32px; --status-h: 24px; --rail-w: 44px; font: 13px var(--mono); }
+.s-classic .win { --bar-h: 40px; --status-h: 26px; --rail-w: 52px; font: 13px var(--ui); }
+.tbar { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--ink4); }
+.lights { display: flex; gap: 8px; margin-right: 14px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.tbar .title { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; font: 600 13px var(--ui); white-space: nowrap; }
+.tbar .title small { font: 400 12px var(--ui); color: var(--ink2); } .s-pixel .tbar .title small { font: 400 12px var(--mono); }
+.tbar .end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.tb { display: grid; place-items: center; width: 28px; height: 24px; border-radius: 6px; color: var(--ink2); }
+.tb:hover { color: var(--ink); background: rgba(127,127,127,.16); } .tb.on { color: var(--ink); }
+.wbody { display: grid; grid-template-columns: var(--rail-w) 236px minmax(0, 1fr) auto; min-height: 0; position: relative; }
+.rail { display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--ink4); }
+.s-pixel .rail { gap: 2px; padding: 6px 4px; } .s-classic .rail { gap: 6px; padding: 9px 0; }
+.ri { position: relative; display: grid; place-items: center; color: var(--ink2); }
+.s-pixel .ri { width: 100%; height: 36px; } .s-pixel .ri.on { color: var(--ink); }
+.s-pixel .ri.on::before { content: ""; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 2px; background: var(--signal); }
+.s-classic .ri { width: 36px; height: 36px; border-radius: 9px; } .s-classic .ri.on { background: var(--sel); color: var(--signal); }
+.ri .badge { position: absolute; right: 2px; top: 4px; }
+.s-pixel .ri .badge { width: 6px; height: 6px; background: var(--amber); box-shadow: 0 0 0 2px var(--bg); }
+.s-classic .ri .badge { right: -3px; top: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--amber); color: #fff; font: 700 10px/15px var(--ui); text-align: center; box-shadow: 0 0 0 2px var(--bg); }
+.rail .sp { flex: 1; }
+.sbar { display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid var(--ink4); color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
+.sbar span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- rooms ---------- */
+.rooms { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--ink4); }
+.rooms .head { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; flex: none; }
+.rooms .list { overflow: auto; flex: 1; padding-bottom: 8px; }
+.rm { position: relative; display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 8px 12px; }
+.rm .top { display: flex; align-items: center; gap: 8px; }
+.rm .name { color: var(--ink); } .rm .last { font: 12px var(--ui); color: var(--ink2); }
+.rm .when { font-size: 11px; color: var(--ink3); }
+.s-pixel .rm .idx { color: var(--ink3); width: 2ch; flex: none; }
+.s-pixel .rm:hover { background: var(--hover); }
+.s-pixel .rm.on { background: var(--sel); } .s-pixel .rm.on::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--signal); }
+.s-pixel .rm.on .idx { color: var(--signal); }
+.s-classic .rm { margin: 1px 8px; width: calc(100% - 16px); padding: 7px 10px; border-radius: 8px; }
+.s-classic .rm:hover { background: var(--hover); } .s-classic .rm.on { background: var(--sel); }
+.s-classic .rm .name { font-weight: 600; } .s-classic .rm .idx { display: none; }
+.count { flex: none; }
+.s-pixel .count { color: var(--amber); font: 11.5px var(--mono); }
+.s-classic .count { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: var(--amber); color: #fff; font: 700 10.5px/17px var(--ui); text-align: center; }
+.paused { flex: none; color: var(--ink3); font-size: 11px; }
+
+/* ---------- a room ---------- */
+.room { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.room .rhead { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; border-bottom: 1px solid var(--ink4); flex: none; }
+.room .rhead .name { font: 600 13.5px var(--ui); color: var(--ink); white-space: nowrap; }
+.room .rhead .topic { font: 12.5px var(--ui); color: var(--ink2); }
+.banner { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--ink4); font: 12.5px var(--ui); color: var(--ink); flex: none; }
+.s-pixel .banner { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--amber) 16%, transparent) 0 6px, transparent 6px 12px); }
+.s-classic .banner { background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.pin { display: flex; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--ink4); font: 12.5px/1.55 var(--ui); color: var(--ink2); flex: none; }
+.pin b { color: var(--ink); font-weight: 600; } .pin .body { white-space: pre-line; }
+.tl { flex: 1; overflow: auto; padding: 10px 0 14px; }
+.day { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; color: var(--ink3); font-size: 11.5px; }
+.day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--ink4); }
+.ev { padding: 4px 14px 4px 54px; font: 12px var(--ui); color: var(--ink2); }
+.s-pixel .ev::before { content: "· "; color: var(--ink3); }
+.msg { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 14px; padding: 7px 14px 3px; }
+.msg.cont { padding-top: 1px; }
+.msg:hover { background: var(--hover); }
+/* what is addressed to the one looking and not yet read: amber, the colour of what waits for you */
+.msg.forme::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--amber); }
+.s-classic .msg.forme { background: color-mix(in srgb, var(--amber) 9%, transparent); }
+.av { width: 26px; height: 26px; display: grid; place-items: center; color: var(--ink); align-self: start; margin-top: 1px; }
+.s-pixel .av { border: 1px solid var(--ink4); }
+.s-classic .av { border-radius: 8px; background: color-mix(in srgb, var(--c, var(--ink3)) 22%, var(--raise)); color: var(--c, var(--ink)); }
+.s-classic .av .ci { width: 15px; height: 15px; }
+.av.you { color: var(--bg); background: var(--ink); border-color: var(--ink); font: 700 10px var(--mono); }
+.s-classic .av.you { background: var(--signal); color: #fff; font: 700 10px var(--ui); }
+.mh { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mh .who { color: var(--ink); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.s-pixel .mh .who { font: 600 13px var(--mono); } .mh .who:hover { text-decoration: underline; }
+.mh .meta { font-size: 11.5px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mh .num { font-size: 11px; color: var(--ink3); margin-left: auto; padding-left: 8px; white-space: nowrap; }
+.quote { display: flex; gap: 6px; font: 12px var(--ui); color: var(--ink2); margin-bottom: 2px; white-space: nowrap; overflow: hidden; }
+.quote .cut { min-width: 0; }
+.s-pixel .quote::before { content: "┌─"; font-family: var(--mono); color: var(--ink3); }
+.s-classic .quote { padding-left: 8px; border-left: 2px solid var(--ink4); }
+.body { font: 13.5px/1.6 var(--ui); color: var(--ink); white-space: pre-wrap; word-break: break-word; user-select: text; }
+.body code { font: 12.5px var(--mono); }
+.s-pixel .body code { color: var(--ink); background: var(--panel); padding: 0 3px; }
+.s-classic .body code { background: var(--field); border-radius: 4px; padding: 1px 4px; }
+/* a mention: a name with its sign, never a status colour */
+.at { white-space: nowrap; cursor: pointer; }
+.s-pixel .at { font: 600 13px var(--mono); color: var(--ink); border-bottom: 1px solid var(--ink3); }
+.s-pixel .at.me { background: var(--ink); color: var(--bg); border: 0; padding: 0 2px; }
+.s-classic .at { color: var(--signal); font-weight: 500; background: color-mix(in srgb, var(--signal) 14%, transparent); padding: 0 4px; border-radius: 5px; }
+.s-classic .at.me { background: var(--signal); color: #fff; }
+.file { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px 8px; font: 12px var(--mono); color: var(--ink2); max-width: 100%; }
+.s-pixel .file { border: 1px solid var(--ink4); } .s-classic .file { background: var(--field); border-radius: 7px; }
+/* where a message stands with each one it was sent to */
+.rc { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: 11.5px; color: var(--ink3); }
+.rc span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.rc .Queued { color: var(--ink2); } .rc .Delivered { color: var(--ink2); } .rc .Handled { color: var(--ink3); } .rc .Failed { color: var(--red); }
+.s-pixel .rc { font-family: var(--mono); }
+.rc .tick { font-family: var(--mono); }
+.empty { display: grid; place-items: center; align-content: center; gap: 10px; height: 100%; text-align: center; color: var(--ink2); font: 13px/1.7 var(--ui); padding: 0 40px; }
+.empty .eg { color: var(--ink3); font-size: 12.5px; }
+/* writing */
+.write { flex: none; padding: 10px 14px 12px; border-top: 1px solid var(--ink4); position: relative; }
+.replying { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font: 12px var(--ui); color: var(--ink2); }
+.box { display: flex; align-items: flex-end; gap: 8px; }
+.box .plus, .box .send { flex: none; display: grid; place-items: center; width: 34px; height: 34px; color: var(--ink2); }
+.s-pixel .box .plus { border: 1px solid var(--ink4); font: 18px var(--mono); }
+.s-pixel .box .field { border: 1px solid var(--ink4); background: var(--field); }
+.s-pixel .box .field:focus-within { border-color: var(--ink2); }
+.s-pixel .box .send { background: var(--ink); color: var(--bg); font: 600 12px var(--mono); width: auto; padding: 0 10px; }
+.s-pixel .box .send:hover { background: var(--signal); color: #000; } .s-pixel .box .send[disabled] { background: var(--ink4); color: var(--ink3); pointer-events: none; }
+.s-classic .box .field { background: var(--field); border-radius: 17px; }
+.s-classic .box .plus .ci { width: 24px; height: 24px; stroke-width: 1.2; }
+.s-classic .box .send { border-radius: 50%; background: var(--signal); color: #fff; width: 30px; height: 30px; margin-bottom: 2px; } .s-classic .box .send[disabled] { background: var(--raise); color: var(--ink3); pointer-events: none; }
+.box .field { flex: 1; min-width: 0; padding: 7px 12px; }
+.box textarea { display: block; width: 100%; font: 13.5px/1.45 var(--ui); max-height: 110px; }
+.box textarea::placeholder { color: var(--ink3); }
+.hint { display: flex; gap: 12px; margin-top: 6px; font-size: 11.5px; color: var(--ink3); }
+.pick { left: 56px; bottom: 100%; margin-bottom: -4px; width: 300px; padding: 4px 0; }
+.pick .opt { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 10px; }
+.pick .opt.on { background: var(--sel); } .s-pixel .pick .opt.on { background: var(--ink); color: var(--bg); }
+.s-pixel .pick .opt.on .dim { color: inherit; opacity: .7; }
+.s-classic .pick .opt { border-radius: 7px; margin: 0 4px; width: calc(100% - 8px); }
+
+/* ---------- members ---------- */
+.mem { width: 232px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--ink4); }
+.mem .head { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; flex: none; border-bottom: 1px solid var(--ink4); }
+.mem .list { overflow: auto; flex: 1; padding: 4px 0 10px; }
+.mem .grp { padding: 10px 12px 4px; }
+.mb { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 12px; }
+.mb:hover { background: var(--hover); }
+.s-classic .mb { margin: 0 6px; width: calc(100% - 12px); padding: 6px; border-radius: 7px; }
+.mb .nm { color: var(--ink); } .mb .sub { font-size: 11px; color: var(--ink3); }
+.mb .mk { color: var(--ink2); flex: none; }
+.s-classic .mb .mk .ci { width: 14px; height: 14px; }
+/* a member's card */
+.card { width: 300px; padding: 12px 14px; }
+.card h3 { margin: 0; font: 600 14px var(--ui); display: flex; align-items: center; gap: 8px; }
+.card dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 14px; margin: 10px 0 12px; font-size: 12px; }
+.card dt { color: var(--ink3); } .card dd { margin: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- a new room ---------- */
+.sheet { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; max-height: 86%; display: flex; flex-direction: column; }
+.sheet .sh { padding: 12px 16px; font: 600 14px var(--ui); border-bottom: 1px solid var(--ink4); display: flex; align-items: center; }
+.s-pixel .sheet .sh { font: 600 12.5px var(--mono); background: var(--raise); }
+.sheet .sb { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.sheet .sf { padding: 12px 16px; border-top: 1px solid var(--ink4); display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
+.fld { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 10px; }
+.fld > span { color: var(--ink2); font-size: 12.5px; }
+.inp { padding: 6px 10px; font: 13px var(--ui); width: 100%; }
+.s-pixel .inp { border: 1px solid var(--ink4); background: var(--field); } .s-pixel .inp:focus { border-color: var(--ink2); }
+.s-classic .inp { background: var(--field); border-radius: 7px; }
+.tabs { display: flex; gap: 14px; border-bottom: 1px solid var(--ink4); }
+.tab { padding: 6px 0; color: var(--ink2); position: relative; font-size: 12.5px; }
+.tab.on { color: var(--ink); } .tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--signal); }
+.s-classic .tabs { border: 0; gap: 2px; background: var(--field); border-radius: 8px; padding: 2px; align-self: flex-start; }
+.s-classic .tab { padding: 4px 12px; border-radius: 6px; } .s-classic .tab.on { background: var(--raise); box-shadow: 0 .5px 1px rgba(0,0,0,.2); } .s-classic .tab.on::after { display: none; }
+.pickrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 4px; }
+.pickrow:hover { background: var(--hover); }
+.chk { flex: none; font: 12.5px var(--mono); color: var(--ink2); width: 3ch; }
+.s-classic .chk { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--ink3); display: grid; place-items: center; font-size: 0; }
+.s-classic .chk.on { background: var(--signal); box-shadow: none; color: #fff; } .s-classic .chk.on::after { content: "✓"; font: 700 11px var(--ui); }
+.choice { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; }
+.choice button { color: var(--ink2); white-space: nowrap; }
+.s-pixel .choice button::before { content: "< > "; color: var(--ink3); font-family: var(--mono); } .s-pixel .choice button.on::before { content: "<x> "; color: var(--ink); }
+.s-pixel .choice button.on { color: var(--ink); }
+.s-classic .choice { gap: 6px; } .s-classic .choice button { padding: 3px 10px; border-radius: 6px; background: var(--field); }
+.s-classic .choice button.on { background: var(--signal); color: #fff; }
+.seated { display: flex; flex-wrap: wrap; gap: 6px; }
+.seat { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 12px; }
+.s-pixel .seat { border: 1px solid var(--ink4); } .s-classic .seat { background: var(--field); border-radius: 999px; padding: 3px 10px; }
+.foot { font: 12px/1.6 var(--ui); color: var(--ink3); }
+
+/* ---------- the iPhone ---------- */
+.phone { width: 390px; height: 800px; flex: none; position: relative; border-radius: 46px; overflow: hidden; background: var(--bg); color: var(--ink);
+  box-shadow: 0 0 0 9px #111, 0 0 0 10px #3a3a3e, 0 26px 70px rgba(0,0,0,.55); display: flex; flex-direction: column; }
+.s-pixel .phone { font: 14px var(--mono); } .s-classic .phone { font: 15px var(--ui); background: var(--side); }
+.phone .stat { height: 50px; flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 30px 8px; font: 600 15px var(--ui); }
+.phone .island { position: absolute; left: 50%; top: 11px; transform: translateX(-50%); width: 112px; height: 32px; border-radius: 16px; background: #000; z-index: 5; }
+.phone .nav { height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--ink4); position: relative; }
+.phone .nav .mid { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; max-width: 56%; font: 600 16px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .nav .mid small { display: block; font: 400 11px var(--ui); color: var(--ink2); }
+.phone .nav button { color: var(--signal); display: inline-flex; align-items: center; gap: 4px; font-size: 15px; }
+.s-pixel .phone .nav button { color: var(--ink); }
+.phone .big { padding: 6px 16px 8px; font: 700 30px var(--ui); flex: none; }
+.s-pixel .phone .big { font: 700 22px var(--mono); letter-spacing: .02em; }
+.phone .scroll { flex: 1; overflow: auto; min-height: 0; }
+.phone .rm { padding: 11px 16px; } .s-classic .phone .rm { margin: 0; width: 100%; border-radius: 0; padding: 11px 16px; }
+.s-classic .phone .cardlist { margin: 0 16px; border-radius: 12px; background: var(--panel); overflow: hidden; }
+.s-classic .phone .cardlist .rm + .rm { box-shadow: inset 0 .5px 0 var(--ink4); }
+.phone .rm .last { font-size: 13.5px; } .phone .rm .name { font-size: 15.5px; }
+.phone .tl { background: var(--bg); } .phone .msg { padding-left: 12px; padding-right: 12px; column-gap: 10px; }
+.phone .ev { padding-left: 48px; } .phone .body { font-size: 15px; }
+.phone .write { background: var(--bg); padding: 8px 10px 26px; }
+.phone .box textarea { font-size: 15px; }
+.phone .pick { left: 10px; right: 10px; width: auto; }
+.phone .home { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: var(--ink); opacity: .9; z-index: 6; }
+.phone .tabbar { flex: none; height: 78px; display: flex; justify-content: space-around; padding-top: 8px; border-top: 1px solid var(--ink4); background: var(--bg); }
+.phone .tabbar div { display: flex; flex-direction: column; align-items: center; gap: 4px; font: 10.5px var(--ui); color: var(--ink2); width: 64px; }
+.phone .tabbar div.on { color: var(--signal); } .s-pixel .phone .tabbar div.on { color: var(--ink); }
+.phone .tabbar .ci { width: 23px; height: 23px; }
+.phone .psheet { left: 0; right: 0; bottom: 0; top: 120px; display: flex; flex-direction: column; }
+.s-classic .phone .psheet { border-radius: 16px 16px 0 0; }
+.s-pixel .phone .psheet { border-width: 1px 0 0; } .s-pixel .phone .psheet::after { display: none; }
+.phone .card { width: auto; }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <span class="seg" id="c-style"><button data-v="pixel">Pixel</button><button data-v="classic">Classic</button></span>
+  <span class="gap"></span>
+  <span class="seg" id="c-view"><button data-v="both">Mac + iPhone</button><button data-v="mac">Mac</button><button data-v="phone">iPhone</button></span>
+  <span class="gap"></span>
+  <span class="seg" id="c-theme"><button data-v="dark">iPhone Dark</button><button data-v="light">iPhone Light</button></span>
+  <span class="gap"></span>
+  <span class="seg" id="c-play"><button data-v="play">▶ Play an Exchange</button><button data-v="reset">Reset</button></span>
+</div>
+<p class="note">可以点：切换房间、在输入框里写字并用 <code>@</code> 选人、看消息从 Sent 到 Queued、Delivered、Handled，点名字看名片，<code>New Room</code> 建房间，暂停与恢复。<br>
+“Play an Exchange” 放一段两个 agent 之间的往返，到第 6 次时房间自动暂停。</p>
+<div class="stage" id="stage"></div>
+
+<div class="doc">
+<h2>// 这页画的是什么</h2>
+<ul>
+<li><b>身份是席位</b>：每个成员一个不变的名字（<code>@daemon</code>），旁边是它的 agent 标记；行尾的小色点是它所在的配置（Default 不标）。点名字出名片：agent、模型、配置、节点、目录、权限模式、谁拉进来的。</li>
+<li><b>谁发给谁看得见</b>：正文里的 <code>@名字</code> 是收件人；被引用的那条显示在消息上方；带 <code>@</code> 的消息下面一行是每个收件人的投递状态。</li>
+<li><b>投递状态四个词</b>：<code>Sent</code>（写进房间）· <code>Queued</code>（对方在忙，这一轮结束再送）· <code>Delivered</code>（交到手上）· <code>Handled</code>（它这一轮结束或回了话）。对方已结束时是 <code>Failed</code>。</li>
+<li><b>发给你、还没看的</b>：行左侧一条琥珀色——琥珀只表示“等你处理”。看过（切到这个房间）就没有了。</li>
+<li><b>成员的状态</b>用终端的那一套：像素外观 Busy · Waiting · Idle · Exited（转圈、键、空心键），经典外观 Working · Needs You · Ready · Ended（转圈、圆点、空心圆）。</li>
+<li><b>不空转</b>：两个 agent 之间没有你参与的连续往返到 6 次，房间自动暂停，顶上出一条说明，<code>Resume</code> 继续。暂停时消息照写，不投递。</li>
+<li><b>置顶笔记</b>：房间名下面那一段，所有成员能读能改（第一版的“临时协作区域”）。</li>
+</ul>
+<h2>// 两种外观各自怎么画</h2>
+<ul>
+<li><b>Pixel</b>（ui-v0 §7）：等宽、方角、1px 实线；分组标签 <code>// Label</code>；选中是行左 3px 信号粉竖条加序号；按钮 <code>[ Word ]</code>；单选 <code>&lt;x&gt;</code>、复选 <code>[x]</code>；浮层是 1px 墨色框加抖动硬阴影；agent 是 5×5 像素图；提到人是加粗带下划线，提到你是反色块。正文不加工，用系统字体。</li>
+<li><b>Classic</b>（§8）：系统字体、圆角、线性图标、标准按钮、圆点状态、数字角标、柔和投影；强调色是蓝；提到人是浅蓝底的胶囊。主窗口仍是一整块黑；iPhone 随系统深浅。</li>
+<li>两种外观共用同一批页面、同样的词（少数状态词按 §8 已定 2 换），只换画法。</li>
+</ul>
+<h2>// 还没定的</h2>
+<ul>
+<li>图标栏里 Chat Room 的图标：这里像素外观画的是一个对话框，经典外观是对话气泡。</li>
+<li>iPhone 上放在哪：这里作为第五个标签页（Terminals · Dispatch · Rooms · Files · Settings），Browser 的去处要再议。</li>
+</ul>
+</div>
+
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+const q = new URLSearchParams(location.search);
+const S = { style: q.get("style") || "pixel", theme: q.get("theme") || "dark", view: q.get("view") || "both", room: q.get("room") || "login",
+  members: true, draft: "", reply: null, pick: null, card: null, sheet: null, phoneScreen: "room", phoneMembers: false };
+const classic = () => S.style === "classic";
+
+// ---------- pictures ----------
+const AG = { cc: "Claude Code", codex: "Codex", oc: "OpenCode", pi: "pi" };
+const CI = {
+  cc: '<path d="M9 2.5v13M2.5 9h13M4.4 4.4l9.2 9.2M13.6 4.4l-9.2 9.2"/>',
+  codex: '<path d="M4 6l3.25 3L4 12M9.5 12.5H14"/>',
+  oc: '<path d="M7 3.5H4.5v11H7M11 3.5h2.5v11H11"/>',
+  pi: '<path d="M3.5 5.5h11M7 5.5v8M11.5 5.5v6.25a1.75 1.75 0 0 0 1.75 1.75"/>',
+  terminals: '<rect x="2.25" y="3.25" width="13.5" height="11.5" rx="2.5"/><path d="M5 6.75 7.25 9 5 11.25M9.5 11.25H13"/>',
+  dispatch: '<g fill="currentColor" stroke="none"><rect x="1.5" y="7" width="4" height="4" rx="1.2"/><rect x="12.5" y="1.75" width="4" height="4" rx="1.2"/><rect x="12.5" y="7" width="4" height="4" rx="1.2"/><rect x="12.5" y="12.25" width="4" height="4" rx="1.2"/></g><path d="M5.5 9h7M5.5 9c3 0 3-5.25 7-5.25M5.5 9c3 0 3 5.25 7 5.25"/>',
+  rooms: '<path d="M15.25 8.5a5.75 5.75 0 0 1-8.6 5L3 14.5l1.1-3.3a5.75 5.75 0 1 1 11.15-2.7z"/><path d="M6.75 7.5h4.5M6.75 10h3"/>',
+  files: '<path d="M2.25 5.5a1.75 1.75 0 0 1 1.75-1.75h2.6l1.65 1.75h5.75a1.75 1.75 0 0 1 1.75 1.75v5.5a1.75 1.75 0 0 1-1.75 1.75H4a1.75 1.75 0 0 1-1.75-1.75z"/>',
+  browser: '<circle cx="9" cy="9" r="6.75"/><ellipse cx="9" cy="9" rx="2.9" ry="6.75"/><path d="M2.25 9h13.5"/>',
+  settings: '<path d="M2.5 4.75h1.75M8.25 4.75h7.25M2.5 9h7.25M13.75 9h1.75M2.5 13.25h3.25M9.75 13.25h5.75"/><circle cx="6.25" cy="4.75" r="1.9"/><circle cx="11.75" cy="9" r="1.9"/><circle cx="7.75" cy="13.25" r="1.9"/>',
+  plus: '<path d="M9 3.75v10.5M3.75 9h10.5"/>', pluscircle: '<circle cx="9" cy="9" r="7"/><path d="M9 5.75v6.5M5.75 9h6.5"/>',
+  people: '<circle cx="6.5" cy="6.25" r="2.5"/><path d="M1.75 14.5a4.75 4.75 0 0 1 9.5 0M12 4a2.4 2.4 0 0 1 0 4.6M13 10.4a4.4 4.4 0 0 1 3.25 4.1"/>',
+  pause: '<path d="M6.25 4v10M11.75 4v10"/>', play: '<path d="M5.5 3.75v10.5L14 9z"/>',
+  pin: '<path d="M6.5 2.75h5l-.75 5 2.5 2.5h-8.5l2.5-2.5zM9 10.25v5"/>',
+  x: '<path d="M4.75 4.75l8.5 8.5M13.25 4.75l-8.5 8.5"/>', reply: '<path d="M7 5.25 3 9l4 3.75M3.25 9H10a4.75 4.75 0 0 1 4.75 4.75"/>',
+  send: '<path d="M9 13.75V4.75M5 8.5 9 4.5l4 4" stroke-width="1.9"/>', chevleft: '<path d="M11.25 3.75 6 9l5.25 5.25"/>',
+  clip: '<path d="M13.5 8.25 8.6 13.1a2.9 2.9 0 0 1-4.1-4.1l5.3-5.3a1.95 1.95 0 0 1 2.75 2.75L7.3 11.7a1 1 0 0 1-1.4-1.4l4.6-4.6"/>',
+  spin: '<path d="M9 2v3.2M9 12.8V16M2 9h3.2M12.8 9H16M4.05 4.05l2.25 2.25M11.7 11.7l2.25 2.25M4.05 13.95l2.25-2.25M11.7 6.3l2.25-2.25" opacity=".9"/>',
+};
+const ci = (name, size) => `<svg class="ci" viewBox="0 0 18 18"${size ? ` style="width:${size}px;height:${size}px"` : ""}>${CI[name]}</svg>`;
+const PX = {
+  terminals: ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"],
+  dispatch: ["......###", "...###.##", "..#...###", "###......", "#########", "###......", "..#...###", "...###.##", "......###"],
+  rooms: ["#########", "#.......#", "#.#####.#", "#.......#", "#.###...#", "#.......#", "###.#####", "..##.....", "..#......"],
+  files: ["####.....", "#...#####", "#.......#", "#.......#", "#.......#", "#.......#", "#########"],
+  browser: ["..#####..", ".#..#..#.", "#...#...#", "#########", "#...#...#", ".#..#..#.", "..#####.."],
+  settings: ["..##.....", "#########", "..##.....", ".........", ".....##..", "#########", ".....##.."],
+  people: ["..##...##", "..##...##", ".####.###", ".####.###"], pin: ["#####", ".###.", ".###.", "#####", "..#..", "..#.."],
+  pause: ["##.##", "##.##", "##.##", "##.##", "##.##"], play: ["#....", "###..", "#####", "###..", "#...."],
+  plus: ["...#...", "...#...", "...#...", "#######", "...#...", "...#...", "...#..."],
+  clip: [".###.", "#...#", "#.#.#", "#.#.#", "#.#.#", "..#.#", "..###"], reply: ["..#....", ".##....", "#######", ".##...#", "..#...#"],
+};
+const pix = (name, px = 2) => P.sprite(PX[name], { px });
+/** A picture by its meaning, in the look's own drawing. */
+const icon = (name, { px = 2, size } = {}) => (classic() ? ci(name, size) : pix(name, px));
+const agentMark = (a, px = 2) => (classic() ? ci(a) : P.sprite(P.AGENT_PX[a], { px }));
+const BRAILLE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+function state(st) {
+  const cls = { busy: "busy", waiting: "waiting", idle: "idle", exited: "exited", failed: "failed" }[st];
+  if (st === "busy") return classic() ? `<span class="st busy">${ci("spin")}</span>` : `<span class="st busy" data-spin>⠋</span>`;
+  return `<span class="st ${cls}"><i></i></span>`;
+}
+const WORD = { busy: ["Busy", "Working"], waiting: ["Waiting", "Needs You"], idle: ["Idle", "Ready"], exited: ["Exited", "Ended"] };
+const word = (st) => WORD[st][classic() ? 1 : 0];
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- made-up data ----------
+const SEATS = {
+  you: { id: "you", name: "you", you: true },
+  daemon: { id: "daemon", name: "daemon", agent: "cc", model: "Fable 5.2", profile: "Work", color: "violet", node: "This Mac", dir: "~/Projects/AgentSwitch/packages/daemon", mode: "Bypass", st: "busy", by: "you" },
+  "mac-app": { id: "mac-app", name: "mac-app", agent: "cc", model: "Opus 5.5", profile: "Default", color: null, node: "This Mac", dir: "~/Projects/AgentSwitch/packages/mac-app", mode: "Auto", st: "idle", by: "you" },
+  "ios-app": { id: "ios-app", name: "ios-app", agent: "codex", model: "GPT-6 Luna", profile: "Team", color: "mint", node: "Mac Mini", dir: "~/Projects/AgentSwitch/packages/ios-app", mode: "Ask", st: "waiting", by: "you" },
+  android: { id: "android", name: "android", agent: "codex", model: "GPT-6 Luna", profile: "Team", color: "mint", node: "Mac Mini", dir: "~/Projects/AgentSwitch/packages/android-app", mode: "Auto", st: "idle", by: "@daemon", started: true },
+  docs: { id: "docs", name: "docs", agent: "oc", model: "DeepSeek Flash", profile: "Default", color: null, node: "This Mac", dir: "~/Projects/AgentSwitch/docs", mode: "Edits", st: "exited", by: "you" },
+  review: { id: "review", name: "review", agent: "cc", model: "Sonnet 5.5", profile: "Personal", color: "sand", node: "This Mac", dir: "~/Projects/DayHub", mode: "Plan", st: "idle", by: "you" },
+  dayhub: { id: "dayhub", name: "dayhub", agent: "pi", model: "Opus 5.5", profile: "Default", color: null, node: "Mac Mini", dir: "~/Projects/DayHub", mode: "Auto", st: "busy", by: "you" },
+};
+const seed = () => ({
+  login: { id: "login", name: "手机订阅接口", topic: "给手机的 Clash 订阅：服务端、三端页面", paused: null, limit: 6, trips: 2,
+    note: "接口：GET /clash/phone.yaml?k=…（4714）\n视图里多一个 phone: { on, listening, links, problem }\n待办：安卓页的 Add to Clash · 文档 §12",
+    seats: ["you", "daemon", "mac-app", "ios-app", "android", "docs"],
+    msgs: [
+      { day: "Today" },
+      { n: 31, from: "you", t: "19:02", text: "@daemon 给手机的订阅地址做出来，局域网和 Tailscale 都开。@mac-app 你等它的接口定了再画页面。", to: { daemon: "Handled", "mac-app": "Handled" } },
+      { n: 32, from: "daemon", t: "19:21", text: "接口定了：`GET /clash` 多一个 `phone`，里面是 `on`、`listening`、`links`、`problem`。@mac-app @ios-app 可以开始了，字段说明在置顶笔记里。", to: { "mac-app": "Handled", "ios-app": "Delivered" } },
+      { n: 33, from: "mac-app", t: "19:26", reply: 32, text: "收到。`links` 里每一项有 `kind` 吗？页面要分 Wi-Fi 和 Tailscale 两行。@daemon", to: { daemon: "Handled" } },
+      { n: 34, from: "daemon", t: "19:27", reply: 33, text: "有，`lan` 或 `tailnet`。@mac-app", to: { "mac-app": "Handled" } },
+      { ev: "@daemon 启动了 @android（Codex · Team · Mac Mini · ~/Projects/AgentSwitch/packages/android-app）" },
+      { n: 35, from: "daemon", t: "19:31", text: "@android 安卓的 Clash 页照 iPhone 的 This iPhone 一节加一段，入口叫 Add to Clash。接口同上。", to: { android: "Handled" }, file: "packages/ios-app/App/Sources/Settings/ClashScreen.swift" },
+      { n: 36, from: "android", t: "19:44", reply: 35, text: "加好了。手机上没有能接 `clash://` 的 app 时改为复制地址，这一点和 iPhone 不同。@daemon", to: { daemon: "Queued" } },
+      { n: 37, from: "ios-app", t: "19:46", text: "@you 要不要在 iPhone 上也加一个 Copy Link？现在只有长按才能复制。", to: { you: "Delivered" }, forme: true },
+      { n: 38, from: "you", t: "19:47", text: "@docs 把这一节写进 clash-v0。", to: { docs: "Failed" } },
+    ] },
+  agents: { id: "agents", name: "Agents 换节点", topic: "设置 › Agents 能选别的节点", paused: "limit", limit: 6, trips: 6,
+    note: "中转：应用把这一页交给自己的服务，别的节点读、发按钮\n名字逐字对齐：claude-code · codex · opencode · pi",
+    seats: ["you", "daemon", "mac-app", "review"],
+    msgs: [
+      { day: "Today" },
+      { n: 12, from: "mac-app", t: "20:11", text: "@daemon `agent` 这个字段你那边校验的是什么？Claude Code 的按钮全被拒了。", to: { daemon: "Handled" } },
+      { n: 13, from: "daemon", t: "20:12", reply: 12, text: "`claude` `codex` `opencode` `pi`。@mac-app 你发的是什么？", to: { "mac-app": "Handled" } },
+      { n: 14, from: "mac-app", t: "20:12", reply: 13, text: "`claude-code`。AgentCLI 的原值就是这个。@daemon", to: { daemon: "Handled" } },
+      { n: 15, from: "daemon", t: "20:13", reply: 14, text: "那是我写错了，改成 `claude-code`。@mac-app 你那边加一条测试把四个名字钉住。", to: { "mac-app": "Handled" } },
+      { n: 16, from: "mac-app", t: "20:15", reply: 15, text: "加了。@daemon 你那边也加一条？", to: { daemon: "Handled" } },
+      { n: 17, from: "daemon", t: "20:16", reply: 16, text: "加了，四个名字各发一次都是 202。@mac-app", to: { "mac-app": "Sent" } },
+      { ev: "连续 6 次往返没有你参与：房间已暂停。" },
+    ] },
+  dayhub: { id: "dayhub", name: "DayHub 部署", topic: "", paused: null, limit: 6, trips: 0, note: "", seats: ["you", "dayhub", "review"], msgs: [] },
+});
+let ROOMS = seed();
+const room = () => ROOMS[S.room] || Object.values(ROOMS)[0];
+const unread = (r) => r.msgs.filter((m) => m.forme).length;
+const lastOf = (r) => { const m = [...r.msgs].reverse().find((x) => x.text || x.ev); return m ? (m.ev || `@${m.from}: ${m.text.replace(/`/g, "")}`) : "No messages yet"; };
+
+// ---------- drawing ----------
+function spot(seat) { return seat.color ? `<i class="spot" style="--c: var(--p-${seat.color})" title="配置 ${seat.profile}"></i>` : ""; }
+function avatar(seat) {
+  if (seat.you) return `<span class="av you">YOU</span>`;
+  return `<span class="av"${seat.color ? ` style="--c: var(--p-${seat.color})"` : ""} title="${AG[seat.agent]}">${agentMark(seat.agent, 3)}</span>`;
+}
+function rich(text) {
+  return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/@([a-z][\w-]*)/g, (m, id) => (SEATS[id] || id === "all" ? `<span class="at${id === "you" ? " me" : ""}" data-card="${id}">@${id}</span>` : m));
+}
+const TICK = { Sent: "·", Queued: "…", Delivered: "✓", Handled: "✓✓", Failed: "×" };
+function receipts(m) {
+  if (!m.to) return "";
+  return `<div class="rc">${Object.entries(m.to).map(([id, st]) => {
+    const why = st === "Failed" ? " · 已结束" : st === "Queued" ? ` · ${word(SEATS[id].st)}` : "";
+    return `<span class="${st}"><span class="tick">${TICK[st]}</span>@${id} ${st}${why}</span>`;
+  }).join("")}</div>`;
+}
+function message(m, prev, r, narrow) {
+  if (m.day) return `<div class="day">${m.day}</div>`;
+  if (m.ev) return `<div class="ev">${rich(m.ev)}</div>`;
+  const seat = SEATS[m.from], cont = prev && prev.from === m.from && !m.reply && !prev.ev && !prev.day;
+  const quoted = m.reply ? r.msgs.find((x) => x.n === m.reply) : null;
+  // A phone's line has room for the model alone; the rest is on the card.
+  const meta = seat.you ? "" : narrow ? seat.model : `${AG[seat.agent]} · ${seat.model} · ${seat.node}`;
+  return `<div class="msg${cont ? " cont" : ""}${m.forme ? " forme" : ""}" data-n="${m.n}">
+    ${cont ? "<span></span>" : avatar(seat)}
+    <div>
+      ${quoted ? `<div class="quote"><span class="faint">#${quoted.n}</span><span>@${quoted.from}</span><span class="cut">${esc(quoted.text.replace(/`/g, ""))}</span></div>` : ""}
+      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : "@" + seat.name}</span>${spot(seat)}<span class="meta">${meta}</span><span class="num">${m.t} · #${m.n}</span></div>`}
+      <div class="body">${rich(m.text)}</div>
+      ${m.file ? `<div class="file">${icon("clip", { px: 1, size: 14 })}<span class="cut">${esc(m.file)}</span></div>` : ""}
+      ${receipts(m)}
+    </div>
+  </div>`;
+}
+function timeline(r, narrow) {
+  if (!r.msgs.length) return `<div class="empty"><div>这个房间里还没有消息。</div><div class="eg">写一句并用 @ 指定收件人，例如：<br>@dayhub 部署前先跑一遍迁移<br>@review 看一下 DayHub 的发布脚本</div></div>`;
+  return r.msgs.map((m, i) => message(m, r.msgs[i - 1], r, narrow)).join("");
+}
+function banner(r) {
+  if (!r.paused) return "";
+  const why = r.paused === "limit" ? `连续 ${r.limit} 次往返没有你参与，房间已暂停。消息照写，不投递。` : "房间已暂停。消息照写，不投递。";
+  return `<div class="banner">${state("waiting")}<span class="grow">${why}</span><button class="btn pri" data-act="resume">Resume</button></div>`;
+}
+function writer(r, phone) {
+  const pickable = S.pick && pickList(r);
+  return `<div class="write">
+    ${pickable && pickable.length ? `<div class="float pick">${pickable.map((s, i) => `<button class="opt${i === S.pick.i ? " on" : ""}" data-pick="${s.id}">${s.id === "all" ? `<span class="st"></span>` : state(s.st)}<span class="grow cut">@${s.name}${s.id === "all" ? ` <span class="dim">全体，只有你能用</span>` : ` <span class="dim">${AG[s.agent]} · ${word(s.st)}</span>`}</span>${s.id === "all" ? "" : spot(s)}</button>`).join("")}</div>` : ""}
+    ${S.reply ? `<div class="replying">${icon("reply", { px: 1, size: 14 })}<span class="grow cut">Reply to #${S.reply} · @${r.msgs.find((m) => m.n === S.reply).from}</span><button data-act="noreply" title="Close">${classic() ? ci("x", 13) : "×"}</button></div>` : ""}
+    <div class="box">
+      <button class="plus" title="Attach">${classic() ? ci("pluscircle") : "+"}</button>
+      <div class="field"><textarea rows="1" placeholder="${phone ? "Message" : "Message — @ to mention"}" data-draft>${esc(S.draft)}</textarea></div>
+      <button class="send" data-act="send"${S.draft.trim() ? "" : " disabled"} title="Send">${classic() ? ci("send", 16) : "Send"}</button>
+    </div>
+    ${phone ? "" : `<div class="hint"><span>只有 @ 才唤醒对方</span><span>${r.paused ? "Paused" : `Round Trips ${r.trips}/${r.limit}`}</span></div>`}
+  </div>`;
+}
+function pickList(r) {
+  const term = S.pick.q.toLowerCase();
+  return [...r.seats.filter((id) => id !== "you").map((id) => SEATS[id]), { id: "all", name: "all" }].filter((s) => s.name.startsWith(term));
+}
+function memberRows(r) {
+  const by = {};
+  for (const id of r.seats) if (id !== "you") (by[SEATS[id].node] ||= []).push(SEATS[id]);
+  return Object.entries(by).map(([node, seats]) => `<div class="grp"><span class="label">${node}</span></div>${seats.map((s) =>
+    `<button class="mb" data-card="${s.id}">${state(s.st)}<span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${s.model} · ${word(s.st)}${s.started ? " · Started by " + s.by : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
+}
+function card(id, style) {
+  const s = SEATS[id];
+  if (!s || s.you) return "";
+  return `<div class="float card" style="${style}"><h3>${state(s.st)}<span class="grow">@${s.name}</span>${spot(s)}</h3>
+    <dl><dt>Agent</dt><dd>${AG[s.agent]}</dd><dt>Model</dt><dd>${s.model}</dd><dt>Profile</dt><dd>${s.profile}</dd><dt>Node</dt><dd>${s.node}</dd>
+    <dt>Folder</dt><dd class="mono" title="${s.dir}">${s.dir}</dd><dt>Mode</dt><dd>${s.mode}</dd><dt>State</dt><dd>${word(s.st)}</dd><dt>Seated By</dt><dd>${s.by === "you" ? "You" : s.by}</dd></dl>
+    <div class="acts"><button class="btn" data-mention="${s.id}">Mention</button><button class="btn" data-act="closecard">Open Terminal</button><button class="btn danger" data-act="closecard">Remove</button></div></div>`;
+}
+function roomRow(r, i) {
+  const n = unread(r);
+  return `<button class="rm${r.id === S.room ? " on" : ""}" data-room="${r.id}">
+    <div class="top"><span class="idx">${String(i + 1).padStart(2, "0")}</span><span class="name grow cut">${esc(r.name)}</span>${r.paused ? `<span class="paused">Paused</span>` : ""}${n ? `<span class="count">${classic() ? n : `[${n}]`}</span>` : ""}</div>
+    <div class="last cut">${esc(lastOf(r))}</div></button>`;
+}
+function sheet() {
+  const f = S.sheet;
+  if (!f) return "";
+  const tab = (id, label) => `<button class="tab${f.tab === id ? " on" : ""}" data-tab="${id}">${label}</button>`;
+  const chk = (on) => `<span class="chk${on ? " on" : ""}">${on ? "[x]" : "[ ]"}</span>`;
+  const choice = (key, opts) => `<div class="choice">${opts.map((o) => `<button class="${f[key] === o ? "on" : ""}" data-choice="${key}" data-v="${o}">${o}</button>`).join("")}</div>`;
+  const running = Object.values(SEATS).filter((s) => !s.you && s.st !== "exited");
+  const sessions = [["sess-a", "修复 Codex 浏览器队列卡住", "~/Projects/AgentSwitch", "Claude Code · 3h ago"], ["sess-b", "DayHub 发布脚本", "~/Projects/DayHub", "Codex · Yesterday"], ["sess-c", "clash-v0 第 12 节", "~/Projects/AgentSwitch/docs", "OpenCode · 2d ago"]];
+  const body = f.tab === "running"
+    ? running.map((s) => `<button class="pickrow" data-seat="${s.id}">${chk(f.seats.includes(s.id))}${state(s.st)}<span class="grow cut">@${s.name} <span class="dim">${AG[s.agent]} · ${s.model} · ${s.node}</span></span>${spot(s)}</button>`).join("")
+    : f.tab === "new"
+      ? `<div class="fld"><span>Node</span>${choice("node", ["This Mac", "Mac Mini"])}</div>
+         <div class="fld"><span>Folder</span><input class="inp mono" value="~/Projects/AgentSwitch"></div>
+         <div class="fld"><span>Agent</span>${choice("agent", ["Claude Code", "Codex", "OpenCode", "pi"])}</div>
+         <div class="fld"><span>Profile</span>${choice("profile", ["Default", "Work", "Personal", "Team"])}</div>
+         <div class="fld"><span>Model</span>${choice("model", ["Fable 5.2", "Opus 5.5", "Sonnet 5.5"])}</div>
+         <div class="fld"><span>Mode</span>${choice("mode", ["Ask", "Edits", "Auto", "Plan", "Bypass"])}</div>
+         <div><button class="btn" data-act="seatnew">Add to Room</button></div>`
+      : sessions.map(([id, title, dir, meta]) => `<button class="pickrow" data-seat="${id}">${chk(f.seats.includes(id))}<span class="grow"><span class="cut">${title}</span><div class="dim cut" style="font-size:11.5px">${dir} · ${meta}</div></span></button>`).join("")
+        + `<div class="fld" style="margin-top:6px"><span>Continue As</span>${choice("as", ["Same Profile", "Default", "Work", "Personal", "Team"])}</div>`;
+  const names = f.seats.map((id) => (SEATS[id] ? "@" + SEATS[id].name : id.startsWith("new") ? "@new-" + id.slice(3) : "@resumed"));
+  return `<div class="veil" data-act="closesheet"></div><div class="float sheet">
+    <div class="sh"><span class="grow">New Room</span></div>
+    <div class="sb">
+      <div class="fld"><span>Name</span><input class="inp" data-f="name" value="${esc(f.name)}" placeholder="Room Name"></div>
+      <div class="fld"><span>Topic</span><input class="inp" data-f="topic" value="${esc(f.topic)}" placeholder="进来的成员先读到的一句话"></div>
+      <div class="line"></div>
+      <div><span class="label">Members</span></div>
+      <div class="tabs">${tab("running", "Running")}${tab("new", "New Session")}${tab("resume", "Resume")}</div>
+      <div>${body}</div>
+      ${names.length ? `<div class="seated">${names.map((n) => `<span class="seat">${n}</span>`).join("")}</div>` : `<div class="foot">至少拉一个会话进来。</div>`}
+    </div>
+    <div class="sf"><span class="foot grow">新开的会话用所选配置的额度。</span><button class="btn" data-act="closesheet">Cancel</button><button class="btn pri" data-act="create"${f.name.trim() && f.seats.length ? "" : " disabled"}>Create</button></div>
+  </div>`;
+}
+const RAIL = [["terminals", "Terminals"], ["dispatch", "Dispatch"], ["rooms", "Chat Room"], ["files", "Files"], ["browser", "Browser"]];
+function mac() {
+  const r = room(), all = Object.values(ROOMS), waiting = all.reduce((n, x) => n + unread(x), 0);
+  return `<div class="app ${classic() ? "s-classic tok-cd" : "s-pixel tok-pd"}" id="mac"><div class="win">
+    <div class="tbar"><div class="lights"><i></i><i></i><i></i></div>
+      <div class="title">Chat Room <small>${esc(r.name)}</small></div>
+      <div class="end"><button class="tb" data-act="newroom" title="New Room">${icon("plus", { px: 2 })}</button>
+        <button class="tb${S.members ? " on" : ""}" data-act="members" title="${classic() ? "Show or hide the members" : "Members"}">${icon("people", { px: 2 })}</button></div></div>
+    <div class="wbody">
+      <div class="rail">${RAIL.map(([id, title]) => `<button class="ri${id === "rooms" ? " on" : ""}" title="${title}">${icon(id, { px: 2 })}${id === "rooms" && waiting ? `<span class="badge">${classic() ? waiting : ""}</span>` : ""}</button>`).join("")}
+        <span class="sp"></span><button class="ri" title="Settings">${icon("settings", { px: 2 })}</button></div>
+      <div class="rooms"><div class="head"><span class="label grow">Rooms</span><button class="btn${classic() ? " sm" : ""}" data-act="newroom">New Room</button></div>
+        <div class="list">${all.map(roomRow).join("")}</div></div>
+      <div class="room">
+        <div class="rhead"><span class="name">${esc(r.name)}</span><span class="topic grow cut">${esc(r.topic)}</span>
+          <button class="btn${classic() ? " sm" : ""}" data-act="${r.paused ? "resume" : "pause"}">${r.paused ? "Resume" : "Pause"}</button></div>
+        ${banner(r)}
+        ${r.note ? `<div class="pin">${icon("pin", { px: 2, size: 14 })}<div class="grow"><b>Pinned Notes</b><div class="body" style="font-size:12.5px;color:var(--ink2)">${rich(r.note)}</div></div><button class="btn${classic() ? " sm" : ""}">Edit</button></div>` : ""}
+        <div class="tl" data-tl>${timeline(r)}</div>
+        ${writer(r, false)}
+        ${S.card && S.card.where === "mac" ? `<div class="veil clear" data-act="closecard"></div>${card(S.card.id, `left:${S.card.x}px;top:${S.card.y}px`)}` : ""}
+      </div>
+      ${S.members ? `<div class="mem"><div class="head"><span class="label grow">Members</span><span class="dim" style="font-size:11.5px">${r.seats.length}</span><button class="btn${classic() ? " sm" : ""}" data-act="newroom">Add</button></div><div class="list">${memberRows(r)}</div></div>` : "<span></span>"}
+      ${S.sheet && S.sheet.where === "mac" ? sheet() : ""}
+    </div>
+    <div class="sbar"><span>${state("idle")}${classic() ? "Running" : "OK"}</span><span>${all.length} Rooms</span><span>${r.seats.length - 1} Sessions Here</span><span class="grow"></span><span>${r.paused ? "Paused" : `Round Trips ${r.trips}/${r.limit}`}</span></div>
+  </div></div>`;
+}
+function phone() {
+  const r = room(), all = Object.values(ROOMS), tok = classic() ? (S.theme === "light" ? "tok-cl" : "tok-cd") : S.theme === "light" ? "tok-pl" : "tok-pd";
+  const inner = S.phoneScreen === "list"
+    ? `<div class="nav"><span class="grow"></span><button data-act="newroomphone">${classic() ? ci("plus", 20) : "[ New ]"}</button></div>
+       <div class="big">${classic() ? "Rooms" : "ROOMS"}</div>
+       <div class="scroll"><div class="cardlist">${all.map(roomRow).join("")}</div></div>
+       <div class="tabbar">${[["terminals", "Terminals"], ["dispatch", "Dispatch"], ["rooms", "Rooms"], ["files", "Files"], ["settings", "Settings"]].map(([id, t]) => `<div class="${id === "rooms" ? "on" : ""}">${icon(id, { px: 2, size: 23 })}${t}</div>`).join("")}</div>`
+    : `<div class="nav"><button data-act="phonelist">${classic() ? ci("chevleft", 18) : "‹"} Rooms</button>
+         <div class="mid">${esc(r.name)}<small>${r.seats.length - 1} Sessions${r.paused ? " · Paused" : ""}</small></div><span class="grow"></span>
+         <button data-act="phonemembers" title="Members">${icon("people", { px: 2, size: 20 })}</button></div>
+       ${banner(r)}
+       <div class="tl scroll" data-tl>${timeline(r, true)}</div>
+       ${writer(r, true)}`;
+  const members = S.phoneMembers ? `<div class="veil" data-act="phonemembers"></div><div class="float psheet"><div class="nav"><span class="mid">Members</span><span class="grow"></span><button data-act="phonemembers">Done</button></div><div class="scroll mem" style="width:auto;border:0"><div class="list">${memberRows(r)}</div></div></div>` : "";
+  const c = S.card && S.card.where === "phone" ? `<div class="veil" data-act="closecard"></div>${card(S.card.id, "left:16px;right:16px;top:230px")}` : "";
+  return `<div class="app ${classic() ? "s-classic" : "s-pixel"} ${tok}" id="phone"><div class="phone"><div class="island"></div>
+    <div class="stat"><span>9:41</span><span style="font-weight:500;letter-spacing:.04em">5G ▮▮▮</span></div>${inner}${members}${c}
+    ${S.sheet && S.sheet.where === "phone" ? sheet() : ""}<div class="home"></div></div></div>`;
+}
+
+function render(keep) {
+  const focus = document.activeElement && document.activeElement.matches("[data-draft]") ? document.activeElement.closest(".app").id : null;
+  const at = focus ? document.activeElement.selectionStart : 0;
+  const scrolls = keep ? [...document.querySelectorAll("[data-tl]")].map((e) => [e.closest(".app").id, e.scrollTop]) : [];
+  document.documentElement.style.colorScheme = "dark";
+  document.getElementById("stage").innerHTML = (S.view !== "phone" ? mac() : "") + (S.view !== "mac" ? phone() : "");
+  for (const el of document.querySelectorAll("[data-tl]")) { const kept = scrolls.find(([id]) => id === el.closest(".app").id); el.scrollTop = kept ? kept[1] : el.scrollHeight; }
+  for (const [id, key] of [["c-style", "style"], ["c-view", "view"], ["c-theme", "theme"]]) for (const b of document.querySelectorAll(`#${id} button`)) b.classList.toggle("on", b.dataset.v === S[key]);
+  if (focus) { const t = document.querySelector(`#${focus} [data-draft]`); if (t) { t.focus(); t.setSelectionRange(at, at); grow(t); } }
+  const u = new URL(location); u.search = new URLSearchParams({ style: S.style, theme: S.theme, view: S.view, room: S.room }); history.replaceState(null, "", u);
+}
+const grow = (t) => { t.style.height = "auto"; t.style.height = Math.min(110, t.scrollHeight) + "px"; };
+setInterval(() => { const f = BRAILLE[Math.floor(Date.now() / 90) % BRAILLE.length]; for (const el of document.querySelectorAll("[data-spin]")) el.textContent = f; }, 90);
+
+// ---------- what happens ----------
+let timers = [];
+const later = (ms, fn) => timers.push(setTimeout(fn, ms));
+const now = () => new Date().toTimeString().slice(0, 5);
+const nextN = (r) => Math.max(0, ...r.msgs.filter((m) => m.n).map((m) => m.n)) + 1;
+function flashNew() { if (!classic()) for (const el of document.querySelectorAll(".msg.forme:last-of-type")) P.glitch(el); }
+/** A message posted: each one it names is handed it when it can take it (docs/chatroom-v0.md §5). */
+function post(r, from, text, { reply = null, answer = true } = {}) {
+  const to = {}, names = [...text.matchAll(/@([a-z][\w-]*)/g)].map((m) => m[1]);
+  const targets = names.includes("all") && from === "you" ? r.seats.filter((id) => id !== from) : names.filter((id) => r.seats.includes(id) && id !== from);
+  for (const id of new Set(targets)) to[id] = "Sent";
+  const m = { n: nextN(r), from, t: now(), text, reply, to: Object.keys(to).length ? to : null, forme: from !== "you" && "you" in to };
+  if (!r.msgs.length) r.msgs.push({ day: "Today" });
+  r.msgs.push(m);
+  render(false);
+  if (m.forme) flashNew();
+  if (r.paused || !m.to) return m;
+  for (const id of Object.keys(m.to)) {
+    if (id === "you") { later(300, () => { m.to.you = "Delivered"; render(true); }); continue; }
+    const seat = SEATS[id];
+    if (seat.st === "exited") { later(350, () => { m.to[id] = "Failed"; render(true); }); continue; }
+    const busy = seat.st === "busy" || seat.st === "waiting";
+    later(350, () => { m.to[id] = busy ? "Queued" : "Delivered"; render(true); });
+    later(busy ? 2600 : 900, () => { m.to[id] = "Delivered"; const was = seat.st; seat.st = "busy"; seat.was = was; render(true); });
+    later(busy ? 5200 : 3200, () => {
+      m.to[id] = "Handled"; seat.st = seat.was === "waiting" ? "waiting" : "idle"; render(true);
+      if (answer && from === "you") post(r, id, `@you 收到，${text.replace(/@[a-z][\w-]*\s*/g, "").slice(0, 18)}${text.length > 18 ? "…" : ""} 这件事我接着做。`, { reply: m.n, answer: false });
+    });
+  }
+  return m;
+}
+function play() {
+  reset(false);
+  S.room = "login";
+  const r = ROOMS.login;
+  r.trips = 0;
+  const lines = [["daemon", "@mac-app 二维码里放的是 `clash://install-config?url=…` 还是地址本身？"], ["mac-app", "@daemon 是 `clash://`，手机相机扫了直接交给 Clash。"],
+    ["daemon", "@mac-app 那地址里的 `&` 要转义，不然会被当成两个参数。"], ["mac-app", "@daemon 已经整段转义了。"], ["daemon", "@mac-app 好。Tailscale 的那条也一样？"], ["mac-app", "@daemon 一样，同一个函数。"]];
+  lines.forEach(([from, text], i) => later(700 + i * 1900, () => {
+    const prev = r.msgs.filter((m) => m.n).at(-1);
+    post(r, from, text, { reply: i ? prev.n : null, answer: false });
+    r.trips = i + 1;
+    if (r.trips >= r.limit) later(900, () => { r.paused = "limit"; r.msgs.push({ ev: `连续 ${r.limit} 次往返没有你参与：房间已暂停。` }); render(false); if (!classic()) for (const b of document.querySelectorAll(".banner")) P.glitch(b); });
+    else render(true);
+  }));
+}
+function reset(draw = true) { timers.forEach(clearTimeout); timers = []; ROOMS = seed(); for (const s of Object.values(SEATS)) if (s.was) { s.st = s.was; delete s.was; } Object.assign(S, { draft: "", reply: null, pick: null, card: null, sheet: null }); if (draw) render(false); }
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button, [data-card], [data-act], .msg");
+  if (!t) return;
+  const where = t.closest(".app")?.id === "phone" ? "phone" : "mac";
+  const seg = t.closest(".ctl .seg");
+  if (seg) {
+    if (seg.id === "c-play") return t.dataset.v === "play" ? play() : reset();
+    S[{ "c-style": "style", "c-view": "view", "c-theme": "theme" }[seg.id]] = t.dataset.v; S.card = null; return render(false);
+  }
+  const r = room();
+  if (t.dataset.room) { S.room = t.dataset.room; S.phoneScreen = "room"; S.reply = null; S.pick = null; S.card = null; for (const m of room().msgs) delete m.forme; return render(false); }
+  if (t.dataset.pick) return choose(t.dataset.pick);
+  if (t.dataset.mention) { S.draft = (S.draft ? S.draft.replace(/\s*$/, " ") : "") + `@${t.dataset.mention} `; S.card = null; render(true); return focusDraft(where); }
+  if (t.dataset.card) {
+    if (t.dataset.card === "you" || t.dataset.card === "all") return;
+    const box = t.closest(".room, .phone")?.getBoundingClientRect() || { left: 0, top: 0, width: 800, height: 600 }, at = t.getBoundingClientRect();
+    const inMembers = !!t.closest(".mem");
+    S.card = { id: t.dataset.card, where, x: Math.max(8, Math.min(inMembers ? box.width - 316 : at.left - box.left, box.width - 316)), y: Math.max(8, Math.min(at.bottom - box.top + 6, box.height - 300)) };
+    S.phoneMembers = false;
+    return render(true);
+  }
+  if (t.dataset.tab) { S.sheet.tab = t.dataset.tab; return render(true); }
+  if (t.dataset.choice) { S.sheet[t.dataset.choice] = t.dataset.v; return render(true); }
+  if (t.dataset.seat) { const s = S.sheet.seats, i = s.indexOf(t.dataset.seat); if (i >= 0) s.splice(i, 1); else s.push(t.dataset.seat); return render(true); }
+  switch (t.dataset.act) {
+    case "send": return send();
+    case "noreply": S.reply = null; return render(true);
+    case "members": S.members = !S.members; return render(true);
+    case "pause": r.paused = "user"; return render(true);
+    case "resume": r.paused = null; r.trips = 0; r.msgs.push({ ev: "你恢复了房间。" }); return render(false);
+    case "closecard": S.card = null; return render(true);
+    case "newroom": case "newroomphone": S.sheet = { where, name: "", topic: "", tab: "running", seats: [], node: "This Mac", agent: "Claude Code", profile: "Default", model: "Fable 5.2", mode: "Auto", as: "Same Profile" }; S.card = null; return render(true);
+    case "closesheet": S.sheet = null; return render(true);
+    case "seatnew": S.sheet.seats.push("new" + (S.sheet.seats.filter((x) => x.startsWith("new")).length + 1)); return render(true);
+    case "create": {
+      const f = S.sheet, id = "r" + Date.now();
+      ROOMS[id] = { id, name: f.name.trim(), topic: f.topic.trim(), paused: null, limit: 6, trips: 0, note: "", seats: ["you", ...f.seats.filter((x) => SEATS[x])], msgs: [{ day: "Today" }, { ev: `你建了这个房间${f.seats.length ? `，拉进来 ${f.seats.length} 个会话` : ""}。` }] };
+      S.room = id; S.sheet = null; S.phoneScreen = "room"; return render(false);
+    }
+    case "phonelist": S.phoneScreen = "list"; S.card = null; return render(false);
+    case "phonemembers": S.phoneMembers = !S.phoneMembers; return render(true);
+  }
+  // A message clicked: answered.
+  const msg = e.target.closest(".msg");
+  if (msg && !e.target.closest("[data-card]") && msg.dataset.n) { S.reply = Number(msg.dataset.n); render(true); focusDraft(where); }
+});
+function focusDraft(where) { const t = document.querySelector(`#${where} [data-draft]`); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }
+function send() {
+  const text = S.draft.trim();
+  if (!text) return;
+  const r = room(), reply = S.reply;
+  S.draft = ""; S.reply = null; S.pick = null; r.trips = 0;
+  post(r, "you", text, { reply });
+}
+function choose(id) {
+  S.draft = S.draft.replace(/@[\w-]*$/, `@${id} `); S.pick = null; render(true);
+  focusDraft(document.querySelector("#mac [data-draft]") ? "mac" : "phone");
+}
+document.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.matches("[data-f]")) { S.sheet[t.dataset.f] = t.value; const b = t.closest(".sheet").querySelector('[data-act="create"]'); b.toggleAttribute("disabled", !(S.sheet.name.trim() && S.sheet.seats.length)); return; }
+  if (!t.matches("[data-draft]")) return;
+  S.draft = t.value;
+  const m = /(?:^|\s)@([\w-]*)$/.exec(t.value.slice(0, t.selectionStart));
+  const had = !!S.pick;
+  S.pick = m ? { q: m[1], i: 0 } : null;
+  if (S.pick || had) render(true); else { grow(t); t.closest(".box").querySelector(".send").toggleAttribute("disabled", !t.value.trim()); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { if (S.pick || S.card || S.sheet || S.phoneMembers) { S.pick = S.card = S.sheet = null; S.phoneMembers = false; render(true); } return; }
+  if (!e.target.matches("[data-draft]")) return;
+  if (S.pick) {
+    const list = pickList(room());
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); S.pick.i = (S.pick.i + (e.key === "ArrowDown" ? 1 : list.length - 1)) % Math.max(1, list.length); return render(true); }
+    if ((e.key === "Enter" || e.key === "Tab") && list.length) { e.preventDefault(); return choose(list[S.pick.i].id); }
+  }
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+});
+const css = document.createElement("style"); css.textContent = P.GLITCH_CSS; document.head.appendChild(css);
+render(false);
+</script>
+</body>
+</html>
