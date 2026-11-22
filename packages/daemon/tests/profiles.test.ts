@@ -1124,7 +1124,8 @@ echo "codex itself"
     expect(ok.status).toBe(0);
     expect(ok.stdout).toContain("Successfully logged in");
     expect(ok.stdout).toContain("codex itself");
-    const lines = readFileSync(seen, "utf8").trim().split("\n");
+    // (Its `--help`, asked once when the terminal was planned, is not part of the sign-in.)
+    const lines = readFileSync(seen, "utf8").trim().split("\n").filter((l) => !l.startsWith("--help|"));
     expect(lines[0]).toBe(`-c cli_auth_credentials_store="file" login --device-auth|${home}`);
     expect(lines[1]).toMatch(new RegExp(`^-c cli_auth_credentials_store="file" -c model_provider="openai" -c notify=.*\\|${home}$`));
     // The page is opened in the background: given a moment.

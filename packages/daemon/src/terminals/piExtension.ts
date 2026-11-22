@@ -12,7 +12,15 @@
 type PiEvent = Record<string, unknown>;
 /** What pi hands a handler beside the event; only the session's id is read (pi 0.87.1 and 1.1.0 both have it). */
 type PiContext = { sessionManager?: { getSessionId?: () => unknown } };
-type Pi = { on(event: string, handler: (event: PiEvent, ctx?: PiContext) => unknown): unknown };
+type Pi = {
+  on(event: string, handler: (event: PiEvent, ctx?: PiContext) => unknown): unknown;
+  /** pi 1.6: a message of the extension's own put into the session; `triggerTurn` starts a turn with it when pi rests,
+   *  `followUp` takes it after the turn at work. */
+  sendMessage?(message: { customType: string; content: string; display: boolean }, options: { triggerTurn: boolean; deliverAs: "followUp" }): unknown;
+  /** pi 1.6: an MCP server for this session, connected at once when registered after the start. */
+  registerMcpServer?(name: string, config: Record<string, unknown>): unknown;
+  unregisterMcpServer?(name: string): unknown;
+};
 
 /** Same budget as the quick hooks: the check answers from memory. */
 const WAIT_MS = 10_000;
@@ -59,6 +67,59 @@ export default function agentswitch(pi: Pi): void {
   pi.on("ui_prompt_start", say("PiWaiting"));
   pi.on("ui_prompt_end", say("PiAgentStart"));
   writing(pi);
+  room(pi);
+}
+
+/** Chat Room (docs/chatroom-v0.md §5, §6, §12). Two things run for as long as pi does, both asked of the service with
+ *  this terminal's hook token: the Chatroom Kit's tool server is registered while the session sits in a room and taken
+ *  away when it sits in none (and registered anew when its tools change), and a message for this session is put into
+ *  it as a message of this extension's own — never as the user's — which starts a turn when pi rests. A pi that can do
+ *  neither (before 1.6) is left as it is: it gets no messages it could not answer. */
+function room(pi: Pi): void {
+  const { AGENTSWITCH_TERMINAL_URL: url, AGENTSWITCH_TERMINAL_ID: id, AGENTSWITCH_TERMINAL_HOOK_TOKEN: token, AGENTSWITCH_ROOM_KIT_NODE: node, AGENTSWITCH_ROOM_KIT_SCRIPT: script } = process.env;
+  if (!url || !id || !token || !node || !script || !pi.sendMessage || !pi.registerMcpServer || !pi.unregisterMcpServer) return;
+  const SERVER = "chatroom";
+  const ask = async (body: Record<string, unknown>, waitMs: number): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const res = await fetch(`${url}/terminals/room`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(waitMs),
+    });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as Record<string, unknown> };
+  };
+  const sleep = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); (t as { unref?: () => void }).unref?.(); });
+
+  // The tools: there while the session sits in a room. A watch is held by the service for minutes (well under the
+  // five of the runtime's own patience with a silent server).
+  void (async () => {
+    let known = "";
+    for (;;) {
+      try {
+        const res = await ask({ op: "watch", version: known }, 4 * 60_000);
+        if (res.status === 403) return;
+        if (res.status !== 200) { await sleep(4000); continue; }
+        const now = String(res.body.version ?? "");
+        if (now === known) continue;
+        known = now;
+        try { pi.unregisterMcpServer!(SERVER); } catch { /* it was not registered */ }
+        if (now) pi.registerMcpServer!(SERVER, { command: node, args: [script], env: { AGENTSWITCH_TERMINAL_ID: id, AGENTSWITCH_TERMINAL_URL: url, AGENTSWITCH_TERMINAL_HOOK_TOKEN: token }, exposure: "direct", description: "AgentSwitch's Chat Room: talk with the other sessions in the rooms you sit in." });
+      } catch { await sleep(4000); }
+    }
+  })();
+
+  // The messages.
+  void (async () => {
+    for (;;) {
+      try {
+        const res = await ask({ op: "wait" }, 4 * 60_000);
+        if (res.status === 403) return;
+        if (res.status !== 200) { await sleep(4000); continue; }
+        if (typeof res.body.text === "string" && res.body.text) pi.sendMessage!({ customType: "agentswitch-room", content: res.body.text, display: true }, { triggerTurn: true, deliverAs: "followUp" });
+        else if (res.body.again !== true) await sleep(2000);   // another waits in this one's place: asked again shortly
+      } catch { await sleep(4000); }
+    }
+  })();
 }
 
 /** How often what it is writing goes to the service at most (the service's own `WRITING_MS`). */

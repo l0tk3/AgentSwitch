@@ -520,9 +520,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
   const rooms = new RoomStore(cfg.home);
   let roomSeat: SeatLookup = () => null;
-  const roomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir() });
+  let roomSay: (terminal: string, text: string) => Promise<boolean> = async () => false;
+  // Only a session that has the Kit is given anything: one that could not answer in the room is not spoken to.
+  const roomDelivery: RoomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir(), push: (terminal, text) => (roomKit.has(terminal) ? roomSay(terminal, text) : Promise.resolve(false)) });
   let roomAsk: Ask | null = null;
-  const roomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk) : null) });
+  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk) : null) });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -551,7 +553,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         codexDaybreak: () => overrides.modelOffers?.current().codex?.daybreak !== undefined,
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
-      mail: (id, takes) => roomDelivery.atTurnEnd(id, takes),
+      mail: (id, takes) => (roomKit.has(id) ? roomDelivery.atTurnEnd(id, takes) : null),
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? {
         onExit: (id: string) => {
@@ -595,7 +597,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     leftovers = new Leftovers({ url: () => `http://127.0.0.1:${localPort}`, live: () => new Set(terminalHost.list().filter((t) => t.status !== "exited").map((t) => t.id)), log: (line) => console.error(line) });
   }
   let style: TerminalStyle | null = null;
-  if (terminalHost) roomSeat = (terminal) => seatLive(terminalHost.get(terminal));
+  if (terminalHost) { roomSeat = (terminal) => seatLive(terminalHost.get(terminal)); roomSay = (terminal, text) => terminalHost.say(terminal, text); }
   // A session's state changes without the rooms being told (it comes to rest, it ends): what has not arrived is
   // looked at again every little while.
   const roomLooks = setInterval(() => roomDelivery.look(), ROOM_LOOK_MS);

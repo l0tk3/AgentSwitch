@@ -19,10 +19,10 @@ const MARK = "CONFIG_PROFILE_V2";
 
 /** Codex's flag for the layer, once its file is in `home` as it should be; [] when it could not be written (the
  *  terminal starts as before, unnamed). */
-export function codexLayerArgs(home: string, server: string, command: string, script: string): string[] {
+export function codexLayerArgs(home: string, server: string, command: string, script: string, more: readonly { readonly server: string; readonly command: string; readonly script: string }[] = []): string[] {
   const file = join(home, `${CODEX_LAYER}.config.toml`);
   const text = `# AgentSwitch: read only by Codex terminals it starts (--profile ${CODEX_LAYER}). Rewritten when it starts one.\n`
-    + `[mcp_servers.${server}]\ncommand = ${JSON.stringify(command)}\nargs = [${JSON.stringify(script)}]\n`;
+    + [{ server, command, script }, ...more].map((s) => `[mcp_servers.${s.server}]\ncommand = ${JSON.stringify(s.command)}\nargs = [${JSON.stringify(s.script)}]\n`).join("");
   try {
     let now: string | null = null;
     try { now = readFileSync(file, "utf8"); } catch { /* not there yet */ }

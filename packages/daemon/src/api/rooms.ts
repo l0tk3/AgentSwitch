@@ -69,7 +69,7 @@ const Asked = z.discriminatedUnion("op", [
   z.object({ op: z.literal("wait") }),
 ]);
 /** How long a `watch` is held, and how often it looks. */
-const WATCH_MS = 5 * 60_000, WATCH_STEP_MS = 1500;
+const WATCH_MS = 3 * 60_000, WATCH_STEP_MS = 1500;
 
 /** How many messages a room is read with when no `after` is given. */
 const PAGE = 200;

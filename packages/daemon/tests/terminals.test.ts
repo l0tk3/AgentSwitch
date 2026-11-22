@@ -19,7 +19,7 @@ import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, perm
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
-import { agentLauncher, claudeHookSettings, CODEX_ATTENTION, HOOK_SCRIPT, withoutParentSession } from "../src/terminals/launch.js";
+import { agentLauncher, claudeHookSettings, CODEX_ATTENTION, codexRoomArgs, HOOK_SCRIPT, ROOM_KIT_SCRIPT, withoutParentSession } from "../src/terminals/launch.js";
 import { deleteTranscript } from "../src/terminals/transcripts.js";
 import { elsewhereCheck, type ElsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
 import { TARGETS_PATH } from "./helpers.js";
@@ -2032,7 +2032,7 @@ describe("terminal pieces", () => {
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
     // "Continue" goes on in the same session; a fork only when asked for.
     const codex = launch({ id: "t2", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
-    expect(codex.args).toEqual(["resume", "-C", "/tmp", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
+    expect(codex.args).toEqual(["resume", "-C", "/tmp", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, ...codexRoomArgs("/n/node", ROOM_KIT_SCRIPT), "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
     // The terminal's folder is named (`-C`): Codex does not ask whether to use the one the session ran in, which may be
     // gone (docs/terminal-v0.md §5).
     expect(launch({ id: "t9", harness: "codex", cwd: "/tmp", resume: "abc", fork: true, mode: "manual", hookToken: "tok" }).args.slice(0, 4)).toEqual(["fork", "-C", "/tmp", "abc"]);

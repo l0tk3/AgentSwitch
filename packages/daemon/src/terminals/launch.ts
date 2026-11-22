@@ -140,6 +140,17 @@ export function codexBrowserArgs(server: BrowserServer): string[] {
   ];
 }
 
+/** The variables a terminal's own programs know it by. */
+const TERMINAL_VARS = ["AGENTSWITCH_TERMINAL_ID", "AGENTSWITCH_TERMINAL_URL", "AGENTSWITCH_TERMINAL_HOOK_TOKEN"] as const;
+
+/** Codex's `-c` overrides for the Chatroom Kit's server (docs/chatroom-v0.md §6). Codex starts a tool server with a
+ *  bare environment; the terminal's three variables are passed on by name (`env_vars`), so the hook token is on no
+ *  command line. */
+export function codexRoomArgs(node: string, script: string): string[] {
+  const key = `mcp_servers.${ROOM_SERVER}`;
+  return ["-c", `${key}.command=${JSON.stringify(node)}`, "-c", `${key}.args=${JSON.stringify([script])}`, "-c", `${key}.env_vars=${JSON.stringify(TERMINAL_VARS)}`];
+}
+
 /** The hook command a terminal's agent runs (the service's node and hook client). */
 export const hookCommandOf = (opts: Pick<LauncherOptions, "node" | "hookScript">): string =>
   `${shq(opts.node ?? process.execPath)} ${shq(opts.hookScript ?? HOOK_SCRIPT)}`;
@@ -360,11 +371,15 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // the host reads them as waiting. They cover what no hook does (an app tool's approval form, a question).
         args.push(...CODEX_ATTENTION);
         if (browser) args.push(...codexBrowserArgs(browser));
+        const kitScript = opts.roomKitScript ?? ROOM_KIT_SCRIPT;
+        args.push(...codexRoomArgs(node, kitScript));
         // The same server once more in a file of AgentSwitch's own, so Codex's hidden thread that names the session can
         // start (codexLayer.ts): without it no Codex session started here got a name.
         const codexHome = env.CODEX_HOME || (env.HOME ? join(env.HOME, ".codex") : "");
-        if (browser && codexHome && browser.args[0] && (opts.codexLayer ?? ((binary) => codexTakesLayer(binary, env)))(file) && !codexNamesOwnProfile(codexHome))
-          args.push(...codexLayerArgs(codexHome, BROWSER_SERVER, browser.command, browser.args[0]));
+        if (codexHome && (opts.codexLayer ?? ((binary) => codexTakesLayer(binary, env)))(file) && !codexNamesOwnProfile(codexHome)) {
+          const kit = { server: ROOM_SERVER, command: node, script: kitScript };
+          args.push(...(browser?.args[0] ? codexLayerArgs(codexHome, BROWSER_SERVER, browser.command, browser.args[0], [kit]) : codexLayerArgs(codexHome, kit.server, kit.command, kit.script)));
+        }
         if (browser && !codexHasOwnInstructions(env)) args.push("-c", `developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
         // Its Daybreak switch, where it has one: the feature it is kept under is off unless enabled (0.162), and
         // without it `/daybreak` is no command and the user's own default does nothing. For this terminal alone.
@@ -404,9 +419,11 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.mode !== "manual") rest.push("--auto");   // OpenCode has one switch: approve what is not denied
         if (req.resume) rest.push("--session", req.resume);   // OpenCode cannot fork: always the same session
         let own = env;
-        if (opts.protected || browser) {
+        {
           const config = join(dir, "opencode.json");
-          const mcp = browser ? { mcp: { [BROWSER_SERVER]: { type: "local", command: [browser.command, ...browser.args], enabled: true, environment: browser.env } } } : {};
+          // The Chatroom Kit (docs/chatroom-v0.md §6), beside the browser when there is one.
+          const kit = { type: "local", command: [node, opts.roomKitScript ?? ROOM_KIT_SCRIPT], enabled: true, environment: { AGENTSWITCH_TERMINAL_ID: req.id, AGENTSWITCH_TERMINAL_URL: opts.hookUrl(), AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken } };
+          const mcp = { mcp: { ...(browser ? { [BROWSER_SERVER]: { type: "local", command: [browser.command, ...browser.args], enabled: true, environment: browser.env } } : {}), [ROOM_SERVER]: kit } };
           const told = join(dir, "browser.md");
           if (browser) writeFileSync(told, `${BROWSER_GUIDANCE}\n`, { mode: 0o600 });
           const base = opts.protected ? opencodeTerminalConfig(opts.protected, env) : { $schema: "https://opencode.ai/config.json" };
@@ -424,6 +441,9 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         return { file, args: ["--standalone", ...rest], env: own, hooks: false, ...(companion ? { companion } : {}) };
       }
       case "pi": {
+        // The Chatroom Kit's server, for pi's extension to register while the session sits in a room.
+        env.AGENTSWITCH_ROOM_KIT_NODE = node;
+        env.AGENTSWITCH_ROOM_KIT_SCRIPT = opts.roomKitScript ?? ROOM_KIT_SCRIPT;
         const args = ["--extension", opts.piExtension ?? PI_EXTENSION];
         if (req.model) args.push("--model", req.model);
         args.push(...effortArgs("pi", req.effort, req.model).args);

@@ -31,7 +31,7 @@ export type DeliveryOptions = {
 export type Waited = { readonly text: string } | { readonly again: true } | { readonly stop: true };
 
 /** How long one wait is held before the program is told to ask again (well under any proxy's or client's patience). */
-const WAIT_MS = 10 * 60_000;
+const WAIT_MS = 3 * 60_000;
 const hm = (at: number): string => { const t = new Date(at); return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
 
 /** States in which a message waits for the seat (it will take it later by itself). */

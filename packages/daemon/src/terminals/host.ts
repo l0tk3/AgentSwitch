@@ -236,6 +236,9 @@ export type Companion = {
   /** Another model, or another level, for the session the program is on, where the companion can set them (OpenCode's
    *  server). What it is on afterwards; throws with a sentence a screen can show. */
   setModel?(want: { model?: string | null; variant?: string | null; session?: string | null }): Promise<{ model: string; variant: string | null }>;
+  /** A text for the session the program is on, as a message to it, where the companion's server takes one
+   *  (OpenCode's `prompt`: it starts a turn, or is taken after the one at work). False: it has no session yet. */
+  say?(text: string): Promise<boolean>;
   /** How a switch of the agent's own stands for the session the program is on, where the terminal has it (Codex's
    *  Daybreak, read from its server). The switch itself is turned in the program, by its own command. */
   daybreak?(session?: string | null): Promise<boolean>;
@@ -1643,6 +1646,21 @@ export class TerminalHost {
     s.agentSessionId = sessionId;
     if (!s.ownSessionId && (!s.resumedFrom || s.forked) && sessionId !== s.resumedFrom) s.ownSessionId = sessionId;
     this.persist(s);
+  }
+
+  /** A text put in front of a resting agent from outside its own screens (a Chat Room message, docs/chatroom-v0.md
+   *  §12), for the agents that leave no program waiting: through its companion's server where that takes one
+   *  (OpenCode), else typed into its terminal and entered (Codex; OpenCode before it has a session). Only at rest,
+   *  with nothing asked of the user, no list on its screen and nothing in its input: it never answers a question in
+   *  the user's place and never mixes with what the user is typing. False: not given now. */
+  async say(id: string, text: string): Promise<boolean> {
+    const s = this.sessions.get(id);
+    if (!s || s.status !== "idle" || s.pending.size || s.attention) return false;
+    if (s.companion?.say && await s.companion.say(text).catch(() => false)) return true;
+    if (s.harness !== "codex" && s.harness !== "opencode") return false;
+    if (this.sessions.get(id) !== s || s.status !== "idle" || this.choicesNow(s) || !inputEmpty(screenRows(s.term, s.rows))) return false;
+    this.write(id, replyBytes(text, this.bracketedPaste(id), true));
+    return true;
   }
 
   /** The file its agent's hooks said its session is written to (Claude Code's and Codex's `transcript_path`), if any. */

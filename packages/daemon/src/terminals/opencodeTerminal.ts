@@ -402,6 +402,15 @@ export class OpenCodeCompanion implements Companion {
     });
   }
 
+  /** A message to the session the TUI is on (docs/chatroom-v0.md §12): the server starts a turn with it, or takes it
+   *  after the one at work. False before the TUI has a session. */
+  async say(text: string): Promise<boolean> {
+    const id = await this.session();
+    if (!id) return false;
+    await this.call("POST", `/api/session/${encodeURIComponent(id)}/prompt?${this.loc}`, { text });
+    return true;
+  }
+
   private async call(method: string, path: string, body?: Json): Promise<Json | null> {
     const server = this.server;
     if (!server) throw new Error("no server");
