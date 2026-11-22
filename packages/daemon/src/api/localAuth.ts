@@ -78,6 +78,8 @@ export class LocalAuth {
     // is checked there) — docs/profiles-v0.md §5.1.
     if ((method === "GET" && /^\/profile-browser\/[a-z0-9.-]+\/browser\/agent\/mcp$/.test(path)) || (method === "POST" && /^\/profile-browser\/[a-z0-9.-]+\/browser\/agent\/mcp\/[\w-]+$/.test(path))) return null;
     if (method === "POST" && path === "/terminals/open") return null;
+    // A terminal's Chatroom Kit and its agent's waiting program (docs/chatroom-v0.md §5, §6): its hook token is checked there.
+    if (method === "POST" && path === "/terminals/room") return null;
     // A terminal's agent asking for the key its profile pays by (docs/profiles-v0.md §3.6): its hook token is checked there.
     if (method === "POST" && path === "/terminals/key") return null;
     if (method === "POST" && path === "/local/console-link") {

@@ -30,6 +30,13 @@ import { ClashIntegration } from "./clash/integration.js";
 import { ClashSources } from "./clash/sources.js";
 import { ClashStore } from "./clash/store.js";
 import { RoomStore } from "./rooms/store.js";
+import { RoomDelivery } from "./rooms/delivery.js";
+import { RoomKit } from "./rooms/kit.js";
+import type { SeatLookup } from "./rooms/state.js";
+import { seatLive } from "./api/rooms.js";
+
+/** How often what has not arrived in the rooms is looked at again. */
+const ROOM_LOOK_MS = 2000;
 import { SessionTitles } from "./sessions/titles.js";
 import { ShownFoldersStore } from "./sessions/shownFolders.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
@@ -508,6 +515,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const held = cfg.holdTerminals && (cfg.terminals || overrides.terminalLauncher) ? holding({ ringBytes: TERMINAL_RING_BYTES }) : null;
   if (cfg.holdTerminals && !held) console.error("terminals: no holder (native/build/pty-hold) — terminals end with the service");
   let leftovers: Leftovers | null = null;
+  // Chat Room (docs/chatroom-v0.md): the rooms as kept, how their messages reach the sessions they are for, and what
+  // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
+  const rooms = new RoomStore(cfg.home);
+  let roomSeat: SeatLookup = () => null;
+  const roomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir() });
+  const roomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -536,6 +549,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         codexDaybreak: () => overrides.modelOffers?.current().codex?.daybreak !== undefined,
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
+      mail: (id, takes) => roomDelivery.atTurnEnd(id, takes),
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? {
         onExit: (id: string) => {
@@ -579,6 +593,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     leftovers = new Leftovers({ url: () => `http://127.0.0.1:${localPort}`, live: () => new Set(terminalHost.list().filter((t) => t.status !== "exited").map((t) => t.id)), log: (line) => console.error(line) });
   }
   let style: TerminalStyle | null = null;
+  if (terminalHost) roomSeat = (terminal) => seatLive(terminalHost.get(terminal));
+  // A session's state changes without the rooms being told (it comes to rest, it ends): what has not arrived is
+  // looked at again every little while.
+  const roomLooks = setInterval(() => roomDelivery.look(), ROOM_LOOK_MS);
+  roomLooks.unref();
   const terminals = terminalHost ? {
     host: terminalHost,
     ...(leftovers ? { leftovers } : {}),
@@ -615,7 +634,6 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const clashStore = new ClashStore(cfg.home);
   const clashPhone: Daemon["clashPhone"] = { reach: { port: null, lan: [], tailnet: [], problem: null }, changed: null };
-  const rooms = new RoomStore(cfg.home);
   const clash = new ClashIntegration({ store: clashStore, reach: () => clashPhone.reach, phoneChanged: (on) => clashPhone.changed?.(on), source: new ClashSources(cfg.home, undefined, undefined, undefined, () => clashStore.settings().autoUpdateHours), base: () => `http://127.0.0.1:${localPort}`,
     // A profile's proxy server is tried on its own port by the routing check (docs/clash-v0.md §7.9).
     proxyPorts: () => new Map(Object.values(profiles.all()).flatMap((a) => a.profiles).flatMap((p) => { const place = p.proxy ? proxyPlace(p.proxy.server) : null; return place ? [[place.host.toLowerCase(), place.port] as const] : []; })) });
@@ -629,7 +647,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomsChanged: () => roomDelivery.look(), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -655,7 +673,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
   return { app, api, remote, nodes, engine, store, quota, targets, clash, clashPhone, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    close: () => { clearInterval(roomLooks); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml

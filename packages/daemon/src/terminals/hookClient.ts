@@ -18,7 +18,10 @@
  *    node hookClient.js key             the key this terminal's profile pays by (docs/profiles-v0.md §3.6): Claude
  *                                       Code's `apiKeyHelper`, Codex's provider `auth` command. Printed alone on one
  *                                       line; without one it says why on stderr and fails, so the agent says it has
- *                                       no key instead of sending an empty one. */
+ *                                       no key instead of sending an empty one.
+ *    node hookClient.js wait            Claude Code, left running when a turn ends (`asyncRewake`, docs/chatroom-v0.md
+ *                                       §12): waits until a Chat Room message is for this terminal's session, then
+ *                                       says it on stderr and exits 2 — which wakes the agent with it. */
 
 import { request } from "node:http";
 
@@ -104,7 +107,31 @@ async function key(): Promise<string> {
   return body.key;
 }
 
-if (process.argv[2] === "key") {
+/** Waits for a room message for this terminal; the text to wake the agent with, or "" when there is nothing to wait
+ *  for any more (another program waits in this one's place, the terminal is gone, the service stayed away). */
+async function mail(): Promise<string> {
+  if (!url || !id || !token) return "";
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  for (let away = 0; away < 60;) {
+    let res: { status: number; text: string };
+    try { res = await post(`${url}/terminals/room`, { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, JSON.stringify({ op: "wait" })); }
+    catch { away += 1; await sleep(4000); continue; }   // the service is restarting: asked again for a few minutes
+    if (res.status !== 200) return "";
+    away = 0;
+    const body = JSON.parse(res.text || "{}") as { text?: unknown; again?: unknown };
+    if (typeof body.text === "string" && body.text) return body.text;
+    if (body.again !== true) return "";
+  }
+  return "";
+}
+
+if (process.argv[2] === "wait") {
+  mail().catch(() => "").then((text) => {
+    if (text) process.stderr.write(`${text}\n`, () => process.exit(2));
+    else process.exit(0);
+  });
+}
+else if (process.argv[2] === "key") {
   key().then((value) => process.stdout.write(`${value}\n`, () => process.exit(0)),
     (err: Error) => process.stderr.write(`AgentSwitch: no API key for this terminal (${err.message})\n`, () => process.exit(1)));
 }

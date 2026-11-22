@@ -742,6 +742,25 @@ describe("terminal host", () => {
     expect(inputEmpty([row("no input line here")])).toBe(false);
   });
 
+  it("goes on with a Chat Room's waiting messages when a turn ends: Claude Code as added context, Codex as the reason not to stop (docs/chatroom-v0.md §12)", async () => {
+    const waiting = new Map<string, string>();
+    const told: string[] = [];
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), mail: (id, takes) => { told.push(`${takes}`); const text = waiting.get(id) ?? null; waiting.delete(id); return takes ? text : null; } });
+    closers.push(() => host.closeAll());
+    const tokenOf = (id: string) => (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(id)!.hookToken;
+    const claude = await host.spawn({ harness: "claude-code", cwd: tmpdir() }), codex = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    // Nothing waits: it stops, as before.
+    expect(await host.hook(claude.id, tokenOf(claude.id), { event: "Stop", payload: {} })).toBeNull();
+    expect(host.get(claude.id)!.status).toBe("idle");
+    waiting.set(claude.id, "[Room r · #1]"); waiting.set(codex.id, "[Room r · #2]");
+    expect(await host.hook(claude.id, tokenOf(claude.id), { event: "Stop", payload: {} })).toEqual({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: "[Room r · #1]" } });
+    expect(await host.hook(codex.id, tokenOf(codex.id), { event: "Stop", payload: {} })).toEqual({ decision: "block", reason: "[Room r · #2]" });
+    // It is at work again, not at rest.
+    expect(host.get(claude.id)!.status).toBe("working");
+    expect(host.get(codex.id)!.status).toBe("working");
+    expect(told).toEqual(["true", "true", "true"]);
+  });
+
   it("learns an agent's own commands from a terminal running it: types `/`, walks its list, takes the `/` out (2026-10-08)", async () => {
     const launcher = fakeLauncher(() => "http://127.0.0.1:9", true);
     const host = new TerminalHost({ launcher: (req) => { const plan = launcher(req); return { ...plan, env: { ...plan.env, FAKE_SLASH: "1" } }; } });
@@ -1992,9 +2011,9 @@ describe("terminal pieces", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-launch-"));
     const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", SECRET_GATE_REPAIR_KEY: "k" } });
     const claude = launch({ id: "t1", harness: "claude-code", cwd: "/tmp", model: "claude-opus-5-5", mode: "manual", hookToken: "tok" });
-    expect(claude.args).toEqual(["--settings", join(stateDir, "t1", "settings.json"), "--model", "claude-opus-5-5", "--permission-mode", "manual"]);
+    expect(claude.args).toEqual(["--settings", join(stateDir, "t1", "settings.json"), "--mcp-config", join(stateDir, "t1", "mcp.json"), "--model", "claude-opus-5-5", "--permission-mode", "manual"]);
     // How hard it thinks, in each agent's own argument (harness/efforts.ts).
-    expect(launch({ id: "t9", harness: "claude-code", cwd: "/tmp", model: "opus", effort: "xhigh", mode: "manual", hookToken: "tok" }).args.slice(2))
+    expect(launch({ id: "t9", harness: "claude-code", cwd: "/tmp", model: "opus", effort: "xhigh", mode: "manual", hookToken: "tok" }).args.slice(4))
       .toEqual(["--model", "opus", "--effort", "xhigh", "--permission-mode", "manual"]);
     expect(launch({ id: "t10", harness: "codex", cwd: "/tmp", model: "gpt-6-sol", effort: "high", mode: "bypass", hookToken: "tok" }).args.join(" ")).toContain('-m gpt-6-sol -c model_reasoning_effort="high"');
     expect(launch({ id: "t5", harness: "claude-code", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.slice(-2)).toEqual(["--permission-mode", "auto"]);
@@ -2008,6 +2027,9 @@ describe("terminal pieces", () => {
     const settings = JSON.parse(readFileSync(join(stateDir, "t1", "settings.json"), "utf8"));
     expect(settings).toEqual(claudeHookSettings('"/n/node" "/h/hook.js"'));
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);
+    // Left waiting when it comes to rest, for a Chat Room message to wake it with (docs/chatroom-v0.md §12).
+    for (const event of ["Stop", "SessionStart"]) expect(settings.hooks[event][0].hooks).toEqual([{ type: "command", command: '"/n/node" "/h/hook.js"', timeout: settings.hooks.Stop[0].hooks[0].timeout }, { type: "command", command: '"/n/node" "/h/hook.js" wait', asyncRewake: true }]);
+    expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
     // "Continue" goes on in the same session; a fork only when asked for.
     const codex = launch({ id: "t2", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
     expect(codex.args).toEqual(["resume", "-C", "/tmp", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);

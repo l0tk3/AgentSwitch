@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TerminalHost, type Launcher } from "../src/terminals/host.js";
-import { agentLauncher, BROWSER_GUIDANCE, BROWSER_SERVER, HOOK_SCRIPT } from "../src/terminals/launch.js";
+import { agentLauncher, BROWSER_GUIDANCE, BROWSER_SERVER, HOOK_SCRIPT, ROOM_KIT_SCRIPT } from "../src/terminals/launch.js";
 
 const FAKE = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
 const BRIDGE = ["/n/node", "/d/bridgeClient.js", "--url", "http://127.0.0.1:4711", "--session", "s1", "--token-file", "/as/browser/sessions/s1.token"];
@@ -61,13 +61,15 @@ describe("the browser tool in a terminal's session config", () => {
     expect(own({ id: "x6", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.join("\n")).toContain("developer_instructions");
   });
 
-  it("Claude Code: the browser server alone in its --mcp-config (the gate's own tools are Dispatch's)", () => {
+  it("Claude Code: the browser server and the Chatroom Kit in its --mcp-config (the gate's own tools are Dispatch's)", () => {
     const { launch, stateDir } = launcher(() => BRIDGE);
     const plan = launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     const config = plan.args[plan.args.indexOf("--mcp-config") + 1]!;
     expect(config).toBe(join(stateDir, "c1", "mcp.json"));
     const servers = JSON.parse(readFileSync(config, "utf8")).mcpServers;
-    expect(Object.keys(servers)).toEqual(["browser"]);
+    expect(Object.keys(servers)).toEqual(["browser", "chatroom"]);
+    // The Kit's server is told which terminal it is in so many words: an agent does not pass its own environment on.
+    expect(servers.chatroom).toEqual({ type: "stdio", command: "/n/node", args: [ROOM_KIT_SCRIPT], env: { AGENTSWITCH_TERMINAL_ID: "c1", AGENTSWITCH_TERMINAL_URL: plan.env.AGENTSWITCH_TERMINAL_URL, AGENTSWITCH_TERMINAL_HOOK_TOKEN: "tok" } });
     expect(servers.browser).toEqual({ type: "stdio", command: "/n/node", args: BRIDGE.slice(1), env: {} });
     expect(Object.keys(plan.env).filter((k) => /proxy|SECRET_GATE|CERT|CA_BUNDLE/i.test(k))).toEqual([]);
     expect(plan.args[plan.args.indexOf("--append-system-prompt") + 1]).toBe(BROWSER_GUIDANCE);
@@ -96,7 +98,8 @@ describe("the browser tool in a terminal's session config", () => {
     expect(off.launch({ id: "x3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");
     const claude = off.launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(claude.args).not.toContain("--append-system-prompt");
-    expect(claude.args).not.toContain("--mcp-config");   // nothing to configure: the gate's tools are not a terminal's
+    // Without the browser, the Kit alone: the gate's tools are not a terminal's.
+    expect(Object.keys(JSON.parse(readFileSync(claude.args[claude.args.indexOf("--mcp-config") + 1]!, "utf8")).mcpServers)).toEqual(["chatroom"]);
     const refused = launcher(() => null);
     expect(refused.launch({ id: "x4", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");
   });

@@ -35,6 +35,12 @@ export type ApiDeps = {
   readonly sealer?: Sealer;
   /** Chat Room's rooms (docs/chatroom-v0.md); absent = off. */
   readonly rooms?: import("../rooms/store.js").RoomStore;
+  /** Chatroom Kit: what a session in a room can do there (docs/chatroom-v0.md §6). */
+  readonly roomKit?: import("../rooms/kit.js").RoomKit;
+  /** How a room's messages reach the sessions they are for (§5). */
+  readonly roomDelivery?: import("../rooms/delivery.js").RoomDelivery;
+  /** Tests: how long a watch of the Kit's tools is held. */
+  readonly roomWatchMs?: number;
   /** Something a room's seats may be waiting for changed (a message, a seat, a pause): what is to be given is looked
    *  at again. */
   readonly roomsChanged?: (roomId: string) => void;

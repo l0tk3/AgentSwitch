@@ -23,6 +23,10 @@ import type { Holding } from "./held.js";
 
 /** The hook command's script next to this module: hookClient.js in dist/, hookClient.ts under tsx (node strips its types). */
 const EXT = import.meta.url.endsWith(".ts") ? "ts" : "js";
+/** The Chatroom Kit's tool server (roomKitClient.ts). */
+export const ROOM_KIT_SCRIPT = fileURLToPath(new URL(`./roomKitClient.${EXT}`, import.meta.url));
+/** Its name in each agent's configuration: its tools show as `room_post`, … under it. */
+export const ROOM_SERVER = "chatroom";
 export const HOOK_SCRIPT = fileURLToPath(new URL(`./hookClient.${EXT}`, import.meta.url));
 /** pi's extension (piExtension.ts; pi loads TypeScript itself). */
 export const PI_EXTENSION = fileURLToPath(new URL(`./piExtension.${EXT}`, import.meta.url));
@@ -69,6 +73,8 @@ export type LauncherOptions = {
    *  terminal `id`, made when it starts (a session of its own). It is the `browser` MCP server as it is: a terminal is
    *  not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08), so its agent sees a page as the page is.
    *  Codex, Claude Code and OpenCode; absent or null: no browser tool. */
+  /** Tests: the Chatroom Kit's tool server (default ROOM_KIT_SCRIPT). */
+  readonly roomKitScript?: string;
   readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => BridgeCommand | null;
   /** Terminals that outlive the service (docs/terminal-v0.md §10): companions' servers run on held ptys too. */
   readonly holding?: Holding | null;
@@ -228,15 +234,19 @@ export function proxyEnv(proxy: string): Record<string, string> {
 
 export function claudeHookSettings(command: string, prot?: ProtectedPaths): Record<string, unknown> {
   const hook = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }] }];
+  // Beside the hook itself, a program left waiting when the session comes to rest (docs/chatroom-v0.md §12): a Chat
+  // Room message for this session ends it, and Claude Code wakes up with what it said (`asyncRewake`). In the
+  // background, with no time limit; it costs nothing while no message comes.
+  const resting = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }, { type: "command", command: `${command} wait`, asyncRewake: true }] }];
   const rule = (tool: string, path: string) => [`${tool}(/${path})`, `${tool}(/${path}/**)`];
   const deny = prot ? [...new Set([...(prot.readDenied ?? []).flatMap(rootSpellings).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap(rootSpellings).flatMap((p) => rule("Edit", p))])] : [];
   return {
     ...(deny.length ? { permissions: { deny } } : {}),
     hooks: {
-      SessionStart: hook(QUICK_HOOK_TIMEOUT_S),
+      SessionStart: resting(QUICK_HOOK_TIMEOUT_S),
       UserPromptSubmit: hook(QUICK_HOOK_TIMEOUT_S),
       Notification: hook(QUICK_HOOK_TIMEOUT_S),
-      Stop: hook(QUICK_HOOK_TIMEOUT_S),
+      Stop: resting(QUICK_HOOK_TIMEOUT_S),
       // The turn ended on an API error: the Mac's Live Activity says so (assistant-v0 §4).
       StopFailure: hook(QUICK_HOOK_TIMEOUT_S),
       // The protected-path floor, in every permission mode (bypass included): the service answers deny or nothing.
@@ -307,9 +317,11 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}) };
         writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
         const args = ["--settings", settings, ...(req.isolated ? ["--setting-sources", "user"] : [])];
-        if (browser) {
+        {
+          // The Chatroom Kit (docs/chatroom-v0.md §6): its tools are there only while this session sits in a room.
+          const kit = { type: "stdio", command: node, args: [opts.roomKitScript ?? ROOM_KIT_SCRIPT], env: { AGENTSWITCH_TERMINAL_ID: req.id, AGENTSWITCH_TERMINAL_URL: opts.hookUrl(), AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken } };
           const mcp = join(dir, "mcp.json");
-          writeFileSync(mcp, JSON.stringify({ mcpServers: { [BROWSER_SERVER]: { type: "stdio", ...browser } } }, null, 2), { mode: 0o600 });
+          writeFileSync(mcp, JSON.stringify({ mcpServers: { ...(browser ? { [BROWSER_SERVER]: { type: "stdio", ...browser } } : {}), [ROOM_SERVER]: kit } }, null, 2), { mode: 0o600 });
           args.push("--mcp-config", mcp);
         }
         if (browser) args.push("--append-system-prompt", BROWSER_GUIDANCE);

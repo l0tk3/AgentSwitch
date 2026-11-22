@@ -300,6 +300,10 @@ export type TerminalHostOptions = {
   /** The protected-path floor for a tool call (PreToolUse): the reason to refuse it, or null to let the agent's own
    *  permission mode decide. */
   readonly floor?: (tool: string, input: Record<string, unknown>, cwd: string) => string | null;
+  /** A terminal's turn ended: what waits for its session in a Chat Room (docs/chatroom-v0.md §5). `takes`: its agent
+   *  goes on with a text given at this moment (the answer to its end-of-turn hook) — the text, or null for none. For
+   *  an agent that does not, it is only told. */
+  readonly mail?: (id: string, takes: boolean) => string | null;
   /** The program ended (or never started): what was made for this terminal's agent ends too (its browser session). */
   readonly onExit?: (id: string) => void;
   /** A terminal's agent writes this conversation now — one it was started on, or one it says it is in: under which
@@ -939,7 +943,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1515,7 +1519,16 @@ export class TerminalHost {
         if (p.source === "compact") return null;
         this.noSubagents(s); this.setStatus(s, "idle"); return null;
       case "UserPromptSubmit": this.settleAll(s, "working"); s.calls.clear(); this.progressed(s, null); this.setStatus(s, "working"); return null;
-      case "Stop": this.settleAll(s, "idle"); s.calls.clear(); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); this.daybreakLooks(s); return null;
+      case "Stop": {
+        this.settleAll(s, "idle"); s.calls.clear(); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); this.daybreakLooks(s);
+        // A room's messages that waited for this turn to end (docs/chatroom-v0.md §5, §12): it goes on with them
+        // instead of stopping. Claude Code takes them as added context (no "stop hook" notice on its screen); Codex as
+        // the reason it may not stop yet.
+        const mail = this.opts.mail?.(s.id, true) ?? null;
+        if (!mail) return null;
+        this.setStatus(s, "working");
+        return s.harness === "codex" ? { decision: "block", reason: mail } : { hookSpecificOutput: { hookEventName: "Stop", additionalContext: mail } };
+      }
       case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
       case "SubagentStop": if (agentId && s.subagents.delete(agentId)) this.doing(s); return null;
       // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
@@ -1575,7 +1588,7 @@ export class TerminalHost {
       // pi says which session it writes (read above from `session_id`, as from any call): nothing else changes.
       case "PiSession": return null;
       case "PiAgentStart": this.setStatus(s, "working"); return null;
-      case "PiAgentEnd": this.turnEnded(s, true, null); this.setStatus(s, "idle"); return null;
+      case "PiAgentEnd": this.turnEnded(s, true, null); this.setStatus(s, "idle"); this.opts.mail?.(s.id, false); return null;
       // What it is writing: its extension's pieces of the part being written, the text so far; `done` once its
       // message ends (docs/simple-view-v0.md §5.14).
       case "PiWriting":
@@ -1592,7 +1605,7 @@ export class TerminalHost {
         // there is, and it is followed as before.
         if (s.hooks && s.sessionByHook && thread && thread !== s.agentSessionId) return null;
         if (thread) this.reported(s, thread);
-        if (p.type === "agent-turn-complete") { this.turnEnded(s, true, p["last-assistant-message"]); this.setStatus(s, "idle"); }
+        if (p.type === "agent-turn-complete") { this.turnEnded(s, true, p["last-assistant-message"]); this.setStatus(s, "idle"); if (!s.hooks) this.opts.mail?.(s.id, false); }
         return null;
       }
       case "PermissionRequest": {

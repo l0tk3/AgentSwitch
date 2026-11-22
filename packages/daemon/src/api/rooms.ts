@@ -10,25 +10,20 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import { MAX_NAME, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatWas } from "../rooms/store.js";
 import { YOU } from "../rooms/names.js";
+import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
+
+export type { SeatCard, SeatState } from "../rooms/state.js";
 import type { TerminalHost, TerminalInfo } from "../terminals/host.js";
 import { parseBody, versionedJson, type ApiDeps } from "./shared.js";
-
-/** A seat's state in the room (§6.1). The first four are the terminal's own; the rest say what is wrong with it. */
-export type SeatState = "busy" | "waiting" | "idle" | "exited" | "reconnecting" | "limited" | "signed_out" | "blocked" | "error" | "offline";
-
-/** A seat's card (§1 名片): no account, no address. */
-export type SeatCard = SeatWas & {
-  /** How it asks, in its agent's own word. */
-  readonly mode: string | null;
-  /** The node it runs on; null: this one. */
-  readonly node: string | null;
-};
 
 export type SeatView = {
   readonly handle: string; readonly kind: "user" | "session"; readonly terminal: string | null;
   readonly face: Seat["face"]; readonly joinedAt: number; readonly addedBy: string;
   readonly canAdd: boolean; readonly byAgent: boolean; readonly left: number | null;
   readonly state: SeatState | null; readonly card: SeatCard | null;
+  /** Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
+   *  there was a Kit, until it is resumed; null for the user. */
+  readonly kit: boolean | null;
 };
 
 const TROUBLE_NOTICE = "trouble";
@@ -45,12 +40,17 @@ function wasOf(info: TerminalInfo): SeatWas {
   return { agent: info.harness, name: info.name, cwd: info.workdir, model: info.modelNow ?? info.model, profile: info.profile?.name ?? null, ...(info.profile?.color ? { color: info.profile.color } : {}) };
 }
 
-export function seatView(seat: Seat, host: TerminalHost | undefined): SeatView {
+/** A terminal as a seat is now, for the rooms' own work (delivery, the Kit). */
+export function seatLive(info: TerminalInfo | null): SeatLive | null {
+  return info ? { state: seatState(info), card: { ...wasOf(info), mode: info.modeNow ?? info.mode, node: null } } : null;
+}
+
+export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean): SeatView {
   const info = seat.terminal ? host?.get(seat.terminal) ?? null : null;
   const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null };
-  if (seat.kind === "user") return { ...base, state: null, card: null };
+  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null };
   const was = info ? wasOf(info) : seat.was ?? null;
-  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null };
+  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false };
 }
 
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
@@ -59,6 +59,15 @@ const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boole
 const SetSeat = z.object({ canAdd: z.boolean() }).strict();
 const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional() }).strict();
 const Read = z.object({ seq: z.number().int().nonnegative() }).strict();
+/** What a terminal's own programs ask (the Kit's tool server, the agent's waiting program). */
+const Asked = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("tools") }),
+  z.object({ op: z.literal("watch"), version: z.string().max(2000) }),
+  z.object({ op: z.literal("call"), name: z.string().min(1).max(100), args: z.record(z.string(), z.unknown()).optional() }),
+  z.object({ op: z.literal("wait") }),
+]);
+/** How long a `watch` is held, and how often it looks. */
+const WATCH_MS = 5 * 60_000, WATCH_STEP_MS = 1500;
 
 /** How many messages a room is read with when no `after` is given. */
 const PAGE = 200;
@@ -67,6 +76,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   const rooms = deps.rooms;
   if (!rooms) return;
   const host = (): TerminalHost | undefined => deps.terminals?.host;
+  const hasKit = (terminal: string): boolean => deps.roomKit?.has(terminal) ?? false;
 
   const refused = (c: { json: (body: unknown, status: 400 | 403 | 404 | 409) => Response }, err: unknown): Response => {
     if (err instanceof RoomError) return c.json({ error: err.message }, err.status);
@@ -74,7 +84,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   };
 
   const seatsOf = (room: Room): SeatView[] => room.seats.map((seat) => {
-    const view = seatView(seat, host());
+    const view = seatView(seat, host(), hasKit);
     // What it is called now is kept for the day its terminal is gone.
     if (seat.terminal && view.card && seat.left === undefined && host()?.get(seat.terminal)) {
       const { mode: _mode, node: _node, ...was } = view.card;
@@ -153,14 +163,14 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     try {
       const made = seat(c.req.param("id"), body.data.terminal, body.data.canAdd);
       deps.roomsChanged?.(c.req.param("id"));
-      return c.json({ seat: seatView(made, host()) }, 201);
+      return c.json({ seat: seatView(made, host(), hasKit) }, 201);
     } catch (err) { return refused(c, err); }
   });
 
   app.patch("/rooms/:id/seats/:handle", async (c) => {
     const body = await parseBody(c, SetSeat);
     if (!body.ok) return c.json({ error: body.error }, 400);
-    try { return c.json({ seat: seatView(rooms.setCanAdd(c.req.param("id"), c.req.param("handle"), body.data.canAdd), host()) }); } catch (err) { return refused(c, err); }
+    try { return c.json({ seat: seatView(rooms.setCanAdd(c.req.param("id"), c.req.param("handle"), body.data.canAdd), host(), hasKit) }); } catch (err) { return refused(c, err); }
   });
 
   app.delete("/rooms/:id/seats/:handle", (c) => {
@@ -177,6 +187,30 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       deps.roomsChanged?.(id);
       return c.json({ message, receipts: rooms.get(id).receipts[message.seq] ?? {} }, 201);
     } catch (err) { return refused(c, err); }
+  });
+
+  // A terminal's own programs: the Kit's tool server (terminals/roomKitClient.ts) and the agent's waiting program
+  // (hookClient.ts `wait`). Not on the remote allowlist; let through the local token check like the hook, and proven
+  // the same way: by the terminal's own hook token. Which session asks is that terminal's — it never says so itself.
+  app.post("/terminals/room", async (c) => {
+    const kit = deps.roomKit, delivery = deps.roomDelivery, terminals = host();
+    const id = c.req.header("x-agentswitch-terminal") ?? "";
+    const token = /^Bearer\s+(\S+)\s*$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const body = await parseBody(c, Asked);
+    if (!token || !body.ok || !kit || !delivery || !terminals) return c.json({ error: "bad room call" }, 400);
+    try { terminals.profileOf(id, token); } catch { return c.json({ error: "unknown terminal or hook token" }, 403); }
+    const asked = body.data;
+    if (asked.op === "wait") return c.json(await delivery.wait(id, c.req.raw.signal));
+    kit.met(id);
+    if (asked.op === "tools") return c.json({ tools: kit.tools(id), version: kit.version(id) });
+    if (asked.op === "call") {
+      const answer = kit.call(id, asked.name, asked.args ?? {});
+      return c.json(answer);
+    }
+    // Held until the tools this terminal has are others than the ones it knows of, or a while has passed.
+    const until = Date.now() + (deps.roomWatchMs ?? WATCH_MS);
+    while (kit.version(id) === asked.version && Date.now() < until && !c.req.raw.signal.aborted) await new Promise((r) => setTimeout(r, Math.min(WATCH_STEP_MS, deps.roomWatchMs ?? WATCH_STEP_MS)));
+    return c.json({ version: kit.version(id) });
   });
 
   app.post("/rooms/:id/read", async (c) => {
