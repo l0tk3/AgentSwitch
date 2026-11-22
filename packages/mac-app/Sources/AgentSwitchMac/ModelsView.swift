@@ -1,10 +1,12 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// 模型: usage on top (docs/ui-v0.md §4.2), then router model and default target via `GET|PUT /settings/models`; the
-/// daemon applies them on restart. Pickers show model names (Opus 5.5) and save the ids.
+/// 模型: usage (docs/ui-v0.md §4.2). With `dispatch` it is the Dispatch page's own part instead (2026-11-22): the
+/// router model and the default target via `GET|PUT /settings/models`; the daemon applies them on restart. Pickers
+/// show model names (Opus 5.5) and save the ids.
 struct ModelsView: View {
     @Environment(AppModel.self) private var model
+    var dispatch = false
     @State private var settings: ModelSettings?
     @State private var routerModel = ""
     @State private var harness = ""
@@ -17,6 +19,8 @@ struct ModelsView: View {
         Group {
             if !model.daemonReady {
                 EmptyPage(title: "Service Not Ready", symbol: "hourglass", message: model.daemonLine.text)
+            } else if !dispatch {
+                Form { UsageSection() }.formStyle(.grouped)
             } else if let settings {
                 form(settings)
             } else if let problem {
@@ -29,21 +33,19 @@ struct ModelsView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await load() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                Button { Task { if dispatch { await load() } else { await model.refreshUsage(force: true) } } } label: { Label("Reload", systemImage: "arrow.clockwise") }
                     .help("Reload")
                     .disabled(!model.daemonReady)
             }
         }
         .task(id: model.daemonReady) {
-            await load()
-            await model.refreshUsage()
+            if dispatch { await load() } else { await model.refreshUsage() }
         }
     }
 
     private func form(_ s: ModelSettings) -> some View {
         let changes = ModelSettingsUpdate.diff(current: s, routerModel: routerModel, defaultHarness: harness, defaultModel: targetModel)
         return Form {
-            UsageSection()
             Section {
                 Picker("Dispatch Model", selection: $routerModel) {
                     ForEach(options(s.router.options, current: s.router.model), id: \.self) { Text(ModelName.display($0)).tag($0) }

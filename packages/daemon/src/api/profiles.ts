@@ -3,7 +3,7 @@
  *  as from the Mac) and that proxy's exit checked — from a paired device too. */
 
 import type { Hono } from "hono";
-import { DEFAULT_PROFILE } from "../profiles/store.js";
+import { CODEX_COPYABLE, codexAuthProblem, DEFAULT_PROFILE } from "../profiles/store.js";
 import { z } from "zod";
 import { checkedProxy, ExitError, ExitPool } from "../browser/exits.js";
 import { remoteCaller } from "../core/caller.js";
@@ -27,6 +27,7 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   if (!store) return;
 
   app.get("/profiles/claude-code/copy-options", (c) => c.json(store.copyOptions()));
+  app.get("/profiles/codex/copy-options", (c) => c.json({ items: store.codexCopyOptions() }));
   // What a profile of its own holds beside what `Default` offers, and changing it after it was made (§3.8).
   app.get("/profiles/claude-code/:id/copies", (c) => {
     try { return c.json(store.copiesOf(c.req.param("id"))); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
@@ -38,11 +39,23 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   });
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
   app.put("/profiles/codex/:id/auth", async (c) => {
-    const body = await parseBody(c, z.object({ content: z.string().min(2).max(131072) }));
+    const body = await parseBody(c, z.object({ content: z.string().min(2).max(131072), endTerminals: z.boolean().optional() }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     const id = c.req.param("id");
-    if (deps.terminals?.host.list().some((t) => t.harness === "codex" && (t.profile?.id ?? DEFAULT_PROFILE) === id && t.status !== "exited"))
-      return c.json({ error: "请先结束使用这个 Profile 的 Codex 终端，再替换登录信息。" }, 409);
+    if (!store.nameOf("codex", id)) return c.json({ error: "no such profile" }, 404);
+    // A Codex that runs keeps the sign-in it started with and writes it back when it renews it: the file is replaced
+    // only with none running under the profile. `endTerminals` (the sheet's `End Terminals and Save`, 2026-11-22):
+    // they are ended first — their conversations stay in the list to go on with — and the file is written then.
+    const host = deps.terminals?.host;
+    const using = () => host?.list().filter((t) => t.harness === "codex" && (t.profile?.id ?? DEFAULT_PROFILE) === id && t.status !== "exited") ?? [];
+    if (using().length && body.data.endTerminals) {
+      // The text is looked at before anything is ended: a file that would be refused ends nothing.
+      const problem = codexAuthProblem(body.data.content);
+      if (problem) return c.json({ error: problem }, 400);
+      await Promise.all(using().map((t) => host!.stopped(t.id).catch(() => undefined)));
+      if (using().length) return c.json({ error: "终端尚未退出，请稍后重试。", terminalsInUse: using().length }, 409);
+    }
+    if (using().length) return c.json({ error: "请先结束使用这个 Profile 的 Codex 终端，再替换登录信息。", terminalsInUse: using().length }, 409);
     try { store.setCodexAuth(id, body.data.content); return c.json({ agents: store.all() }); }
     catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
   });
@@ -73,13 +86,16 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   app.post("/profiles", async (c) => {
     const body = await parseBody(c, z.object({ agent: Agent, name: z.string().min(1).max(80), kind: z.enum(["subscription", "api"]).default("subscription"), api: Api.optional(),
-      /** false: Claude Code's telemetry off under it from the start (§3.7). */ telemetry: z.boolean().optional(), sharedSkills: z.array(z.string().min(1).max(100)).max(100).default([]), copyFromDefault: Copies.optional() }));
+      /** true: Claude Code's telemetry on under it from the start; else it is off (§3.7). */ telemetry: z.boolean().optional(), sharedSkills: z.array(z.string().min(1).max(100)).max(100).default([]), copyFromDefault: Copies.optional(),
+      /** A Codex account profile: what of the Mac's own Codex it is given a copy of (it has a folder all its own). */ copyCodex: z.array(z.enum(CODEX_COPYABLE)).max(CODEX_COPYABLE.length).optional() }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     if (body.data.telemetry === false && body.data.agent !== "claude-code") return c.json({ error: "only Claude Code's telemetry can be turned off" }, 400);
     const isolation = body.data.agent === "claude-code" ? { ...body.data.copyFromDefault, skills: body.data.copyFromDefault?.skills ?? body.data.sharedSkills } : undefined;
     // As made, with its telemetry as asked.
     const made = (id: string) => {
-      if (body.data.telemetry === false) store.setTelemetry(body.data.agent, id, false);
+      // Claude Code's telemetry is off under a new profile unless it is asked for (2026-11-22; it was on unless
+      // refused): usage statistics, Datadog logs and the feature-flag service all carry what the machine is.
+      if (body.data.agent === "claude-code" && body.data.telemetry !== true) store.setTelemetry(body.data.agent, id, false);
       return { profile: store.all()[body.data.agent].profiles.find((p) => p.id === id), agents: store.all() };
     };
     try {
@@ -90,7 +106,8 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
         const profile = await deps.apiKeys.create(body.data.agent, body.data.name, { key: body.data.api.key.trim(), baseUrl: body.data.api.baseUrl?.trim() || undefined, model: body.data.api.model?.trim() || undefined }, body.data.api.force === true, isolation);
         return c.json(made(profile.id), 201);
       }
-      const profile = store.create(body.data.agent, body.data.name, body.data.kind, undefined, isolation);
+      // A Codex profile that signs in with an account is made with a folder all its own (2026-11-22), as Claude Code's are.
+      const profile = store.create(body.data.agent, body.data.name, body.data.kind, undefined, isolation, body.data.agent === "codex" ? body.data.copyCodex ?? [] : undefined);
       return c.json(made(profile.id), 201);
     } catch (err) {
       if (err instanceof ApiKeyError) return c.json({ error: err.message }, 400);
@@ -217,7 +234,8 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     // A terminal still running under it keeps its folder in use.
     if (deps.terminals?.host.list().some((t) => t.harness === agent.data && t.profile?.id === id && t.status !== "exited")) return c.json({ error: "有终端还在用这个配置：先结束它们。" }, 409);
     try { store.remove(agent.data, id); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
-    void deps.profileBrowsers?.drop(exitKey(agent.data, id));
+    // Its browser goes with it, the folders too: the sign-ins in them were that profile's.
+    void deps.profileBrowsers?.remove(exitKey(agent.data, id));
     void deps.exits?.drop(exitKey(agent.data, id));
     return c.json({ agents: store.all() });
   });

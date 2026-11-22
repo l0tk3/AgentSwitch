@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProfileStore } from "../src/profiles/store.js";
-import { transferClaudeContext } from "../src/profiles/context.js";
+import { moveClaudeSession } from "../src/profiles/context.js";
 import { agentLauncher } from "../src/terminals/launch.js";
 import { claudeSignedIn } from "../src/terminals/signIn.js";
 import { TerminalHost, type LaunchRequest } from "../src/terminals/host.js";
@@ -183,7 +183,9 @@ it("clears inherited credentials and endpoint selectors before applying the prof
   const plan = launch({ id: "one", harness: "claude-code", hookToken: "test", mode: "manual", cwd: w.root, configHome: w.store.homeOf("claude-code", p.id)!, isolated: true, proxy: "http://127.0.0.1:2345", api: { name: "A", baseUrl: "https://chosen.test" }, browserKey: "claude-code." + p.id });
   expect(plan.env).not.toHaveProperty("ANTHROPIC_API_KEY");
   for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE", "BASH_ENV", "NODE_OPTIONS", "UNKNOWN_VENDOR_TOKEN"]) expect(plan.env).not.toHaveProperty(key);
-  expect(plan.env.HOME).not.toBe(w.userHome);
+  expect(plan.env.HOME).toBe(w.userHome);
+  for (const key of ["XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"]) expect(plan.env).not.toHaveProperty(key);
+  expect(existsSync(join(w.store.homeOf("claude-code", p.id)!, "..", "system-home"))).toBe(false);
   expect(plan.env.HTTPS_PROXY).toBe("http://127.0.0.1:2345");
   expect(plan.args).toContain("--setting-sources");
   const settings = JSON.parse(readFileSync(plan.args[1]!, "utf8"));
@@ -191,20 +193,64 @@ it("clears inherited credentials and endpoint selectors before applying the prof
   expect(settings.apiKeyHelper).toContain(" key");
 });
 
-it("copies only one transcript with a fresh id, discovers it and deletes it independently", async () => {
+it("removes the private home folder isolated profiles used to have, and nothing else of the profile", () => {
+  const w = world(), p = w.store.create("claude-code", "Old", "subscription", undefined, { skills: [] });
+  const root = join(w.store.homeOf("claude-code", p.id)!, "..");
+  mkdirSync(join(root, "system-home", ".local", "share"), { recursive: true });
+  writeFileSync(join(root, "system-home", ".local", "share", "copy"), "x");
+  chmodSync(join(root, "system-home", ".local"), 0o500);
+  expect(w.store.removeOldSystemHomes()).toBe(1);
+  expect(existsSync(join(root, "system-home"))).toBe(false);
+  expect(existsSync(join(root, "home", "settings.json"))).toBe(true);
+  expect(w.store.removeOldSystemHomes()).toBe(0);
+});
+
+it("moves a session's record to the profile it goes on under, under a new id, with what stands beside it — and back again", async () => {
   const w = world(), target = w.store.create("claude-code", "Private", "subscription", undefined, { skills: [] });
-  const source = transcript(join(w.userHome, ".claude", "projects"), w.root);
+  const own = join(w.userHome, ".claude"), theirs = join(w.store.homeOf("claude-code", target.id)!);
+  const source = transcript(join(own, "projects"), w.root);
+  const folderName = w.root.replace(/[^a-zA-Z0-9]/g, "-"), folder = join(source, "..");
+  // A line that only mentions the id (in what somebody said) is left as it is.
+  writeFileSync(source, readFileSync(source, "utf8") + JSON.stringify({ type: "user", sessionId: session, message: { content: `about ${session}` } }) + "\n");
   const before = readFileSync(source, "utf8");
-  const id = transferClaudeContext(source, w.store.claudeProjectsOf(target.id), w.root);
+  // What Claude Code keeps beside a record by its id, and another session's, which stays.
+  for (const dir of [join(folder, session, "subagents"), join(own, "file-history", session), join(own, "session-env", session), join(own, "todos"), join(own, "file-history", "another-session")]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(folder, session, "subagents", "a.jsonl"), JSON.stringify({ sessionId: session, agentId: "a" }) + "\n");
+  writeFileSync(join(own, "file-history", session, "f@v1"), "old");
+  writeFileSync(join(own, "todos", `${session}-agent-${session}.json`), "[]");
+  writeFileSync(join(own, "todos", "another-session.json"), "[]");
+  const id = moveClaudeSession(source, w.store.claudeProjectsOf(target.id));
   expect(id).not.toBe(session);
   const sessions = monitor(w);
   const located = sessions.locate("claude-code", id)!;
-  expect(located).toContain(target.id);
-  expect(JSON.parse(readFileSync(located, "utf8"))).toMatchObject({ sessionId: id, cwd: w.root, message: { content: "old context" } });
-  expect(sessions.list().some((s) => s.id === id)).toBe(true);
-  expect((await sessions.remove("claude-code", id)).failed).toEqual([]);
+  expect(located).toBe(join(theirs, "projects", folderName, id + ".jsonl"));
+  expect(readFileSync(located, "utf8")).toBe(before.split(`"sessionId":"${session}"`).join(`"sessionId":"${id}"`));
+  expect(readFileSync(located, "utf8")).toContain(`about ${session}`);
+  // One record: the old one is gone, and the list has the conversation once.
+  expect(existsSync(source)).toBe(false);
+  expect(sessions.locate("claude-code", session)).toBeNull();
+  expect(sessions.list().filter((s) => s.cwd === w.root).map((s) => s.id)).toEqual([id]);
+  expect(readFileSync(join(theirs, "projects", folderName, id, "subagents", "a.jsonl"), "utf8")).toBe(JSON.stringify({ sessionId: id, agentId: "a" }) + "\n");
+  for (const moved of [join("file-history", id, "f@v1"), join("session-env", id), join("todos", `${id}-agent-${id}.json`)]) expect(existsSync(join(theirs, moved)), moved).toBe(true);
+  for (const gone of [join("projects", folderName, session), join("file-history", session), join("session-env", session), join("todos", `${session}-agent-${session}.json`)]) expect(existsSync(join(own, gone)), gone).toBe(false);
+  expect(existsSync(join(own, "file-history", "another-session"))).toBe(true);
+  expect(existsSync(join(own, "todos", "another-session.json"))).toBe(true);
+  // A record of the new id already there is never written over; the record stays where it is.
+  expect(() => moveClaudeSession(located, join(theirs, "projects"), id)).toThrow();
+  writeFileSync(join(own, "projects", folderName, "11111111-2222-3333-4444-555555555555.jsonl"), "taken\n");
+  expect(() => moveClaudeSession(located, join(own, "projects"), "11111111-2222-3333-4444-555555555555")).toThrow();
+  expect(existsSync(located)).toBe(true);
+  // And back: the same record with what was said meanwhile, under another new id.
+  writeFileSync(located, readFileSync(located, "utf8") + JSON.stringify({ type: "assistant", sessionId: id, message: { content: "more" } }) + "\n");
+  const again = moveClaudeSession(located, join(own, "projects"));
+  expect([session, id]).not.toContain(again);
+  expect(readFileSync(join(own, "projects", folderName, again + ".jsonl"), "utf8")).toContain(`"sessionId":"${again}","message":{"content":"more"}`);
   expect(existsSync(located)).toBe(false);
-  expect(readFileSync(source, "utf8")).toBe(before);
+  expect(existsSync(join(own, "file-history", again, "f@v1"))).toBe(true);
+  // Between profiles that share their sessions it is renamed where it is.
+  const renamed = moveClaudeSession(join(own, "projects", folderName, again + ".jsonl"), join(own, "projects"));
+  expect(readdirSync(join(own, "projects", folderName)).filter((n) => n.endsWith(".jsonl")).sort()).toEqual(["11111111-2222-3333-4444-555555555555.jsonl", renamed + ".jsonl"].sort());
+  expect(() => moveClaudeSession(join(folder, "notes.txt"), join(theirs, "projects"))).toThrow();
 });
 
 it("keeps the user-selected project directory and requires consent before transferring a session", async () => {
@@ -227,8 +273,13 @@ it("keeps the user-selected project directory and requires consent before transf
   const response = await post("/terminals/resume", { ...body, allowContextTransfer: true });
   expect(response.status).toBe(201);
   expect(asked.at(-1)).toMatchObject({ isolated: true, cwd: w.root, browserKey: "claude-code." + target.id });
-  expect(asked.at(-1)!.resume).not.toBe(session);
-  expect(existsSync(source)).toBe(true);
+  // The same conversation under a new id: its record is the target profile's now, the old one is gone, listed once.
+  const moved = asked.at(-1)!.resume!;
+  expect(moved).not.toBe(session);
+  expect(existsSync(source)).toBe(false);
+  expect(sessions.locate("claude-code", moved)).toContain(target.id);
+  expect(sessions.list().filter((s) => s.cwd === w.root).map((s) => s.id)).toEqual([moved]);
+  expect(w.store.sessionProfile("claude-code", moved)).toBe(target.id);
   expect(host.get(original.terminal.id)).toBeNull();
 });
 

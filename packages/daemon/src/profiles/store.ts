@@ -9,9 +9,10 @@
  *  explicit read-only copies. Existing profiles retain their legacy links; Codex still uses its existing sharing
  *  rules. No account identity is copied into a new profile. See docs/profiles-v0.md for the isolation boundary. */
 
+import type { AddonPlace } from "./addons.js";
 import { changeClaudeCopies, claudeCopyOptions, claudeCopyState, prepareClaudeCopies, type ClaudeCopies, type ClaudeCopyList } from "./claudeCopies.js";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -97,6 +98,10 @@ const CLAUDE_PROJECT_CARRIED = ["hasTrustDialogAccepted", "hasCompletedProjectOn
  *  `installation_id`, the databases, the caches, the locks. */
 const CODEX_LINKED = ["config.toml", "AGENTS.md", "AGENTS.override.md", "skills", "rules", "prompts", "plugins"] as const;
 const CODEX_SESSIONS = ["sessions", "archived_sessions"] as const;
+/** What a Codex profile with a folder all its own (isolated, 2026-11-22) may be given a copy of when it is made: the
+ *  Mac's own settings, instructions and what was added to it. Never its sign-in, its sessions or its state. */
+export const CODEX_COPYABLE = ["config.toml", "AGENTS.md", "skills", "rules", "prompts", "plugins"] as const;
+export type CodexCopy = (typeof CODEX_COPYABLE)[number];
 const MAX_PROFILES = 24;
 const DEVICE = /^[0-9a-f]{16,128}$/;
 /** How many conversations' profiles are remembered for one agent (§3.3); the oldest go first. */
@@ -198,7 +203,8 @@ export class ProfileStore {
   keepLinked(agent: ProfileAgent, id: string): void {
     if (id === DEFAULT_PROFILE) return;
     const home = this.homeOf(agent, id);
-    if (home && agent === "codex") this.codexHome(home);
+    // One with a folder all its own takes nothing of the Mac's own after it was made.
+    if (home && agent === "codex" && !this.all().codex.profiles.find((p) => p.id === id)?.isolated) this.codexHome(home);
   }
 
   /** The name the screens show for `id` (null: no such profile). */
@@ -298,14 +304,11 @@ export class ProfileStore {
 
   setCodexAuth(id: string, source: string): void {
     if (!this.nameOf("codex", id)) throw new ProfileError("not_found", "no such profile");
-    let auth: any;
-    try { auth = JSON.parse(source); } catch { throw new ProfileError("invalid", "auth.json 不是有效的 JSON。"); }
-    const token = (v: unknown) => typeof v === "string" && v.trim().length > 0;
-    if (!auth || typeof auth !== "object" || Array.isArray(auth) || !(token(auth.OPENAI_API_KEY) ||
-      (token(auth.tokens?.access_token) && token(auth.tokens?.refresh_token) && token(auth.tokens?.id_token))))
-      throw new ProfileError("invalid", "auth.json 需要 OPENAI_API_KEY 或完整的登录 tokens。");
+    const problem = codexAuthProblem(source);
+    if (problem) throw new ProfileError("invalid", problem);
+    const auth = JSON.parse(source) as unknown;
     const home = id === DEFAULT_PROFILE ? join(this.userHome, ".codex") : join(this.dir, "codex", id, "home");
-    if (id === DEFAULT_PROFILE) mkdirSync(home, { recursive: true }); else this.codexHome(home);
+    if (id === DEFAULT_PROFILE || this.all().codex.profiles.find((p) => p.id === id)?.isolated) mkdirSync(home, { recursive: true, mode: 0o700 }); else this.codexHome(home);
     const path = join(home, "auth.json"), tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
     try {
       writeFileSync(tmp, JSON.stringify(auth, null, 2) + "\n", { mode: 0o600, flag: "wx" });
@@ -336,8 +339,13 @@ export class ProfileStore {
   }
 
   /** A new profile. One that pays by a key is made with the key (a ciphertext the caller has had the gate open once). */
-  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi, isolation?: ClaudeCopies): Profile {
-    if (isolation && agent !== "claude-code") throw new ProfileError("invalid", "isolation is currently available for Claude Code");
+  /** `codexCopies` (a Codex profile that signs in with an account): made with a folder all its own — nothing of the
+   *  Mac's own Codex is linked into it, its sessions are its own — and a copy of what is named here. Left out: the
+   *  kind made until 2026-11-22, whose settings and sessions are the Mac's own, linked. */
+  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi, isolation?: ClaudeCopies, codexCopies?: readonly CodexCopy[]): Profile {
+    if (isolation && agent !== "claude-code") throw new ProfileError("invalid", "these copies are Claude Code's");
+    if (codexCopies && (agent !== "codex" || kind !== "subscription")) throw new ProfileError("invalid", "only a Codex profile that signs in with an account has a folder of its own");
+    if (codexCopies?.some((name) => !CODEX_COPYABLE.includes(name))) throw new ProfileError("invalid", "not something a Codex profile can be given a copy of");
     const copyConfiguration = isolation ? prepareClaudeCopies(this.userHome, isolation) : null;
     if (!PROFILE_KINDS[agent]?.includes(kind)) throw new ProfileError("invalid", PROFILE_KINDS[agent] ? `a ${agent} profile cannot sign in that way yet` : "this agent has `Default` alone so far");
     if ((kind === "api") !== Boolean(api)) throw new ProfileError("invalid", kind === "api" ? "a profile that pays by a key needs the key" : "only a profile that pays by a key has one");
@@ -351,26 +359,62 @@ export class ProfileStore {
     // A colour no other profile of this agent has, while there is one left; then they come round again.
     const taken = new Set((file.agents?.[agent]?.profiles ?? []).map((p) => p.color));
     const color = PROFILE_COLORS.find((c) => !taken.has(c)) ?? PROFILE_COLORS[known.length % PROFILE_COLORS.length]!;
-    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now(), color, ...(isolation ? { isolated: true as const } : {}) };
+    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now(), color, ...(isolation || codexCopies ? { isolated: true as const } : {}) };
     // Claude Code's and Codex's sign-in and identifiers are a folder's; Codex paying by a key runs in the Mac's own
     // folder, the key and the address given when it starts (§3.6).
     if (agent === "claude-code") {
       const root = join(this.dir, agent, profile.id);
       try {
         if (isolation) {
-          for (const dir of ["system-home", "home", ...[...CLAUDE_SESSIONS, "skills", "plugins", "agents", "commands"].map((s) => `home/${s}`)]) mkdirSync(join(root, dir), { recursive: true, mode: 0o700 });
+          for (const dir of ["home", ...[...CLAUDE_SESSIONS, "skills", "plugins", "agents", "commands"].map((s) => `home/${s}`)]) mkdirSync(join(root, dir), { recursive: true, mode: 0o700 });
           for (const file of [".claude.json", "settings.json"]) writeFileSync(join(root, "home", file), "{}\n", { mode: 0o600 });
           copyConfiguration?.(join(root, "home"));
         } else this.claudeHome(join(root, "home"));
       } catch (error) { writableDirectories(root); rmSync(root, { recursive: true, force: true }); throw error; }
     }
-    if (agent === "codex" && kind === "subscription") this.codexHome(join(this.dir, agent, profile.id, "home"));
+    if (agent === "codex" && kind === "subscription") {
+      const root = join(this.dir, agent, profile.id), home = join(root, "home");
+      if (!codexCopies) this.codexHome(home);
+      else {
+        try {
+          for (const dir of ["", ...CODEX_SESSIONS]) mkdirSync(join(home, dir), { recursive: true, mode: 0o700 });
+          for (const name of new Set(codexCopies)) copyOwn(join(this.userHome, ".codex", name), join(home, name));
+        } catch (error) { writableDirectories(root); rmSync(root, { recursive: true, force: true }); throw error; }
+      }
+    }
     const stored = file.agents?.[agent] ?? {};
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [...(stored.profiles ?? []), { ...profile, ...(checked ? { api: checked } : {}) }] } } });
     return this.of(agent, this.read()).profiles.find((p) => p.id === profile.id)!;
   }
 
   copyOptions() { return claudeCopyOptions(this.userHome); }
+
+  /** Where `id` keeps what the Add-Ons page shows and changes (profiles/addons.ts); null: no such profile, or one
+   *  with no folder to speak of (OpenCode, pi). A Codex profile that pays by a key runs in the Mac's own folder. */
+  addonPlace(agent: ProfileAgent, id: string): AddonPlace | null {
+    if (agent !== "claude-code" && agent !== "codex") return null;
+    if (id !== DEFAULT_PROFILE && !this.all()[agent].profiles.some((p) => p.id === id)) return null;
+    const home = id === DEFAULT_PROFILE ? null : this.homeOf(agent, id);
+    const kept = join(this.dir, agent, id, "addons.json");
+    if (agent === "codex") return { agent, id, config: home ?? join(this.userHome, ".codex"), kept: home ? kept : join(this.dir, agent, DEFAULT_PROFILE, "addons.json"), own: home !== null };
+    return home ? { agent, id, config: home, json: join(home, ".claude.json"), kept, own: true }
+      : id === DEFAULT_PROFILE ? { agent, id, config: join(this.userHome, ".claude"), json: join(this.userHome, ".claude.json"), kept, own: false } : null;
+  }
+
+  /** What of the Mac's own Codex there is to copy into a new profile: names only. */
+  codexCopyOptions(): CodexCopy[] {
+    return CODEX_COPYABLE.filter((name) => { try { const st = lstatSync(join(this.userHome, ".codex", name)); return st.isFile() || st.isDirectory(); } catch { return false; } });
+  }
+
+  /** The `sessions` folders of the Codex profiles that keep their own (the list of sessions reads them too). */
+  codexSessionRoots(): string[] {
+    return this.all().codex.profiles.filter((p) => p.isolated).map((p) => join(this.dir, "codex", p.id, "home", "sessions"));
+  }
+
+  /** Where Codex keeps the sessions that run under `id`: the profile's own folder, else the Mac's. */
+  codexSessionsOf(id: string): string {
+    return this.all().codex.profiles.find((p) => p.id === id)?.isolated ? join(this.dir, "codex", id, "home", "sessions") : join(this.userHome, ".codex", "sessions");
+  }
 
   /** The folder of a Claude Code profile that has its own configuration (not one linked to `Default`'s). */
   private ownClaudeHome(id: string): string {
@@ -395,6 +439,18 @@ export class ProfileStore {
 
   claudeProjectsOf(id: string): string {
     return join(this.homeOf("claude-code", id) ?? join(this.userHome, ".claude"), "projects");
+  }
+
+  /** The private `HOME` isolated profiles had until 2026-11-15 (`<profile>/system-home`: a second Claude Code install,
+   *  tool caches) is of no use any more; what is left of it is removed at start. Returns how many went. */
+  removeOldSystemHomes(): number {
+    let removed = 0;
+    for (const p of this.all()["claude-code"].profiles) {
+      const old = join(this.dir, "claude-code", p.id, "system-home");
+      if (!existsSync(old)) continue;
+      try { writableDirectories(old); rmSync(old, { recursive: true, force: true }); removed += 1; } catch { /* at the next start */ }
+    }
+    return removed;
   }
 
   claudeProjectRoots(): string[] {
@@ -506,10 +562,29 @@ export class ProfileStore {
   }
 }
 
+/** A file or a folder of the user's own copied as it is; a link, or anything else, is not followed and not copied. */
+function copyOwn(from: string, to: string): void {
+  let st;
+  try { st = lstatSync(from); } catch { return; }
+  if (!st.isFile() && !st.isDirectory()) return;
+  cpSync(from, to, { recursive: true, errorOnExist: true, force: false, filter: (source) => { const s = lstatSync(source); return s.isFile() || s.isDirectory(); } });
+}
+
 function writableDirectories(path: string): void {
   if (!existsSync(path) || lstatSync(path).isSymbolicLink() || !lstatSync(path).isDirectory()) return;
   chmodSync(path, 0o700);
   for (const name of readdirSync(path)) writableDirectories(join(path, name));
+}
+
+/** Why `source` is no auth.json Codex could sign in with; null when it is one. */
+export function codexAuthProblem(source: string): string | null {
+  let auth: any;
+  try { auth = JSON.parse(source); } catch { return "auth.json 不是有效的 JSON。"; }
+  const token = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+  if (!auth || typeof auth !== "object" || Array.isArray(auth) || !(token(auth.OPENAI_API_KEY) ||
+    (token(auth.tokens?.access_token) && token(auth.tokens?.refresh_token) && token(auth.tokens?.id_token))))
+    return "auth.json 需要 OPENAI_API_KEY 或完整的登录 tokens。";
+  return null;
 }
 
 /** What the screens are told of how a profile reaches its model: never the key. */

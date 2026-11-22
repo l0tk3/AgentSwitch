@@ -16,10 +16,11 @@ import { Hono } from "hono";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { DEFAULT_PROFILE, PROFILE_AGENTS, ProfileStore } from "./profiles/store.js";
+import { Addons, codexMcpOff } from "./profiles/addons.js";
 import { ProfileHealthChecks } from "./profiles/health.js";
 import { subscriptionHealth } from "./profileHealthProviders.js";
 import { SessionKeys } from "./browser/sessionKey.js";
@@ -110,6 +111,7 @@ import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
 import { endLeftHeld, TERMINAL_HARNESSES } from "./terminals/host.js";
 import { Leftovers } from "./terminals/leftovers.js";
+import { forgetTerminalFiles, sweepAttachments, sweepTerminalFiles } from "./terminals/stateFiles.js";
 import { BRIDGE_SCRIPT, bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
 import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
@@ -119,7 +121,7 @@ import { claudeSignedIn, codexSignedIn } from "./terminals/signIn.js";
 import { ProfileBrowsers } from "./browser/fleet.js";
 import { exitKey, profileOfKey } from "./api/profiles.js";
 import type { BrowserHost } from "./browser/host.js";
-import { sharedBrowser } from "./browser/setup.js";
+import { removeOwnBrowserFiles, sharedBrowser, sweepOwnBrowserFiles } from "./browser/setup.js";
 import { newEngineKit } from "./browser/engine/setup.js";
 import { stdioServePorts } from "./harness/opencodeStdio.js";
 
@@ -425,14 +427,21 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // their own browsers (§5.1, §5.5): one for each profile but the Mac's own, made when first needed — through that
   // forwarder when the profile has a proxy, straight out when it has none.
   const profiles = new ProfileStore({ home: cfg.home });
+  { const old = profiles.removeOldSystemHomes(); if (old) console.error(`profiles: removed ${old} private home folders isolated profiles no longer use`); }
   const exits = new ExitPool({ ownPorts, ...(gate ? { resolve: gateFill(gate) } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
   const profileBrowsers = browser
     ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder,
           zone: () => { const p = profileOfKey(key); return p ? profiles.all()[p.agent].profiles.find((x) => x.id === p.id)?.exit?.timezone ?? null : null; },
           // Its sign-in to claude.ai, when the profile keeps a session key (docs/profiles-v0.md §3.4).
           launched: async () => { const p = profileOfKey(key); if (p) await sessionKeys.launched(p.agent, p.id); } } }), exits,
-        (key) => { const p = profileOfKey(key); return p && ((["claude-code", "codex"].includes(p.agent) && p.id === DEFAULT_PROFILE) || profiles.homeOf(p.agent, p.id)) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; })
+        (key) => { const p = profileOfKey(key); return p && ((["claude-code", "codex"].includes(p.agent) && p.id === DEFAULT_PROFILE) || profiles.homeOf(p.agent, p.id)) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; },
+        (key) => removeOwnBrowserFiles(cfg.home, key))
     : undefined;
+  // Browser folders of profiles removed before a removal took them along (setup.ts): any profile still listed keeps its.
+  if (profileBrowsers) {
+    const swept = sweepOwnBrowserFiles(cfg.home, (key) => { const p = profileOfKey(key); return !!p && (p.id === DEFAULT_PROFILE || profiles.all()[p.agent].profiles.some((x) => x.id === p.id)); });
+    if (swept.length) console.error(`browser: removed the folders of ${swept.length} profiles that are no more: ${swept.join(", ")}`);
+  }
   // An address asked for its models with a profile's key is asked the way the profile's agent would send it: through
   // the forwarder of its proxy when it has one (docs/profiles-v0.md §4), straight out when it has none.
   const apiKeys = new ApiKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
@@ -492,6 +501,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         // desktop app no longer lists it under its project. `AGENTSWITCH_CODEX_TERMINAL=server` starts it that way.
         codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL === "server",
         // Its Daybreak switch, where this Codex and this account have one (router/modelOffers.ts; simple-view-v0 §5.8).
+        // Codex's MCP servers switched off under a profile, by the folder it runs in (profiles/addons.ts).
+        codexMcpOff: (configHome) => {
+          const dir = configHome ? dirname(configHome) : join(cfg.home, "profiles", "codex", DEFAULT_PROFILE);
+          return codexMcpOff(join(dir, "addons.json"), join(configHome ?? join(homedir(), ".codex"), "config.toml"));
+        },
         codexDaybreak: () => overrides.modelOffers?.current().codex?.daybreak !== undefined,
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
@@ -507,7 +521,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         },
       } : {}),
       // What its program leaves running is ended after a grace (docs/terminal-v0.md §11).
-      onLeft: (id: string) => leftovers?.ended(id),
+      // Its own folder too (stateFiles.ts): nothing reads it once the program is gone.
+      onLeft: (id: string) => { leftovers?.ended(id); forgetTerminalFiles(join(cfg.home, "terminals"), id); },
       ...(held ? { hold: {
         holding: held,
         dir: join(cfg.home, "terminals"),
@@ -547,6 +562,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       : harness === "codex" && agentBinaries.codex ? codexSignedIn(agentBinaries.codex, home) : Promise.resolve(null)),
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
+    reidentified: (harness: string, from: string, to: string) => sessionTitles.reidentified(harness, from, to),
     ...(agentBinaries.codex ? { prepare: async (harness: string, home?: string) => { if (harness === "codex") await withTimeout(codexTrust(home)!.ensure({ fresh: true }), 8000); } } : {}),
     ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current(), variants: () => overrides.modelOffers!.variants(), daybreakTurned: (on: boolean) => overrides.modelOffers!.noteCodexDaybreak(on) } : {}),
   } : undefined;
@@ -557,7 +573,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const opencodeBin = overrides.terminalLauncher || !cfg.opencodeBinary ? undefined : agentBinaries.opencode ?? terminalBinaries(targets, cfg.opencodeBinary).opencode;
   const openCodeDelete = overrides.openCodeDelete ?? (opencodeBin ? openCodeDeleter(opencodeBin, sessionSources.opencodeDb) : undefined);
   const sessions = cfg.watchSessions ? new SessionMonitor({
-    ...sessionSources, claudeProfileProjects: () => profiles.claudeProjectRoots(), ...(openCodeDelete ? { openCodeDelete } : {}),
+    ...sessionSources, claudeProfileProjects: () => profiles.claudeProjectRoots(), codexProfileSessions: () => profiles.codexSessionRoots(), ...(openCodeDelete ? { openCodeDelete } : {}),
     ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
     agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id) || profiles.sessionProfile(harness, id) !== null, folders: () => sessionFolders.get(),
   }) : undefined;
@@ -584,7 +600,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -768,7 +784,16 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
       : daemon.terminals?.restore().then((n) => { if (n) console.error(`terminals: ${n} taken up again from their holders`); }, (err: Error) => console.error(`terminals: restore: ${err.message}`)) ?? Promise.resolve();
     // What the last daemon's terminals left running is looked for once this daemon's own terminals are all known
     // (docs/terminal-v0.md §11): a held terminal taken up again has left nothing.
-    void taken.finally(() => daemon.leftovers?.start());
+    void taken.finally(() => {
+      daemon.leftovers?.start();
+      // Folders of terminals no daemon has any more (stateFiles.ts), once this daemon's own are all known.
+      if (daemon.terminals) {
+        const live = new Set(daemon.terminals.list().map((t) => t.id));
+        const swept = sweepTerminalFiles(join(cfg.home, "terminals"), live);
+        if (swept) console.error(`terminals: removed ${swept} folders of terminals that ended`);
+        sweepAttachments(join(tmpdir(), "agentswitch-attach"), live, (folder) => daemon.sessions?.keepPicturesIn(folder));
+      }
+    });
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   }, auth);
   void daemon.quota.refresh();

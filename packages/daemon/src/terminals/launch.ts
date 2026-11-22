@@ -7,6 +7,7 @@ import { profileEnvironment } from "./profileEnvironment.js";
 import { effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { CodexCompanion } from "./codexTerminal.js";
+import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -59,6 +60,11 @@ export type LauncherOptions = {
    *  router/modelOffers.ts): a terminal is started with the feature enabled, for that terminal alone
    *  (docs/simple-view-v0.md §5.8). */
   readonly codexDaybreak?: () => boolean;
+  /** Codex's MCP servers switched off under the profile whose folder this is (absent: the Mac's own), by name
+   *  (profiles/addons.ts): the terminal starts with each `enabled = false`. */
+  readonly codexMcpOff?: (configHome: string | undefined) => readonly string[];
+  /** This Codex takes a configuration layer of AgentSwitch's own (codexLayer.ts); default: asked of the program. */
+  readonly codexLayer?: (binary: string) => boolean;
   /** The shared browser for the agent (docs/browser-v0.md §2 给 agent, terminal-v0 §3): the agent bridge's command for
    *  terminal `id`, made when it starts (a session of its own). It is the `browser` MCP server as it is: a terminal is
    *  not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08), so its agent sees a page as the page is.
@@ -112,6 +118,10 @@ export function browserServer(bridge: readonly string[]): BrowserServer | null {
   const [command, ...args] = bridge;
   return command ? { command, args, env: {} } : null;
 }
+
+/** Codex with what it reports of itself switched off (config keys of 0.171: `analytics.enabled`, `feedback.enabled`,
+ *  `check_for_update_on_startup`). */
+export const CODEX_QUIET: readonly string[] = ["-c", "analytics.enabled=false", "-c", "feedback.enabled=false", "-c", "check_for_update_on_startup=false"];
 
 /** Codex's `-c` overrides for the browser server (its session config, never the user's config.toml). */
 export function codexBrowserArgs(server: BrowserServer): string[] {
@@ -289,7 +299,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // `x-api-key` and `Authorization`), and is told where to send it when that is not Anthropic's own address.
         const keyed = req.api ? { apiKeyHelper: `${hookCommand} key` } : {};
         // A profile with its telemetry off (§3.7): in both, for the same reason.
-        const quiet = req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {};
+        // Under any profile but the Mac's own, crash and error reports are not sent either (2026-11-22): they carry
+        // the machine's own (OS release, paths in stack traces) whoever is signed in. Its own switch in Claude Code,
+        // which the telemetry one does not cover.
+        const quiet = { ...(req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {}), ...(req.configHome ? { DISABLE_ERROR_REPORTING: "1" } : {}) };
         Object.assign(env, quiet);
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}) };
         writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
@@ -323,12 +336,23 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const args = [...(req.configHome ? [...CODEX_FILE_STORE, "-c", 'model_provider="openai"'] : []), "-c", `notify=${JSON.stringify([node, script, "codex"])}`];
         // The Mac's own Codex going on with a thread a key profile's ran last: under the user's own provider.
         if (req.ownProvider && !req.api && !req.configHome) args.push("-c", `model_provider=${JSON.stringify(codexOwnProvider(env))}`);
+        // Under any profile but the Mac's own, what Codex sends besides the work itself is off (2026-11-22): its
+        // analytics events and metrics (OS version, architecture, with the account's sign-in), feedback uploads, and
+        // the look for a new version at start (AgentSwitch's Agents page does that). As flags, for this terminal:
+        // the profile's config.toml may be the Mac's own, linked.
+        if (req.configHome || req.api) args.push(...CODEX_QUIET);
+        for (const name of opts.codexMcpOff?.(req.configHome) ?? []) args.push("-c", `mcp_servers.${name}.enabled=false`);
         const hooked = opts.codexHooks?.(req.configHome) ?? false;
         if (hooked) args.push(...codexHookArgs(hookCommand, QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S));
         // Codex's own "needs you" notifications, as terminal notifications (OSC 9) whether or not its window has focus:
         // the host reads them as waiting. They cover what no hook does (an app tool's approval form, a question).
         args.push(...CODEX_ATTENTION);
         if (browser) args.push(...codexBrowserArgs(browser));
+        // The same server once more in a file of AgentSwitch's own, so Codex's hidden thread that names the session can
+        // start (codexLayer.ts): without it no Codex session started here got a name.
+        const codexHome = env.CODEX_HOME || (env.HOME ? join(env.HOME, ".codex") : "");
+        if (browser && codexHome && browser.args[0] && (opts.codexLayer ?? ((binary) => codexTakesLayer(binary, env)))(file) && !codexNamesOwnProfile(codexHome))
+          args.push(...codexLayerArgs(codexHome, BROWSER_SERVER, browser.command, browser.args[0]));
         if (browser && !codexHasOwnInstructions(env)) args.push("-c", `developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
         // Its Daybreak switch, where it has one: the feature it is kept under is off unless enabled (0.162), and
         // without it `/daybreak` is no command and the user's own default does nothing. For this terminal alone.

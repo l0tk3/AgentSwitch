@@ -248,7 +248,7 @@ extension TerminalsModel {
         guard let session = terminal.agentSessionId, opening == nil else { return }
         let c = client()
         Task {
-            let answer = await ask(TerminalSheet(title: "以 \(profile.name) 继续？", body: "会传递旧上下文，包括原会话里的消息、代码、路径和工具输出。涉及隔离 Profile 时会复制成新会话，原记录保留，工作文件不会复制。当前进程将结束，正在执行的操作会中断。", confirm: "Continue"))
+            let answer = await ask(TerminalSheet(title: "以 \(profile.name) 继续？", body: "会传递旧上下文，包括原会话里的消息、代码、路径和工具输出。会话记录移到目标 Profile 并换新的会话 ID，工作文件不动。当前进程将结束，正在执行的操作会中断。", confirm: "Continue"))
             guard answer.ok, opening == nil else { return }
             select(terminal.id)
             let previousLayout = layout
@@ -287,7 +287,7 @@ extension TerminalsModel {
         let c = client()
         Task {
             if profile != nil {
-                let answer = await ask(TerminalSheet(title: "以所选 Profile 继续？", body: "会传递旧上下文，包括消息、代码、路径和工具输出。涉及隔离 Profile 时会复制成新会话，原记录保留；工作文件不会复制。", confirm: "Continue"))
+                let answer = await ask(TerminalSheet(title: "以所选 Profile 继续？", body: "会传递旧上下文，包括消息、代码、路径和工具输出。会话记录移到目标 Profile 并换新的会话 ID，工作文件不动。", confirm: "Continue"))
                 guard answer.ok else { return }
             }
             if !TerminalListText.checked.contains(session.harness), session.active {

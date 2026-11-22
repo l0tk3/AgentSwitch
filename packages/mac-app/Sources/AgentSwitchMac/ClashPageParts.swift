@@ -215,7 +215,7 @@ struct ClashSubscriptionCard: View {
                 ClashButton("Update Now") { actions.update(subscription.id) }.disabled(fetching)
             }
             .clashRow()
-            if let error = subscription.error { ClashNote(text: "上次没有取到：\(error)。现在用的是之前那一份。").clashRow() }
+            if let error = subscription.error { ClashNote(text: "更新失败：\(error)，沿用旧版。").clashRow() }
             ForEach(subscription.providers.filter { $0.error != nil }, id: \.name) { set in
                 ClashNote(text: "节点集 \(set.name) 没有取到：\(set.error ?? "")。").clashRow()
             }
@@ -307,11 +307,11 @@ struct ClashDeliveryCard: View {
     let actions: ClashActions
 
     var body: some View {
-        ClashCard(title: "Clash Verge") {
+        ClashCard(title: "Clash Core") {
             if let fetched = view.fetchedAt {
-                ClashFact(name: "Clash Verge Fetched") { Text(TimeText.moment(Date(timeIntervalSince1970: fetched / 1000))) }
+                ClashFact(name: "Clash Core Fetched") { Text(TimeText.moment(Date(timeIntervalSince1970: fetched / 1000))) }
             }
-            ClashSwitch(title: "Apply Changes at Once", detail: "订阅有改动时由 AgentSwitch 直接让内核载入，不等 Clash Verge 每小时来取", isOn: setting(\.applyNow))
+            ClashSwitch(title: "Apply Changes at Once", detail: "订阅有改动时由 AgentSwitch 直接让内核载入，不等 Clash Core 每小时来取", isOn: setting(\.applyNow))
             if let group = view.defaultGroup, !view.ownRules {
                 ClashSwitch(title: "Rename “\(group)” to Manual", detail: nil, isOn: setting(\.renameDefault))
             }

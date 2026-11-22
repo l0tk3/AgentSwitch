@@ -2,7 +2,9 @@
  *  cwd, where it was started); turns are `response_item` messages (role user / assistant) and tool calls. The first user
  *  items are the harness's own context blocks, not what the user typed. */
 
-import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
 import { clipText, MESSAGE_CHARS, type SessionMessage, type SessionMode } from "./types.js";
 import { movedFolder } from "./moved.js";
@@ -132,18 +134,22 @@ export function codexProviderOf(path: string, chunk = 512 * 1024): string | null
   return str(meta.model_provider) || null;
 }
 
-let names: { path: string; mtime: number; size: number; by: Map<string, string> } | null = null;
+/** By Codex home: what was read of it, and what its files looked like then. */
+const names = new Map<string, { stamp: string; by: Map<string, string> }>();
 
-/** The name Codex keeps for thread `id` (`thread/name/set`: the desktop app's own naming, `/rename`), or null. Codex
- *  writes each one as a line of `session_index.jsonl` beside its sessions, `{id, thread_name, updated_at}`, a thread's
- *  newest line last. Read again when the file changed. */
-export function codexThreadName(indexPath: string, id: string): string | null {
-  let st;
-  try { st = statSync(indexPath); } catch { return null; }
-  if (!names || names.path !== indexPath || names.mtime !== st.mtimeMs || names.size !== st.size) {
+/** The name Codex keeps for thread `id` (`thread/name/set`: the name it makes itself from the first message — the
+ *  desktop app and, since 0.169, the command line — and `/rename`), or null. Codex keeps it in the `threads` table of
+ *  the state database in its home (`state_<n>.sqlite`, column `name`); before that, as a line of `session_index.jsonl`
+ *  there, `{id, thread_name, updated_at}`, a thread's newest line last — a file it has stopped writing (2026-11-22: on
+ *  one Mac its last line was five weeks old). Both are read, the database's name first; again when either changed. */
+export function codexThreadName(codexHome: string, id: string): string | null {
+  const index = join(codexHome, "session_index.jsonl"), db = stateDb(codexHome);
+  const stamp = [index, db, db ? `${db}-wal` : null].map((file) => { try { const st = file ? statSync(file) : null; return st ? `${file}:${st.mtimeMs}:${st.size}` : ""; } catch { return ""; } }).join("|");
+  let read = names.get(codexHome);
+  if (!read || read.stamp !== stamp) {
     const by = new Map<string, string>();
     try {
-      for (const line of readFileSync(indexPath, "utf8").split("\n")) {
+      for (const line of readFileSync(index, "utf8").split("\n")) {
         if (!line.trim()) continue;
         try {
           const row = obj(JSON.parse(line));
@@ -151,8 +157,32 @@ export function codexThreadName(indexPath: string, id: string): string | null {
           if (str(row.id)) { if (name) by.set(str(row.id), name); else by.delete(str(row.id)); }
         } catch { /* a line half written */ }
       }
-    } catch { return null; }
-    names = { path: indexPath, mtime: st.mtimeMs, size: st.size, by };
+    } catch { /* no such file */ }
+    if (db) {
+      let open: DatabaseSync | null = null;
+      try {
+        open = new DatabaseSync(db, { readOnly: true });
+        for (const row of open.prepare("SELECT id, name FROM threads WHERE name IS NOT NULL AND name <> ''").all()) {
+          const name = str(row.name).trim();
+          if (str(row.id) && name) by.set(str(row.id), name);
+        }
+      } catch { /* an older Codex (no such column), or the file is being replaced: the index's names stand */ }
+      finally { try { open?.close(); } catch { /* closed */ } }
+    }
+    read = { stamp, by };
+    names.set(codexHome, read);
   }
-  return names.by.get(id) ?? null;
+  return read.by.get(id) ?? null;
+}
+
+/** Codex's state database in its home: `state_<n>.sqlite`, the highest `n` (it starts a new file when the layout changes). */
+function stateDb(codexHome: string): string | null {
+  let best: { n: number; name: string } | null = null;
+  try {
+    for (const name of readdirSync(codexHome)) {
+      const n = /^state_(\d+)\.sqlite$/.exec(name)?.[1];
+      if (n !== undefined && (!best || Number(n) > best.n)) best = { n: Number(n), name };
+    }
+  } catch { return null; }
+  return best ? join(codexHome, best.name) : null;
 }

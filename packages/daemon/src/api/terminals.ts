@@ -22,7 +22,8 @@ import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { BrowserError, YOU } from "../browser/types.js";
-import { transferClaudeContext } from "../profiles/context.js";
+import { moveClaudeSession, moveCodexSession } from "../profiles/context.js";
+import { codexFileOf } from "../sessions/monitor.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
 import { browserExitProblem, exitFor } from "./profiles.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
@@ -49,6 +50,8 @@ export type Terminals = {
   readonly style: () => TerminalStyle;
   /** Whether a session is open in another program (it is continued in place, so only one may write it). */
   readonly elsewhere: ElsewhereCheck;
+  /** A session was given a new id (it went on under another profile): what is kept by its id is kept by the new one. */
+  readonly reidentified?: (harness: TerminalHarness, from: string, to: string) => void;
   /** What each agent offers today for the model menu (its own list); the catalog stands in for an agent not asked. */
   readonly offers?: () => Offers;
   /** OpenCode's variants per model (`provider/id`), as its server lists them. */
@@ -376,12 +379,18 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const target = deps.profiles?.all()[body.data.harness].profiles.find((p) => p.id === wanted);
     if (wanted !== DEFAULT_PROFILE && !target) return c.json({ error: "no such profile" }, resumed?.switchFrom ? 404 : 400);
     const previousProfile = resumed?.switchFrom ? host.get(resumed.switchFrom)?.profile?.id ?? DEFAULT_PROFILE : recorded;
-    const sourceProfile = deps.profiles?.all()[body.data.harness].profiles.find((p) => p.id === previousProfile);
     const crossing = Boolean(resumed && previousProfile !== wanted);
     if (crossing && !resumed?.allowContextTransfer) return c.json({ error: "跨 Profile 继续会传递旧上下文，请确认后重试。", contextTransferRequired: true }, 409);
-    const transfer = crossing && body.data.harness === "claude-code" && (target?.isolated || sourceProfile?.isolated);
-    const transcript = transfer && agentSessionId ? deps.sessions?.locate("claude-code", agentSessionId) : null;
-    if (transfer && !transcript) return c.json({ error: "找不到要传递的会话记录；旧终端保持运行。" }, 409);
+    // A Claude Code session going on under another profile takes its record along and a new id (profiles/context.ts).
+    const transfer = crossing && body.data.harness === "claude-code";
+    // A Codex thread's record goes along where one of the two profiles keeps its own sessions; its id stays.
+    const sourceProfile = deps.profiles?.all()[body.data.harness].profiles.find((p) => p.id === previousProfile);
+    const threadMove = crossing && body.data.harness === "codex" && Boolean(target?.isolated || sourceProfile?.isolated);
+    const transcript = (transfer || threadMove) && agentSessionId ? deps.sessions?.locate(transfer ? "claude-code" : "codex", agentSessionId) : null;
+    // No record to be found: where one of the two keeps its own sessions the agent could not go on with it there, so
+    // nothing is started; between profiles that share their sessions it goes on as it is (a session that has written
+    // nothing yet has nothing to take along).
+    if ((threadMove || (transfer && (target?.isolated || sourceProfile?.isolated))) && !transcript) return c.json({ error: "找不到要传递的会话记录；旧终端保持运行。" }, 409);
     if (resumed?.switchFrom) {
       const previous = host.get(resumed.switchFrom);
       if (!previous || previous.harness !== resumed.harness || previous.agentSessionId !== agentSessionId || fork || !resumed.profile)
@@ -396,12 +405,6 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if ("refused" in way) return c.json({ error: way.refused }, way.status);
       await host.stopped(previous.id);
       if (host.get(previous.id)?.status !== "exited") return c.json({ error: "旧进程尚未退出，请稍后重试。" }, 409);
-    }
-    if (transfer && transcript) {
-      try {
-        agentSessionId = transferClaudeContext(transcript, deps.profiles!.claudeProjectsOf(wanted), cwd);
-        deps.profiles!.noteSession("claude-code", agentSessionId, wanted);
-      } catch { return c.json({ error: "无法复制会话上下文；原记录未修改。" }, 409); }
     }
     if (resumed && !RESUMES.has(resumed.harness)) return c.json({ error: `${resumed.harness} cannot continue a session` }, 400);
     if (fork && !FORKS.has(body.data.harness)) return c.json({ error: `${body.data.harness} cannot fork a session` }, 400);
@@ -476,6 +479,24 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // Only one that signs in with an account: one that pays by a key has nobody to sign in.
     const account = profile && deps.profiles!.kindOf(body.data.harness, wanted) === "subscription";
     const signIn = Boolean(profile?.home && account && (await t.signedIn?.(body.data.harness, profile.home, profile.isolated).catch(() => null)) === false);
+    // The record goes to the profile it goes on under, under a new id (profiles/context.ts). Only now — nobody writes it any more (the terminal it ran in has
+    // ended, no other program has it open) and everything that may still refuse the start has been asked (the
+    // profile's proxy, its sign-in): a start that is refused leaves the record where it was.
+    if (transfer && transcript) {
+      try {
+        const was = agentSessionId!;
+        agentSessionId = moveClaudeSession(transcript, deps.profiles!.claudeProjectsOf(wanted));
+        deps.profiles!.noteSession("claude-code", agentSessionId, wanted);
+        // What is kept here by the session's id (the user's own name for it) follows it.
+        try { t.reidentified?.("claude-code", was, agentSessionId); } catch { /* the name is asked for again */ }
+      } catch { return c.json({ error: "无法移动会话记录；原记录未改动。" }, 409); }
+    }
+    if (threadMove && transcript) {
+      try {
+        moveCodexSession(transcript, deps.profiles!.codexSessionsOf(wanted), (name) => codexFileOf(name, agentSessionId!));
+        deps.profiles!.noteSession("codex", agentSessionId!, wanted);
+      } catch { return c.json({ error: "无法移动会话记录；原记录未改动。" }, 409); }
+    }
     try {
       const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(signIn ? { signIn: true as const } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(forks ? { fork: forks } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),

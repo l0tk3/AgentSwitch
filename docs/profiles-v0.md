@@ -4,14 +4,26 @@
 
 本节覆盖下文旧版「设置与会话链接共用」的描述。`POST /profiles` 创建的 Claude 订阅/API Profile 默认使用隔离目录；已有 Profile、Default 和 Codex 不自动迁移。
 
-- 凭据：非 Default Claude 启动时清除继承的 Anthropic/Claude 与云供应商认证变量。隔离 Profile 只保留基础进程环境变量，再注入当前 Profile 的配置、代理和终端通信变量；私有 `HOME` 与 XDG 目录避免读取系统用户的工具配置。独立 settings 中由用户明确添加的配置仍生效。
+- 凭据：非 Default Claude 启动时清除继承的 Anthropic/Claude 与云供应商认证变量。隔离 Profile 只保留基础进程环境变量，再注入当前 Profile 的配置、代理和终端通信变量。`HOME` 仍是用户自己的：隔离的是配置目录（`CLAUDE_CONFIG_DIR`，钥匙串里的登录也按它分条）与环境变量，不另造家目录。2026-11-15 起不再换 `HOME`：私有家目录挡不住按路径读文件和钥匙串，却让 macOS 在每次存登录时弹「Keychain Not Found」、每个配置各攒一份 npm 等缓存（一个配置一天 300 MB 余）、终端里的 git/ssh 找不到用户的设置。旧配置留下的 `system-home` 目录不再使用，可删。独立 settings 中由用户明确添加的配置仍生效。
 - 配置：`home/settings.json`、`home/.claude.json` 从空对象开始，MCP、插件、指令均不链接到本机配置；创建时可勾选从 Default 复制配置。启动使用 `--setting-sources user`，不自动加载工作项目中的 settings。系统管理员管理的策略仍由 Claude 自己执行。
 - 会话：projects、history、plans、todos、file-history、memory 保存在该 Profile 的目录。AgentSwitch 的历史列表汇总这些目录，但 Claude 本身不共享它们。
 - 文件：所有 Profile 与 Default 一样在新建终端时自由选择项目目录；服务端不再覆盖 cwd，也不要求把项目搬进专属 workspace。旧 workspace 中的文件原样保留。配置、会话、记忆的目录仍独立。
 - 复制：创建界面自动读取目标节点 Default 的可复制内容，Skills、MCP、Commands、Agents 可整组勾选或逐项勾选，CLAUDE.md、模型与界面偏好可单独勾选。默认均不勾选，不需要手写路径。`GET /profiles/claude-code/copy-options` 只返回名称/可用性，不返回凭据或内容；`POST /profiles` 的 `copyFromDefault` 指定所选内容。技能/指令/Agents 为只读副本，拒绝符号链接和特殊文件；MCP 复制被选服务的完整配置（界面提示可能包含凭据），偏好只复制白名单字段，不带 env、hooks、身份或登录。副本不会与 Default 同步。原 sharedSkills 请求仍兼容。
 - 浏览器：按 Profile 使用独立持久化目录、Cookie 和缓存；包括无代理的隔离 Profile。独立浏览器不可用时拒绝启动，不退回共享浏览器。
 
-跨 Profile 的 Resume As / Continue As 必须确认「会传递旧上下文」，API 请求携带 `allowContextTransfer: true`。跨越隔离边界时只复制所选主会话 transcript，并分配新会话 ID、更新工作目录字段；原记录保留，不复制身份、设置、记忆、其他会话或工作文件。消息内原有路径、代码、工具输出不会被脱敏；引用的附件和子代理文件不自动搬运。
+跨 Profile 的 Resume As / Continue As 必须确认「会传递旧上下文」，API 请求携带 `allowContextTransfer: true`。Claude Code 的会话换 Profile 继续时，把这一条会话的记录**移**到目标 Profile 并**换一个新的会话 ID**（2026-11-22 起，共享会话的 Profile 之间也一样，那时是原地改名；此前跨隔离边界是复制成新 ID、原记录保留，等于分叉：一段对话在列表里两条，各缺对方后来说的，再点一次又多一条；共享的 Profile 之间则沿用同一个 ID）。一段对话始终只有一条记录；两个账号不会发出同一个会话 ID。记录里只改每行自己的 `"sessionId"`，其余原样，连同按 ID 存在它旁边的子代理记录、文件改动历史、会话环境和待办一起移（`profiles/context.ts` `moveClaudeSession`）；按 ID 命名的都改成新 ID，用户在这里给会话起的名字也跟过去。之后原 Profile 要继续，同样是移回来（再换一个 ID），带着这期间说过的全部内容。Codex 的会话不动：它的 ID 在文件名和记录头里，换了它自己的库对不上。移动放在一切可能拒绝启动的检查（代理、登录、别处是否开着）之后，被拒绝的启动不动记录。不移身份、设置、记忆、其他会话或工作文件。消息内原有路径、代码、工具输出不会被脱敏；引用的附件和子代理文件不自动搬运。
+
+**Codex 的隔离 Profile（2026-11-22）。** 此前 Codex 的账号配置只隔了登录：`config.toml`、`AGENTS.md`、技能、规则、提示词、插件和会话都链接到 `~/.codex`（§6.2）。现在 `POST /profiles` 新建的 Codex 账号配置和 Claude Code 的一样有一个完全自己的目录（`isolated`）：什么都不链接，`sessions`、`archived_sessions` 是它自己的；新建时可以从这台机器自己的 Codex 复制一份 `config.toml`、`AGENTS.md`、`skills`、`rules`、`prompts`、`plugins`（`copyCodex`，可选项由 `GET /profiles/codex/copy-options` 给出名字；只复制普通文件和目录，链接不跟、不带；登录、会话、状态库从不复制），之后不随 Default 变化，启动前也不再补链接（`keepLinked`）；导入 auth.json 同样不链接任何东西。终端的环境只留基础变量（与 Claude Code 的隔离配置同一份白名单，`HOME` 仍是用户自己的）。会话列表把这些目录一并读（`codexProfileSessions`），线程名按记录所在的那个家目录的状态库读。跨 Profile 继续且有一边是隔离的：线程的记录文件（一个线程可能有几个）原样移到目标的 `sessions` 下同样的日期目录里，**ID 不变**——Codex 的 ID 在文件名、记录头和它自己的库里，换了就成了另一个线程；实测 0.171：全新的家目录里放进一个别处的 rollout，`thread/read` 按 ID 读得到。已有的 Codex 配置不迁移（仍是链接的那种）；按 key 付费的 Codex 配置仍在 `~/.codex` 里运行，没有隔离。
+
+**非 Default 配置下 agent 不上报自己的情况（2026-11-22）。** 查过 Claude Code 2.1.330 的二进制与 Codex 0.171.0 的源码：两家默认都不把取自硬件的标识发给厂商，各自的随机标识（`userID`、`installation_id`）在配置目录里、已按配置分开；能把同一台机器上的两个配置连起来的是遥测里的机器特征和仓库信息。能用开关关掉的现在都关：Claude Code 在任何有自己目录的配置下设 `DISABLE_ERROR_REPORTING=1`（进程环境与叠加的 settings 的 `env` 各一份，同 `DISABLE_TELEMETRY`；遥测本身仍由 §3.7 的开关管）；Codex 在任何非 Default 配置下带 `-c analytics.enabled=false -c feedback.enabled=false -c check_for_update_on_startup=false`（`launch.ts` `CODEX_QUIET`；用启动参数而不写 config.toml，因为旧配置的 config.toml 是链接到本机那一份的）。Default 不动。开关管不到的仍然会发：每次请求里的当前目录（含用户名）、Claude Code 提示词里的 git 用户名与分支和提交、Codex 请求元数据里的仓库根路径与远程地址和提交哈希、系统版本与架构。
+
+**Add-Ons：每个配置装了什么（2026-11-22，第一版，仅 Mac、仅本机）。** 用户：每个agent的 mcp和skill 有什么管理方式吗……可以选中profile输入安装mcp的命令给指定profile安装mcp然后可以指定profile禁用 删除mcp。样子见 `docs/design/concepts/profile-addons.html`（三稿：一稿是对比表，配置一多就排不下；现在左边是可过滤、可勾选的配置列表，右边勾一个是带开关的清单，勾多个或不勾是每项一行、写明在几个配置里）。设置侧栏 `Add-Ons`（`AddonsView.swift`），服务 `profiles/addons.ts` 与 `GET /profiles/addons?agent=`、`POST /profiles/addons/{mcp/install,mcp/remove,mcp/switch,copy,remove}`（改动只收本机请求）。
+- 读：直接读配置自己的目录，只出名字。Claude Code 的 MCP 在 `.claude.json` 的 `mcpServers`（本机那份在 `~/.claude.json`，配置的在它目录里），skills / agents / commands 是目录里的文件，插件读 `plugins/installed_plugins.json` 与 `settings.json` 的 `enabledPlugins`；Codex 的 MCP 问它自己（`codex mcp list --json`，0.1 秒），skills / prompts / rules 是文件。MCP 的命令里像密钥的词打码，环境变量和请求头只给个数。目录是指向 Default 的链接的那一类标 `Shared`，要改去 Default。
+- 装 MCP：输入 agent 自己的命令（`claude mcp add …` / `codex mcp add …`），不经 shell，按词拆开后在每个选中的配置名下各跑一次（`CLAUDE_CONFIG_DIR` / `CODEX_HOME` 指向它，环境只有 PATH、HOME 等几项）。Claude Code 的一律加 `-s user`：它默认的 scope 是“当前目录”，而这里没有哪个终端会在那个目录里。只认 `mcp add`（Claude 另认 `add-json`），名字 `browser` 留给 AgentSwitch 自己。
+- 删 MCP：同样由 agent 自己删（`claude mcp remove <name> -s user` / `codex mcp remove <name>`）。它们自己的文件自己写，运行中的 agent 也在不停改写，这里不直接动。
+- 停用 MCP：Claude Code 对用户级的服务没有开关，所以停用是把定义用 `mcp remove` 取出、整份记在配置旁边的 `addons.json`（0600），启用时用 `mcp add-json <name> -`（定义走 stdin，不进进程列表）放回去；Codex 有 `enabled` 但没有改它的命令，所以只记名字，终端启动时带 `-c mcp_servers.<name>.enabled=false`——只对 `config.toml` 里还在的名字带，给一个已不存在的名字带这个参数会凭空造出一个只有 `enabled` 的服务，Codex 就起不来了（`invalid transport`）。因此 Codex 的停用只在 AgentSwitch 开的终端里生效，且对之后开的终端生效。
+- skills、agents、commands、prompts、rules：在配置之间按文件复制（原样，不覆盖已有的，不跟链接）和删除；链接到 Default 的那一类不能复制进去也不能从那里删。插件只列出，不在这里装和删（agent 自己的 `/plugin`，或 `Copies…`）。
+- 实测（真的 `claude` 2.1.330 与 `codex` 0.171.0，临时目录）：安装 → 停用 → 启用 → 删除各走了一轮，两家都通。没做的：别的节点上的 Add-Ons、iPhone 上的这一页、Dispatch 的 Extensions 与它互通。
 
 删除隔离 Profile 会删除它自己目录内的历史和文件，界面会明确提示；用户选择的外部项目目录不删除。旧 Profile 的共享记录仍保留。
 

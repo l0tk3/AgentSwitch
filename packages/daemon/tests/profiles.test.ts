@@ -109,6 +109,34 @@ describe("the profile store", () => {
     expect(await reply.text()).not.toContain("secret-value");
   });
 
+  it("refuses an auth.json while Codex terminals run under the profile, and ends them first when asked to", async () => {
+    const { store, userHome } = world();
+    const running = [{ id: "t1", harness: "codex", status: "idle" }, { id: "t2", harness: "codex", status: "working", profile: { id: "other00000" } }, { id: "t3", harness: "claude-code", status: "idle" }];
+    const stopped: string[] = [];
+    const host = { list: () => running, stopped: async (id: string) => { stopped.push(id); const t = running.find((x) => x.id === id)!; if (id !== "stuck") t.status = "exited"; } };
+    const app = new Hono<any>();
+    mountProfiles(app, { profiles: store, terminals: { host } } as unknown as ApiDeps);
+    const send = (body: Record<string, unknown>) => app.request("/profiles/codex/default/auth", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const content = JSON.stringify({ OPENAI_API_KEY: "secret-value" });
+    const refused = await send({ content });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ terminalsInUse: 1 });
+    expect(stopped).toEqual([]);
+    // A file that would be refused ends nothing.
+    expect((await send({ content: "{}", endTerminals: true })).status).toBe(400);
+    expect(stopped).toEqual([]);
+    // Only the profile's own Codex terminals are ended; then the file is written.
+    expect((await send({ content, endTerminals: true })).status).toBe(200);
+    expect(stopped).toEqual(["t1"]);
+    expect(running.map((t) => t.status)).toEqual(["exited", "working", "idle"]);
+    expect(readFileSync(join(userHome, ".codex", "auth.json"), "utf8")).toContain("secret-value");
+    // One that does not end keeps the file as it is.
+    running.push({ id: "stuck", harness: "codex", status: "idle" });
+    expect((await send({ content: JSON.stringify({ OPENAI_API_KEY: "newer" }), endTerminals: true })).status).toBe(409);
+    expect(readFileSync(join(userHome, ".codex", "auth.json"), "utf8")).not.toContain("newer");
+    expect((await app.request("/profiles/codex/nobody0000/auth", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) })).status).toBe(404);
+  });
+
   it("has Default for every agent, the Mac's own; a new Claude Code profile is a folder with links and no account", () => {
     const { userHome, home, store } = world();
     expect(store.all()["claude-code"]).toEqual({ current: DEFAULT_PROFILE, creatable: true, kinds: ["subscription", "api"], profiles: [{ id: "default", name: "Default", kind: "subscription", createdAt: 0, account: "me@example.com" }] });
@@ -321,7 +349,7 @@ describe("a profile's own proxy", () => {
     const own = launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", proxy: via });
     expect(own.env).toMatchObject({ HTTPS_PROXY: via, HTTP_PROXY: via, ALL_PROXY: via, https_proxy: via, NO_PROXY: "127.0.0.1,localhost,::1", no_proxy: "127.0.0.1,localhost,::1" });
     const settings = JSON.parse(readFileSync(join(stateDir, "c1", "settings.json"), "utf8")) as { env?: Record<string, string>; hooks: object };
-    expect(settings.env).toEqual(proxyEnv(via));
+    expect(settings.env).toEqual({ ...proxyEnv(via), DISABLE_ERROR_REPORTING: "1" });
     expect(settings.hooks).toBeTruthy();
     // Without a proxy of its own nothing is set or laid over: what the user's environment has stays.
     const plain = launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
@@ -640,16 +668,18 @@ esac
   // User, 2026-10-14: 要求新profile可以选择是否关闭cc的遥测（一个环境变量）.
   it("can have Claude Code's telemetry off, from when it is made or later, for the terminals started after", async () => {
     const { store, call, root, asked } = served(async () => true);
-    const quiet = (await call("POST", "/profiles", { agent: "claude-code", name: "Quiet", telemetry: false })).json;
+    // Off unless it is asked for (2026-11-22; it was on unless refused).
+    const quiet = (await call("POST", "/profiles", { agent: "claude-code", name: "Quiet" })).json;
     expect(quiet.profile).toMatchObject({ name: "Quiet", telemetry: false });
-    const loud = (await call("POST", "/profiles", { agent: "claude-code", name: "Loud" })).json.profile;
+    expect((await call("POST", "/profiles", { agent: "claude-code", name: "Quiet Too", telemetry: false })).json.profile.telemetry).toBe(false);
+    const loud = (await call("POST", "/profiles", { agent: "claude-code", name: "Loud", telemetry: true })).json.profile;
     expect(loud.telemetry).toBeUndefined();
     await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: quiet.profile.id });
     await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: loud.id });
     await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: "default" });
     expect(asked.map((r) => r.telemetryOff ?? null)).toEqual([true, null, null]);
     // Turned on again, and off for the other.
-    expect((await call("PUT", `/profiles/claude-code/${quiet.profile.id}/telemetry`, { on: true })).json.agents["claude-code"].profiles[1].telemetry).toBeUndefined();
+    expect((await call("PUT", `/profiles/claude-code/${quiet.profile.id}/telemetry`, { on: true })).json.agents["claude-code"].profiles.find((p: { id: string }) => p.id === quiet.profile.id).telemetry).toBeUndefined();
     expect(store.telemetryOff("claude-code", loud.id)).toBe(false);
     await call("PUT", `/profiles/claude-code/${loud.id}/telemetry`, { on: false });
     expect(store.telemetryOff("claude-code", loud.id)).toBe(true);
@@ -665,10 +695,26 @@ esac
     const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/n/hook.js", env: { PATH: "/usr/bin", HOME: "/Users/u" } });
     const quiet = launch({ id: "q1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", telemetryOff: true });
     expect(quiet.env.DISABLE_TELEMETRY).toBe("1");
-    expect(JSON.parse(readFileSync(join(stateDir, "q1", "settings.json"), "utf8")).env).toEqual({ DISABLE_TELEMETRY: "1" });
+    expect(JSON.parse(readFileSync(join(stateDir, "q1", "settings.json"), "utf8")).env).toEqual({ DISABLE_TELEMETRY: "1", DISABLE_ERROR_REPORTING: "1" });
     const loud = launch({ id: "q2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home" });
     expect(loud.env.DISABLE_TELEMETRY).toBeUndefined();
-    expect(JSON.parse(readFileSync(join(stateDir, "q2", "settings.json"), "utf8")).env).toBeUndefined();
+    // Error reports are not sent under any profile but the Mac's own, whatever its telemetry (2026-11-22).
+    expect(loud.env.DISABLE_ERROR_REPORTING).toBe("1");
+    expect(JSON.parse(readFileSync(join(stateDir, "q2", "settings.json"), "utf8")).env).toEqual({ DISABLE_ERROR_REPORTING: "1" });
+    const own = launch({ id: "q3", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
+    expect(own.env.DISABLE_ERROR_REPORTING).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(stateDir, "q3", "settings.json"), "utf8")).env).toBeUndefined();
+  });
+
+  it("starts Codex with what it reports of itself off under a profile, and as it is under the Mac's own", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-profile-quiet-codex-"));
+    const launch = agentLauncher({ binaries: { codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/n/hook.js", env: { PATH: "/usr/bin", HOME: "/Users/u" } });
+    const off = ["analytics.enabled=false", "feedback.enabled=false", "check_for_update_on_startup=false"];
+    const account = launch({ id: "c1", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home" }).args;
+    const keyed = launch({ id: "c2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", api: { name: "Relay", baseUrl: "https://relay.example/v1" } }).args;
+    for (const args of [account, keyed]) for (const flag of off) expect(args[args.indexOf(flag) - 1], flag).toBe("-c");
+    const own = launch({ id: "c3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args;
+    for (const flag of off) expect(own).not.toContain(flag);
   });
 
   it("gives one made before profiles had colours a colour, once, and keeps it", () => {
@@ -827,11 +873,11 @@ describe("a profile that pays by a key (§3.6)", () => {
     const claude = launch({ id: "k1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", api: { name: "Relay", baseUrl: "https://relay.example/api", model: "claude-made-up" } });
     const settings = JSON.parse(readFileSync(join(stateDir, "k1", "settings.json"), "utf8")) as { apiKeyHelper?: string; env?: Record<string, string> };
     expect(settings.apiKeyHelper).toBe('"/n/node" "/n/hook.js" key');
-    expect(settings.env).toEqual({ ANTHROPIC_BASE_URL: "https://relay.example/api" });
+    expect(settings.env).toEqual({ ANTHROPIC_BASE_URL: "https://relay.example/api", DISABLE_ERROR_REPORTING: "1" });
     expect(claude.args.slice(claude.args.indexOf("--model"), claude.args.indexOf("--model") + 2)).toEqual(["--model", "claude-made-up"]);
     // Anthropic's own address is not named; the model chosen for the terminal goes before the profile's.
     const plain = launch({ id: "k2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", model: "opus", api: { name: "Key", model: "claude-made-up" } });
-    expect(JSON.parse(readFileSync(join(stateDir, "k2", "settings.json"), "utf8")).env).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(stateDir, "k2", "settings.json"), "utf8")).env).toEqual({ DISABLE_ERROR_REPORTING: "1" });
     expect(plain.args).toContain("opus");
     expect(plain.args).not.toContain("claude-made-up");
     const codex = launch({ id: "k3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", api: { name: "Key" } });

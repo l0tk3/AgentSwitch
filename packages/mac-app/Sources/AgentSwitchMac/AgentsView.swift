@@ -271,6 +271,20 @@ struct CodexAuthSheet: View {
     @State private var content = ""
     @State private var problem: String?
     @State private var busy = false
+    /// The service refused it while Codex terminals run under the profile: they can be ended with the save.
+    @State private var inUse = false
+
+    private func save(endTerminals: Bool) {
+        busy = true
+        Task {
+            defer { busy = false }
+            do { let result = try await profileClient.setCodexAuth(id: profile.id, content: content, endTerminals: endTerminals); content = ""; done(result); dismiss() }
+            catch {
+                if case DaemonError.http(status: 409, _) = error { inUse = true }
+                problem = error.localizedDescription
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -284,14 +298,9 @@ struct CodexAuthSheet: View {
             HStack {
                 Button("Cancel") { content = ""; dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
                 Spacer()
-                Button(busy ? "Saving…" : "Save") {
-                    busy = true
-                    Task {
-                        defer { busy = false }
-                        do { let result = try await profileClient.setCodexAuth(id: profile.id, content: content); content = ""; done(result); dismiss() }
-                        catch { problem = error.localizedDescription }
-                    }
-                }.keyboardShortcut(.defaultAction).disabled(busy || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                let empty = content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if inUse { Button("End Terminals and Save") { save(endTerminals: true) }.disabled(busy || empty) }
+                Button(busy ? "Saving…" : "Save") { save(endTerminals: false) }.keyboardShortcut(.defaultAction).disabled(busy || empty)
             }
         }.padding(20).frame(width: 580)
     }
@@ -456,9 +465,12 @@ struct ProfileNewSheet: View {
     @State private var draft = ApiKeyDraft()
     @State private var problem: String?
     @State private var busy = false
-    /// Claude Code's telemetry under it (docs/profiles-v0.md §3.7); on, as Claude Code has it.
-    @State private var telemetry = true
+    /// Claude Code's telemetry under it (docs/profiles-v0.md §3.7); off unless asked for (2026-11-22).
+    @State private var telemetry = false
     @State private var copies = ClaudeProfileCopies()
+    /// A Codex account profile (it has a folder all its own): what of `Default` there is to copy, and what was picked.
+    @State private var codexOptions: [String] = []
+    @State private var codexCopies: Set<String> = []
     @State private var copyOptions: ClaudeProfileCopyOptions?
     @State private var copyProblem: String?
     @State private var loadingCopies = false
@@ -495,13 +507,17 @@ struct ProfileNewSheet: View {
                 }
             }
             .formStyle(.columns)
-            if agent == .claude {
-                copyChoices
-                Text("勾选的内容各复制一份到这个配置里，之后不随 Default 变化，也可以在配置那一行的 Copies… 里再改。没有勾选的不带过去；登录、会话和浏览器数据始终是它自己的。")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if agent == .claude { copyChoices }
+            if agent == .codex, !byKey, !codexOptions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Copy from Default").font(.callout.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(codexOptions, id: \.self) { item in
+                            Toggle(item, isOn: Binding(get: { codexCopies.contains(item) }, set: { if $0 { codexCopies.insert(item) } else { codexCopies.remove(item) } }))
+                        }
+                    }
+                }
             }
-            Text(byKey ? ApiKeyWords.about(agent) : ProfileNewWords.account(agent))
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let said = (byKey ? draft.problem(agent: agent.rawValue) : nil) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
@@ -512,7 +528,10 @@ struct ProfileNewSheet: View {
         }
         .padding(20)
         .frame(width: 540)
-        .task { if agent == .claude { await loadCopies() } }
+        .task {
+            if agent == .claude { await loadCopies() }
+            if agent == .codex { codexOptions = (try? await profileClient.codexProfileCopyOptions()) ?? [] }
+        }
     }
 
     private var copyChoices: some View {
@@ -550,7 +569,7 @@ struct ProfileNewSheet: View {
                     let ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: profileNodeID)
                     done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry, copyFromDefault: selection))
                 } else {
-                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry, copyFromDefault: selection))
+                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry, copyFromDefault: selection, copyCodex: agent == "codex" ? codexOptions.filter(codexCopies.contains) : nil))
                 }
                 dismiss()
             } catch { problem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
@@ -587,8 +606,6 @@ struct ProfileKeySheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(profile.name) · API Key").font(.headline)
             Form { ApiKeyFields(agent: agent, draft: $draft, kept: true) }.formStyle(.columns)
-            Text(ApiKeyWords.about(agent) + "已经开着的终端继续用它们启动时的地址与模型；key 每次用时现取，换了就用新的。")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let said = draft.problem(agent: agent.rawValue, keptSite: keptSite) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
@@ -633,24 +650,6 @@ private struct ApiKeyFields: View {
     }
 }
 
-/// What a new profile that signs in with an account is (docs/profiles-v0.md §3.1, §6.2).
-enum ProfileNewWords {
-    static func account(_ agent: AgentCLI) -> String {
-        guard agent == .codex else { return "一份新的登录，放在它自己的目录里。建好后在它名下开一个终端，会直接从登录开始。" }
-        return "一份新的 ChatGPT 登录，放在它自己的目录里；设置、技能与会话和这台 Mac 原有的 Codex 共用。建好后在它名下开一个终端，会先用设备码登录：登录页开在这个配置自己的浏览器里，把终端里显示的一次性码填进去。"
-    }
-}
-
-enum ApiKeyWords {
-    static func about(_ agent: AgentCLI) -> String {
-        let own = agent == .claude ? "Anthropic" : "OpenAI"
-        let note = agent == .claude
-            ? "这个配置有它自己的目录，不用登录。"
-            : "这个配置就在这台 Mac 原有的 Codex 目录里运行，会话与设置共用，只是换成按这个 key 付费；地址须支持 Responses 接口。"
-        return "Base URL 留空就是 \(own) 自己的地址，填了就发到那里（中转、网关）。Model 留空用 agent 自己的默认。key 在这台 Mac 上为这个地址加密后才保存，之后不再显示；终端里的 agent 用时向本机服务取，不写进它的设置和环境变量。\(note)"
-    }
-}
-
 /// A colour's swatch for a menu (a menu draws pictures, not views): a filled dot, in the colour as this appearance has it.
 enum ProfileSwatch {
     static func image(_ color: ProfileColor, side: CGFloat = 10) -> NSImage {
@@ -687,70 +686,108 @@ struct ProfilesSection: View {
     var telemetry: ((AgentProfile, Bool) -> Void)? = nil
     let color: (AgentProfile, ProfileColor) -> Void
 
+    /// `work@example.com · Isolated · Telemetry Off · Tampa 23.26.109.123`.
+    static func detail(_ profile: AgentProfile, onNode: Bool) -> String {
+        [ProfileWords.who(profile), profile.isolated == true ? "Isolated" : nil, profile.telemetryOff ? "Telemetry Off" : nil,
+         profile.proxy == nil && onNode ? "This Node" : profile.way].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// What is done less often than a row's two buttons, and the row's words to copy whole.
+    @ViewBuilder private func rowMenu(_ profile: AgentProfile) -> some View {
+        Button("Copy Name") { Self.copy(profile.name) }
+        if let account = profile.account { Button("Copy Account") { Self.copy(account) } }
+        if profile.proxy != nil { Button("Copy Exit") { Self.copy(profile.way) } }
+        if agent == .claude {
+            Divider()
+            if profile.isolated == true, let copies {
+                Button("Copies…") { copies(profile) }.help("这个配置从 Default 复制了哪些技能、插件、MCP 与设置。")
+            }
+            // For the terminals started under it from now on: `DISABLE_TELEMETRY=1` when off.
+            if !profile.isDefault, let telemetry {
+                Toggle("Telemetry", isOn: Binding(get: { !profile.telemetryOff }, set: { telemetry(profile, $0) }))
+            }
+        }
+        if profile.isDefault && agent == .claude, resetIdentity != nil {
+            Divider()
+            Button("Reset Identity…", role: .destructive) { resettingIdentity = true }
+        } else if !profile.isDefault {
+            Divider()
+            Button("Delete…", role: .destructive) { remove(profile) }
+        }
+    }
+
     var body: some View {
         Section {
             ForEach(profiles.profiles) { profile in
                 VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
+                // A list row as the system's own are laid out (2026-11-22, user: 排列看上去丑丑的): the name over one
+                // line of what it is, both whole — a long name wraps, it is not cut in the middle — and beside them
+                // the two things done most, the rest in a menu. Before, four buttons stood in the name's line and
+                // names and accounts were shortened to fit ("cvp_ late…gmail.com").
+                HStack(alignment: .top, spacing: 10) {
                     // No "current" one to pick here (docs/profiles-v0.md §3.3): a profile is chosen where a terminal
                     // is made or a conversation continued.
                     // Its colour — the dot on the terminals that run under it — and the menu that changes it. `Default`
                     // has none; its place is kept so the names line up.
-                    if let tint = profile.tint {
-                        Menu {
-                            Picker("Color", selection: Binding(get: { tint }, set: { color(profile, $0) })) {
-                                ForEach(ProfileColor.allCases) { choice in
-                                    Label { Text(choice.title) } icon: { Image(nsImage: ProfileSwatch.image(choice)) }.tag(choice)
+                    Group {
+                        if let tint = profile.tint {
+                            Menu {
+                                Picker("Color", selection: Binding(get: { tint }, set: { color(profile, $0) })) {
+                                    ForEach(ProfileColor.allCases) { choice in
+                                        Label { Text(choice.title) } icon: { Image(nsImage: ProfileSwatch.image(choice)) }.tag(choice)
+                                    }
                                 }
+                                .pickerStyle(.inline)
+                            } label: {
+                                // A menu's button draws a picture, not a view of ours.
+                                Image(nsImage: ProfileSwatch.image(tint))
                             }
-                            .pickerStyle(.inline)
-                        } label: {
-                            // A menu's button draws a picture, not a view of ours.
-                            Image(nsImage: ProfileSwatch.image(tint))
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                            .help("Color")
+                            .accessibilityLabel("Color: \(tint.title)")
+                        } else {
+                            Color.clear
                         }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 16)
-                        .help("Color")
-                        .accessibilityLabel("Color: \(tint.title)")
-                    } else {
-                        Color.clear.frame(width: 16, height: 16)
                     }
-                    // The device Claude Code says it is under it (docs/profiles-v0.md §3.5), once it has run there.
-                    Text(profile.name).lineLimit(1).truncationMode(.middle).help(profile.device.map(DeviceID.help) ?? profile.name)
-                    Text(ProfileWords.who(profile) + (profile.isolated == true ? " · Isolated" : "") + (profile.telemetryOff ? " · Telemetry Off" : "")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
-                    Text(profile.proxy == nil && profileNodeID != nil ? "This Node" : profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
+                    .frame(width: 16, height: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        // The device Claude Code says it is under it (docs/profiles-v0.md §3.5), once it has run there.
+                        Text(profile.name).fixedSize(horizontal: false, vertical: true).help(profile.device.map(DeviceID.help) ?? profile.name)
+                        // Who is signed in, what is set for it, and where what runs under it leaves from: this Mac, or
+                        // where its own proxy lets traffic out.
+                        Text(Self.detail(profile, onNode: profileNodeID != nil)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     if !profile.isDefault || agent == .claude || agent == .codex {
-                        if agent == .codex, let authJSON {
-                            Button("auth.json…") { authJSON(profile) }.controlSize(.small)
+                        HStack(spacing: 6) {
+                            if agent == .codex, let authJSON {
+                                Button("auth.json…") { authJSON(profile) }
+                            }
+                            // Claude Code's profiles only: the key signs its own browser in to claude.ai (§3.4).
+                            if profile.paysByKey, let apiKey {
+                                Button("API Key…") { apiKey(profile) }
+                            }
+                            // One that pays by a key has nobody to sign in to claude.ai.
+                            if agent == .claude, !profile.paysByKey, let sessionKey {
+                                Button("Session Key…") { sessionKey(profile) }
+                                    .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
+                            }
+                            Button("Proxy…") { proxy(profile) }
+                            Menu {
+                                rowMenu(profile)
+                            } label: { Image(systemName: "ellipsis") }
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 22)
+                            .help("More").accessibilityLabel("More")
                         }
-                        // Claude Code's profiles only: the key signs its own browser in to claude.ai (§3.4).
-                        if profile.paysByKey, let apiKey {
-                            Button("API Key…") { apiKey(profile) }.controlSize(.small)
-                        }
-                        // One that pays by a key has nobody to sign in to claude.ai.
-                        if agent == .claude, !profile.paysByKey, let sessionKey {
-                            Button("Session Key…") { sessionKey(profile) }.controlSize(.small)
-                                .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
-                        }
-                        if agent == .claude, profile.isolated == true, let copies {
-                            Button("Copies…") { copies(profile) }.controlSize(.small)
-                                .help("这个配置从 Default 复制了哪些技能、插件、MCP 与设置。")
-                        }
-                        Button("Proxy…") { proxy(profile) }.controlSize(.small)
-                        if profile.isDefault && agent == .claude, resetIdentity != nil {
-                            Button("Reset Identity…") { resettingIdentity = true }.controlSize(.small)
-                        } else if !profile.isDefault {
-                            Button("Delete…") { remove(profile) }.controlSize(.small)
-                        }
+                        .controlSize(.small).fixedSize()
                     }
                 }
-                .contextMenu {
-                    // For the terminals started under it from now on: `DISABLE_TELEMETRY=1` when off.
-                    if agent == .claude, !profile.isDefault, let telemetry {
-                        Toggle("Telemetry", isOn: Binding(get: { !profile.telemetryOff }, set: { telemetry(profile, $0) }))
-                    }
-                }
+                .contextMenu { rowMenu(profile) }
                 if let checkHealth {
                     let key = "\(agent.rawValue).\(profile.id)"
                     HStack(alignment: .top, spacing: 10) {
@@ -773,10 +810,6 @@ struct ProfilesSection: View {
             if let error { Text(error).font(.callout).foregroundStyle(.red) }
         } header: {
             Text("\(agent.title) Profiles")
-        } footer: {
-            if profiles.creatable {
-                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。用哪个配置在开终端的地方选：新建终端的面板里有一行 Profile，默认是上次用的；恢复一段对话默认回到它上次所在的配置，要换就用右键菜单里的 Resume As。新建之后在它名下开一个终端，没登录的配置会直接从登录开始。每个配置有一个颜色（名字前的圆点，点它可以换）：在它名下运行的终端，列表和底栏里带着同色的亮点。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。每个配置还有它自己的浏览器——一个单独的浏览器窗口，登录态和指纹都是它自己的，agent 的浏览器工具和登录页都在里面；有代理的配置，浏览器和 agent 从同一个代理出去。")
-            }
         }
         .confirmationDialog("重置 Default 的身份信息？", isPresented: $resettingIdentity) {
             Button("Reset Identity", role: .destructive) { resetIdentity?() }

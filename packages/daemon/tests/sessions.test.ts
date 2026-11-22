@@ -134,9 +134,28 @@ describe("the Mac's coding sessions", () => {
     writeFileSync(index, line({ id: "x1", thread_name: "Run tests", updated_at: "2026-09-26T12:02:00Z" }) + "\n" + line({ id: "other", thread_name: "Other" }) + "\n" + line({ id: "x1", thread_name: "Run the tests", updated_at: "2026-09-26T12:03:00Z" }) + "\n{half");
     expect(by()).toMatchObject({ c1: "Fix the login form", x1: "Run the tests" });
     expect(monitor.find("codex", "x1")?.named).toBe(true);
+    // Since 0.169 Codex keeps the name in its state database instead (the highest `state_<n>.sqlite`), which comes first.
+    for (const [file, name] of [["state_4.sqlite", "Old layout"], ["state_5.sqlite", "Run every test"]] as const) {
+      const db = new DatabaseSync(join(dirname(sources.codexSessions), file));
+      db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT)");
+      db.prepare("INSERT INTO threads VALUES (?, ?), (?, ?)").run("x1", name, "unnamed", null);
+      db.close();
+    }
+    expect(by().x1).toBe("Run every test");
     // The user's own name for it here still comes first.
     titles.rename("codex", "x1", "Mine");
     expect(by().x1).toBe("Mine");
+  });
+
+  it("a session given a new id keeps its title and the user's name for it", () => {
+    const { data } = fixture();
+    const titles = new SessionTitles(data, () => NOW);
+    titles.note("claude-code", "old-id", "Fix login");
+    titles.rename("claude-code", "old-id", "Mine");
+    titles.reidentified("claude-code", "old-id", "new-id");
+    expect([titles.get("claude-code", "new-id"), titles.custom("claude-code", "new-id"), titles.custom("claude-code", "old-id"), titles.ran("claude-code", "old-id")]).toEqual(["Fix login", "Mine", null, false]);
+    titles.reidentified("claude-code", "nobody", "other");
+    expect(titles.ran("claude-code", "other")).toBe(false);
   });
 
   it("does not give back a kept title that is only the agent's own name (2026-11-21)", () => {

@@ -20,7 +20,9 @@ export class ProfileBrowsers {
   constructor(private readonly make: ProfileBrowserMaker, private readonly exits: Pick<ExitPool, "address">,
               /** Each profile's way out now, by its key: its own proxy, or none (this Mac's own way out). Null:
                *  no such profile (the Mac's own has no key). */
-              private readonly profile: (key: string) => { readonly proxy: ProxySetting | null } | null) {}
+              private readonly profile: (key: string) => { readonly proxy: ProxySetting | null } | null,
+              /** Removes what profile `key`'s browser kept on disk (setup.ts `removeOwnBrowserFiles`). */
+              private readonly forget?: (key: string) => void) {}
 
   /** The browser of profile `key`; null when there is no such profile. One made for a proxy that has since been
    *  changed, set or taken away is shut down and made anew: its traffic is not to go the old way. */
@@ -51,6 +53,12 @@ export class ProfileBrowsers {
     const was = this.made.get(key);
     this.made.delete(key);
     if (was) await this.shut(was.browser);
+  }
+
+  /** The profile is removed: its browser stopped, then its folders (cookies, sign-ins, fingerprint) deleted. */
+  async remove(key: string): Promise<void> {
+    await this.drop(key);
+    this.forget?.(key);
   }
 
   async stop(): Promise<void> {

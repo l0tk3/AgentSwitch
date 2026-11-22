@@ -43,6 +43,10 @@ export const BRIDGE_SCRIPT = fileURLToPath(new URL(`./bridgeClient.${EXT}`, impo
 
 /** A call on a tab a person holds waits this long for the hand-back (browser-v0 §1 接手). */
 export const HOLD_WAIT_MS = 120_000;
+/** A call handed to Playwright MCP that has not answered by then is given up (Codex gives up on a tool after 300 s):
+ *  the session's calls run one at a time, so one that never answers would hold up every later one for good. */
+export const CALL_DEADLINE_MS = 330_000;
+export const CALL_TIMED_OUT = "AgentSwitch's shared browser gave up on this call: the browser did not answer in time. Try again.";
 /** Bridge processes of one session kept at once (an agent restarting its tool leaves the old one to time out). */
 const MAX_CONNECTIONS = 8;
 /** The box of the element a call acts on is given this long; the call does not wait longer for it. */
@@ -127,6 +131,8 @@ export type BrowserAgentsOptions = {
   readonly dir: string;
   readonly audit?: BrowserAudit;
   readonly holdWaitMs?: number;
+  /** Tests: how long a call handed to the engine may take (`CALL_DEADLINE_MS`). */
+  readonly callDeadlineMs?: number;
   /** Tests: how long a file handed to a page is kept (`UPLOAD_KEEP_MS`). */
   readonly uploadKeepMs?: number;
   readonly log?: (line: string) => void;
@@ -190,6 +196,8 @@ type Connection = {
   readonly waits: Map<JsonRpcId, () => void>;
   /** `tools/list` requests of a session with no gate, by id: their answers are the model's list (`directTools`). */
   readonly listing: Set<JsonRpcId>;
+  /** Calls given up while the engine had them (cancelled by the agent, or past the deadline): a late answer is dropped. */
+  readonly abandoned: Set<JsonRpcId>;
   closed: boolean;
 };
 
@@ -339,7 +347,7 @@ export class BrowserAgents {
     while (session.connections.has(connId)) connId = randomBytes(4).toString("hex");
     const outputDir = join(this.agentsDir, `${session.id}-${connId}`);
     mkdirSync(outputDir, { recursive: true, mode: 0o700 });
-    const conn: Connection = { id: connId, session, outputDir, out: send, onEnd, engine: null, pending: new Map(), queued: new Set(), cancelled: new Set(), waits: new Map(), listing: new Set(), closed: false };
+    const conn: Connection = { id: connId, session, outputDir, out: send, onEnd, engine: null, pending: new Map(), queued: new Set(), cancelled: new Set(), waits: new Map(), listing: new Set(), abandoned: new Set(), closed: false };
     session.connections.set(connId, conn);
     try {
       conn.engine = await this.opts.engine({ owner: session.owner, outputDir, send: (m) => this.fromEngine(conn, m) });
@@ -403,6 +411,9 @@ export class BrowserAgents {
     if (message.method === "notifications/cancelled") {
       const id = (message.params as { requestId?: JsonRpcId } | undefined)?.requestId;
       if (id !== undefined && (conn.queued.has(id) || conn.waits.has(id))) { conn.cancelled.add(id); conn.waits.get(id)?.(); }
+      // Already with the engine: Playwright MCP sends no answer to a cancelled call, so the queue is let go of here.
+      const waiting = id !== undefined ? conn.pending.get(id) : undefined;
+      if (waiting) { conn.pending.delete(id!); conn.abandoned.add(id!); waiting(null); }
     }
     conn.engine.receive(message);
   }
@@ -417,6 +428,7 @@ export class BrowserAgents {
     if (isAnswer(message)) {
       const waiting = conn.pending.get(message.id!);
       if (waiting) { conn.pending.delete(message.id!); waiting(message); return; }
+      if (conn.abandoned.delete(message.id!)) return;
       if (conn.listing.delete(message.id!)) { this.send(conn, directTools(message)); return; }
     }
     this.send(conn, message);
@@ -642,7 +654,17 @@ export class BrowserAgents {
   private forward(conn: Connection, request: JsonRpcMessage): Promise<JsonRpcMessage | null> {
     return new Promise((resolve) => {
       if (conn.closed || !conn.engine) { resolve(null); return; }
-      conn.pending.set(request.id!, resolve);
+      const id = request.id!;
+      const timer = setTimeout(() => {
+        if (conn.pending.get(id) !== done) return;
+        conn.pending.delete(id);
+        conn.abandoned.add(id);
+        this.log("browser: agent call gave no answer in time; given up so the session's next calls can run");
+        resolve(failure(id, CALL_TIMED_OUT));
+      }, this.opts.callDeadlineMs ?? CALL_DEADLINE_MS);
+      timer.unref?.();
+      const done = (answer: JsonRpcMessage | null) => { clearTimeout(timer); resolve(answer); };
+      conn.pending.set(id, done);
       conn.engine.receive(request);
     });
   }
