@@ -171,8 +171,17 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .s-classic .msg.forme { background: color-mix(in srgb, var(--amber) 9%, transparent); }
 .av { width: 26px; height: 26px; display: grid; place-items: center; color: var(--ink); align-self: start; margin-top: 1px; }
 .s-pixel .av { border: 1px solid var(--ink4); }
-.s-classic .av { border-radius: 8px; background: color-mix(in srgb, var(--c, var(--ink3)) 22%, var(--raise)); color: var(--c, var(--ink)); }
-.s-classic .av .ci { width: 15px; height: 15px; }
+.s-classic .av { border-radius: 8px; background: var(--raise); color: var(--ink); }
+.av.sm { width: 22px; height: 22px; position: relative; flex: none; }
+.av.sm .on { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 12px; height: 12px; background: var(--bg); }
+.s-classic .av.sm .on { border-radius: 50%; }
+.s-pixel .av.sm .on .st.busy { font-size: 10px; }
+.amk { color: var(--ink3); align-self: center; display: inline-grid; }
+.s-classic .amk .ci { width: 13px; height: 13px; }
+.gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 14px 10px; padding: 16px; background: var(--bg); color: var(--ink); border-radius: 10px; }
+.gal div { display: flex; flex-direction: column; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--ink2); }
+.s-classic .gal div { font: 11px var(--ui); }
+.gal .av { width: 34px; height: 34px; align-self: center; }
 .av.you { color: var(--bg); background: var(--ink); border-color: var(--ink); font: 700 10px var(--mono); }
 .s-classic .av.you { background: var(--signal); color: #fff; font: 700 10px var(--ui); }
 .mh { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -351,6 +360,14 @@ button svg { pointer-events: none; }
 <li><b>一行只写谁和什么时候</b>：agent 是名字旁的图，模型、节点、目录在名片里；投递状态只在还没送到或送不到时出现，都处理完了就不写。</li>
 <li><b>置顶笔记</b>：房间名下面那一段，所有成员能读能改（第一版的“临时协作区域”）。</li>
 </ul>
+<h2>// 头像</h2>
+<ul>
+<li>每个席位一张 5×5 的图案，左右对称，<b>由名字算出来</b>：同一个名字在哪台设备上都是同一张，不用存、不用选。</li>
+<li>十五个格子决定一张（三列五行，另两列是镜像），去掉太空、太满、整排整列一样的，剩下两万多种；同一个房间里再保证两两至少差六格。</li>
+<li>只用墨色：颜色留给配置和状态。agent 是名字后面那个小图标。你自己是固定的 <code>YOU</code>。</li>
+<li>两种外观是同一张图案，像素外观画方格，经典外观画圆点。下面是 48 个名字各自的样子，切换上面的 Pixel / Classic 一起变。</li>
+</ul>
+<div id="gallery"></div>
 <h2>// 两种外观各自怎么画</h2>
 <ul>
 <li><b>Pixel</b>（ui-v0 §7）：等宽、方角、1px 实线；分组标签 <code>// Label</code>；选中是行左 3px 信号粉竖条加序号；按钮 <code>[ Word ]</code>；单选 <code>&lt;x&gt;</code>、复选 <code>[x]</code>；浮层是 1px 墨色框加抖动硬阴影；agent 是 5×5 像素图；提到人是加粗带下划线，提到你是反色块。正文不加工，用系统字体。</li>
@@ -421,6 +438,9 @@ const WORD = { busy: ["Busy", "Working"], waiting: ["Waiting", "Needs You"], idl
 const word = (st) => WORD[st][classic() ? 1 : 0];
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+const GALLERY = ["daemon", "mac-app", "ios-app", "android", "docs", "review", "dayhub", "web", "api", "gate", "router", "infra", "deploy", "tests", "lint", "design", "search", "billing",
+  "auth", "sync", "cache", "queue", "worker", "mailer", "notes", "editor", "player", "shop", "cart", "admin", "report", "metrics", "logs", "backup", "migrate", "release",
+  "mac-app-2", "ios-app-2", "daemon-2", "kit", "widgets", "proxy", "clash", "browser", "files", "terminal", "pairing", "updater"];
 // ---------- made-up data ----------
 const SEATS = {
   you: { id: "you", name: "you", you: true },
@@ -469,9 +489,35 @@ const lastOf = (r) => { const m = [...r.msgs].reverse().find((x) => x.text || x.
 
 // ---------- drawing ----------
 function spot(seat) { return seat.color ? `<i class="spot" style="--c: var(--p-${seat.color})" title="配置 ${seat.profile}"></i>` : ""; }
+/** A seat's face (2026-11-22, user: 头像可以做的有些识别度，简洁、有辨识性，然后头像排列变化不同尽可能的多): a pattern on a 5 × 5
+ *  grid, mirrored left to right, made from the seat's name — the same name is the same face on every device, and no
+ *  two names share one. Fifteen cells decide it (three columns of five); the ones kept are neither nearly empty nor
+ *  nearly full, and never a plain bar or a full frame, so each reads as a shape. Ink alone: colour stays the
+ *  profile's and the states' (§7.2 第 11 条, §9). The agent is the small picture after the name. */
+function faceRows(name) {
+  let h = 2166136261;
+  const next = () => { for (const ch of name) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } h ^= h >>> 13; h = Math.imul(h, 2654435761) >>> 0; return h; };
+  for (let tries = 0; tries < 40; tries++) {
+    const bits = next() & 0x7fff;
+    const lit = (x, y) => (bits >> (y * 3 + x)) & 1;
+    const cells = Array.from({ length: 5 }, (_, y) => [0, 1, 2, 1, 0].map((x) => lit(x, y)));
+    const count = cells.flat().reduce((a, b) => a + b, 0);
+    const rowsSame = cells.every((r) => r.join("") === cells[0].join("")), colsSame = [0, 1, 2].every((x) => cells.every((r) => r[x] === cells[0][x]));
+    if (count < 9 || count > 17 || rowsSame || colsSame) continue;
+    return cells.map((r) => r.map((c) => (c ? "#" : ".")).join(""));
+  }
+  return ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"];
+}
+function face(name, px = 4) {
+  const rows = faceRows(name);
+  if (!classic()) return P.sprite(rows, { px });
+  // The same cells as round dots: only the drawing changes.
+  const step = px + 1, r = px / 2;
+  return `<svg class="fdots" width="${5 * step - 1}" height="${5 * step - 1}" viewBox="0 0 ${5 * step - 1} ${5 * step - 1}" fill="currentColor">${rows.map((row, y) => [...row].map((c, x) => (c === "#" ? `<rect x="${x * step}" y="${y * step}" width="${px}" height="${px}" rx="${r * 0.7}"/>` : "")).join("")).join("")}</svg>`;
+}
 function avatar(seat) {
   if (seat.you) return `<span class="av you">YOU</span>`;
-  return `<span class="av"${seat.color ? ` style="--c: var(--p-${seat.color})"` : ""} title="${AG[seat.agent]}">${agentMark(seat.agent, 3)}</span>`;
+  return `<span class="av" title="${seat.name}">${face(seat.name)}</span>`;
 }
 function rich(text) {
   return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/@([a-z][\w-]*)/g, (m, id) => (SEATS[id] || id === "all" ? `<span class="at${id === "you" ? " me" : ""}" data-card="${id}">@${id}</span>` : m));
@@ -496,7 +542,7 @@ function message(m, prev, r, narrow) {
     ${cont ? "<span></span>" : avatar(seat)}
     <div>
       ${quoted ? `<div class="quote"><span>${quoted.from === "you" ? "You" : quoted.from}</span><span class="cut">${esc(quoted.text.replace(/`/g, "").replace(/@[a-z][\w-]*\s*/g, ""))}</span></div>` : ""}
-      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : seat.name}</span>${spot(seat)}<span class="meta">${m.t}</span><span class="num">#${m.n}</span></div>`}
+      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : seat.name}</span>${seat.you ? "" : `<span class="amk" title="${AG[seat.agent]}">${agentMark(seat.agent, 2)}</span>`}${spot(seat)}<span class="meta">${m.t}</span><span class="num">#${m.n}</span></div>`}
       <div class="body">${rich(m.text)}</div>
       ${m.file ? `<div class="file">${icon("clip", { px: 1, size: 14 })}<span class="cut">${esc(m.file)}</span></div>` : ""}
       ${receipts(m)}
@@ -534,12 +580,12 @@ function memberRows(r) {
   const by = {};
   for (const id of r.seats) if (id !== "you") (by[SEATS[id].node] ||= []).push(SEATS[id]);
   return Object.entries(by).map(([node, seats]) => `<div class="grp"><span class="label">${node}</span></div>${seats.map((s) =>
-    `<button class="mb" data-card="${s.id}">${state(s.st)}<span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${s.model} · ${word(s.st)}${s.started ? " · Started by " + s.by : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
+    `<button class="mb" data-card="${s.id}"><span class="av sm">${face(s.name, 3)}<span class="on">${state(s.st)}</span></span><span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${s.model} · ${word(s.st)}${s.started ? " · Started by " + s.by : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
 }
 function card(id, style) {
   const s = SEATS[id];
   if (!s || s.you) return "";
-  return `<div class="float card" style="${style}"><h3>${state(s.st)}<span class="grow">@${s.name}</span>${spot(s)}</h3>
+  return `<div class="float card" style="${style}"><h3><span class="av">${face(s.name)}</span><span class="grow">@${s.name}</span>${state(s.st)}${spot(s)}</h3>
     <dl><dt>Agent</dt><dd>${AG[s.agent]}</dd><dt>Model</dt><dd>${s.model}</dd><dt>Profile</dt><dd>${s.profile}</dd><dt>Node</dt><dd>${s.node}</dd>
     <dt>Folder</dt><dd class="mono" title="${s.dir}">${s.dir}</dd><dt>Mode</dt><dd>${s.mode}</dd><dt>State</dt><dd>${word(s.st)}</dd><dt>Seated By</dt><dd>${s.by === "you" ? "You" : s.by}</dd></dl>
     <div class="acts"><button class="btn" data-mention="${s.id}">Mention</button><button class="btn" data-act="closecard">Open Terminal</button><button class="btn danger" data-act="closecard">Remove</button></div></div>`;
@@ -663,6 +709,7 @@ function render(keep) {
   document.documentElement.style.colorScheme = "dark";
   document.getElementById("stage").innerHTML = (S.view !== "phone" ? mac() : "") + (S.view !== "mac" ? phone() : "");
   for (const el of document.querySelectorAll("[data-tl]")) { const kept = scrolls.find(([id]) => id === el.closest(".app").id); el.scrollTop = kept ? kept[1] : el.scrollHeight; }
+  document.getElementById("gallery").innerHTML = `<div class="app ${classic() ? "s-classic tok-cd" : "s-pixel tok-pd"}"><div class="gal">${GALLERY.map((n) => `<div><span class="av">${face(n, 5)}</span>${n}</div>`).join("")}</div></div>`;
   for (const [id, key] of [["c-style", "style"], ["c-view", "view"], ["c-theme", "theme"]]) for (const b of document.querySelectorAll(`#${id} button`)) b.classList.toggle("on", b.dataset.v === S[key]);
   if (focus) { const t = document.querySelector(`#${focus} [data-draft]`); if (t) { t.focus(); t.setSelectionRange(at, at); grow(t); } }
   const u = new URL(location); u.search = new URLSearchParams({ style: S.style, theme: S.theme, view: S.view, room: S.room, screen: S.phoneScreen }); history.replaceState(null, "", u);
