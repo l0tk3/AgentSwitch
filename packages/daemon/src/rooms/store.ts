@@ -13,6 +13,8 @@ import { faceOf, type Face } from "./face.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
 export const MAX_ROOMS = 100, MAX_SEATS = 16, MAX_NAME = 60, MAX_TOPIC = 300, MAX_TEXT = 16_000;
+/** §7: the rounds between sessions the user is told of, and how many sessions one session may start. */
+export const ROUNDS_LIMIT = 6, MAX_STARTED = 4;
 
 export type Receipt = "sent" | "queued" | "delivered" | "ended";
 
@@ -36,6 +38,8 @@ export type Seat = {
   readonly canAdd: boolean;
   /** Started by another session: its switch stays off. */
   readonly byAgent: boolean;
+  /** The terminal of the session that started it, when one did. */
+  readonly starter?: string;
   /** When it left; its handle and face stay with what it said. */
   readonly left?: number;
   readonly was?: SeatWas;
@@ -64,6 +68,10 @@ export type Room = {
   readonly lastSeq: number;
   /** The last one the user has seen. */
   readonly readSeq: number;
+  /** Messages from one session to another, in a row with no word from the user, at which the user is told (§7). */
+  readonly roundsLimit: number;
+  /** The message up to which the user has seen the rounds go by (`OK`): counted from there again. */
+  readonly roundsFrom: number;
   /** What has not arrived: message number → handle → where it is. */
   readonly receipts: Readonly<Record<string, Readonly<Record<string, Receipt>>>>;
 };
@@ -123,6 +131,9 @@ export class RoomStore {
 
   // ---- rooms
 
+  /** Whether a terminal's session may bring sessions in: its switch is on in a room it sits in (§6). */
+  mayAdd(terminal: string): boolean { return this.roomsOf(terminal).some((s) => s.seat.canAdd); }
+
   create(o: { readonly name: string; readonly topic?: string; readonly by?: string }): Room {
     if (this.all().size >= MAX_ROOMS) throw new RoomError(409, `房间最多 ${MAX_ROOMS} 个，先删掉不用的`);
     const name = clean(o.name, MAX_NAME);
@@ -131,16 +142,40 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, receipts: {} };
     this.save(room);
     return room;
   }
 
-  update(id: string, o: { readonly name?: string; readonly topic?: string; readonly paused?: boolean }): Room {
+  update(id: string, o: { readonly name?: string; readonly topic?: string; readonly paused?: boolean; readonly roundsLimit?: number }): Room {
     const room = this.get(id);
     const name = o.name === undefined ? room.name : clean(o.name, MAX_NAME);
     if (!name) throw new RoomError(400, "房间要有名字");
-    return this.save({ ...room, name, topic: o.topic === undefined ? room.topic : clean(o.topic, MAX_TOPIC), paused: o.paused ?? room.paused });
+    const roundsLimit = o.roundsLimit === undefined ? room.roundsLimit : Math.min(Math.max(Math.floor(o.roundsLimit), 2), 100);
+    return this.save({ ...room, name, topic: o.topic === undefined ? room.topic : clean(o.topic, MAX_TOPIC), paused: o.paused ?? room.paused, roundsLimit });
+  }
+
+  /** How many messages one session sent another since the user last spoke or said `OK` (§7): at the room's limit the
+   *  user is told; nothing stops. */
+  rounds(id: string): number {
+    const room = this.get(id);
+    const all = this.messagesOf(id);
+    let from = room.roundsFrom;
+    for (const m of all) if (m.from === YOU && m.seq > from) from = m.seq;
+    return all.filter((m) => m.seq > from && m.to.some((h) => h !== YOU)).length;
+  }
+
+  /** The user has seen the rounds go by: counted from here again. */
+  roundsSeen(id: string): Room {
+    const room = this.get(id);
+    return room.roundsFrom === room.lastSeq ? room : this.save({ ...room, roundsFrom: room.lastSeq });
+  }
+
+  /** The sessions a terminal's session started that still sit in a room. */
+  startedBy(terminal: string): number {
+    const found = new Set<string>();
+    for (const room of this.all().values()) for (const s of room.seats) if (s.starter === terminal && s.left === undefined && s.terminal) found.add(s.terminal);
+    return found.size;
   }
 
   remove(id: string): void {
@@ -154,7 +189,7 @@ export class RoomStore {
   // ---- seats
 
   /** A session takes a seat. One that sat here before takes its old seat again, name and face as they were. */
-  seat(id: string, o: { readonly terminal: string; readonly was: SeatWas; readonly by?: string; readonly canAdd?: boolean; readonly byAgent?: boolean }): Seat {
+  seat(id: string, o: { readonly terminal: string; readonly was: SeatWas; readonly by?: string; readonly canAdd?: boolean; readonly byAgent?: boolean; readonly starter?: string }): Seat {
     const room = this.get(id);
     const old = room.seats.find((s) => s.terminal === o.terminal);
     if (old && old.left === undefined) throw new RoomError(409, `这个会话已经在房间里了（@${old.handle}）`);
@@ -162,13 +197,13 @@ export class RoomStore {
     const byAgent = o.byAgent ?? old?.byAgent ?? false;
     if (old) {
       const { left: _left, ...rest } = old;
-      const back: Seat = { ...rest, joinedAt: this.now(), addedBy: o.by ?? YOU, was: o.was, byAgent, canAdd: byAgent ? false : (o.canAdd ?? old.canAdd) };
+      const back: Seat = { ...rest, joinedAt: this.now(), addedBy: o.by ?? YOU, was: o.was, byAgent, canAdd: byAgent ? false : (o.canAdd ?? old.canAdd), ...(o.starter ? { starter: o.starter } : {}) };
       this.save({ ...room, seats: room.seats.map((s) => (s === old ? back : s)) });
       return back;
     }
     const handle = freeHandle(handleFrom(o.was.name, handleFrom(o.was.agent)), new Set(room.seats.map((s) => s.handle)));
     const face = faceOf(handle, room.seats.flatMap((s) => (s.face && s.left === undefined ? [s.face] : [])));
-    const seat: Seat = { handle, kind: "session", terminal: o.terminal, face, joinedAt: this.now(), addedBy: o.by ?? YOU, canAdd: byAgent ? false : (o.canAdd ?? false), byAgent, was: o.was };
+    const seat: Seat = { handle, kind: "session", terminal: o.terminal, face, joinedAt: this.now(), addedBy: o.by ?? YOU, canAdd: byAgent ? false : (o.canAdd ?? false), byAgent, was: o.was, ...(o.starter ? { starter: o.starter } : {}) };
     this.save({ ...room, seats: [...room.seats, seat] });
     return seat;
   }
@@ -326,7 +361,7 @@ function seatFrom(v: unknown): Seat | null {
   return {
     handle: o.handle, kind: o.kind, ...(str(o.terminal) ? { terminal: o.terminal } : {}), face, joinedAt: o.joinedAt,
     addedBy: str(o.addedBy) ? o.addedBy : YOU, canAdd: o.canAdd === true, byAgent: o.byAgent === true,
-    ...(num(o.left) ? { left: o.left } : {}), ...(was ? { was } : {}),
+    ...(num(o.left) ? { left: o.left } : {}), ...(was ? { was } : {}), ...(str(o.starter) ? { starter: o.starter } : {}),
   };
 }
 
@@ -344,7 +379,8 @@ function roomFrom(v: unknown): Room | null {
   }
   return {
     id: o.id, name: o.name, topic: str(o.topic) ? o.topic : "", createdAt: num(o.createdAt) ? o.createdAt : 0, createdBy: str(o.createdBy) ? o.createdBy : YOU,
-    paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0, receipts,
+    paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
+    roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
   };
 }
 

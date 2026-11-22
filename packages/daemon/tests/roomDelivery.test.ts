@@ -93,20 +93,20 @@ describe("giving a room's messages to sessions", () => {
 });
 
 describe("the Chatroom Kit", () => {
-  it("is there only while the session sits in a room", () => {
+  it("is there only while the session sits in a room", async () => {
     const { kit, store, room } = made();
     expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members"]);
     expect(kit.tools("t9")).toEqual([]);
-    expect(kit.call("t9", "room_post", { text: "hi" })).toMatchObject({ isError: true, text: expect.stringContaining("sits in no Chat Room") });
+    expect((await kit.call("t9", "room_post", { text: "hi" }))).toMatchObject({ isError: true, text: expect.stringContaining("sits in no Chat Room") });
     const before = kit.version("t1");
     store.unseat(room.id, "daemon");
     expect(kit.version("t1")).not.toBe(before);
     expect(kit.tools("t1")).toEqual([]);
   });
 
-  it("posts as the calling session, tells it what each addressee's state means, and reads the room", () => {
+  it("posts as the calling session, tells it what each addressee's state means, and reads the room", async () => {
     const { kit, store, room, receipts } = made();
-    const sent = kit.call("t1", "room_post", { text: "接口改完了 @mac-app，@you 请看", to: ["ios", "nobody"], reply_to: undefined });
+    const sent = (await kit.call("t1", "room_post", { text: "接口改完了 @mac-app，@you 请看", to: ["ios", "nobody"], reply_to: undefined }));
     expect(sent.isError).toBeUndefined();
     expect(sent.text).toContain("#1 sent in \"重构登录模块\"");
     expect(sent.text).toContain("@mac-app: busy: it gets the message when its current turn ends");
@@ -114,29 +114,29 @@ describe("the Chatroom Kit", () => {
     expect(sent.text).toContain("@you: the user sees it in the room");
     expect(store.messages(room.id)[0]).toMatchObject({ from: "daemon", to: ["you", "mac-app", "ios"] });
     expect(receipts()).toEqual({ 1: { "mac-app": "queued", ios: "sent" } });
-    expect(kit.call("t1", "room_post", { text: "记一笔" }).text).toContain("addressed to nobody");
-    expect(kit.call("t2", "room_post", { text: "@all hi" })).toMatchObject({ isError: true });
-    expect(kit.call("t1", "room_nope", {})).toMatchObject({ isError: true });
+    expect((await kit.call("t1", "room_post", { text: "记一笔" })).text).toContain("addressed to nobody");
+    expect((await kit.call("t2", "room_post", { text: "@all hi" }))).toMatchObject({ isError: true });
+    expect((await kit.call("t1", "room_nope", {}))).toMatchObject({ isError: true });
 
-    const read = kit.call("t2", "room_read", { from: "@daemon", limit: 5 }).text;
+    const read = (await kit.call("t2", "room_read", { from: "@daemon", limit: 5 })).text;
     expect(read).toContain("2 of 2 messages from @daemon");
     expect(read).toContain("#1 11-23 20:41 @daemon → @you @mac-app @ios\n接口改完了");
-    expect(kit.call("t2", "room_read", { search: "一笔", after: 1 }).text).toContain("1 of 1 message after #1");
+    expect((await kit.call("t2", "room_read", { search: "一笔", after: 1 })).text).toContain("1 of 1 message after #1");
 
-    const members = kit.call("t2", "room_members", {}).text;
+    const members = (await kit.call("t2", "room_members", {})).text;
     expect(members).toContain("4 members");
     expect(members).toContain("@mac-app (you) — Claude Code · Fable 5.2 · profile Work · /Users/x/proj/mac-app · mode acceptEdits");
     expect(members).toContain("@you — the user");
   });
 
-  it("asks which room when the session sits in several", () => {
+  it("asks which room when the session sits in several", async () => {
     const { kit, store } = made();
     const other = store.create({ name: "Release" });
     store.seat(other.id, { terminal: "t1", was: { agent: "codex", name: "daemon", cwd: "/w", model: null, profile: null } });
-    expect(kit.call("t1", "room_members", {})).toMatchObject({ isError: true, text: expect.stringContaining("say which with `room`") });
-    expect(kit.call("t1", "room_members", { room: "release" }).text).toContain("Room \"Release\"");
-    expect(kit.call("t1", "room_members", { room: other.id }).text).toContain("Room \"Release\"");
-    expect(kit.call("t1", "room_members", { room: "nope" })).toMatchObject({ isError: true });
+    expect((await kit.call("t1", "room_members", {}))).toMatchObject({ isError: true, text: expect.stringContaining("say which with `room`") });
+    expect((await kit.call("t1", "room_members", { room: "release" })).text).toContain("Room \"Release\"");
+    expect((await kit.call("t1", "room_members", { room: other.id })).text).toContain("Room \"Release\"");
+    expect((await kit.call("t1", "room_members", { room: "nope" }))).toMatchObject({ isError: true });
   });
 });
 
@@ -163,5 +163,76 @@ describe("a terminal's own programs", () => {
     expect((await ask("t1", { op: "call", name: "room_post", args: { text: "@ios 好了" } })).body.text).toContain("#1 sent");
     expect(await ask("t3", { op: "wait" })).toMatchObject({ status: 200, body: { text: expect.stringContaining("@ios 好了") } });
     expect(store.get(room.id).receipts).toEqual({ 1: { ios: "delivered" } });
+  });
+});
+
+describe("bringing sessions in (Can Add Sessions)", () => {
+  function org() {
+    const { store, delivery, room, states } = made();
+    const started: unknown[] = [];
+    const seat = (terminal: string): SeatLive | null => (states.has(terminal) ? { state: states.get(terminal)!, card: { agent: terminal.startsWith("new") ? "codex" : "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: terminal === "t3" ? "bypassPermissions" : "default", node: null } } : null);
+    const kit = new RoomKit({
+      store, seat, delivery, now: () => 10 * 3_600_000,
+      org: () => ({
+        profiles: async () => [{ agent: "claude-code", id: "default", name: "Default", kind: "subscription", health: { status: "healthy", checkedAt: 8 * 3_600_000, message: "" } }, { agent: "codex", id: "abc123", name: "Work", kind: "api", health: null }],
+        models: async () => ({ "claude-code": [{ id: "opus", name: "Opus", description: "Opus 5.5" }], pi: [] }),
+        sessions: async () => ({ running: [{ terminal: "t1", agent: "claude-code", name: "daemon", cwd: "/w/d", state: "idle", profile: null }, { terminal: "t8", agent: "codex", name: "spare", cwd: "/w/s", state: "idle", profile: "Work" }], resumable: [{ agent: "codex", id: "sess-1", title: "fix login", cwd: "/w/l", updatedAt: 9 * 3_600_000, profile: null }] }),
+        check: async (agent, profile) => ({ status: "unhealthy", checkedAt: 1, message: `${agent}/${profile} signed out` }),
+        start: async (req) => { started.push(req); const id = `new${started.length}`; states.set(id, "idle"); return id; },
+      }),
+    });
+    return { kit, store, room, states, started };
+  }
+
+  it("has the organizing tools only with the switch on, and refuses a call the moment it is off", async () => {
+    const { kit, store, room } = org();
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members"]);
+    expect(await kit.call("t1", "profiles", {})).toMatchObject({ isError: true, text: expect.stringContaining("may not add sessions") });
+    store.setCanAdd(room.id, "daemon", true);
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "rooms", "room_create", "room_add", "profiles", "models", "sessions", "profile_check"]);
+    expect((await kit.call("t1", "profiles", {})).text).toBe("2 profiles:\nclaude-code · default · \"Default\" · subscription · healthy, checked 2 h ago\ncodex · abc123 · \"Work\" · API key · not checked yet");
+    expect((await kit.call("t1", "models", { agent: "claude-code" })).text).toBe("claude-code:\n  opus — Opus · Opus 5.5");
+    const sessions = (await kit.call("t1", "sessions", {})).text;
+    expect(sessions).toContain("t1 · claude-code · \"daemon\" · /w/d · idle · (you)");
+    expect(sessions).toContain("codex · sess-1 · \"fix login\" · /w/l · 1 h ago");
+    expect((await kit.call("t1", "profile_check", { agent: "codex", profile: "abc123" })).text).toContain("unhealthy — codex/abc123 signed out");
+    expect((await kit.call("t1", "rooms", {})).text).toContain("\"重构登录模块\"");
+    store.setCanAdd(room.id, "daemon", false);
+    expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true });
+  });
+
+  it("seats a running session, starts new ones one level deep and four at most, and never in bypass from a session that is not", async () => {
+    const { kit, store, room, states, started } = org();
+    store.setCanAdd(room.id, "daemon", true);
+    states.set("t8", "idle");
+    expect((await kit.call("t1", "room_add", { terminal: "t8" })).text).toContain("@t8 now sits in");
+    expect(store.get(room.id).seats.find((s) => s.handle === "t8")).toMatchObject({ addedBy: "daemon", byAgent: false, canAdd: false });
+    expect(await kit.call("t1", "room_add", { terminal: "t1" })).toMatchObject({ isError: true });
+    expect(await kit.call("t1", "room_add", { terminal: "nope" })).toMatchObject({ isError: true });
+    expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w", mode: "bypass" })).toMatchObject({ isError: true, text: expect.stringContaining("bypass") });
+    const added = await kit.call("t1", "room_add", { agent: "codex", cwd: "/w/x", model: "gpt", resume: "sess-1" });
+    expect(added.text).toContain("@new1 now sits in");
+    expect(started).toEqual([{ agent: "codex", cwd: "/w/x", model: "gpt", resume: "sess-1" }]);
+    const child = store.get(room.id).seats.find((s) => s.handle === "new1")!;
+    expect(child).toMatchObject({ byAgent: true, starter: "t1", canAdd: false, addedBy: "daemon" });
+    // One level: the session it started has no organizing tools, and its switch can not be turned on.
+    expect(kit.tools("new1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members"]);
+    expect(() => store.setCanAdd(room.id, "new1", true)).toThrow();
+    for (let i = 0; i < 3; i++) expect((await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).isError).toBeUndefined();
+    expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true, text: expect.stringContaining("the most one session may") });
+    // A session in bypass itself may start one in bypass.
+    store.setCanAdd(room.id, "ios", true);
+    expect((await kit.call("t3", "room_add", { agent: "codex", cwd: "/w", mode: "bypass" })).isError).toBeUndefined();
+  });
+
+  it("makes a room and sits in it, the switch still on", async () => {
+    const { kit, store, room } = org();
+    store.setCanAdd(room.id, "daemon", true);
+    const made = await kit.call("t1", "room_create", { name: "发布检查", topic: "发版前过一遍" });
+    expect(made.text).toContain("Room \"发布检查\"");
+    const other = store.list().find((r) => r.name === "发布检查")!;
+    expect(other).toMatchObject({ topic: "发版前过一遍", createdBy: "daemon" });
+    expect(other.seats.map((s) => [s.handle, s.canAdd])).toEqual([["you", true], ["t1", true]]);
+    expect(await kit.call("t1", "room_create", { name: " " })).toMatchObject({ isError: true });
   });
 });

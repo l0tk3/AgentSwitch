@@ -54,7 +54,7 @@ export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (term
 }
 
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
-const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: z.string().max(MAX_TOPIC * 4).optional(), paused: z.boolean().optional() }).strict();
+const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: z.string().max(MAX_TOPIC * 4).optional(), paused: z.boolean().optional(), roundsLimit: z.number().int().min(2).max(100).optional() }).strict();
 const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boolean().optional() }).strict();
 const SetSeat = z.object({ canAdd: z.boolean() }).strict();
 const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional() }).strict();
@@ -93,6 +93,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     return view;
   });
 
+  const roundsOf = (room: Room): number | null => { const n = rooms.rounds(room.id); return n >= room.roundsLimit ? n : null; };
+
   const summary = (room: Room) => {
     const last = rooms.last(room.id);
     const unread = rooms.unread(room.id);
@@ -103,11 +105,14 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       faces: seats.filter((s) => s.kind === "session").slice(0, 4).map((s) => ({ handle: s.handle, face: s.face })),
       last: last ? { seq: last.seq, from: last.from, text: last.text.slice(0, 200), at: last.at } : null,
       unread: unread.count, forYou: unread.forYou,
+      // Sessions have been talking among themselves for this many messages with no word from the user (§7); null
+      // under the room's limit.
+      rounds: roundsOf(room),
     };
   };
 
   const whole = (room: Room, messages: readonly Message[]) => ({
-    room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq },
+    room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
     seats: seatsOf(room), messages, receipts: room.receipts,
   });
 
@@ -147,7 +152,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       const o = body.data;
-      const room = rooms.update(c.req.param("id"), { ...(o.name === undefined ? {} : { name: o.name }), ...(o.topic === undefined ? {} : { topic: o.topic }), ...(o.paused === undefined ? {} : { paused: o.paused }) });
+      const room = rooms.update(c.req.param("id"), { ...(o.name === undefined ? {} : { name: o.name }), ...(o.topic === undefined ? {} : { topic: o.topic }), ...(o.paused === undefined ? {} : { paused: o.paused }), ...(o.roundsLimit === undefined ? {} : { roundsLimit: o.roundsLimit }) });
       deps.roomsChanged?.(room.id);
       return c.json({ room: summary(room) });
     } catch (err) { return refused(c, err); }
@@ -204,13 +209,18 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     kit.met(id);
     if (asked.op === "tools") return c.json({ tools: kit.tools(id), version: kit.version(id) });
     if (asked.op === "call") {
-      const answer = kit.call(id, asked.name, asked.args ?? {});
+      const answer = await kit.call(id, asked.name, asked.args ?? {});
       return c.json(answer);
     }
     // Held until the tools this terminal has are others than the ones it knows of, or a while has passed.
     const until = Date.now() + (deps.roomWatchMs ?? WATCH_MS);
     while (kit.version(id) === asked.version && Date.now() < until && !c.req.raw.signal.aborted) await new Promise((r) => setTimeout(r, Math.min(WATCH_STEP_MS, deps.roomWatchMs ?? WATCH_STEP_MS)));
     return c.json({ version: kit.version(id) });
+  });
+
+  // The user has seen the sessions' rounds go by (`OK`): counted from here again. Nothing was stopped.
+  app.post("/rooms/:id/rounds/ok", (c) => {
+    try { rooms.roundsSeen(c.req.param("id")); return c.json({ ok: true }); } catch (err) { return refused(c, err); }
   });
 
   app.post("/rooms/:id/read", async (c) => {

@@ -34,6 +34,7 @@ import { RoomDelivery } from "./rooms/delivery.js";
 import { RoomKit } from "./rooms/kit.js";
 import type { SeatLookup } from "./rooms/state.js";
 import { seatLive } from "./api/rooms.js";
+import { roomOrg, type Ask } from "./api/roomOrg.js";
 
 /** How often what has not arrived in the rooms is looked at again. */
 const ROOM_LOOK_MS = 2000;
@@ -520,7 +521,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const rooms = new RoomStore(cfg.home);
   let roomSeat: SeatLookup = () => null;
   const roomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir() });
-  const roomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery });
+  let roomAsk: Ask | null = null;
+  const roomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk) : null) });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -658,6 +660,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const assistant = new Assistant({ log: conversation, store, engine, ...(assistantRouter ? { router: assistantRouter } : {}), ...(sealer ? { sealer } : {}),
     admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), workRoot: apiDeps.workRoot, ...(sessions ? { sessions } : {}), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
   const api = createApp({ ...apiDeps, assistant });
+  // The Kit's organizing tools ask this API itself, as this Mac's own screens would.
+  roomAsk = async (method, path, body) => {
+    const res = await api.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   // docs/mesh-v0.md: this node among the others. What it has is what its screens would show of it.
   const nodes = new Nodes({

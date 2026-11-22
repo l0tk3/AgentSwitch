@@ -1,0 +1,64 @@
+/** What the Chatroom Kit's organizing tools read and do (docs/chatroom-v0.md §6 开了“拉会话”才有的): the profiles, the
+ *  models, the sessions, a profile's check, and starting a session. Each is asked of this service's own API, in
+ *  process — the same routes the screens use, with the same rules — and cut down to what an agent may know: no
+ *  account, no key, no proxy. */
+
+import type { KitOrg } from "../rooms/kit.js";
+import { RoomError } from "../rooms/store.js";
+
+/** One request to this service's own API. */
+export type Ask = (method: string, path: string, body?: unknown) => Promise<{ readonly status: number; readonly body: unknown }>;
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (v && typeof v === "object" ? v as Obj : {});
+const list = (v: unknown): Obj[] => (Array.isArray(v) ? v.map(obj) : []);
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+const STATES: Readonly<Record<string, string>> = { working: "busy", waiting: "waiting", idle: "idle", exited: "exited" };
+
+export function roomOrg(ask: Ask): KitOrg {
+  const refuse = (res: { status: number; body: unknown }, what: string): never => {
+    throw new RoomError(res.status === 404 ? 404 : res.status === 403 ? 403 : res.status === 409 ? 409 : 400, `${what}: ${str(obj(res.body).error) || `refused (${res.status})`}`);
+  };
+  return {
+    async profiles() {
+      const [all, health] = await Promise.all([ask("GET", "/profiles"), ask("GET", "/profiles/health")]);
+      const checked = obj(obj(health.body).health);
+      return Object.entries(obj(obj(all.body).agents)).flatMap(([agent, of]) => list(obj(of).profiles).map((p) => {
+        const h = obj(checked[`${agent}.${str(p.id)}`]);
+        return { agent, id: str(p.id), name: str(p.name), kind: str(p.kind), health: str(h.status) ? { status: str(h.status), checkedAt: num(h.checkedAt), message: str(h.message).slice(0, 200) } : null };
+      }));
+    },
+    async models() {
+      const res = await ask("GET", "/terminals");
+      return Object.fromEntries(Object.entries(obj(obj(res.body).models)).map(([agent, models]) => [agent, list(models).filter((m) => m.older !== true).map((m) => ({ id: str(m.id), name: str(m.name), ...(str(m.description) ? { description: str(m.description) } : {}) }))]));
+    },
+    async sessions(limit) {
+      const [terminals, sessions] = await Promise.all([ask("GET", "/terminals"), ask("GET", `/sessions?limit=${Math.min(Math.max(limit, 1), 500)}`)]);
+      return {
+        running: list(obj(terminals.body).terminals).filter((t) => str(t.status) !== "exited").map((t) => ({
+          terminal: str(t.id), agent: str(t.harness), name: str(t.name), cwd: str(t.workdir) || str(t.cwd), state: STATES[str(t.status)] ?? str(t.status), profile: str(obj(t.profile).name) || null,
+        })),
+        resumable: list(obj(sessions.body).sessions).filter((s) => s.active !== true).map((s) => ({
+          agent: str(s.harness), id: str(s.id), title: (str(s.title) || str(s.lastText)).slice(0, 120), cwd: str(s.cwd), updatedAt: num(s.updatedAt) || Date.parse(str(s.updatedAt)) || 0,
+          profile: str(obj(s.profile).name) || (typeof s.profile === "string" ? s.profile : null),
+        })),
+      };
+    },
+    async check(agent, profile) {
+      if (!/^[a-z-]{2,20}$/.test(agent) || !/^[a-z0-9]{1,16}$/.test(profile)) throw new RoomError(400, "profile_check: `agent` and `profile` are an agent's name and a profile's id, as `profiles` lists them.");
+      const res = await ask("POST", `/profiles/${agent}/${profile}/health`, {});
+      if (res.status !== 200) refuse(res, "The check was not run");
+      const h = obj(res.body);
+      return { status: str(h.status) || "unknown", checkedAt: num(h.checkedAt), message: str(h.message).slice(0, 300) };
+    },
+    async start(req) {
+      const body = { harness: req.agent, cwd: req.cwd, ...(req.profile ? { profile: req.profile } : {}), ...(req.model ? { model: req.model } : {}), ...(req.mode ? { mode: req.mode } : {}), ...(req.resume ? { agentSessionId: req.resume } : {}) };
+      const res = await ask("POST", req.resume ? "/terminals/resume" : "/terminals", body);
+      const id = str(obj(obj(res.body).terminal).id);
+      if (res.status >= 300 || !id) refuse(res, "The session was not started");
+      return id;
+    },
+  };
+}
