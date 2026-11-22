@@ -9,7 +9,7 @@
    具体的session来指定传输信息). One set of made-up data drawn in both looks (ui-v0 §7 Pixel, §8 Classic), in the Mac's main
    window (rail · list · page · members · status bar; fixed dark, §8 已定 3) and on the iPhone (follows the system's light or
    dark). It works: pick a room, write with @, watch a message be queued, delivered and handled, open a member's card, make
-   a room, pause one.   ?style=pixel|classic&theme=dark|light&view=mac|phone|both&room=<id> */
+   a room, pause one.   ?style=pixel|classic&theme=dark|light&view=mac|phone|both&room=<id>&screen=room|list|terminals&files=1 */
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
@@ -160,9 +160,10 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .tl { flex: 1; overflow: auto; padding: 10px 0 14px; }
 .day { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; color: var(--ink3); font-size: 11.5px; }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--ink4); }
-.ev { padding: 4px 14px 4px 54px; font: 12px var(--ui); color: var(--ink2); }
+.ev { padding: 6px 14px 2px 52px; font: 12px var(--ui); color: var(--ink3); }
+.ev .at { font: inherit !important; color: var(--ink2) !important; background: none !important; padding: 0 !important; }
 .s-pixel .ev::before { content: "· "; color: var(--ink3); }
-.msg { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 14px; padding: 7px 14px 3px; }
+.msg { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 12px; padding: 9px 14px 3px; }
 .msg.cont { padding-top: 1px; }
 .msg:hover { background: var(--hover); }
 /* what is addressed to the one looking and not yet read: amber, the colour of what waits for you */
@@ -178,7 +179,8 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .mh .who { color: var(--ink); font-weight: 600; white-space: nowrap; cursor: pointer; }
 .s-pixel .mh .who { font: 600 13px var(--mono); } .mh .who:hover { text-decoration: underline; }
 .mh .meta { font-size: 11.5px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mh .num { font-size: 11px; color: var(--ink3); margin-left: auto; padding-left: 8px; white-space: nowrap; }
+.mh .num { font-size: 11px; color: var(--ink3); margin-left: auto; padding-left: 8px; white-space: nowrap; visibility: hidden; }
+.msg:hover .mh .num { visibility: visible; }
 .quote { display: flex; gap: 6px; font: 12px var(--ui); color: var(--ink2); margin-bottom: 2px; white-space: nowrap; overflow: hidden; }
 .quote .cut { min-width: 0; }
 .s-pixel .quote::before { content: "┌─"; font-family: var(--mono); color: var(--ink3); }
@@ -189,10 +191,10 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .s-classic .body code { background: var(--field); border-radius: 4px; padding: 1px 4px; }
 /* a mention: a name with its sign, never a status colour */
 .at { white-space: nowrap; cursor: pointer; }
-.s-pixel .at { font: 600 13px var(--mono); color: var(--ink); border-bottom: 1px solid var(--ink3); }
+.s-pixel .at { font: 600 13px var(--mono); color: var(--ink); }
 .s-pixel .at.me { background: var(--ink); color: var(--bg); border: 0; padding: 0 2px; }
-.s-classic .at { color: var(--signal); font-weight: 500; background: color-mix(in srgb, var(--signal) 14%, transparent); padding: 0 4px; border-radius: 5px; }
-.s-classic .at.me { background: var(--signal); color: #fff; }
+.s-classic .at { color: var(--signal); font-weight: 500; }
+.s-classic .at.me { background: var(--signal); color: #fff; padding: 0 4px; border-radius: 5px; }
 .file { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px 8px; font: 12px var(--mono); color: var(--ink2); max-width: 100%; }
 .s-pixel .file { border: 1px solid var(--ink4); } .s-classic .file { background: var(--field); border-radius: 7px; }
 /* where a message stands with each one it was sent to */
@@ -285,7 +287,8 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .phone .nav { height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--ink4); position: relative; }
 .phone .nav .mid { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; max-width: 56%; font: 600 16px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .phone .nav .mid small { display: block; font: 400 11px var(--ui); color: var(--ink2); }
-.phone .nav button { color: var(--signal); display: inline-flex; align-items: center; gap: 4px; font-size: 15px; }
+.phone .nav button { color: var(--signal); display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 15px; min-width: 32px; min-height: 32px; position: relative; z-index: 1; }
+button svg { pointer-events: none; }
 .s-pixel .phone .nav button { color: var(--ink); }
 .phone .big { padding: 6px 16px 8px; font: 700 30px var(--ui); flex: none; }
 .s-pixel .phone .big { font: 700 22px var(--mono); letter-spacing: .02em; }
@@ -301,9 +304,21 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .phone .pick { left: 10px; right: 10px; width: auto; }
 .phone .home { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: var(--ink); opacity: .9; z-index: 6; }
 .phone .tabbar { flex: none; height: 78px; display: flex; justify-content: space-around; padding-top: 8px; border-top: 1px solid var(--ink4); background: var(--bg); }
-.phone .tabbar div { display: flex; flex-direction: column; align-items: center; gap: 4px; font: 10.5px var(--ui); color: var(--ink2); width: 64px; }
-.phone .tabbar div.on { color: var(--signal); } .s-pixel .phone .tabbar div.on { color: var(--ink); }
+.phone .tabbar button { display: flex; flex-direction: column; align-items: center; gap: 4px; font: 10.5px var(--ui); color: var(--ink2); width: 64px; height: 44px; justify-content: flex-end; }
+.phone .tabbar button.on { color: var(--signal); } .s-pixel .phone .tabbar button.on { color: var(--ink); }
 .phone .tabbar .ci { width: 23px; height: 23px; }
+.phone .tabbar .tico { position: relative; display: grid; place-items: center; height: 24px; }
+.phone .tabbar .tbadge { position: absolute; right: -9px; top: -3px; font-style: normal; }
+.s-pixel .phone .tabbar .tbadge { width: 6px; height: 6px; background: var(--amber); right: -7px; top: 0; }
+.s-classic .phone .tabbar .tbadge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--amber); color: #fff; font: 700 10.5px/16px var(--ui); text-align: center; }
+/* what comes up from the foot and goes back when it is closed */
+.phone .psheet.up { animation: up .26s cubic-bezier(.2, .8, .2, 1) 1; }
+.s-pixel .phone .psheet.up { animation: up .2s steps(6) 1; }
+@keyframes up { from { transform: translateY(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .phone .psheet.up { animation: none; } }
+.frow { display: flex; align-items: center; gap: 8px; padding: 7px 16px; font-size: 14px; }
+.s-pixel .frow { padding: 4px 16px; font: 13px var(--mono); }
+.phone .nav .mid small.mono { font: 400 11px var(--mono); }
 .phone .psheet { left: 0; right: 0; bottom: 0; top: 120px; display: flex; flex-direction: column; }
 .s-classic .phone .psheet { border-radius: 16px 16px 0 0; }
 .s-pixel .phone .psheet { border-width: 1px 0 0; } .s-pixel .phone .psheet::after { display: none; }
@@ -321,7 +336,7 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
   <span class="seg" id="c-play"><button data-v="play">▶ Play an Exchange</button><button data-v="reset">Reset</button></span>
 </div>
 <p class="note">可以点：切换房间、在输入框里写字并用 <code>@</code> 选人、看消息从 Sent 到 Queued、Delivered、Handled，点名字看名片，<code>New Room</code> 建房间，暂停与恢复。<br>
-“Play an Exchange” 放一段两个 agent 之间的往返，到第 6 次时房间自动暂停。</p>
+“Play an Exchange” 放一段两个 agent 之间的往返，到第 6 次时提醒你一声，它们接着聊。</p>
 <div class="stage" id="stage"></div>
 
 <div class="doc">
@@ -329,10 +344,11 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 <ul>
 <li><b>身份是席位</b>：每个成员一个不变的名字（<code>@daemon</code>），旁边是它的 agent 标记；行尾的小色点是它所在的配置（Default 不标）。点名字出名片：agent、模型、配置、节点、目录、权限模式、谁拉进来的。</li>
 <li><b>谁发给谁看得见</b>：正文里的 <code>@名字</code> 是收件人；被引用的那条显示在消息上方；带 <code>@</code> 的消息下面一行是每个收件人的投递状态。</li>
-<li><b>投递状态四个词</b>：<code>Sent</code>（写进房间）· <code>Queued</code>（对方在忙，这一轮结束再送）· <code>Delivered</code>（交到手上）· <code>Handled</code>（它这一轮结束或回了话）。对方已结束时是 <code>Failed</code>。</li>
+<li><b>投递状态</b>：<code>Sent</code>（写进房间）· <code>Queued</code>（对方在忙，这一轮结束再送）· <code>Delivered</code>（交到手上）；对方处理完这一行就消失。对方已结束时是 <code>Ended</code>，红色。</li>
 <li><b>发给你、还没看的</b>：行左侧一条琥珀色——琥珀只表示“等你处理”。看过（切到这个房间）就没有了。</li>
 <li><b>成员的状态</b>用终端的那一套：像素外观 Busy · Waiting · Idle · Exited（转圈、键、空心键），经典外观 Working · Needs You · Ready · Ended（转圈、圆点、空心圆）。</li>
-<li><b>不空转</b>：两个 agent 之间没有你参与的连续往返到 6 次，房间自动暂停，顶上出一条说明，<code>Resume</code> 继续。暂停时消息照写，不投递。</li>
+<li><b>多轮没有你</b>：两个 agent 之间连续往返到 6 次，提醒你一声（顶上一条、房间列表里一个标记、手机上一条通知），不打断它们。要停由你点 <code>Pause</code>；暂停时消息照写，不投递。</li>
+<li><b>一行只写谁和什么时候</b>：agent 是名字旁的图，模型、节点、目录在名片里；投递状态只在还没送到或送不到时出现，都处理完了就不写。</li>
 <li><b>置顶笔记</b>：房间名下面那一段，所有成员能读能改（第一版的“临时协作区域”）。</li>
 </ul>
 <h2>// 两种外观各自怎么画</h2>
@@ -341,10 +357,10 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 <li><b>Classic</b>（§8）：系统字体、圆角、线性图标、标准按钮、圆点状态、数字角标、柔和投影；强调色是蓝；提到人是浅蓝底的胶囊。主窗口仍是一整块黑；iPhone 随系统深浅。</li>
 <li>两种外观共用同一批页面、同样的词（少数状态词按 §8 已定 2 换），只换画法。</li>
 </ul>
-<h2>// 还没定的</h2>
+<h2>// 定了的与没定的</h2>
 <ul>
-<li>图标栏里 Chat Room 的图标：这里像素外观画的是一个对话框，经典外观是对话气泡。</li>
-<li>iPhone 上放在哪：这里作为第五个标签页（Terminals · Dispatch · Rooms · Files · Settings），Browser 的去处要再议。</li>
+<li>安卓上那张 Files 弹出页的样子照 iPhone 的画。</li>
+<li>已定（2026-11-22）：图标就用这里画的。iPhone 与安卓上 Files 离开标签栏，进 Terminals 页的顶栏，从下面弹上来、关掉就回去；空出来的位置给 Rooms（Terminals · Dispatch · Rooms · Browser · Settings）。点手机底下的 Terminals 标签，再点顶栏的文件夹就能看到。</li>
 </ul>
 </div>
 
@@ -353,7 +369,7 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 const P = window.Pixel;
 const q = new URLSearchParams(location.search);
 const S = { style: q.get("style") || "pixel", theme: q.get("theme") || "dark", view: q.get("view") || "both", room: q.get("room") || "login",
-  members: true, draft: "", reply: null, pick: null, card: null, sheet: null, phoneScreen: "room", phoneMembers: false };
+  members: true, draft: "", reply: null, pick: null, card: null, sheet: null, phoneScreen: q.get("screen") || "room", phoneMembers: false, phoneFiles: q.get("files") === "1" };
 const classic = () => S.style === "classic";
 
 // ---------- pictures ----------
@@ -426,13 +442,13 @@ const seed = () => ({
       { n: 32, from: "daemon", t: "19:21", text: "接口定了：`GET /clash` 多一个 `phone`，里面是 `on`、`listening`、`links`、`problem`。@mac-app @ios-app 可以开始了，字段说明在置顶笔记里。", to: { "mac-app": "Handled", "ios-app": "Delivered" } },
       { n: 33, from: "mac-app", t: "19:26", reply: 32, text: "收到。`links` 里每一项有 `kind` 吗？页面要分 Wi-Fi 和 Tailscale 两行。@daemon", to: { daemon: "Handled" } },
       { n: 34, from: "daemon", t: "19:27", reply: 33, text: "有，`lan` 或 `tailnet`。@mac-app", to: { "mac-app": "Handled" } },
-      { ev: "@daemon 启动了 @android（Codex · Team · Mac Mini · ~/Projects/AgentSwitch/packages/android-app）" },
+      { ev: "@daemon 启动了 @android" },
       { n: 35, from: "daemon", t: "19:31", text: "@android 安卓的 Clash 页照 iPhone 的 This iPhone 一节加一段，入口叫 Add to Clash。接口同上。", to: { android: "Handled" }, file: "packages/ios-app/App/Sources/Settings/ClashScreen.swift" },
       { n: 36, from: "android", t: "19:44", reply: 35, text: "加好了。手机上没有能接 `clash://` 的 app 时改为复制地址，这一点和 iPhone 不同。@daemon", to: { daemon: "Queued" } },
       { n: 37, from: "ios-app", t: "19:46", text: "@you 要不要在 iPhone 上也加一个 Copy Link？现在只有长按才能复制。", to: { you: "Delivered" }, forme: true },
       { n: 38, from: "you", t: "19:47", text: "@docs 把这一节写进 clash-v0。", to: { docs: "Failed" } },
     ] },
-  agents: { id: "agents", name: "Agents 换节点", topic: "设置 › Agents 能选别的节点", paused: "limit", limit: 6, trips: 6,
+  agents: { id: "agents", name: "Agents 换节点", topic: "设置 › Agents 能选别的节点", paused: null, told: true, limit: 6, trips: 6,
     note: "中转：应用把这一页交给自己的服务，别的节点读、发按钮\n名字逐字对齐：claude-code · codex · opencode · pi",
     seats: ["you", "daemon", "mac-app", "review"],
     msgs: [
@@ -443,7 +459,6 @@ const seed = () => ({
       { n: 15, from: "daemon", t: "20:13", reply: 14, text: "那是我写错了，改成 `claude-code`。@mac-app 你那边加一条测试把四个名字钉住。", to: { "mac-app": "Handled" } },
       { n: 16, from: "mac-app", t: "20:15", reply: 15, text: "加了。@daemon 你那边也加一条？", to: { daemon: "Handled" } },
       { n: 17, from: "daemon", t: "20:16", reply: 16, text: "加了，四个名字各发一次都是 202。@mac-app", to: { "mac-app": "Sent" } },
-      { ev: "连续 6 次往返没有你参与：房间已暂停。" },
     ] },
   dayhub: { id: "dayhub", name: "DayHub 部署", topic: "", paused: null, limit: 6, trips: 0, note: "", seats: ["you", "dayhub", "review"], msgs: [] },
 });
@@ -461,26 +476,27 @@ function avatar(seat) {
 function rich(text) {
   return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/@([a-z][\w-]*)/g, (m, id) => (SEATS[id] || id === "all" ? `<span class="at${id === "you" ? " me" : ""}" data-card="${id}">@${id}</span>` : m));
 }
-const TICK = { Sent: "·", Queued: "…", Delivered: "✓", Handled: "✓✓", Failed: "×" };
+const TICK = { Sent: "·", Queued: "…", Delivered: "✓", Failed: "×" };
 function receipts(m) {
   if (!m.to) return "";
-  return `<div class="rc">${Object.entries(m.to).map(([id, st]) => {
-    const why = st === "Failed" ? " · 已结束" : st === "Queued" ? ` · ${word(SEATS[id].st)}` : "";
-    return `<span class="${st}"><span class="tick">${TICK[st]}</span>@${id} ${st}${why}</span>`;
-  }).join("")}</div>`;
+  // Said only while it matters: a message everyone has taken says nothing; one on its way, or one that could not be
+  // handed over, says to whom.
+  const open = Object.entries(m.to).filter(([, st]) => st !== "Handled");
+  if (!open.length) return "";
+  return `<div class="rc">${open.map(([id, st]) => `<span class="${st}"><span class="tick">${TICK[st]}</span>${id === "you" ? "You" : id} · ${st === "Failed" ? "Ended" : st}</span>`).join("")}</div>`;
 }
 function message(m, prev, r, narrow) {
   if (m.day) return `<div class="day">${m.day}</div>`;
   if (m.ev) return `<div class="ev">${rich(m.ev)}</div>`;
   const seat = SEATS[m.from], cont = prev && prev.from === m.from && !m.reply && !prev.ev && !prev.day;
   const quoted = m.reply ? r.msgs.find((x) => x.n === m.reply) : null;
-  // A phone's line has room for the model alone; the rest is on the card.
-  const meta = seat.you ? "" : narrow ? seat.model : `${AG[seat.agent]} · ${seat.model} · ${seat.node}`;
+  // Who and when, nothing more (2026-11-22, user: 聊天中的信息展示能不能精简一些，现在看上去有点乱): the agent is the picture
+  // beside the name, the model, the node and the folder are on the card, the message's number shows under the pointer.
   return `<div class="msg${cont ? " cont" : ""}${m.forme ? " forme" : ""}" data-n="${m.n}">
     ${cont ? "<span></span>" : avatar(seat)}
     <div>
-      ${quoted ? `<div class="quote"><span class="faint">#${quoted.n}</span><span>@${quoted.from}</span><span class="cut">${esc(quoted.text.replace(/`/g, ""))}</span></div>` : ""}
-      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : "@" + seat.name}</span>${spot(seat)}<span class="meta">${meta}</span><span class="num">${m.t} · #${m.n}</span></div>`}
+      ${quoted ? `<div class="quote"><span>${quoted.from === "you" ? "You" : quoted.from}</span><span class="cut">${esc(quoted.text.replace(/`/g, "").replace(/@[a-z][\w-]*\s*/g, ""))}</span></div>` : ""}
+      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : seat.name}</span>${spot(seat)}<span class="meta">${m.t}</span><span class="num">#${m.n}</span></div>`}
       <div class="body">${rich(m.text)}</div>
       ${m.file ? `<div class="file">${icon("clip", { px: 1, size: 14 })}<span class="cut">${esc(m.file)}</span></div>` : ""}
       ${receipts(m)}
@@ -492,21 +508,22 @@ function timeline(r, narrow) {
   return r.msgs.map((m, i) => message(m, r.msgs[i - 1], r, narrow)).join("");
 }
 function banner(r) {
-  if (!r.paused) return "";
-  const why = r.paused === "limit" ? `连续 ${r.limit} 次往返没有你参与，房间已暂停。消息照写，不投递。` : "房间已暂停。消息照写，不投递。";
-  return `<div class="banner">${state("waiting")}<span class="grow">${why}</span><button class="btn pri" data-act="resume">Resume</button></div>`;
+  // Many rounds without the user are told, not stopped (2026-11-22, user: 多轮没我的参与就提醒我一下就行不用中断他们).
+  if (r.paused) return `<div class="banner">${state("waiting")}<span class="grow">房间已暂停。消息照写，不投递。</span><button class="btn pri" data-act="resume">Resume</button></div>`;
+  if (r.told) return `<div class="banner">${state("waiting")}<span class="grow">这里已经连续 ${r.trips} 次往返没有你参与。</span><button class="btn" data-act="pause">Pause</button><button class="btn pri" data-act="seen">OK</button></div>`;
+  return "";
 }
 function writer(r, phone) {
   const pickable = S.pick && pickList(r);
   return `<div class="write">
     ${pickable && pickable.length ? `<div class="float pick">${pickable.map((s, i) => `<button class="opt${i === S.pick.i ? " on" : ""}" data-pick="${s.id}">${s.id === "all" ? `<span class="st"></span>` : state(s.st)}<span class="grow cut">@${s.name}${s.id === "all" ? ` <span class="dim">全体，只有你能用</span>` : ` <span class="dim">${AG[s.agent]} · ${word(s.st)}</span>`}</span>${s.id === "all" ? "" : spot(s)}</button>`).join("")}</div>` : ""}
-    ${S.reply ? `<div class="replying">${icon("reply", { px: 1, size: 14 })}<span class="grow cut">Reply to #${S.reply} · @${r.msgs.find((m) => m.n === S.reply).from}</span><button data-act="noreply" title="Close">${classic() ? ci("x", 13) : "×"}</button></div>` : ""}
+    ${S.reply ? `<div class="replying">${icon("reply", { px: 1, size: 14 })}<span class="grow cut">Reply to ${r.msgs.find((m) => m.n === S.reply).from === "you" ? "You" : r.msgs.find((m) => m.n === S.reply).from}</span><button data-act="noreply" title="Close">${classic() ? ci("x", 13) : "×"}</button></div>` : ""}
     <div class="box">
       <button class="plus" title="Attach">${classic() ? ci("pluscircle") : "+"}</button>
       <div class="field"><textarea rows="1" placeholder="${phone ? "Message" : "Message — @ to mention"}" data-draft>${esc(S.draft)}</textarea></div>
       <button class="send" data-act="send"${S.draft.trim() ? "" : " disabled"} title="Send">${classic() ? ci("send", 16) : "Send"}</button>
     </div>
-    ${phone ? "" : `<div class="hint"><span>只有 @ 才唤醒对方</span><span>${r.paused ? "Paused" : `Round Trips ${r.trips}/${r.limit}`}</span></div>`}
+    ${phone ? "" : `<div class="hint"><span>只有 @ 才唤醒对方</span>${r.paused ? "<span>Paused</span>" : ""}</div>`}
   </div>`;
 }
 function pickList(r) {
@@ -530,7 +547,7 @@ function card(id, style) {
 function roomRow(r, i) {
   const n = unread(r);
   return `<button class="rm${r.id === S.room ? " on" : ""}" data-room="${r.id}">
-    <div class="top"><span class="idx">${String(i + 1).padStart(2, "0")}</span><span class="name grow cut">${esc(r.name)}</span>${r.paused ? `<span class="paused">Paused</span>` : ""}${n ? `<span class="count">${classic() ? n : `[${n}]`}</span>` : ""}</div>
+    <div class="top"><span class="idx">${String(i + 1).padStart(2, "0")}</span><span class="name grow cut">${esc(r.name)}</span>${r.paused ? `<span class="paused">Paused</span>` : ""}${r.told && !n ? state("waiting") : ""}${n ? `<span class="count">${classic() ? n : `[${n}]`}</span>` : ""}</div>
     <div class="last cut">${esc(lastOf(r))}</div></button>`;
 }
 function sheet() {
@@ -593,16 +610,39 @@ function mac() {
       ${S.members ? `<div class="mem"><div class="head"><span class="label grow">Members</span><span class="dim" style="font-size:11.5px">${r.seats.length}</span><button class="btn${classic() ? " sm" : ""}" data-act="newroom">Add</button></div><div class="list">${memberRows(r)}</div></div>` : "<span></span>"}
       ${S.sheet && S.sheet.where === "mac" ? sheet() : ""}
     </div>
-    <div class="sbar"><span>${state("idle")}${classic() ? "Running" : "OK"}</span><span>${all.length} Rooms</span><span>${r.seats.length - 1} Sessions Here</span><span class="grow"></span><span>${r.paused ? "Paused" : `Round Trips ${r.trips}/${r.limit}`}</span></div>
+    <div class="sbar"><span>${state("idle")}${classic() ? "Running" : "OK"}</span><span>${all.length} Rooms</span><span>${r.seats.length - 1} Sessions Here</span><span class="grow"></span><span>${r.paused ? "Paused" : r.trips ? `${r.trips} Rounds Without You` : ""}</span></div>
   </div></div>`;
+}
+/** The phone's tabs (2026-11-22, user: iPhone/安卓上的file图标放到terminal顶栏，做成弹出式的……空出来的放这个chatroom): Files left
+ *  the bar for the Terminals page's top bar, where it comes up as a sheet; Rooms has its place. */
+const PTABS = [["terminals", "Terminals"], ["dispatch", "Dispatch"], ["rooms", "Rooms"], ["browser", "Browser"], ["settings", "Settings"]];
+function tabbar(on) {
+  const waiting = Object.values(ROOMS).reduce((n, x) => n + unread(x), 0);
+  return `<div class="tabbar">${PTABS.map(([id, t]) => `<button class="${id === on ? "on" : ""}" data-ptab="${id}"><span class="tico">${icon(id, { px: 2, size: 23 })}${id === "rooms" && waiting ? `<i class="tbadge">${classic() ? waiting : ""}</i>` : ""}</span>${t}</button>`).join("")}</div>`;
+}
+const TREE = [[0, "packages", true], [1, "daemon", true], [2, "src", true], [3, "clash", true], [4, "phone.ts"], [4, "phoneListener.ts"], [3, "api", true], [1, "mac-app", true], [1, "ios-app", true], [0, "docs", true], [1, "chatroom-v0.md"], [1, "clash-v0.md"], [0, "CLAUDE.md"]];
+function filesSheet() {
+  const rows = TREE.map(([depth, name, dir], i) => {
+    const last = !TREE.slice(i + 1).some(([d]) => d === depth) || (TREE[i + 1] && TREE[i + 1][0] < depth);
+    const lead = classic() ? `<span style="width:${depth * 16}px;flex:none"></span>${dir ? ci("files", 17) : `<span style="width:17px;flex:none"></span>`}` : `<span class="faint mono" style="white-space:pre">${"│  ".repeat(depth)}${last ? "└─" : "├─"} </span>`;
+    return `<div class="frow">${lead}<span class="grow cut${dir ? "" : " dim"}">${name}${dir && !classic() ? "/" : ""}</span></div>`;
+  }).join("");
+  return `<div class="veil" data-act="phonefiles"></div><div class="float psheet up">
+    <div class="nav"><span class="mid">Files<small class="mono">~/Projects/AgentSwitch</small></span><span class="grow"></span><button data-act="phonefiles">Done</button></div>
+    <div class="scroll" style="padding:8px 0 30px">${rows}</div></div>`;
+}
+function terminalsScreen() {
+  const rows = Object.values(SEATS).filter((x) => !x.you).map((x, i) => `<div class="rm"><div class="top"><span class="idx">${String(i + 1).padStart(2, "0")}</span>${state(x.st)}<span class="name grow cut">${x.name}</span><span class="when">${word(x.st)}</span><span class="mk dim">${agentMark(x.agent)}</span>${spot(x)}</div><div class="last cut mono" style="font-size:12px">${x.dir}</div></div>`).join("");
+  return `<div class="nav"><span class="grow"></span><button data-act="phonefiles" title="Files">${icon("files", { px: 2, size: 21 })}</button><button title="New Terminal">${classic() ? ci("plus", 21) : "[ New ]"}</button></div>
+    <div class="big">${classic() ? "Terminals" : "TERMINALS"}</div>
+    <div class="scroll"><div class="cardlist">${rows}</div></div>${tabbar("terminals")}`;
 }
 function phone() {
   const r = room(), all = Object.values(ROOMS), tok = classic() ? (S.theme === "light" ? "tok-cl" : "tok-cd") : S.theme === "light" ? "tok-pl" : "tok-pd";
-  const inner = S.phoneScreen === "list"
+  const inner = S.phoneScreen === "terminals" ? terminalsScreen() : S.phoneScreen === "list"
     ? `<div class="nav"><span class="grow"></span><button data-act="newroomphone">${classic() ? ci("plus", 20) : "[ New ]"}</button></div>
        <div class="big">${classic() ? "Rooms" : "ROOMS"}</div>
-       <div class="scroll"><div class="cardlist">${all.map(roomRow).join("")}</div></div>
-       <div class="tabbar">${[["terminals", "Terminals"], ["dispatch", "Dispatch"], ["rooms", "Rooms"], ["files", "Files"], ["settings", "Settings"]].map(([id, t]) => `<div class="${id === "rooms" ? "on" : ""}">${icon(id, { px: 2, size: 23 })}${t}</div>`).join("")}</div>`
+       <div class="scroll"><div class="cardlist">${all.map(roomRow).join("")}</div></div>${tabbar("rooms")}`
     : `<div class="nav"><button data-act="phonelist">${classic() ? ci("chevleft", 18) : "‹"} Rooms</button>
          <div class="mid">${esc(r.name)}<small>${r.seats.length - 1} Sessions${r.paused ? " · Paused" : ""}</small></div><span class="grow"></span>
          <button data-act="phonemembers" title="Members">${icon("people", { px: 2, size: 20 })}</button></div>
@@ -612,7 +652,7 @@ function phone() {
   const members = S.phoneMembers ? `<div class="veil" data-act="phonemembers"></div><div class="float psheet"><div class="nav"><span class="mid">Members</span><span class="grow"></span><button data-act="phonemembers">Done</button></div><div class="scroll mem" style="width:auto;border:0"><div class="list">${memberRows(r)}</div></div></div>` : "";
   const c = S.card && S.card.where === "phone" ? `<div class="veil" data-act="closecard"></div>${card(S.card.id, "left:16px;right:16px;top:230px")}` : "";
   return `<div class="app ${classic() ? "s-classic" : "s-pixel"} ${tok}" id="phone"><div class="phone"><div class="island"></div>
-    <div class="stat"><span>9:41</span><span style="font-weight:500;letter-spacing:.04em">5G ▮▮▮</span></div>${inner}${members}${c}
+    <div class="stat"><span>9:41</span><span style="font-weight:500;letter-spacing:.04em">5G ▮▮▮</span></div>${inner}${members}${c}${S.phoneFiles && S.phoneScreen === "terminals" ? filesSheet() : ""}
     ${S.sheet && S.sheet.where === "phone" ? sheet() : ""}<div class="home"></div></div></div>`;
 }
 
@@ -625,7 +665,7 @@ function render(keep) {
   for (const el of document.querySelectorAll("[data-tl]")) { const kept = scrolls.find(([id]) => id === el.closest(".app").id); el.scrollTop = kept ? kept[1] : el.scrollHeight; }
   for (const [id, key] of [["c-style", "style"], ["c-view", "view"], ["c-theme", "theme"]]) for (const b of document.querySelectorAll(`#${id} button`)) b.classList.toggle("on", b.dataset.v === S[key]);
   if (focus) { const t = document.querySelector(`#${focus} [data-draft]`); if (t) { t.focus(); t.setSelectionRange(at, at); grow(t); } }
-  const u = new URL(location); u.search = new URLSearchParams({ style: S.style, theme: S.theme, view: S.view, room: S.room }); history.replaceState(null, "", u);
+  const u = new URL(location); u.search = new URLSearchParams({ style: S.style, theme: S.theme, view: S.view, room: S.room, screen: S.phoneScreen }); history.replaceState(null, "", u);
 }
 const grow = (t) => { t.style.height = "auto"; t.style.height = Math.min(110, t.scrollHeight) + "px"; };
 setInterval(() => { const f = BRAILLE[Math.floor(Date.now() / 90) % BRAILLE.length]; for (const el of document.querySelectorAll("[data-spin]")) el.textContent = f; }, 90);
@@ -667,12 +707,12 @@ function play() {
   const r = ROOMS.login;
   r.trips = 0;
   const lines = [["daemon", "@mac-app 二维码里放的是 `clash://install-config?url=…` 还是地址本身？"], ["mac-app", "@daemon 是 `clash://`，手机相机扫了直接交给 Clash。"],
-    ["daemon", "@mac-app 那地址里的 `&` 要转义，不然会被当成两个参数。"], ["mac-app", "@daemon 已经整段转义了。"], ["daemon", "@mac-app 好。Tailscale 的那条也一样？"], ["mac-app", "@daemon 一样，同一个函数。"]];
+    ["daemon", "@mac-app 那地址里的 `&` 要转义，不然会被当成两个参数。"], ["mac-app", "@daemon 已经整段转义了。"], ["daemon", "@mac-app 好。Tailscale 的那条也一样？"], ["mac-app", "@daemon 一样，同一个函数。"], ["daemon", "@mac-app 那我这边没有要改的了。"]];
   lines.forEach(([from, text], i) => later(700 + i * 1900, () => {
     const prev = r.msgs.filter((m) => m.n).at(-1);
     post(r, from, text, { reply: i ? prev.n : null, answer: false });
     r.trips = i + 1;
-    if (r.trips >= r.limit) later(900, () => { r.paused = "limit"; r.msgs.push({ ev: `连续 ${r.limit} 次往返没有你参与：房间已暂停。` }); render(false); if (!classic()) for (const b of document.querySelectorAll(".banner")) P.glitch(b); });
+    if (r.trips === r.limit) { r.told = true; render(true); if (!classic()) for (const b of document.querySelectorAll(".banner")) P.glitch(b); }
     else render(true);
   }));
 }
@@ -689,6 +729,7 @@ document.addEventListener("click", (e) => {
   }
   const r = room();
   if (t.dataset.room) { S.room = t.dataset.room; S.phoneScreen = "room"; S.reply = null; S.pick = null; S.card = null; for (const m of room().msgs) delete m.forme; return render(false); }
+  if (t.dataset.ptab) { if (t.dataset.ptab === "terminals" || t.dataset.ptab === "rooms") { S.phoneScreen = t.dataset.ptab === "rooms" ? "list" : "terminals"; S.phoneFiles = false; S.card = null; render(false); } return; }
   if (t.dataset.pick) return choose(t.dataset.pick);
   if (t.dataset.mention) { S.draft = (S.draft ? S.draft.replace(/\s*$/, " ") : "") + `@${t.dataset.mention} `; S.card = null; render(true); return focusDraft(where); }
   if (t.dataset.card) {
@@ -706,7 +747,8 @@ document.addEventListener("click", (e) => {
     case "send": return send();
     case "noreply": S.reply = null; return render(true);
     case "members": S.members = !S.members; return render(true);
-    case "pause": r.paused = "user"; return render(true);
+    case "pause": r.paused = "user"; r.told = false; return render(true);
+    case "seen": r.told = false; r.trips = 0; return render(true);
     case "resume": r.paused = null; r.trips = 0; r.msgs.push({ ev: "你恢复了房间。" }); return render(false);
     case "closecard": S.card = null; return render(true);
     case "newroom": case "newroomphone": S.sheet = { where, name: "", topic: "", tab: "running", seats: [], node: "This Mac", agent: "Claude Code", profile: "Default", model: "Fable 5.2", mode: "Auto", as: "Same Profile" }; S.card = null; return render(true);
@@ -718,6 +760,7 @@ document.addEventListener("click", (e) => {
       S.room = id; S.sheet = null; S.phoneScreen = "room"; return render(false);
     }
     case "phonelist": S.phoneScreen = "list"; S.card = null; return render(false);
+    case "phonefiles": S.phoneFiles = !S.phoneFiles; return render(true);
     case "phonemembers": S.phoneMembers = !S.phoneMembers; return render(true);
   }
   // A message clicked: answered.
@@ -729,7 +772,7 @@ function send() {
   const text = S.draft.trim();
   if (!text) return;
   const r = room(), reply = S.reply;
-  S.draft = ""; S.reply = null; S.pick = null; r.trips = 0;
+  S.draft = ""; S.reply = null; S.pick = null; r.trips = 0; r.told = false;
   post(r, "you", text, { reply });
 }
 function choose(id) {
