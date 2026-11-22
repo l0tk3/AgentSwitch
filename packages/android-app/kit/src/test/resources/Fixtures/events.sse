@@ -1,0 +1,22 @@
+event: queued
+data: {"taskId":"t_1","seq":1,"ts":1790000000000,"type":"queued","payload":{"task":"hi","cwd":"/tmp/w","threadId":null}}
+id: 1
+
+: keep-alive comment
+
+event: dispatched
+data: {"taskId":"t_1","seq":2,"ts":1790000001000,"type":"dispatched","payload":{"harness":"claude-code","model":"sonnet","effort":null}}
+id: 2
+
+event: text
+data: {"taskId":"t_1","seq":3,"ts":1790000002000,"type":"text","payload":{"text":"第一行\n第二行 ✓"}}
+id: 3
+
+event: approval_request
+data: {"taskId":"t_1","seq":4,"ts":1790000003000,"type":"approval_request","payload":{"approvalId":"ap_1","kind":"approval","action":"bash: ls","evidence":"{}","humanOnly":false}}
+id: 4
+
+event: done
+data: {"taskId":"t_1","seq":5,"ts":1790000004000,"type":"done","payload":{"result":"ok","tokens":120}}
+id: 5
+

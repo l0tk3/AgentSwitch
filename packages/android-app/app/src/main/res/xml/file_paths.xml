@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the folder the task pages download into (cacheDir/agentswitch-files/<task>/<path>), never the rest of the app's cache. -->
+<paths>
+    <cache-path name="task_files" path="agentswitch-files/" />
+    <!-- The Files tab: copies of the Mac's files fetched to share or save (cacheDir/uploads/<id>/<name>, FilesStore.holder). The viewer's copies (agentswitch-files/mac/) are inside the folder above. -->
+    <cache-path name="files_tab_copies" path="uploads/" />
+</paths>

@@ -1,0 +1,2 @@
+[{"harness":"codex","remaining":0.42,"detail":{"primary":{"usedPercent":58,"windowMinutes":300}},"source":"account/rateLimits/read","fetchedAt":1790000000000,"error":null},
+ {"harness":"claude-code","remaining":null,"detail":{},"source":"local count","fetchedAt":1790000000000,"error":"quota timed out after 10000 ms"}]

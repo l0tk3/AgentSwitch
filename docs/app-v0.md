@@ -172,6 +172,40 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
 - 推送不做；留 `NotificationSink` 接口。
 - **本地通知**（2026-11-11，用户：现在手机端的通知有点问题，就算我开着app 也不会给我推送通知）：查下来应用里没有任何通知的代码，只有实时活动，所以从来没有通知。现在应用自己发本地通知（`App/Sources/Live/Notifier.swift`）：终端新出现“等你处理”（标题 `名字 · Needs You`，正文是问题或要批准的工具）、终端这一轮结束（`名字 · Done`）。应用在前台时也以横幅显示；正开着的那个终端不通知；点通知打开那个终端；同一个终端后一条顶替前一条。第一次有话要说或第一次打开终端页时问系统要通知权限。**限度**：通知是应用得知变化时自己发的，所以只有应用在运行时才有——在前台，以及退到后台后系统还让它运行的那一小会儿。应用被系统挂起或关掉之后收不到，那需要苹果的远程推送（付费开发者计划加一个发送端），仍然没做。只编过模拟器版，真机上没有装、没有看过。
 
+## 5b. Android 应用（2026-11-11）
+
+起因：手机端只有 iPhone 版；用 Android 手机的人（提出这件事的是三星 S26 Ultra）没法用。
+
+- **同一个设计，两种手机**。Android 版不是另一个应用：页面、文案、颜色、字号、间距都取自 iPhone 版（§5、ui-v0 §7 与 §8），iPhone 上的一点在这里是一个 dp 或 sp。五个标签页的顺序、打开先到 `Terminals`、像素与经典两种外观、演示屏幕的名字都相同。不同的只有系统给的东西（见下）。
+- **技术**：Kotlin + Jetpack Compose，Android 10（API 29）起，`packages/android-app/`。分两个模块，对应 iPhone 的包与应用：
+  - `kit`：纯逻辑，不含 Android，在 Mac 上跑测试（`./gradlew :kit:test`）。是 `AgentSwitchKit` 逐文件的移植——一个 Swift 文件一个 Kotlin 文件，类型名、成员名相同，包名 `com.agentswitch.kit.<目录>`——连同它的测试。逻辑改动两边一起改：先改 Swift 与它的测试，再照样改 Kotlin。
+  - `app`：Compose 界面，加上只有手机才有的东西（`platform/`）。
+- **服务端不用改**。配对时平台报 `android`（daemon 接受任意平台名，Mac 应用的设备列表显示为 `Android`）；用的是 iPhone 用的同一批远程接口。
+- **与 iPhone 不同的地方**（都是系统给的东西）：
+  | 事 | iPhone | Android |
+  |---|---|---|
+  | 钉证书指纹 | `URLSession` 的代理 | OkHttp + 自己的信任管理器：只比对叶证书 DER 的 SHA-256，不认 CA、不查主机名；每个重载都走同一处比对。不缓存、不存 cookie、不跟重定向、写请求不重发（Mac 关掉的连接见下） |
+  | 发现 Mac | Bonjour（`NWBrowser`） | 系统的服务发现（`NsdManager`），同一个 `_agentswitch._tcp` 与 TXT `fp` |
+  | 网络变化 | `NWPathMonitor` | `ConnectivityManager`（包含 VPN：Tailscale 是 VPN） |
+  | 设备令牌 | Keychain（仅本机、解锁后可用） | Android Keystore 造并保管的 AES-256-GCM 密钥封存，密文放在应用自己的偏好文件里；应用不参与备份与换机迁移 |
+  | 造密文 | swift-sodium | lazysodium 的 Android 版（同一个 libsodium 的 `crypto_box_seal`），不手写密码学；测试里由 Python gate 解开 Kotlin 造的密文（`CrossLanguageTests`，按需开启） |
+  | 扫码 | AVFoundation | CameraX 取画面，ZXing 认码。不用 Google Play 服务：没有它的手机也能用。只认 `agentswitch://` 开头的码 |
+  | 终端屏幕 | SwiftTerm | Termux 的 `terminal-emulator` 与 `terminal-view`（Apache 2.0）。和 iPhone 一样只显示：不接键盘，回复走回复框，按键与滚轮按名字发。它不保留 OSC 8 链接，链接只从屏幕上写出来的地址里认 |
+  | 行内 Markdown | Foundation 的解析器 | `kit` 自己的小解析器（粗体、斜体、行内代码、删除线、链接），给出带标记的文字段，由界面画；只放行 http/https，图片不加载，HTML 不解释 |
+  | 等宽字 | 系统的 SF Mono | 内置 JetBrains Mono（OFL）。它没有盲文字符，所以转圈是照盲文点阵画的，不靠字体 |
+  | 通知 | 本地通知，只在应用运行时发 | 本地通知，Android 13 起要先问权限。有事在进行时应用在后台也继续跟着（见下“后台跟随”），所以离开应用后照样发 |
+  | 实时活动 | Live Activity 与灵动岛 | 一条常驻通知，内容是同一份摘要（`LiveSummary`） |
+- **只在一边能跑的坑**：`kit` 的测试跑在 Mac 的 JVM 上，手机上是另一个运行时。2026-11-11 就有一处：`Pattern.UNICODE_CHARACTER_CLASS` 在 JVM 上是必须的，在 Android 上直接抛异常——测试全过，应用一打开 Markdown 就崩。现在这类正则一律经 `support/UnicodePattern.kt` 的 `unicodePattern` 造；调试版另有一个自检页（`--es uiDemoScreen selfcheck`）：在真机或模拟器上把 `kit` 的每个类加载一遍（文件里的正则都在加载时编译），再拿示例数据走几条路径，并用设备上的 libsodium 封一条再解开。新加逻辑后在模拟器上跑一次。
+- **Mac 关掉的连接**（2026-11-11）：Mac 的服务在一条连接空闲 5 秒后关掉它（Node 的 `keepAliveTimeout`）；OkHttp 默认把空闲连接留 5 分钟，只在空闲满 10 秒且要发写请求前才细查连接是否还活着，而为了“写请求不重发”它自己的重试是关掉的——于是请求拿到一条对面已经关掉的连接就直接失败，页面上隔一阵闪一下 `Unreachable`，从后台回来必闪。iPhone 的 `URLSession` 自己会换一条连接，所以那边没有。这里三处一起管，都不会把写请求发两遍：空闲连接只留 4 秒，比 Mac 先放手；隔了更久没发请求（手机睡了、应用被系统冻在后台）时，发请求前先把留着的连接清掉；读请求（`GET`、`HEAD`）在连接上失败时换一条新连接再问一次，超时、握手被拒（指纹不符）、地址根本不通不重问。`kit/api/HTTPTransport.kt`，测试 `PinnedTransportTLSTests`。
+- **手机上的 VPN**（2026-11-12，第一次装到真机就撞上）：Android 上的 VPN 应用默认接管所有应用的流量，包括发往 Mac 局域网地址的连接。常年开着 Clash 一类代理的人很多——它把发往 `10.x.x.x` 的连接送去代理节点，节点到不了家里的 Mac：手机和 Mac 明明在同一个 Wi-Fi，配对页却说“无法连接此 Mac”，Mac 这边一个连接都没收到。（iPhone 上这类应用默认不碰局域网，所以那边没有这件事。）Android 允许应用把连接绑到 VPN 底下的那个网络上，只要 VPN 允许绕过，多数都允许。做法（`kit/connection/DirectRoute.kt`、`PinnedSessionTransport`、`platform/AndroidDirectRoute.kt`）：默认网络是 VPN、手机同时连着 Wi-Fi 或以太网、而且要去的是局域网地址（RFC 1918、链路本地、`.local`）时，发请求前先从底下那个网络试一次——连上并完成钉了指纹的握手，不发请求，0.8 秒内；Mac 在那边应答了，这个地址的请求就都走那边（单独一个连接池），60 秒后再确认；没应答就走平常的路，15 秒后再试。**先试而不是认定**：有的 VPN 本身就是去 Mac 所在网络的路（WireGuard 回家、组网），绕过它反而到不了；也可能这个 Wi-Fi 上恰好有别的设备占着同一个地址——握手时指纹对不上，就不当它是 Mac。tailnet 与组网的地址（100.64/10）是 VPN 自己的，不绕。VPN 不允许绕过时这条路走不通，只能在 VPN 应用里把 AgentSwitch 排除或让它放行局域网。
+- **网络不上主线程**（2026-11-12，同一次真机上）：Android 禁止在主线程上做网络操作，而关闭一个应答就是网络操作——TLS 连接关闭时要写一笔，没读完的应答体要读到头。Mac 的两个地址（配对码里的局域网地址和 Bonjour 找到的那个）同时应答探测时，慢的那个被取消，它的应答在调用方的线程上被关闭，调用方在主线程，应用当场退出。模拟器发现不了第二个地址，测不出来。现在传输层的收发整个在 `Dispatchers.IO` 上做，没人等的应答也不在发现这件事的线程上关。
+- **后台跟随**（2026-11-12）：Android 在应用离开屏幕几秒后就把它冻结，冻结后不再问 Mac，也就什么都不知道、什么通知都发不出——终端要你批准、一轮结束，都收不到。所以**有事在进行时**（有任务在跑，或有终端在工作）起一个前台服务（`platform/FollowService.kt`）：应用不被冻结，不在前台时每 5 秒问一次终端与进行中的任务，通知照常发；服务自己的那条常驻通知写着正在进行什么（一件事时是它的名字、状态和正在做的事，带计时；多件时是“1 Needs You · 2 Busy”加每件一行），点它回到那个终端或任务。这就是 iPhone 实时活动在这边的样子，多出来的是 iPhone 做不到的“离开后还跟着”。规则（`FollowRule`，有测试）：有东西在跑就一直跟；只剩等你处理的，再跟 10 分钟（你可能在 Mac 上答了，工作接着跑）就停——一个问题晾一夜不该让手机醒一夜，关于它的那条通知还在；什么都没有就不起服务，也没有常驻通知。离开应用的那一刻再问一次、2.5 秒后又问一次，这样“发完回复马上锁屏”也跟得上（Android 只允许应用离开屏幕后的几秒内启动前台服务）。服务类型是 `connectedDevice`（配对的 Mac，经网络连接；它要求声明几个网络权限之一，用的是安装时自动给的 `CHANGE_NETWORK_STATE`），没有 `dataSync` 那样每天几小时的上限；两次询问之间持一把会自己松开的唤醒锁，否则屏幕一灭计时器就不走了。代价是这期间多耗一点电、通知栏多一条通知；Settings › Alerts & Voice › `Follow in Background` 可以关，关掉后和 iPhone 一样只在应用运行时发通知。没有通知权限时不跟（没处显示，也没处通知）。手机不知道的事跟不了：应用被冻结期间在 Mac 上新开的终端，要等下次打开应用才看得到。
+- **演示屏幕**：同 iPhone 的 `-uiDemo YES -uiDemoScreen <名字>`，这里是 `adb shell am start -n com.agentswitch.android/.MainActivity --ez uiDemo true --es uiDemoScreen <名字>`（只在调试版），名字相同；`--es appearance classic` 看经典外观；`--es uiDemoScreen design` 是全部公共零件一页。
+- **拿一个随手可丢的服务来试**：`packages/android-app/scripts/e2e-service.sh` 用 Mac 应用里打包的运行时起一个服务——临时目录、非默认端口、**自己的 HOME**——打印配对链接。`FAKE_AGENT=1` 时 `claude` 是 daemon 测试里的替身，可以开终端、要权限，不调用任何模型。HOME 必须是临时的：服务启动时会往 HOME 下各 agent 自己的配置里写东西（比如 Codex 的 hook 信任哈希），也会把 HOME 里的文件开放给配对的手机；第一次沿用 iPhone 端到端脚本的做法用了真实的 HOME，用户的 `~/.codex/config.toml` 就被写了一次（装着的那个服务下次开 Codex 终端时会改回去）。`../ios-app/scripts/e2e-live.sh` 仍是原来的做法，没有动。
+- **装到手机上**：装 `release` 这一种（`./gradlew :app:assembleRelease`）：不可调试，所以界面比调试版顺；没有开代码压缩。**签名**（2026-11-12）：构建机器上有发布密钥时用它——`packages/android-app/keystore.properties`（不入库）里写密钥库的位置、口令与别名，或者同样四项从环境变量给（`AGENTSWITCH_ANDROID_KEYSTORE` 等，给发布任务用）；都没有时退回构建机器自己的调试密钥，谁都还能构建。密钥本身放在仓库之外，丢了就再也发不出能覆盖安装的更新。签名不同的包不能互相覆盖：换密钥、换机器构建的包，装之前要先卸载，配对随之失效。开启“USB 调试”后 `adb install`，或者把 APK 拷到手机上点开（三星手机要先关掉“自动拦截”才能装商店以外的应用）。演示屏幕与自检页只在调试版里。换一台机器构建的包签名不同，装之前要先卸载，配对随之失效。步骤在 `packages/android-app/README.md`。
+- **做到哪了**（2026-11-12）：五个标签页都在；`kit` 整个移植完（测试 400 个）；在 Android 16 模拟器上用 `release` 包对着上面那个服务走过：配对、终端列表、新建终端、回复、权限卡片、通知与点通知回到终端、Dispatch 发任务、Files 浏览与预览、Browser 列表、Settings；后台跟随：发完回复立刻离开应用，服务启动、常驻通知出现，38 秒后应用没有被冻结，这一轮在 Mac 上结束时 `Done` 通知送到、服务自己结束。**真机**：三星 S26 Ultra（Android 17、One UI 9），手机上开着 Clash（FlClash）的 VPN——扫码、配对、终端列表与 Settings 的 `Connected · LAN` 都通了，上面两条就是在它上面找到并修掉的。真机上还没看过的：后台跟随会不会被三星的省电策略停掉、指纹解锁、其余各页。
+- **没做的**（iPhone 版有的，或这里该有的）：小组件。Android 16 的“实时更新”（状态栏上的小条，三星的 Now Bar）：常驻通知可以申请升成它，没有做。文字里链接的长按菜单（点链接能打开，长按出的 Copy / 在手机浏览器打开没有接上）。Dispatch 卡片上的文件行点开的是任务页，不是文件。终端与会话页的 `Show in Files` 去的是 Files 标签页，不是盖在当前页上的那一层（`MacFilesOverSheet` 写了没接）。Files 没有下拉刷新（每 3 秒自己重读）。终端屏幕的双指缩放没法用 adb 试，没验证。代码压缩（包现在约 40 MB）。上游 `99d2cfb` 之后 iPhone 端的改动（如果有）还没有跟。
+
 ## 6. 威胁模型的变化
 
 | 变化 | 风险 | 对策 |

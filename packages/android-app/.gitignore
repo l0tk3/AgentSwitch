@@ -1,0 +1,14 @@
+# Gradle and Kotlin build state
+.gradle/
+.kotlin/
+build/
+# where the Android SDK is on this machine
+local.properties
+# Android Studio
+.idea/
+*.iml
+captures/
+# the release key's whereabouts and passwords (README, "Signing"); the key itself is kept outside the repository
+keystore.properties
+*.jks
+*.keystore
