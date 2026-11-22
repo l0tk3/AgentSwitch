@@ -87,6 +87,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        // The Home Screen icon is the look's (platform/HomeIcon.kt): changed while the app is off the screen.
+        com.agentswitch.android.platform.HomeIcon.follow(this, app.settings.look)
         super.onStop()
         if (!demo && !isChangingConfigurations) app.model.leaving()
     }

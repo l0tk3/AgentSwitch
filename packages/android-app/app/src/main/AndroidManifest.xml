@@ -36,10 +36,6 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- The Mac app's pairing link, tapped or scanned by another app: agentswitch://pair?p=… -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -48,6 +44,30 @@
                 <data android:scheme="agentswitch" />
             </intent-filter>
         </activity>
+        <!-- The Home Screen icon follows the look (docs/ui-v0.md §10, platform/HomeIcon.kt): the launcher shows the app
+             by one of these two names for MainActivity, each with its own icon, and exactly one is switched on. -->
+        <activity-alias
+            android:name=".LauncherPixel"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherClassic"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_classic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <!-- A downloaded task file is opened by the phone's own viewer: it is handed a content:// address of the app's
              cache folder for tasks' files (xml/file_paths.xml) and nothing else. -->
         <service
