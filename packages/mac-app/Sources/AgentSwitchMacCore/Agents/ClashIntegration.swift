@@ -328,6 +328,29 @@ public struct ClashProfile: Decodable, Equatable, Sendable, Identifiable {
     public var id: String { uid }
 }
 
+/// What a phone's Clash or Stash takes the subscription by (docs/clash-v0.md §12): switched on, being listened for,
+/// the address at each of the Mac's addresses a phone can reach, and why it is not listened for.
+public struct ClashPhone: Decodable, Equatable, Sendable {
+    public struct Link: Decodable, Equatable, Sendable, Identifiable {
+        /// `lan` or `tailnet`.
+        public let kind: String
+        public let url: String
+        public var id: String { url }
+        /// The Mac's address in it (`192.168.1.20`), for telling the links apart.
+        public var host: String { URLComponents(string: url)?.host ?? "" }
+        public var title: String { kind == "tailnet" ? "Tailscale" : "Wi-Fi" }
+        /// What a phone's camera opens the app with: the app is handed the address and takes the subscription.
+        public var install: String {
+            // The address is one value of this one: every `&`, `=` and `?` in it is escaped.
+            "clash://install-config?url=\(url.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")&name=AgentSwitch"
+        }
+    }
+    public let on: Bool
+    public let listening: Bool
+    public let links: [Link]
+    public let problem: String?
+}
+
 public struct ClashView: Decodable, Equatable, Sendable {
     /// Clash Verge is on this Mac; its core answers.
     public let found: Bool
@@ -360,6 +383,8 @@ public struct ClashView: Decodable, Equatable, Sendable {
     /// With `applyNow` on: what the core said of the subscription it would not load; nil: it took it, or there was
     /// nothing to load (and a service from before §7.12 says nothing).
     public let applyProblem: String?
+    /// nil from a service from before §12.
+    public let phone: ClashPhone?
 
     public func state(_ service: ClashService) -> ClashServiceState? { services[service.rawValue] }
 
@@ -518,6 +543,14 @@ extension DaemonClient {
     /// A node is left out of everything from now on, or is back.
     public func setClashNode(_ name: String, off: Bool) async throws -> ClashView {
         try decode(ClashView.self, try await call("POST", "/clash/node", body: try JSONSerialization.data(withJSONObject: ["name": name, "off": off]), timeout: 20))
+    }
+
+    /// Phones may take the subscription, or not; `renew`: the address handed out before answers no more.
+    public func setClashPhone(on: Bool? = nil, renew: Bool = false) async throws -> ClashView {
+        var body: [String: Bool] = [:]
+        if let on { body["on"] = on }
+        if renew { body["renew"] = true }
+        return try decode(ClashView.self, try await call("POST", "/clash/phone", body: try JSONSerialization.data(withJSONObject: body), timeout: 20))
     }
 
     /// How long every node takes to answer, in ms (nil: no answer), whatever it is used for.

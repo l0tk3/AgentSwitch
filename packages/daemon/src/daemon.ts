@@ -86,7 +86,10 @@ import { DEFAULT_SCOPE } from "./files/browse.js";
 import { Thumbnails } from "./files/thumbnails.js";
 import { vergeDir } from "./clash/verge.js";
 import { createRemoteApp } from "./remote/app.js";
-import { DEFAULT_REMOTE_PORT, macName, remoteRuntime, type RemoteRuntime } from "./remote/runtime.js";
+import { DEFAULT_REMOTE_PORT, discoverAddresses, macName, remoteRuntime, type RemoteRuntime } from "./remote/runtime.js";
+import { DEFAULT_PHONE_PORT, listenPhone, PHONE_PATH, type PhoneListener } from "./clash/phoneListener.js";
+import type { PhoneReach } from "./clash/integration.js";
+import { isAllowedSource } from "./remote/address.js";
 import { listenRemote, type RemoteListener } from "./remote/server.js";
 import type { TargetRef } from "./core/target.js";
 import { mergeLogged } from "./router/discovery.js";
@@ -130,6 +133,8 @@ export const DEFAULT_PORT = 4711;
 /** Expired archived threads are deleted at start-up and then this often. */
 const THREAD_SWEEP_INTERVAL_MS = 3600_000;
 /** How often Clash Integration looks whether its subscription is due to be fetched again. */
+/** This Mac's addresses are looked up again this often for the phones' Clash address (§12). */
+const PHONE_ADDRESSES_MS = 60_000;
 const CLASH_TICK_MS = 60_000;
 /** How often the Codex records are looked at for the picture files they name when no screen reads the list (a pasted
  *  picture's file lasts about three days), and how soon after the service starts (docs/simple-view-v0.md §4). */
@@ -157,6 +162,9 @@ export type DaemonConfig = {
   /** app-v0 §2: HTTPS for paired phones on all interfaces (AGENTSWITCH_REMOTE=1, AGENTSWITCH_REMOTE_PORT, default 4713;
    *  AGENTSWITCH_REMOTE_NAME overrides the Mac name in the pairing payload). Absent = off. */
   readonly remote?: { readonly port: number; readonly name?: string };
+  /** docs/clash-v0.md §12: the port phones' Clash and Stash take the subscription on, plain HTTP on all interfaces
+   *  (AGENTSWITCH_CLASH_PHONE_PORT, default 4714, with AGENTSWITCH_REMOTE on; 0 or `off`: none). Absent = off. */
+  readonly clashPhonePort?: number;
   /** The AgentSwitch.app this daemon runs from (AGENTSWITCH_APP_BUNDLE, set by the Mac app): staged updates sit next to it. */
   readonly appBundle?: string;
   /** Tasks with no folder of their own work in a dated subfolder of the user's default work folder (docs/control-v0.md
@@ -180,6 +188,13 @@ export type DaemonConfig = {
    *  AGENTSWITCH_LEFTOVERS=0. Tests build with it off: a sweep reads the machine's process table. */
   readonly leftovers?: boolean;
 };
+
+/** AGENTSWITCH_CLASH_PHONE_PORT as a TCP port; unset or empty → the default; 0, `off` or not a port → none. */
+function clashPhonePort(raw: string | undefined): number {
+  if (raw === undefined || !raw.trim()) return DEFAULT_PHONE_PORT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= MAX_PORT ? n : 0;
+}
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
 export function remotePort(value: string | undefined): number {
@@ -217,6 +232,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     ...(env.AGENTSWITCH_REMOTE === "1" || env.AGENTSWITCH_REMOTE === "true"
       ? { remote: { port: remotePort(env.AGENTSWITCH_REMOTE_PORT), ...(env.AGENTSWITCH_REMOTE_NAME?.trim() ? { name: env.AGENTSWITCH_REMOTE_NAME.trim() } : {}) } }
       : {}),
+    ...((env.AGENTSWITCH_REMOTE === "1" || env.AGENTSWITCH_REMOTE === "true") && clashPhonePort(env.AGENTSWITCH_CLASH_PHONE_PORT) ? { clashPhonePort: clashPhonePort(env.AGENTSWITCH_CLASH_PHONE_PORT) } : {}),
     ...(env.AGENTSWITCH_APP_BUNDLE?.trim() ? { appBundle: env.AGENTSWITCH_APP_BUNDLE.trim() } : {}),
     taskFolders: env.AGENTSWITCH_TASK_FOLDERS !== "0",
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
@@ -258,6 +274,9 @@ export type Daemon = {
   /** The port the 127.0.0.1 listener got: the terminals' hook command calls it. */
   setLocalPort(port: number): void;
   readonly clash: ClashIntegration;
+  /** Where phones reach this Mac for the Clash subscription (§12), and what to do when that is switched on or off:
+   *  both set by whoever listens. */
+  readonly clashPhone: { reach: PhoneReach; changed: ((on: boolean) => Promise<void>) | null };
   close(): void;
 };
 
@@ -587,7 +606,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   forgetDeletedTasks(conversation, store);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const clashStore = new ClashStore(cfg.home);
-  const clash = new ClashIntegration({ store: clashStore, source: new ClashSources(cfg.home, undefined, undefined, undefined, () => clashStore.settings().autoUpdateHours), base: () => `http://127.0.0.1:${localPort}`,
+  const clashPhone: Daemon["clashPhone"] = { reach: { port: null, lan: [], tailnet: [], problem: null }, changed: null };
+  const clash = new ClashIntegration({ store: clashStore, reach: () => clashPhone.reach, phoneChanged: (on) => clashPhone.changed?.(on), source: new ClashSources(cfg.home, undefined, undefined, undefined, () => clashStore.settings().autoUpdateHours), base: () => `http://127.0.0.1:${localPort}`,
     // A profile's proxy server is tried on its own port by the routing check (docs/clash-v0.md §7.9).
     proxyPorts: () => new Map(Object.values(profiles.all()).flatMap((a) => a.profiles).flatMap((p) => { const place = p.proxy ? proxyPlace(p.proxy.server) : null; return place ? [[place.host.toLowerCase(), place.port] as const] : []; })) });
   // The nodes are made after the API (they need the remote listener): what they heard is asked through this.
@@ -624,7 +644,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   nodesMade = nodes;
   const fileScopes = { get: (id: string) => scopeOf(cfg.home, id), set: (id: string, scope: Parameters<typeof setScope>[2]) => setScope(cfg.home, id, scope) };
   const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
-  return { app, api, remote, nodes, engine, store, quota, targets, clash, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
+  return { app, api, remote, nodes, engine, store, quota, targets, clash, clashPhone, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
     close: () => { sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
@@ -773,6 +793,32 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   const remote: RemoteListener | undefined = daemon.remote
     ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); throw err; })
     : undefined;
+  // docs/clash-v0.md §12: phones' Clash and Stash take the subscription here. A port that is taken is said on the
+  // page, not a reason not to start.
+  let phone: PhoneListener | null = null;
+  const phonePort = cfg.clashPhonePort;
+  const addresses = async () => {
+    const found = await (daemon.remote?.addresses ?? discoverAddresses)().catch(() => ({ lan: [] as string[], tailnet: [] as string[] }));
+    daemon.clashPhone.reach = { ...daemon.clashPhone.reach, lan: found.lan, tailnet: found.tailnet };
+  };
+  const phoneListen = async (on: boolean) => {
+    if (!phonePort) return;
+    if (!on) { await phone?.close(); phone = null; daemon.clashPhone.reach = { ...daemon.clashPhone.reach, port: null, problem: null }; return; }
+    if (phone) return;
+    try {
+      phone = await listenPhone(daemon.clash, phonePort, { allowSource: isAllowedSource });
+      daemon.clashPhone.reach = { ...daemon.clashPhone.reach, port: phone.port, problem: null };
+      console.error(`agentswitchd clash subscription for phones on http://*:${phone.port}${PHONE_PATH}`);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      daemon.clashPhone.reach = { ...daemon.clashPhone.reach, port: null, problem: code === "EADDRINUSE" ? `端口 ${phonePort} 已被占用` : (err as Error).message };
+      console.error(`clash subscription for phones on port ${phonePort}: ${(err as Error).message}`);
+    }
+  };
+  daemon.clashPhone.changed = phoneListen;
+  if (phonePort) { await addresses(); await phoneListen(daemon.clash.phoneOn()); }
+  const addressTimer = phonePort ? setInterval(() => { void addresses(); }, PHONE_ADDRESSES_MS) : null;
+  addressTimer?.unref();
   // Every local caller shows the token (api/localAuth.ts); made on first start, read by the Mac app and the CLI.
   const auth = new LocalAuth(ensureLocalToken(cfg.home));
   const server = listenLocal(daemon, cfg.port, (info) => {
@@ -808,7 +854,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   picturesFirst.unref();
   const picturesTimer = setInterval(keepPictures, PICTURES_EVERY_MS);
   picturesTimer.unref();
-  const close = () => { clearInterval(sweeper); clearInterval(clashTimer); clearTimeout(picturesFirst); clearInterval(picturesTimer); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); };
+  const close = () => { if (addressTimer) clearInterval(addressTimer); void phone?.close(); clearInterval(sweeper); clearInterval(clashTimer); clearTimeout(picturesFirst); clearInterval(picturesTimer); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); };
   // A signal: Chrome is let quit on its own first (a killed one leaves its code-sign clone behind), then the rest.
   return { daemon, close, stop: async () => { await daemon.stopBrowser().catch(() => undefined); close(); } };
 }

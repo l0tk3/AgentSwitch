@@ -175,6 +175,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/clash/node"],
   ["POST", "/clash/select"],
   ["POST", "/clash/delays"],
+  ["POST", "/clash/phone"],
   ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],

@@ -302,6 +302,27 @@ public struct ClashProfile: Decodable, Equatable, Sendable, Identifiable {
     public var id: String { uid }
 }
 
+/// What this phone's Stash or Clash takes the subscription by (docs/clash-v0.md §12): the address at each of the Mac's
+/// addresses a phone can reach.
+public struct ClashPhone: Decodable, Equatable, Sendable {
+    public struct Link: Decodable, Equatable, Sendable, Identifiable {
+        /// `lan` or `tailnet`.
+        public let kind: String
+        public let url: String
+        public var id: String { url }
+        public var title: String { kind == "tailnet" ? "Tailscale" : "Wi-Fi" }
+        /// What opens Stash (or another Clash) with the address to take the subscription from.
+        public var install: URL? {
+            // The address is one value of this one: every `&`, `=` and `?` in it is escaped.
+            URL(string: "clash://install-config?url=\(url.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")&name=AgentSwitch")
+        }
+    }
+    public let on: Bool
+    public let listening: Bool
+    public let links: [Link]
+    public let problem: String?
+}
+
 public struct ClashView: Decodable, Equatable, Sendable {
     /// Clash Verge is on this Mac; its core answers.
     public let found: Bool
@@ -335,6 +356,8 @@ public struct ClashView: Decodable, Equatable, Sendable {
     public let upToDate: Bool
     /// When Clash Verge last fetched it (ms); nil: not since the service started.
     public let fetchedAt: Double?
+    /// nil from a Mac from before §12.
+    public let phone: ClashPhone?
 
     public func state(_ service: ClashService) -> ClashServiceState? { services[service.rawValue] }
 

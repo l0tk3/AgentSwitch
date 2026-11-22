@@ -51,6 +51,9 @@ struct ClashActions {
     var editDNS: () -> Void = {}
     /// The routing check is run.
     var check: () -> Void = {}
+    /// Phones may take the subscription, or not; the address they take it by is made anew.
+    var setPhone: (Bool) -> Void = { _ in }
+    var renewPhone: () -> Void = {}
 }
 
 /// What is being edited in the sheet — a rule template's rules or the DNS template's text — as it was when the sheet
@@ -112,6 +115,7 @@ struct ClashIntegrationView: View {
                             ForEach(view.listed) { ClashSubscriptionCard(subscription: $0, view: view, fetching: fetching, actions: actions) }
                             ClashAddCard(view: view, fetching: fetching, actions: actions)
                             if view.source != nil { ClashDeliveryCard(view: view, actions: actions) }
+                            if view.source != nil, let phone = view.phone { ClashPhoneCard(phone: phone, actions: actions) }
                         }
                         if view.source != nil {
                             // Every node of every subscription in one place (§10).
@@ -186,7 +190,9 @@ struct ClashIntegrationView: View {
             test: test,
             edit: edit,
             editDNS: editDNS,
-            check: check)
+            check: check,
+            setPhone: { on in run { try await $0.setClashPhone(on: on) } },
+            renewPhone: { run { try await $0.setClashPhone(renew: true) } })
     }
 
     /// The service keeps several subscriptions (§10).
@@ -390,7 +396,8 @@ extension ClashView {
                  "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]}},
      "templates":{"domestic":{"on":true,"custom":false,"count":169},"block":{"on":false,"custom":true,"count":31}},"defaultGroup":"Candy",
      "dns":{"on":true,"custom":false,"overridden":false},
-     "install":"clash://install-config?url=x"}
+     "install":"clash://install-config?url=x",
+     "phone":{"on":true,"listening":true,"problem":null,"links":[{"kind":"lan","url":"http://192.168.1.20:4714/clash/phone.yaml?k=demo"},{"kind":"tailnet","url":"http://100.64.0.2:4714/clash/phone.yaml?k=demo"}]}}
     """.utf8))
 
     static let demoDelays: [String: Int?] = ["JP Tokyo 01": 392, "SG Singapore 01": 428, "US Seattle 02": nil, "US Los Angeles 01": 330]

@@ -491,3 +491,47 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 
 订阅中接管的服务专用 `RULE-SET` / `GEOSITE` 规则也有相邻保护，保留 `no-resolve` 等标志。所选节点因订阅更新全部消失时，保留服务匹配并拒绝流量，等待重新选择；主动清空选择则恢复订阅规则。用户显式配置的 `Go Direct` 仍优先，组内备用节点切换保留。此保护依赖流量命中服务规则及内核处于规则模式，不是系统级网络隔离。
 
+
+## 12. 手机上的 Stash 和 Clash 也来取（2026-11-22）
+
+用户：我现在这个clash代理功能，能不能开个端口让手机上的 stash 和 clash 也可以拉适配的代理配置；给手机用的地址默认打开吧，局域网和tailscale都打开，然后根据请求的app返回不同的配置文件。参照是用户自己手写的那份 Stash 文件（`stash_tgyun_static.yaml`，2026-09-28）。
+
+### 12.1 是什么
+
+- **一个地址**：`http://<这台 Mac 的地址>:4714/clash/phone.yaml?k=<口令>`。局域网地址和 Tailscale 地址各一条，页面上都列出来。
+- **默认开着**，页面上有开关；关掉就不再监听。服务要开着给手机的远程访问（`AGENTSWITCH_REMOTE`）才有这个监听；端口用 `AGENTSWITCH_CLASH_PHONE_PORT` 改，`0` 或 `off` 是不要。端口被占用时服务照常启动，页面上说明。
+- **口令是它自己的**，不是本机 Clash Verge 取订阅用的那个。`New Link…` 换一个，原来的地址立即失效。
+- **按来取的 app 给不同的正文**：自称里带 `Stash` 的给 Stash 版，其余的当作内核是 mihomo 的 Clash（Clash Meta for Android、FlClash 等）。地址后面加 `&for=stash` 或 `&for=mihomo` 可以指定。
+- 回答带 `profile-update-interval: 12` 和订阅的流量信息，app 自己每 12 小时来取一次。
+
+### 12.2 正文
+
+从交给本机 Clash Verge 的那一份（§7.2、§10.2）出发，所以 Mac 上的一切选择都在：为 Claude、OpenAI 选的节点和顺序、停用的节点、合在一起的多份订阅、规则模版、DNS 模版。区别：
+
+- **整份自带**：AgentSwitch 提供的节点集写成正文里的 `proxies`，用到节点集的分组改成点名（分组上的 `filter`、`exclude-filter`、`exclude-type` 在这里先算好）；AgentSwitch 提供的规则集展开成 `rules` 里的一条条规则，放在原来那条 `RULE-SET` 的位置、去原来的去向。正文里没有任何指回这台 Mac 的地址：手机取一次就能用，离开家、Mac 关机也照常，只是更新要等下次连得上。
+- 订阅里别人提供的节点集、规则集原样留着，手机自己去取。
+- **去掉只属于这台 Mac 的**：各个监听端口、控制口和它的口令、`tun`、`dns.listen` 等。
+- **按程序名的规则（`PROCESS-…`）两版都去掉**：模版里写的是这台 Mac 上的程序名，手机上对不上；而且旧一些的内核不认其中的写法（安卓上的 Clash 遇到 `PROCESS-NAME-WILDCARD` 整份拒收，2026-11-22 实测）。
+- 一个节点都不剩的分组成员写成 `REJECT`，不改走别的出口（§11 的规矩）。
+- **Stash 版另外**：只留 Stash 认的顶层键（`mode`、`log-level`、`ipv6`、`dns`、`hosts`、`proxies`、`proxy-groups`、`proxy-providers`、`rules`、`rule-providers`）；`SUB-RULE` 去掉；`dns` 只留它认的键，`respect-rules: true` 写成它的 `follow-rule: true`，名字服务器后面的 `#分组` 去掉，一行多个域名的 `nameserver-policy` 拆成一行一个。
+
+### 12.3 谁能取到
+
+- 普通 HTTP：Stash 和 Clash 不认自签证书，配对手机走的那个端口借不了。
+- 只接受来自家用网段和 Tailscale 网段的连接（和远程访问同一张表），别的来源在连上时就断开。
+- 除了带着当前口令的这一个地址，别的一律 404。
+- **正文里有全部节点的地址和口令**。经 Tailscale 取是加密的；在局域网里是明文，同一网络下能抓包的人看得到。用户知情后选的两边都开（2026-11-22）。
+- 日志里记谁取了哪一版，不记地址（地址里有口令）。
+
+### 12.4 接口与页面
+
+- `GET /clash` 多了 `phone: { on, listening, links: [{ kind: "lan" | "tailnet", url }], problem }`。
+- `POST /clash/phone`，`{ on?, renew? }`：开关，或者换口令。配对的手机也可以调。
+- Mac 的 Clash 页：`Subscriptions` 里一张 `Phones` 卡片——开关、每个地址的 `QR Code`（内容是 `clash://install-config?url=…`，手机相机扫了由 Stash 或 Clash 打开）和 `Copy Link`、`New Link…`。
+- iPhone 的 Clash 页：`This iPhone` 一节，`Add to Stash · Wi-Fi` / `· Tailscale`，直接把地址交给 Stash；长按可以复制链接。
+
+### 12.5 做了的与没验证的
+
+- 做了：`clash/phone.ts`（正文）、`clash/phoneListener.ts`（监听）、上面的接口和两处页面；`tests/clashPhone.test.ts`。
+- 用用户真实的订阅各出了一份：48 个节点、6 个分组、213 条规则（Stash 版），没有指回 Mac 的地址，没有悬空的分组成员或规则去向。
+- **没验证**：Stash 和安卓上的 Clash 真的导入这份正文并能用；Stash 取订阅时的自称里带 `Stash`（按惯例推的，认不出时可用 `&for=stash`）；`clash://install-config` 在 iPhone 上由 Stash 接住。

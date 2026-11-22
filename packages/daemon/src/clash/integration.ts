@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import { stringify } from "yaml";
 import { appliedConfig, buildConfig, chosen, CLASH_SERVICES, CLASH_TEMPLATES, DEFAULT_GROUP, defaultGroup, DIRECT_SET, directGroup, dnsSection, dnsText, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, templateOn, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
+import { phoneApp, phoneConfig, type PhoneApp } from "./phone.js";
 import { rulesFrom } from "./rules.js";
 import { observe, type CheckDeps, type Observed } from "./check.js";
 import { ClashController, type ClashStatus } from "./controller.js";
@@ -58,7 +59,12 @@ export type ClashView = {
   /** With `applyNow` on: why the core did not take the subscription made now, in its own words; null: it did, or
    *  there was nothing to load. */
   readonly applyProblem: string | null;
+  /** What a phone's Clash or Stash takes the subscription by (§12): switched on, being listened for, the address at
+   *  each of this Mac's addresses a phone can reach, and why it is not listened for (the port is taken). */
+  readonly phone: { readonly on: boolean; readonly listening: boolean; readonly links: readonly { readonly kind: "lan" | "tailnet"; readonly url: string }[]; readonly problem: string | null };
 };
+/** Where phones reach this Mac: the port listened on for them (null: not listening), its addresses, what went wrong. */
+export type PhoneReach = { readonly port: number | null; readonly lan: readonly string[]; readonly tailnet: readonly string[]; readonly problem: string | null };
 
 /** One line of the routing check (§7.9): a kind of traffic, the name tried for it, what it should do and what the
  *  core did with it. `expect` null: nothing is asked of it here (a template that is off), it is shown for what it is;
@@ -89,9 +95,15 @@ export type ClashOptions = {
   /** The port a proxy server listens on, by its host in lower case (the profiles' proxies): a `Go Direct` address is
    *  tried on the port it is used on, where one is known. */
   readonly proxyPorts?: () => ReadonlyMap<string, number>;
+  /** Where phones reach this Mac (§12); absent: nowhere. */
+  readonly reach?: () => PhoneReach;
+  /** The phones' address was switched on or off: listen for it, or stop. */
+  readonly phoneChanged?: (on: boolean) => void | Promise<void>;
 };
 
 const DELAY_MS = 5_000, HTTPS = 443;
+/** How often a phone's app is asked to fetch the subscription again, in hours. */
+const PHONE_UPDATE_HOURS = 12;
 /** What a node is tried against when no service is meant: as `自动选择` tries them. */
 const ANY_PROBE = "https://www.gstatic.com/generate_204";
 /** A text the core was given is not given again sooner than this (Clash Verge may have put its own copy back). */
@@ -345,6 +357,32 @@ export class ClashIntegration {
 
   provider(slug: string): { readonly text: string; readonly userinfo?: string } | null { return this.o.source.provider(slug); }
 
+  // ---- what a phone's Clash or Stash fetches (§12)
+
+  phoneOn(): boolean { return this.o.store.phoneOn(); }
+  phoneToken(): string { return this.o.store.phoneToken(); }
+
+  /** The subscription whole in one text, as the app that asks takes it; null without one to work from. */
+  phone(userAgent: string | undefined, asked?: string): { readonly text: string; readonly app: PhoneApp; readonly headers: Record<string, string> } | null {
+    const made = this.build();
+    if (!made) return null;
+    const app = phoneApp(userAgent, asked), base = `${this.o.base()}/clash`;
+    const config = phoneConfig(made.config, { base, ruleSet: (name) => this.ruleSet(name), nodeSet: (name) => this.nodeSet(name), provider: (slug) => this.provider(slug)?.text ?? null }, app);
+    const info = this.o.source.info();
+    return { app, text: stringify(config, { lineWidth: 0 }), headers: { "profile-update-interval": String(PHONE_UPDATE_HOURS),
+      "content-disposition": "attachment; filename=AgentSwitch.yaml", ...(info?.userinfo ? { "subscription-userinfo": info.userinfo } : {}) } };
+  }
+
+  /** Switched on or off; `renew`: the address handed out before answers no more. */
+  async setPhone(change: { readonly on?: boolean | undefined; readonly renew?: boolean | undefined }): Promise<ClashView> {
+    if (change.renew) this.o.store.phoneToken(true);
+    if (change.on !== undefined && change.on !== this.o.store.phoneOn()) {
+      this.o.store.setPhoneOn(change.on);
+      await this.o.phoneChanged?.(change.on);
+    }
+    return this.view();
+  }
+
   // ---- inside
 
   /** What would be handed over now; null without a subscription to work from. */
@@ -464,7 +502,12 @@ export class ClashIntegration {
     };
     const install = `clash://install-config?url=${encodeURIComponent(`${base}/clash/sub.yaml?k=${this.token()}`)}&name=${encodeURIComponent("AgentSwitch")}`;
     const traffic = info?.userinfo ? parseTraffic(info.userinfo) : null;
+    const reach = this.o.reach?.() ?? { port: null, lan: [], tailnet: [], problem: null }, phoneOn = this.o.store.phoneOn();
+    const link = (address: string): string => `http://${address.includes(":") ? `[${address}]` : address}:${reach.port}/clash/phone.yaml?k=${this.o.store.phoneToken()}`;
+    const phone: ClashView["phone"] = { on: phoneOn, listening: phoneOn && reach.port !== null, problem: phoneOn ? reach.problem : null,
+      links: phoneOn && reach.port !== null ? [...reach.lan.map((a) => ({ kind: "lan" as const, url: link(a) })), ...reach.tailnet.map((a) => ({ kind: "tailnet" as const, url: link(a) }))] : [] };
     return {
+      phone,
       found: profiles !== null, running: status !== null,
       ...(status ? { version: status.version, mode: status.mode, tun: status.tun } : {}),
       source: info ? { ...info, ...(traffic ? { traffic } : {}) } : null,

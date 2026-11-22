@@ -148,6 +148,7 @@ struct ClashScreen: View {
                     rules(view)
                     direct(view)
                     routing(view)
+                    if let phone = view.phone, phone.on { onPhone(phone) }
                 }
             } else if clash.loaded {
                 Section { Text("这台 Mac 上的 AgentSwitch 还不能从手机管理 Clash：在 Mac 上更新 AgentSwitch。").foregroundStyle(.secondary) }
@@ -242,6 +243,20 @@ struct ClashScreen: View {
         } footer: {
             Text(view.source == nil ? "AgentSwitch 从这个订阅出发，加上给 Claude 和 OpenAI 单独的分组，再交给 Clash Verge。链接由 Mac 保管，这里只显示它的主机名。"
                                     : "换一个订阅会忘掉为 Claude 和 OpenAI 选过的节点。")
+        }
+    }
+
+    /// The subscription for this phone's own Stash or Clash (§12): handed to the app at the Mac's address at home, or
+    /// its Tailscale one.
+    private func onPhone(_ phone: ClashPhone) -> some View {
+        Section {
+            if let problem = phone.problem { Text(problem).font(.footnote).foregroundStyle(Theme.waiting) }
+            ForEach(phone.links) { link in
+                Button("Add to Stash · \(link.title)") { if let url = link.install { UIApplication.shared.open(url) } }
+                    .contextMenu { Button("Copy Link") { UIPasteboard.general.string = link.url } }
+            }
+        } header: {
+            SectionLabel("This iPhone")
         }
     }
 

@@ -12,7 +12,8 @@ import { rulesFrom } from "./rules.js";
 const MAX_NODES = 32, MAX_DIRECT = 64;
 /** `served`: the subscription as Clash Verge last fetched it — its fingerprint and when. */
 type State = { settings: ClashSettings; token?: string; served?: { hash: string; at: number };
-  /** The subscription AgentSwitch last loaded into the core itself (§7.12): its fingerprint and when. */ applied?: { hash: string; at: number } };
+  /** The subscription AgentSwitch last loaded into the core itself (§7.12): its fingerprint and when. */ applied?: { hash: string; at: number };
+  /** The address phones take the subscription by (§12): on unless switched off, and the token it carries. */ phone?: { on: boolean; token?: string } };
 const MAX_DNS = 64 * 1024;
 
 export class ClashStore {
@@ -32,6 +33,21 @@ export class ClashStore {
     return token;
   }
 
+  /** Phones may take the subscription (§12): on until it is switched off. */
+  phoneOn(): boolean { return this.read().phone?.on !== false; }
+
+  setPhoneOn(on: boolean): void { const now = this.read(); this.write({ ...now, phone: { ...now.phone, on } }); }
+
+  /** The token the phones' address carries, its own (not the one this Mac's Clash has); `renew`: another from now on,
+   *  and the address handed out before answers no more. */
+  phoneToken(renew = false): string {
+    const now = this.read();
+    if (now.phone?.token && !renew) return now.phone.token;
+    const token = randomBytes(18).toString("base64url");
+    this.write({ ...now, phone: { on: now.phone?.on !== false, token } });
+    return token;
+  }
+
   served(): { readonly hash: string; readonly at: number } | null { return this.read().served ?? null; }
 
   setServed(hash: string, at: number): void { this.write({ ...this.read(), served: { hash, at } }); }
@@ -48,10 +64,11 @@ export class ClashStore {
 
   private read(): State {
     try {
-      const o = JSON.parse(readFileSync(this.file, "utf8")) as { settings?: unknown; token?: unknown; served?: { hash?: unknown; at?: unknown }; applied?: { hash?: unknown; at?: unknown } };
+      const o = JSON.parse(readFileSync(this.file, "utf8")) as { settings?: unknown; token?: unknown; phone?: { on?: unknown; token?: unknown }; served?: { hash?: unknown; at?: unknown }; applied?: { hash?: unknown; at?: unknown } };
       const stamp = (v: { hash?: unknown; at?: unknown } | undefined) => (typeof v?.hash === "string" && typeof v.at === "number" ? { hash: v.hash, at: v.at } : null);
       const served = stamp(o.served), applied = stamp(o.applied);
-      return { settings: cleanSettings(o.settings), ...(typeof o.token === "string" && /^[\w-]{16,64}$/.test(o.token) ? { token: o.token } : {}), ...(served ? { served } : {}), ...(applied ? { applied } : {}) };
+      return { settings: cleanSettings(o.settings), ...(typeof o.token === "string" && /^[\w-]{16,64}$/.test(o.token) ? { token: o.token } : {}), ...(served ? { served } : {}), ...(applied ? { applied } : {}),
+        ...(o.phone && typeof o.phone === "object" ? { phone: { on: o.phone.on !== false, ...(typeof o.phone.token === "string" && /^[\w-]{16,64}$/.test(o.phone.token) ? { token: o.phone.token } : {}) } } : {}) };
     } catch { return { settings: EMPTY_SETTINGS }; }
   }
 

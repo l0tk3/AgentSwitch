@@ -42,6 +42,7 @@ const SubscriptionEdit = z.object({ name: z.string().min(1).max(80).optional(), 
 const NodeOff = z.object({ name: z.string().min(1).max(400), off: z.boolean() }).strict();
 const SUBSCRIPTION_ID = /^[0-9a-f]{1,16}$/;
 const Select = z.object({ service: z.enum(CLASH_SERVICES), node: z.string().min(1).max(200).nullable() });
+const Phone = z.object({ on: z.boolean().optional(), renew: z.boolean().optional() }).strict();
 const Delays = z.object({ service: z.enum([...CLASH_SERVICES, "any"]), scope: z.enum(["chosen", "all"]) });
 /** A YAML answer's headers, made anew each time: the listener writes into the object it is given (a length), and a
  *  shared one answered the second request with `v is not iterable` (seen with the real listener, 2026-10-08). */
@@ -124,6 +125,12 @@ export function mountClash(app: Hono<any>, deps: ApiDeps): void {
   app.post("/clash/delays", async (c) => {
     const body = await parseBody(c, Delays);
     return body.ok ? said(c, async () => ({ delays: await clash.delays(body.data.service, body.data.scope) })) : c.json({ error: body.error }, 400);
+  });
+
+  // The address phones take the subscription by (§12): switched on or off, or made anew.
+  app.post("/clash/phone", async (c) => {
+    const body = await parseBody(c, Phone);
+    return body.ok ? page(c, () => clash.setPhone(body.data)) : c.json({ error: body.error }, 400);
   });
 
   // ---- what Clash Verge and its core fetch

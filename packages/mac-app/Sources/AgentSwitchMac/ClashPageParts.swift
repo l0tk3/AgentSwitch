@@ -327,6 +327,61 @@ struct ClashDeliveryCard: View {
     }
 }
 
+// MARK: - for phones
+
+/// The subscription for a phone's Clash or Stash (docs/clash-v0.md §12): whether it is offered, and the address at
+/// each of this Mac's addresses a phone can reach — copied, or shown as a code the phone's camera reads.
+struct ClashPhoneCard: View {
+    let phone: ClashPhone
+    let actions: ClashActions
+    @State private var shown: ClashPhone.Link?
+    @State private var renewing = false
+
+    var body: some View {
+        ClashCard(title: "Phones") {
+            ClashSwitch(title: "Serve to Stash and Clash", detail: nil, isOn: Binding(get: { phone.on }, set: { actions.setPhone($0) }))
+            if let problem = phone.problem { ClashNote(text: problem).clashRow() }
+            ForEach(phone.links) { link in
+                HStack(spacing: 8) {
+                    Text(link.title)
+                    Text(link.host).mono(12).foregroundStyle(Look.ink2).textSelection(.enabled)
+                    Spacer(minLength: 8)
+                    ClashButton("QR Code") { shown = link }
+                        .popover(isPresented: Binding(get: { shown == link }, set: { if !$0 { shown = nil } }), arrowEdge: .bottom) { ClashPhoneCode(link: link) }
+                    ClashButton("Copy Link") { _ = SensitiveClipboard.copy(link.url, shared: true) }
+                }
+                .clashRow()
+            }
+            if phone.on, phone.listening {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 8)
+                    ClashButton("New Link…") { renewing = true }
+                }
+                .clashRow()
+            }
+        }
+        .confirmationDialog("New Link", isPresented: $renewing) {
+            Button("New Link", role: .destructive) { actions.renewPhone() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("原来的链接立即失效，已导入的手机需要重新导入。") }
+    }
+}
+
+/// The link as a code: `clash://install-config?url=…`, which a phone's camera opens Stash or Clash with.
+private struct ClashPhoneCode: View {
+    let link: ClashPhone.Link
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if let code = QRCodeRenderer.image(for: link.install) {
+                Image(decorative: code, scale: 1).interpolation(.none).resizable().frame(width: 240, height: 240).padding(10).background(Color.white)
+            }
+            Text("\(link.title) · \(link.host)").font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+        .padding(16)
+    }
+}
+
 // MARK: - every node
 
 /// Every node of every subscription in one table (docs/clash-v0.md §10): which subscription each is of, how long it
