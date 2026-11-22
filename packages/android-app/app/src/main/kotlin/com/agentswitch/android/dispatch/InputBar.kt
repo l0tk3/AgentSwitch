@@ -136,14 +136,14 @@ fun InputBar(modifier: Modifier = Modifier) {
     val nav = LocalNav.current
     fun openMenu() {
         val rows = ArrayList<PixelBox.Action>()
-        if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) rows += PixelBox.Action("Camera") {
+        if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) rows += PixelBox.Action("Camera", icon = "camera") {
             hideKeyboard()
             if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) takePicture.launch(null)
             else askCamera.launch(Manifest.permission.CAMERA)
         }
-        rows += PixelBox.Action("Photos") { hideKeyboard(); pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-        rows += PixelBox.Action("Files") { hideKeyboard(); pickFiles.launch(arrayOf("*/*")) }
-        rows += PixelBox.Action("Paste Image") {
+        rows += PixelBox.Action("Photos", icon = "photo.on.rectangle") { hideKeyboard(); pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        rows += PixelBox.Action("Files", icon = "folder") { hideKeyboard(); pickFiles.launch(arrayOf("*/*")) }
+        rows += PixelBox.Action("Paste Image", icon = "doc.on.clipboard") {
             val images = pastedImages(context)
             if (images.isEmpty()) error = "剪贴板中无图片" else add(images, true)
         }

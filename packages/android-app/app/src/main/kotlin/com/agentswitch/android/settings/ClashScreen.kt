@@ -131,6 +131,7 @@ fun ClashScreen() {
                 RulesSection(clash, view)
                 DirectSection(clash, view, directAnchor)
                 RoutingSection(clash, view, checkAnchor)
+                view.phone?.takeIf { it.on }?.let { PhoneSection(clash, it) }
             }
         } else if (clash.loaded) {
             FormSection { FormNote("这台 Mac 上的 AgentSwitch 还不能从手机管理 Clash：在 Mac 上更新 AgentSwitch。", first = true) }
@@ -267,6 +268,31 @@ private fun DirectSection(clash: ClashModel, view: ClashView, anchor: BringIntoV
                 "Add", if (newDirect.trim().isEmpty()) Modifier else Modifier.clickable(role = Role.Button, onClick = add).padding(vertical = 8.dp), color = if (newDirect.trim().isEmpty()) Theme.inkDim else Theme.ink,
                 style = plain(16), maxLines = 1,
             )
+        }
+    }
+}
+
+// MARK: this phone's own Clash
+
+/**
+ * The subscription for this phone's own Clash (docs/clash-v0.md §12): handed to the app at the Mac's address at home,
+ * or its Tailscale one. With no Clash app that takes `clash://` links on the phone, the address is copied instead.
+ */
+@Composable
+private fun PhoneSection(clash: ClashModel, phone: com.agentswitch.kit.api.ClashPhone) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    FormSection("This Phone") {
+        phone.problem?.let { FormNote(it, color = Theme.waiting, first = true) }
+        phone.links.forEachIndexed { i, link ->
+            FormButton("Add to Clash · ${link.title}", {
+                try {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(link.install)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: Exception) {
+                    val board = context.getSystemService(android.content.ClipboardManager::class.java)
+                    board?.setPrimaryClip(android.content.ClipData.newPlainText("AgentSwitch", link.url))
+                    clash.error = "没有找到能打开 clash:// 链接的 app，订阅地址已复制，可在 Clash 里粘贴导入。"
+                }
+            }, first = i == 0 && phone.problem == null)
         }
     }
 }

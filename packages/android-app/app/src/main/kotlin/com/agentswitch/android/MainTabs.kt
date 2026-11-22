@@ -43,6 +43,8 @@ import com.agentswitch.android.browser.BrowserTab
 import com.agentswitch.android.dispatch.HomeView
 import com.agentswitch.android.files.FilesTab
 import com.agentswitch.android.design.LocalLook
+import com.agentswitch.android.design.ClassicIcon
+import com.agentswitch.android.design.ClassicIconKind
 import com.agentswitch.android.design.ShadedSpriteView
 import com.agentswitch.android.design.folder
 import com.agentswitch.android.design.Theme
@@ -124,14 +126,16 @@ fun MainTabs() {
 /** Whether the tab that is shown wants the tab bar gone for now; a tab sets it and clears it as it leaves. */
 val LocalTabBarHidden = staticCompositionLocalOf<MutableState<Boolean>> { mutableStateOf(false) }
 
-private class TabItem(val tab: MainTab, val word: String, val picture: ShadedSprite)
+/** `classic`: what the classic look draws in the picture's place, as the iPhone's tab bar does (line icons, the app's
+ *  own mark for Dispatch). */
+private class TabItem(val tab: MainTab, val word: String, val picture: ShadedSprite, val classic: ClassicIconKind)
 
 private val tabItems = listOf(
-    TabItem(MainTab.Terminals, "Terminals", ShadedSprite.terminals),
-    TabItem(MainTab.Tasks, "Dispatch", ShadedSprite.dispatch),
-    TabItem(MainTab.Files, "Files", ShadedSprite.folder),
-    TabItem(MainTab.Browser, "Browser", ShadedSprite.browser),
-    TabItem(MainTab.Settings, "Settings", ShadedSprite.settings),
+    TabItem(MainTab.Terminals, "Terminals", ShadedSprite.terminals, ClassicIconKind.Symbol("terminal")),
+    TabItem(MainTab.Tasks, "Dispatch", ShadedSprite.dispatch, ClassicIconKind.Lanes),
+    TabItem(MainTab.Files, "Files", ShadedSprite.folder, ClassicIconKind.Symbol("folder")),
+    TabItem(MainTab.Browser, "Browser", ShadedSprite.browser, ClassicIconKind.Symbol("globe")),
+    TabItem(MainTab.Settings, "Settings", ShadedSprite.settings, ClassicIconKind.Symbol("gearshape")),
 )
 
 /** The bar under the tabs: a picture and a word each, a count on a red disc where something waits for you. */
@@ -151,7 +155,8 @@ private fun TabBar(current: MainTab, badges: Map<MainTab, Int>, onSelect: (MainT
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Box(Modifier.size(width = 44.dp, height = 28.dp), contentAlignment = Alignment.Center) {
-                        ShadedSpriteView(item.picture, strength = if (on) 1f else 0.55f, shadow = false, cell = 1.6)
+                        if (classic) ClassicIcon(item.classic, 24.dp, 22.dp, if (on) Theme.signal else Theme.secondaryInk)
+                        else ShadedSpriteView(item.picture, strength = if (on) 1f else 0.55f, shadow = false, cell = 1.6)
                         val count = badges[item.tab] ?: 0
                         if (count > 0) {
                             Box(

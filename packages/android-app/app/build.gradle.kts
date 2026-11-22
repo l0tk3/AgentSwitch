@@ -49,6 +49,13 @@ android {
         }
     }
 
+    // Termux's own native library opens a local shell, which this app never does (a terminal here is the Mac's, its
+    // screen alone is drawn): left out. It is also the one library built for 4 KB pages, which Android 15 and later
+    // warn about and a phone with 16 KB pages cannot load.
+    packaging {
+        jniLibs { excludes += "**/libtermux.so" }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

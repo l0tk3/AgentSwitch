@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -80,7 +82,8 @@ data class PixelBox(
 ) {
     enum class Tone { Plain, Amber, Red, Signal }
 
-    data class Action(val label: String, val role: Role = Role.Normal, val run: () -> Unit) {
+    /** `icon`: a menu row's picture, by the name the iPhone's menu gives the system's symbol (`camera`, `folder`). */
+    data class Action(val label: String, val role: Role = Role.Normal, val icon: String? = null, val run: () -> Unit) {
         enum class Role { Normal, Primary, Destructive }
     }
 
@@ -171,7 +174,10 @@ private fun PixelBoxLayer(box: PixelBox, close: () -> Unit) {
         )
         val anchor = box.anchor
         if (anchor != null) {
-            val origin = menuOrigin(box, anchor, maxWidth.value, maxHeight.value, density)
+            // The keyboard covers the foot of the screen: a menu that would open under it opens over its anchor (a reply
+            // box's `+` sits right above the keys).
+            val keys = WindowInsets.ime.getBottom(LocalDensity.current) / density
+            val origin = menuOrigin(box, anchor, maxWidth.value, maxHeight.value - keys, density)
             Box(Modifier.offset(origin.first.dp, origin.second.dp)) { Menu(box, close) }
         } else {
             Box(Modifier.fillMaxSize().padding(start = 22.dp, end = 28.dp), contentAlignment = Alignment.Center) { Confirm(box, close) }
@@ -326,6 +332,7 @@ private fun MenuRow(a: PixelBox.Action, close: () -> Unit) {
         Modifier.fillMaxWidth().height(menuRow.dp).background(fill).clickable(source, null, role = SemanticsRole.Button) { close(); a.run() }.padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(a.label, color = ink, style = mono(14), maxLines = 1)
+        Text(a.label, Modifier.weight(1f), color = ink, style = if (classic) plain(15) else mono(14), maxLines = 1)
+        if (a.icon != null) ClassicIcon(ClassicIconKind.Symbol(a.icon), 18.dp, 18.dp, ink)
     }
 }

@@ -597,14 +597,14 @@ private fun PageContent(opened: TerminalInfo, page: TerminalPageModel, record: S
 
     fun openPlusMenu(anchor: Rect) {
         val rows = ArrayList<PixelBox.Action>()
-        if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) rows += PixelBox.Action("Camera") { hideKeyboard(); capture() }
-        rows += PixelBox.Action("Photos") { hideKeyboard(); pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-        rows += PixelBox.Action("Files") { hideKeyboard(); pickFiles.launch(arrayOf("*/*")) }
+        if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) rows += PixelBox.Action("Camera", icon = "camera") { hideKeyboard(); capture() }
+        rows += PixelBox.Action("Photos", icon = "photo.on.rectangle") { hideKeyboard(); pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        rows += PixelBox.Action("Files", icon = "folder") { hideKeyboard(); pickFiles.launch(arrayOf("*/*")) }
         // The Mac's own files, as a sheet at this terminal's folder; what is picked lands in this reply box.
-        rows += PixelBox.Action("Files on Mac") { hideKeyboard(); presentMacFiles() }
-        rows += PixelBox.Action("Paste Image") { pasteImages() }
+        rows += PixelBox.Action("Files on Mac", icon = "laptopcomputer") { hideKeyboard(); presentMacFiles() }
+        rows += PixelBox.Action("Paste Image", icon = "doc.on.clipboard") { pasteImages() }
         // The keys are out of the way under the record until they are wanted.
-        if (simple) rows += PixelBox.Action(if (showKeys) "Hide Keys" else "Keys") { showKeys = !showKeys }
+        if (simple) rows += PixelBox.Action(if (showKeys) "Hide Keys" else "Keys", icon = "keyboard") { showKeys = !showKeys }
         menu = PageMenu(null, anchor, PixelBox.menuWidth, rows)
     }
 

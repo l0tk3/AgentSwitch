@@ -58,6 +58,10 @@ sealed interface ClassicIconKind {
         /** The icon for a sprite's rows; null for one the classic look has none for (it draws the pixels). */
         fun of(rows: List<String>): ClassicIconKind? {
             PixelArt.symbol(rows)?.let { return Symbol(it) }
+            // The bars' pictures that act (share, the bin): the kit's table has no row for them, the iPhone names the
+            // system's symbols where it draws them.
+            if (rows == PixelArt.share) return Symbol("square.and.arrow.up")
+            if (rows == PixelArt.trash) return Symbol("trash")
             if (rows == PixelArt.markRows) return Lanes
             return PixelArt.agents.entries.firstOrNull { it.value == rows }?.key?.let { Agent(it) }
         }
@@ -126,6 +130,103 @@ private fun DrawScope.drawSymbol(name: String, frame: Rect, color: Color) {
             drawCircle(color, box * 0.42f, p(0.5f, 0.5f), style = stroke)
             drawOval(color, p(0.29f, 0.08f), Size(box * 0.42f, box * 0.84f), style = stroke)
             drawLine(color, p(0.08f, 0.5f), p(0.92f, 0.5f), line)
+        }
+        "folder" -> {
+            val body = Path().apply {
+                moveTo(p(0.08f, 0.3f).x, p(0.08f, 0.3f).y)
+                lineTo(p(0.08f, 0.24f).x, p(0.08f, 0.24f).y)
+                quadraticTo(p(0.08f, 0.18f).x, p(0.08f, 0.18f).y, p(0.15f, 0.18f).x, p(0.15f, 0.18f).y)
+                lineTo(p(0.36f, 0.18f).x, p(0.36f, 0.18f).y)
+                lineTo(p(0.46f, 0.3f).x, p(0.46f, 0.3f).y)
+                lineTo(p(0.85f, 0.3f).x, p(0.85f, 0.3f).y)
+                quadraticTo(p(0.92f, 0.3f).x, p(0.92f, 0.3f).y, p(0.92f, 0.37f).x, p(0.92f, 0.37f).y)
+                lineTo(p(0.92f, 0.75f).x, p(0.92f, 0.75f).y)
+                quadraticTo(p(0.92f, 0.82f).x, p(0.92f, 0.82f).y, p(0.85f, 0.82f).x, p(0.85f, 0.82f).y)
+                lineTo(p(0.15f, 0.82f).x, p(0.15f, 0.82f).y)
+                quadraticTo(p(0.08f, 0.82f).x, p(0.08f, 0.82f).y, p(0.08f, 0.75f).x, p(0.08f, 0.75f).y)
+                close()
+            }
+            drawPath(body, color, style = stroke)
+        }
+        "gearshape" -> {
+            // Eight teeth round a ring, a hole in the middle.
+            val c = p(0.5f, 0.5f)
+            val gear = Path()
+            val teeth = 8
+            for (i in 0 until teeth * 2) {
+                val outer = i % 2 == 0
+                val r = box * (if (outer) 0.44f else 0.34f)
+                val half = (Math.PI / teeth * 0.5).toFloat() * (if (outer) 0.62f else 1.38f)
+                val mid = (Math.PI * i / teeth).toFloat()
+                for (a in listOf(mid - half, mid + half)) {
+                    val at = Offset(c.x + r * cos(a), c.y + r * sin(a))
+                    if (i == 0 && a == mid - half) gear.moveTo(at.x, at.y) else gear.lineTo(at.x, at.y)
+                }
+            }
+            gear.close()
+            drawPath(gear, color, style = stroke)
+            drawCircle(color, box * 0.14f, c, style = stroke)
+        }
+        "square.and.arrow.up" -> {
+            val tray = Path().apply {
+                moveTo(p(0.34f, 0.42f).x, p(0.34f, 0.42f).y); lineTo(p(0.22f, 0.42f).x, p(0.22f, 0.42f).y)
+                lineTo(p(0.22f, 0.9f).x, p(0.22f, 0.9f).y); lineTo(p(0.78f, 0.9f).x, p(0.78f, 0.9f).y)
+                lineTo(p(0.78f, 0.42f).x, p(0.78f, 0.42f).y); lineTo(p(0.66f, 0.42f).x, p(0.66f, 0.42f).y)
+                moveTo(p(0.5f, 0.64f).x, p(0.5f, 0.64f).y); lineTo(p(0.5f, 0.08f).x, p(0.5f, 0.08f).y)
+                moveTo(p(0.34f, 0.24f).x, p(0.34f, 0.24f).y); lineTo(p(0.5f, 0.08f).x, p(0.5f, 0.08f).y); lineTo(p(0.66f, 0.24f).x, p(0.66f, 0.24f).y)
+            }
+            drawPath(tray, color, style = stroke)
+        }
+        "trash" -> {
+            val bin = Path().apply {
+                moveTo(p(0.14f, 0.26f).x, p(0.14f, 0.26f).y); lineTo(p(0.86f, 0.26f).x, p(0.86f, 0.26f).y)
+                moveTo(p(0.38f, 0.26f).x, p(0.38f, 0.26f).y); lineTo(p(0.41f, 0.12f).x, p(0.41f, 0.12f).y)
+                lineTo(p(0.59f, 0.12f).x, p(0.59f, 0.12f).y); lineTo(p(0.62f, 0.26f).x, p(0.62f, 0.26f).y)
+                moveTo(p(0.24f, 0.26f).x, p(0.24f, 0.26f).y); lineTo(p(0.29f, 0.9f).x, p(0.29f, 0.9f).y)
+                lineTo(p(0.71f, 0.9f).x, p(0.71f, 0.9f).y); lineTo(p(0.76f, 0.26f).x, p(0.76f, 0.26f).y)
+                moveTo(p(0.42f, 0.42f).x, p(0.42f, 0.42f).y); lineTo(p(0.43f, 0.74f).x, p(0.43f, 0.74f).y)
+                moveTo(p(0.58f, 0.42f).x, p(0.58f, 0.42f).y); lineTo(p(0.57f, 0.74f).x, p(0.57f, 0.74f).y)
+            }
+            drawPath(bin, color, style = stroke)
+        }
+        "camera" -> {
+            val body = Path().apply {
+                moveTo(p(0.08f, 0.34f).x, p(0.08f, 0.34f).y)
+                lineTo(p(0.3f, 0.34f).x, p(0.3f, 0.34f).y); lineTo(p(0.38f, 0.22f).x, p(0.38f, 0.22f).y)
+                lineTo(p(0.62f, 0.22f).x, p(0.62f, 0.22f).y); lineTo(p(0.7f, 0.34f).x, p(0.7f, 0.34f).y)
+                lineTo(p(0.92f, 0.34f).x, p(0.92f, 0.34f).y); lineTo(p(0.92f, 0.82f).x, p(0.92f, 0.82f).y)
+                lineTo(p(0.08f, 0.82f).x, p(0.08f, 0.82f).y); close()
+            }
+            drawPath(body, color, style = stroke)
+            drawCircle(color, box * 0.15f, p(0.5f, 0.57f), style = stroke)
+        }
+        "photo.on.rectangle" -> {
+            drawPath(rounded(0.2f, 0.3f, 0.94f, 0.86f, 0.08f), color, style = stroke)
+            val back = Path().apply {
+                moveTo(p(0.8f, 0.3f).x, p(0.8f, 0.3f).y); lineTo(p(0.8f, 0.14f).x, p(0.8f, 0.14f).y)
+                lineTo(p(0.06f, 0.14f).x, p(0.06f, 0.14f).y); lineTo(p(0.06f, 0.7f).x, p(0.06f, 0.7f).y); lineTo(p(0.2f, 0.7f).x, p(0.2f, 0.7f).y)
+            }
+            drawPath(back, color, style = stroke)
+            val hill = Path().apply {
+                moveTo(p(0.24f, 0.8f).x, p(0.24f, 0.8f).y)
+                for ((x, y) in listOf(0.46f to 0.56f, 0.62f to 0.72f, 0.72f to 0.62f, 0.9f to 0.8f)) lineTo(p(x, y).x, p(x, y).y)
+            }
+            drawPath(hill, color, style = stroke)
+        }
+        "laptopcomputer" -> {
+            drawPath(rounded(0.16f, 0.2f, 0.84f, 0.68f, 0.06f), color, style = stroke)
+            drawLine(color, p(0.04f, 0.8f), p(0.96f, 0.8f), line, cap = StrokeCap.Round)
+        }
+        "doc.on.clipboard" -> {
+            drawPath(rounded(0.18f, 0.16f, 0.82f, 0.92f, 0.08f), color, style = stroke)
+            drawPath(rounded(0.36f, 0.08f, 0.64f, 0.24f, 0.05f), color, style = stroke)
+            drawLine(color, p(0.34f, 0.48f), p(0.66f, 0.48f), line, cap = StrokeCap.Round)
+            drawLine(color, p(0.34f, 0.66f), p(0.66f, 0.66f), line, cap = StrokeCap.Round)
+        }
+        "keyboard" -> {
+            drawPath(rounded(0.04f, 0.24f, 0.96f, 0.76f, 0.08f), color, style = stroke)
+            for (x in listOf(0.24f, 0.41f, 0.59f, 0.76f)) drawCircle(color, line * 0.75f, p(x, 0.42f))
+            drawLine(color, p(0.3f, 0.6f), p(0.7f, 0.6f), line, cap = StrokeCap.Round)
         }
         else -> drawCircle(color, box * 0.3f, frame.center)
     }

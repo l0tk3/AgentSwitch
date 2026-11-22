@@ -335,6 +335,21 @@ data class ClashProfile(val uid: String, val name: String, val type: String) {
     val id: String get() = uid
 }
 
+/**
+ * What this phone's Clash takes the subscription by (docs/clash-v0.md §12): the address at each of the Mac's addresses
+ * a phone can reach.
+ */
+@Serializable
+data class ClashPhone(val on: Boolean, val listening: Boolean, val links: List<Link> = emptyList(), val problem: String? = null) {
+    @Serializable
+    data class Link(/** `lan` or `tailnet`. */ val kind: String, val url: String) {
+        val title: String get() = if (kind == "tailnet") "Tailscale" else "Wi-Fi"
+
+        /** What opens a Clash app with the address to take the subscription from: the address is one value of it. */
+        val install: String get() = "clash://install-config?url=${java.net.URLEncoder.encode(url, "UTF-8")}&name=AgentSwitch"
+    }
+}
+
 @Serializable
 data class ClashView(
     /** Clash Verge is on this Mac; its core answers. */
@@ -358,6 +373,8 @@ data class ClashView(
     val upToDate: Boolean,
     /** When Clash Verge last fetched it (ms since 1970); null: not since the service started. */
     @Serializable(with = WholeNumber::class) val fetchedAt: Long? = null,
+    /** null from a Mac from before §12. */
+    val phone: ClashPhone? = null,
 ) {
     fun state(service: ClashService): ClashServiceState? = services[service.rawValue]
 

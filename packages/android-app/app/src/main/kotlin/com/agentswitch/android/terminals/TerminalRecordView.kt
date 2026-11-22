@@ -98,6 +98,13 @@ fun TerminalRecordView(page: TerminalPageModel, record: SessionRecordModel, term
 
     var atEnd by remember { mutableStateOf(true) }
     var unseen by remember { mutableStateOf(false) }
+    // A finger moving the record puts the keyboard away, as the iPhone's does (`scrollDismissesKeyboard`): the reader
+    // wants the room. The record following its own end is not a finger and leaves the keys where they are.
+    val keys = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { if (it is androidx.compose.foundation.interaction.DragInteraction.Start) { focus.clearFocus(); keys?.hide() } }
+    }
     // The end is where the reader is while the list is not being moved by a finger; once it is, the end is where it ends.
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to !listState.canScrollForward }.collect { (moving, end) ->

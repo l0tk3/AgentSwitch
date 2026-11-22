@@ -255,9 +255,9 @@ private fun FolderPage(
 
     fun uploadMenu(anchor: Rect) {
         val rows = ArrayList<PixelBox.Action>()
-        if (pickers.hasCamera) rows += PixelBox.Action("Camera") { pickers.takePhoto() }
-        rows += PixelBox.Action("Photos") { pickers.pickPhotos() }
-        rows += PixelBox.Action("Files") { pickers.pickFiles() }
+        if (pickers.hasCamera) rows += PixelBox.Action("Camera", icon = "camera") { pickers.takePhoto() }
+        rows += PixelBox.Action("Photos", icon = "photo.on.rectangle") { pickers.pickPhotos() }
+        rows += PixelBox.Action("Files", icon = "folder") { pickers.pickFiles() }
         menu = MenuSpec(anchor, rows, 180.dp)
     }
 
