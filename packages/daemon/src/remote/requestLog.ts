@@ -16,9 +16,10 @@ export class RemoteRequestLog {
 
   constructor(private readonly log: (line: string) => void, private readonly schedule: Schedule = unrefTimer, private readonly windowMs = STREAMED_WINDOW_MS) {}
 
-  write(device: string, method: string, path: string, status: number): void {
+  /** `why`: what the service answered a refused request with (its `error`), on one line and cut short. */
+  write(device: string, method: string, path: string, status: number, why?: string): void {
     const what = `remote: device ${device} ${method} ${path}`;
-    if (status >= 400 || !STREAMED.test(path)) { this.log(`${what} → ${status}`); return; }
+    if (status >= 400 || !STREAMED.test(path)) { this.log(`${what} → ${status}${status >= 400 && why ? ` (${why.replace(/\s+/g, " ").slice(0, 160)})` : ""}`); return; }
     const more = this.open.get(what);
     if (more !== undefined) { this.open.set(what, more + 1); return; }
     this.log(`${what} → ${status}`);

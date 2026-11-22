@@ -158,7 +158,15 @@ export function createRemoteApp(deps: RemoteAppDeps): Hono<Env> {
   app.all("*", async (c) => {
     const device = c.get("device");
     const res = await deps.local.fetch(c.req.raw, markRemote(c.env, { deviceId: device.id }));
-    if (c.req.method !== "GET") writes.write(device.id, c.req.method, c.req.path, res.status);
+    if (c.req.method !== "GET") {
+      // A refusal with what the service said of it (its own words: no request body, no credential): "→ 409" alone
+      // did not say which of the half-dozen refusals of a resume it was (2026-11-22).
+      let why: string | undefined;
+      if (res.status >= 400 && (res.headers.get("content-type") ?? "").includes("json")) {
+        try { const said = (await res.clone().json() as { error?: unknown }).error; if (typeof said === "string") why = said; } catch { /* no reason to tell */ }
+      }
+      writes.write(device.id, c.req.method, c.req.path, res.status, why);
+    }
     return res;
   });
   return app;

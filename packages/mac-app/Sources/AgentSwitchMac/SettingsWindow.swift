@@ -4,26 +4,33 @@ import SwiftUI
 
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, nodes, models, permissions, keys, agents, profiles, environment, general
-    /// The Dispatch group (docs/dispatch-v0.md §3): what the web console's side column and the phone's settings had.
-    case context, extensions, log, history
+    case pairing, nodes, models, keys, agents, profiles, addons, environment, general
+    /// Dispatch's own settings (docs/dispatch-v0.md §3): one row in the sidebar, its parts chosen at the top of the
+    /// page (2026-11-22, user: dispatch应该单独做一个选项，然后里面是分组的各个设置). `dispatchModels` and `permissions`
+    /// were among the app's pages before: the model that dispatches and the default target, and who approves what
+    /// a dispatched task asks for — neither is about anything but Dispatch.
+    case dispatchModels, permissions, context, extensions, log, history
 
     var id: String { rawValue }
 
     /// The sidebar's first block, without a header.
-    static let app: [SettingsTab] = [.pairing, .nodes, .models, .permissions, .keys, .agents, .profiles, .environment, .general]
-    /// The sidebar's `Dispatch` group; the main window's settings button opens its first page.
-    static let dispatch: [SettingsTab] = [.context, .extensions, .log, .history]
+    static let app: [SettingsTab] = [.pairing, .nodes, .models, .keys, .agents, .profiles, .addons, .environment, .general]
+    /// The parts of the sidebar's `Dispatch` page, in the order its switch shows them.
+    static let dispatch: [SettingsTab] = [.dispatchModels, .permissions, .context, .extensions, .log, .history]
+    var isDispatch: Bool { Self.dispatch.contains(self) }
+    /// What the window is called while this page shows.
+    var windowTitle: String { isDispatch ? "Dispatch" : title }
 
     var title: String {
         switch self {
         case .pairing: return "Pairing"
         case .nodes: return "Nodes"
-        case .models: return "Models"
+        case .models, .dispatchModels: return "Models"
         case .permissions: return "Permissions"
         case .keys: return "Keys"
         case .agents: return "Agents"
         case .profiles: return "Profiles"
+        case .addons: return "Add-Ons"
         case .environment: return "Environment"
         case .general: return "General"
         case .context: return "Context"
@@ -37,11 +44,12 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "qrcode"
         case .nodes: return "point.3.connected.trianglepath.dotted"
-        case .models: return "cpu"
+        case .models, .dispatchModels: return "cpu"
         case .permissions: return "checkmark.shield"
         case .keys: return "key"
         case .agents: return "shippingbox"
         case .profiles: return "person.crop.rectangle.stack"
+        case .addons: return "square.stack.3d.up"
         case .environment: return "checklist"
         case .general: return "gearshape"
         case .context: return "doc.text"
@@ -81,7 +89,9 @@ extension EnvironmentValues {
 @MainActor
 @Observable
 final class SettingsNavigation {
-    var tab: SettingsTab = .pairing
+    var tab: SettingsTab = .pairing { didSet { if tab.isDispatch { dispatchPart = tab } } }
+    /// The part of the Dispatch page shown last: the sidebar's row goes back to it.
+    private(set) var dispatchPart: SettingsTab = .dispatchModels
     /// The first-run wizard's current step while it is open over the window (docs/control-v0.md §6).
     var wizardStep: SetupStep?
     @ObservationIgnored let wizardStore: SetupWizardStore
@@ -243,25 +253,29 @@ struct SettingsView: View {
                     // first group could not be clicked, 2026-10-06).
                     Label(tab.title, systemImage: tab.symbol).badge(tab == .agents ? model.agentUpdateCount : 0).tag(tab)
                 }
-                Section("Dispatch") {
-                    ForEach(SettingsTab.dispatch) { tab in
-                        Label(tab.title, systemImage: tab.symbol).tag(tab)
-                    }
-                }
+                // One row for all of Dispatch's settings: tagged with the part it opens, the one shown last.
+                Label("Dispatch", systemImage: "arrow.triangle.branch").tag(navigation.dispatchPart)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             VStack(spacing: 0) {
                 ErrorBanner()
+                if navigation.tab.isDispatch {
+                    Picker("Dispatch", selection: selection) {
+                        ForEach(SettingsTab.dispatch) { part in Text(part.title).tag(Optional(part)) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .padding(.top, 12).padding(.bottom, 4)
+                }
                 page(navigation.tab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             // The wizard shows it itself while it is up: one sheet at a time.
             .gateServiceSheet(model, active: navigation.wizardStep == nil)
         }
-        .navigationTitle(navigation.tab.title)
-        .background(WindowTitle(title: navigation.tab.title))
+        .navigationTitle(navigation.tab.windowTitle)
+        .background(WindowTitle(title: navigation.tab.windowTitle))
         .frame(minWidth: 720, minHeight: 480)
         .tint(.brand)
         .sheet(isPresented: wizardShown) {
@@ -305,10 +319,12 @@ struct SettingsView: View {
         case .pairing: PairingView()
         case .nodes: NodesView()
         case .models: ModelsView()
+        case .dispatchModels: ModelsView(dispatch: true)
         case .permissions: PermissionsView()
         case .keys: KeysView()
         case .agents: AgentsView()
         case .profiles: ProfilesSettingsView()
+        case .addons: AddonsView()
         case .environment: EnvironmentView()
         case .general: GeneralView()
         case .context: ContextSettingsPage()

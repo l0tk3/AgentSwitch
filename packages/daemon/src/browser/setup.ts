@@ -10,7 +10,7 @@ import { WINDOW_HOLDER } from "./types.js";
 import { camoufoxDriver } from "./camoufoxDriver.js";
 import type { EngineKit } from "./engine/kit.js";
 import { Forwarder } from "./forwarder.js";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { closeBrowsersOf, disablePasswordManager } from "../executors/browserSlots.js";
 import { BROWSER_PROFILES_DIR, BROWSER_STATE_DIR, canonicalPath, type ProtectedPaths } from "../executors/protected.js";
@@ -166,6 +166,37 @@ export function camoufoxLaunchFailure(err: unknown): string {
   if (/executable doesn't exist|ENOENT|EACCES/i.test(text)) return `未找到 Camoufox 的程序。${where}`;
   return `Camoufox 未能启动：${text.split("\n")[0]!.trim()}。${where}`;
 }
+
+/** What profile `key`'s own browser keeps on disk: its Chrome and Camoufox folders (cookies, sign-ins, cache) and its
+ *  state (audit, fingerprint, agents' folders). */
+function ownBrowserFolders(home: string, key: string): string[] {
+  return [join(home, BROWSER_PROFILES_DIR, key), join(home, BROWSER_PROFILES_DIR, `${key}${CAMOUFOX_PROFILE_SUFFIX}`), join(home, BROWSER_STATE_DIR, "of", key)];
+}
+
+/** A removed profile's browser goes with it (docs/profiles-v0.md §2 删除): called once that browser has stopped. */
+export function removeOwnBrowserFiles(home: string, key: string): void {
+  if (!OWN_KEY.test(key)) return;
+  for (const dir of ownBrowserFolders(home, key)) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* swept at the next start */ } }
+}
+
+/** Browser folders of profiles that are no more (removed before this was done, or while a removal failed): swept at
+ *  start. Only `<agent>.<id>` names are looked at — `main`, the slots and everything else stay. Returns the keys. */
+export function sweepOwnBrowserFiles(home: string, known: (key: string) => boolean): string[] {
+  const keys = new Set<string>();
+  for (const [dir, strip] of [[join(home, BROWSER_PROFILES_DIR), true], [join(home, BROWSER_STATE_DIR, "of"), false]] as const) {
+    let names: string[] = [];
+    try { names = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { /* none */ }
+    for (const name of names) {
+      const key = strip && name.endsWith(CAMOUFOX_PROFILE_SUFFIX) ? name.slice(0, -CAMOUFOX_PROFILE_SUFFIX.length) : name;
+      if (OWN_KEY.test(key) && !known(key)) keys.add(key);
+    }
+  }
+  for (const key of keys) removeOwnBrowserFiles(home, key);
+  return [...keys].sort();
+}
+
+/** A profile's key as the folders are named: `<agent>.<id>` (api/profiles.ts `exitKey`). */
+const OWN_KEY = /^[a-z][a-z-]*\.[A-Za-z0-9]+$/;
 
 /** Camoufox's profile beside Chrome's `main`: `main-camoufox`. */
 export const CAMOUFOX_PROFILE_SUFFIX = "-camoufox";

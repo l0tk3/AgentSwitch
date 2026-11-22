@@ -61,6 +61,6 @@ extension TerminalInfo {
     public var noticeWait: String {
         if let ask = permissions.first, let question = ask.questions.first { return question.question }
         if let ask = permissions.first, !ask.summary.isEmpty { return ask.summary }
-        return "等你处理。"
+        return "等你处理"
     }
 }

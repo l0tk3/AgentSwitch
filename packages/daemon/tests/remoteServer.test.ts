@@ -385,8 +385,17 @@ describe("remote app, in process", () => {
     expect((await app.request("/context", { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ text: "# x\n" }) }, env)).status).toBe(200);
     expect((await app.request("/tasks/nope", { method: "DELETE", headers: auth }, env)).status).toBe(404);
     expect((await app.request("/tasks", { headers: auth }, env)).status).toBe(200);
-    expect(lines).toEqual([`remote: device ${device.id} PUT /context → 200`, `remote: device ${device.id} DELETE /tasks/nope → 404`]);
+    expect(lines).toEqual([`remote: device ${device.id} PUT /context → 200`, `remote: device ${device.id} DELETE /tasks/nope → 404 (not found)`]);
     d.close();
+  });
+
+  it("a refused request's line says what the service answered, on one line and cut short", () => {
+    const lines: string[] = [];
+    const log = new RemoteRequestLog((l) => lines.push(l), () => undefined);
+    log.write("dev1", "POST", "/terminals/resume", 409, "旧进程尚未退出，\n请稍后重试。");
+    log.write("dev1", "POST", "/terminals/resume", 201, "never said of a success");
+    log.write("dev1", "POST", "/terminals/resume", 409, "x".repeat(400));
+    expect(lines).toEqual(["remote: device dev1 POST /terminals/resume → 409 (旧进程尚未退出， 请稍后重试。)", "remote: device dev1 POST /terminals/resume → 201", `remote: device dev1 POST /terminals/resume → 409 (${"x".repeat(160)})`]);
   });
 
   it("typing, scrolling and resizing are a line a minute per device and target, with how many more; failures each", () => {

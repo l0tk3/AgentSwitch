@@ -443,7 +443,7 @@ final class AppModel {
         let seen = inFront ? viewedTerminal : nil
         for terminal in fresh where terminal.id != seen { notifier.post(terminal: terminal.id, title: "\(terminal.noticeName) · Needs You", body: terminal.noticeWait) }
         for terminal in terminalDone.newlyDone(terminals.terminals) where terminal.id != seen {
-            notifier.post(terminal: terminal.id, title: "\(terminal.noticeName) · Done", body: "这一轮结束了。")
+            notifier.post(terminal: terminal.id, title: "\(terminal.noticeName) · Done", body: "这一轮结束了")
         }
         syncLive()
     }

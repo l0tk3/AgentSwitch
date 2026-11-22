@@ -21,6 +21,8 @@ export type SessionSources = {
   readonly claudeProfileProjects?: () => readonly string[];
   readonly claudeProjects: string;   // ~/.claude/projects
   readonly codexSessions: string;    // ~/.codex/sessions
+  /** The `sessions` folders of the Codex profiles that keep their own (docs/profiles-v0.md, isolated ones). */
+  readonly codexProfileSessions?: () => readonly string[];
   readonly opencodeDb: string;       // ~/.local/share/opencode/opencode.db
   /** ~/.pi/agent/sessions; absent: pi's sessions are not read. */
   readonly piSessions?: string;
@@ -98,7 +100,7 @@ export class SessionMonitor {
     const have = new Set(claude.map((r) => r.path));
     const fromFiles = [
       ...this.scan([...claude, ...forced.filter((r) => !have.has(r.path))], "claude-code", now),
-      ...this.codexThreads(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), now),
+      ...this.codexThreads(this.codexRoots().flatMap((root) => jsonlFiles(root, 3, now, this.scanFiles)), now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
     ];
     // OpenCode's title is its own, kept in its own store: nothing of ours stands in for it.
@@ -118,7 +120,8 @@ export class SessionMonitor {
     if (custom) return { ...s, title: oneLine(custom, TITLE_CHARS) };
     if (s.named) return s;
     // Codex's own name for the thread, kept beside its sessions and not in the record.
-    const named = s.harness === "codex" ? codexThreadName(join(dirname(this.sources.codexSessions), "session_index.jsonl"), s.id) : null;
+    // Codex's own name for the thread, kept in the home its record is in (a profile's own, or the Mac's).
+    const named = s.harness === "codex" ? this.codexRoots().map((root) => codexThreadName(dirname(root), s.id)).find((name) => name) ?? null : null;
     if (named) return { ...s, title: oneLine(named, TITLE_CHARS), named: true };
     const given = this.sources.agentTitle?.(s.harness, s.id);
     return given ? { ...s, title: oneLine(given, TITLE_CHARS) } : s;
@@ -232,6 +235,11 @@ export class SessionMonitor {
   /** Where the session of a terminal of ours is kept, listed or not: its file as the list knows it, else looked for by
    *  its id (Claude Code's `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`). Null for
    *  OpenCode (one database for all) and for a session with no file yet. */
+  /** Where Codex's records are: the Mac's own `sessions`, and those of the profiles that keep their own. */
+  private codexRoots(): string[] {
+    return [this.sources.codexSessions, ...(this.sources.codexProfileSessions?.() ?? [])];
+  }
+
   locate(harness: SessionHarness, id: string): string | null {
     if (harness === "opencode" || !SESSION_ID.test(id)) return null;
     const key = `${harness}:${id}`;
@@ -256,7 +264,7 @@ export class SessionMonitor {
           }
         }
       };
-      walk(this.sources.codexSessions, 3);
+      for (const root of this.codexRoots()) walk(root, 3);
     } else if (this.sources.piSessions) {
       for (const dir of safeDirs(this.sources.piSessions)) {
         const name = safeDirs(join(this.sources.piSessions, dir), true).find((n) => n.endsWith(`_${id}.jsonl`));
@@ -272,7 +280,7 @@ export class SessionMonitor {
   keepPictures(): void {
     const pictures = this.sources.pictures;
     if (!pictures) return;
-    for (const ref of jsonlFiles(this.sources.codexSessions, 3, this.now(), this.scanFiles)) pictures.noticed(ref.path, ref.size, ref.mtime);
+    for (const root of this.codexRoots()) for (const ref of jsonlFiles(root, 3, this.now(), this.scanFiles)) pictures.noticed(ref.path, ref.size, ref.mtime);
     pictures.tidy();
   }
 
@@ -355,7 +363,7 @@ export class SessionMonitor {
           else if (codexFileOf(name, id)) drop(path);
         }
       };
-      walk(this.sources.codexSessions, 3);
+      for (const root of this.codexRoots()) walk(root, 3);
     } else if (harness === "pi" && this.sources.piSessions) {
       for (const dir of safeDirs(this.sources.piSessions)) {
         for (const name of safeDirs(join(this.sources.piSessions, dir), true)) {

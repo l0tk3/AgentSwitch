@@ -36,6 +36,8 @@ struct TerminalsTab: View {
     @State private var leftSaid: String?
     /// The session whose menu is open (a long press), and where its row is.
     @State private var menuFor: SessionMenu?
+    /// `Resume As…` was picked for this session: the profiles to choose from, in a menu of their own.
+    @State private var resumeAsFor: SessionMenu?
     /// The folder just unfolded: its rows are drawn line by line.
     @State private var revealed: Reveal?
     /// Sessions being wiped out, and those gone from the list until the next one comes without them.
@@ -138,14 +140,14 @@ struct TerminalsTab: View {
                     Button("Continue") { Task { await continueAs(target.terminal, profile: target.profile) } }
                 }
             } message: {
-                Text("会传递旧上下文，包括消息、代码、路径和工具输出。涉及隔离 Profile 时复制成新会话，原记录保留，工作文件不会复制。当前进程将结束，正在执行的操作会中断。原会话若为 Bypass，将以 Auto 恢复。")
+                Text("会传递旧上下文，包括消息、代码、路径和工具输出。会话记录移到目标 Profile 并换新的会话 ID，工作文件不动。当前进程将结束，正在执行的操作会中断。原会话若为 Bypass，将以 Auto 恢复。")
             }
             .confirmationDialog("传递旧上下文？", isPresented: Binding(get: { contextTransfer != nil }, set: { if !$0 { contextTransfer = nil } })) {
                 if let target = contextTransfer {
                     Button("Continue") { Task { await resume(target.session, as: target.profile, confirmed: true) } }
                 }
             } message: {
-                Text("会传递旧上下文，包括消息、代码、路径和工具输出。涉及隔离 Profile 时复制成新会话，原记录保留，工作文件不会复制。")
+                Text("会传递旧上下文，包括消息、代码、路径和工具输出。会话记录移到目标 Profile 并换新的会话 ID，工作文件不动。")
             }
             // The words said in sessions, once typing pauses; an answer to an older query is not kept.
             .task(id: query) {
@@ -208,8 +210,10 @@ struct TerminalsTab: View {
                 if TerminalsTab.resumable.contains(m.session.harness) {
                     items.append(.init(label: "Resume") { Task { await resume(m.session) } })
                     // Under another profile than the one it last ran under (docs/profiles-v0.md §3.3), where the agent has more than the Mac's own.
+                    // One row, then the profiles in a menu of their own: a row a profile made this menu as long as the
+                    // profiles were many (2026-11-22, user: 配置太多了不爆炸了吗).
                     if let choices = model.terminals.profiles[m.session.harness], choices.several {
-                        for p in choices.profiles where p.id != (m.session.profile ?? "default") { items.append(.init(label: "Resume As \(p.name)") { Task { await resume(m.session, as: p.id) } }) }
+                        items.append(.init(label: "Resume As…") { DispatchQueue.main.async { resumeAsFor = m } })
                     }
                 }
                 // Its folder on the Files tab, as on the Mac's list (docs/files-v0.md §12.4).
@@ -219,6 +223,10 @@ struct TerminalsTab: View {
                     items.append(.init(label: "Delete", role: .destructive) { deletingSession = m.session })
                 }
                 return PixelBox(cancel: nil, actions: items, anchor: m.anchor)
+            }
+            .pixelBox(item: $resumeAsFor) { m in
+                let profiles = (model.terminals.profiles[m.session.harness]?.profiles ?? []).filter { $0.id != (m.session.profile ?? "default") }
+                return PixelBox(head: "Resume As", cancel: nil, actions: profiles.map { p in .init(label: p.name) { Task { await resume(m.session, as: p.id) } } }, anchor: m.anchor, width: 260)
             }
             .pixelBox(item: $bypassResume) { s in
                 PixelBox(head: "Bypass", tone: .amber, message: "「\(s.displayTitle)」上次以 Bypass 运行。\(NewTerminalSheet.bypassNote)",

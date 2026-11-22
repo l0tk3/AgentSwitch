@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Add-Ons</title>
+<style>
+/* Settings › Add-Ons (concept, third draft 2026-11-22; user: 考虑到如果巨多profile会怎么样 然后可以选中profile输入安装mcp
+   的命令给指定profile安装mcp然后可以指定profile禁用 删除mcp): what each profile has installed, for as many profiles
+   as there are. Left: the profiles, filtered and ticked. Right: what the ticked ones have — one profile is a list
+   with a switch a row; several, or all, is a list of add-ons each saying in how many it is, opening to the profiles
+   themselves. Install MCP… takes the agent's own command and the profiles to run it in. A server is switched off or
+   removed in one profile, in the ticked ones, or everywhere.
+   A working prototype: nothing is read from this Mac or written to it, every name is made up, the state lives in
+   the page. The settings window is macOS's own (docs/ui-v0.md §7.4 Mac). */
+:root {
+  --signal: #ff2e88; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  --win: #1e1e1e; --side: #262626; --pane: #222; --group: #2a2a2a; --line: #3a3a3a; --ink: #ececec; --ink2: #9a9a9a; --ink3: #6a6a6a; --ctl: #4a4a4a; --menu: #323232; --hover: rgba(255,255,255,.06); --sel: rgba(255,46,136,.16); --veil: rgba(0,0,0,.45);
+  color-scheme: dark;
+}
+.light {
+  --signal: #e0106f; --green: #3d8a00; --amber: #b87400; --red: #c9281b;
+  --win: #ececec; --side: #e3e3e3; --pane: #e8e8e8; --group: #f7f7f7; --line: #d6d6d6; --ink: #1d1d1f; --ink2: #6e6e73; --ink3: #a3a3a8; --ctl: #ffffff; --menu: #f4f4f4; --hover: rgba(0,0,0,.05); --sel: rgba(224,16,111,.12); --veil: rgba(0,0,0,.25);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button, input, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.ctl { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.ctl .gap { width: 14px; }
+.note { max-width: 940px; margin: 4px auto 14px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; }
+.stage { overflow-x: auto; padding: 0 16px 34px; }
+
+.set { width: 1080px; height: 740px; margin: 0 auto; background: var(--win); color: var(--ink); display: grid; grid-template-columns: 172px 236px minmax(0, 1fr);
+  border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); position: relative; }
+.sd { background: var(--side); padding: 12px 10px; }
+.lights { display: flex; gap: 8px; margin: 2px 0 18px 6px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.it { display: flex; align-items: center; gap: 9px; width: 100%; height: 28px; padding: 0 8px; border-radius: 6px; }
+.it:hover { background: var(--hover); } .it.on { background: var(--signal); color: #fff; }
+.it i { width: 14px; height: 14px; border: 1.4px solid currentColor; border-radius: 3px; opacity: .8; flex: none; }
+
+/* The profiles: as many as there are. */
+.pf { background: var(--pane); border-right: .5px solid var(--line); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; min-height: 0; }
+.pf .top { padding: 14px 12px 8px; display: flex; align-items: center; gap: 8px; }
+.pf .top b { font: 600 13px var(--ui); }
+.seg { display: inline-flex; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 .5px var(--line); }
+.seg button { height: 22px; padding: 0 9px; background: var(--ctl); font-size: 12px; }
+.seg button + button { border-left: .5px solid var(--line); }
+.seg button.on { background: var(--ink2); color: var(--win); }
+.in { height: 24px; padding: 0 8px; border-radius: 6px; border: 0; outline: 0; background: var(--ctl); box-shadow: 0 0 0 .5px var(--line); min-width: 0; }
+.in:focus { box-shadow: 0 0 0 2px var(--signal); }
+.pf .flt { padding: 0 12px 8px; display: flex; }
+.pf .flt .in { flex: 1; }
+.pf .quick { padding: 0 12px 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+.chipb { height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; color: var(--ink2); box-shadow: 0 0 0 .5px var(--line); }
+.chipb:hover { color: var(--ink); background: var(--hover); }
+.pl { overflow-y: auto; padding: 0 6px 6px; }
+.p { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 6px; border-radius: 6px; }
+.p:hover { background: var(--hover); }
+.p.on { background: var(--sel); }
+.bx { width: 14px; height: 14px; border-radius: 3.5px; background: var(--ctl); box-shadow: 0 0 0 .5px var(--line); display: grid; place-items: center; font-size: 10px; color: #fff; flex: none; }
+.on > .bx, .bx.on { background: var(--signal); box-shadow: none; }
+.bx.half { background: var(--ink2); box-shadow: none; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.p .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.p .kd { margin-left: auto; font: 10.5px var(--mono); color: var(--ink3); flex: none; }
+.pf .sum { border-top: .5px solid var(--line); padding: 8px 12px; color: var(--ink2); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.lk { color: var(--signal); font-size: 12px; }
+.lk:hover { text-decoration: underline; }
+
+.pg { display: grid; grid-template-rows: 52px auto minmax(0, 1fr); min-width: 0; min-height: 0; position: relative; }
+.head { display: flex; align-items: center; gap: 10px; padding: 0 22px; font: 600 15px var(--ui); white-space: nowrap; }
+.head .sub { font: 12px var(--ui); color: var(--ink2); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 0 22px 12px; }
+.sp { flex: 1; }
+.btn { height: 24px; padding: 0 10px; border-radius: 6px; background: var(--ctl); box-shadow: 0 0 0 .5px var(--line); white-space: nowrap; font-size: 12.5px; }
+.btn:hover { filter: brightness(1.12); }
+.btn.pri { background: var(--signal); color: #fff; box-shadow: none; }
+.btn.red { color: var(--red); }
+.btn:disabled { opacity: .4; cursor: default; filter: none; }
+.body { overflow-y: auto; padding: 0 22px 64px; }
+.sl { font: 11px var(--mono); color: var(--ink2); letter-spacing: .04em; margin: 14px 2px 6px; display: flex; gap: 8px; }
+.sl .c { color: var(--ink3); }
+.box { background: var(--group); border-radius: 10px; border: .5px solid var(--line); overflow: hidden; }
+.row { border-top: .5px solid var(--line); }
+.row:first-child { border-top: 0; }
+.rl { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px 0 0; }
+.r { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: 36px; padding: 5px 0 5px 12px; }
+.rl:hover { background: var(--hover); }
+.tw { width: 10px; color: var(--ink3); font-size: 9px; transition: transform .12s; flex: none; }
+.row.open .tw { transform: rotate(90deg); }
+.nmm { font: 12.5px var(--mono); white-space: nowrap; }
+.off .nmm { color: var(--ink3); text-decoration: line-through; }
+.ds { color: var(--ink2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tag { font: 11px var(--mono); color: var(--ink2); border: .5px solid var(--line); border-radius: 4px; padding: 0 6px; line-height: 17px; white-space: nowrap; }
+.tag.shared { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 50%, transparent); }
+.tag.offt { color: var(--ink3); }
+.sw { width: 30px; height: 18px; border-radius: 9px; background: var(--ctl); position: relative; flex: none; transition: background .12s; }
+.sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .12s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.sw.on { background: var(--green); } .sw.on::after { left: 14px; }
+.sw:disabled { opacity: .45; cursor: default; }
+.more { width: 24px; height: 22px; border-radius: 5px; color: var(--ink2); text-align: center; letter-spacing: 1px; flex: none; }
+.more:hover { background: var(--ctl); color: var(--ink); }
+.cov { display: flex; align-items: center; gap: 8px; flex: none; font: 11.5px var(--mono); color: var(--ink2); white-space: nowrap; }
+.covb { width: 70px; height: 5px; border-radius: 3px; background: var(--ctl); overflow: hidden; display: flex; }
+.covb i { height: 100%; background: var(--green); } .covb u { height: 100%; background: var(--ink3); }
+.det { padding: 2px 12px 12px 32px; font-size: 12px; }
+.kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 5px 12px; }
+.kv .k { color: var(--ink2); } .kv .v { font-family: var(--mono); overflow-wrap: anywhere; } .kv .v.hid { color: var(--ink3); }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 148px; overflow-y: auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 12px; box-shadow: 0 0 0 .5px var(--line); background: var(--win); white-space: nowrap; }
+.chip:hover { box-shadow: 0 0 0 1px var(--signal); }
+.chip.no { color: var(--ink3); background: none; border: .5px dashed var(--line); box-shadow: none; }
+.chip.offc { color: var(--ink3); text-decoration: line-through; }
+.chip .st { font-size: 9px; } .chip .st.y { color: var(--green); } .chip .st.o { color: var(--ink3); } .chip .st.s { color: var(--amber); }
+.empty { padding: 9px 12px; color: var(--ink3); font-size: 12px; }
+.foot { color: var(--ink2); font-size: 12px; margin: 10px 2px 0; line-height: 1.6; }
+.menu { position: absolute; z-index: 20; min-width: 190px; max-height: 320px; overflow-y: auto; background: var(--menu); border-radius: 8px; padding: 5px; box-shadow: 0 0 0 .5px var(--line), 0 10px 30px rgba(0,0,0,.45); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 9px; border-radius: 5px; white-space: nowrap; }
+.mi:hover { background: var(--signal); color: #fff; }
+.mi.del { color: var(--red); } .mi.del:hover { color: #fff; background: var(--red); }
+.menu .sep { height: .5px; background: var(--line); margin: 4px 6px; }
+.menu .hd { font-size: 11px; color: var(--ink2); padding: 3px 9px 2px; }
+.toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 15; display: flex; align-items: center; gap: 12px; background: var(--menu); border-radius: 8px; padding: 7px 8px 7px 14px; box-shadow: 0 0 0 .5px var(--line), 0 10px 30px rgba(0,0,0,.45); font-size: 12.5px; white-space: nowrap; }
+.veil { position: absolute; inset: 0; z-index: 30; background: var(--veil); display: grid; place-items: start center; }
+.sheet { width: 560px; max-height: 700px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--win); border-radius: 0 0 10px 10px; padding: 18px 20px; box-shadow: 0 0 0 .5px var(--line), 0 20px 50px rgba(0,0,0,.5); }
+.sheet h3 { margin: 0 0 12px; font: 600 14px var(--ui); }
+.lab { color: var(--ink2); font-size: 12px; margin: 12px 0 5px; display: flex; align-items: center; gap: 8px; }
+.cmd { width: 100%; height: 58px; resize: none; padding: 7px 9px; border-radius: 6px; border: 0; outline: 0; background: #111; color: #e6e6e6; font: 12px/1.5 var(--mono); box-shadow: 0 0 0 .5px var(--line); }
+.cmd:focus { box-shadow: 0 0 0 2px var(--signal); }
+.read { font: 12px var(--mono); color: var(--ink2); margin-top: 6px; min-height: 17px; }
+.read b { color: var(--ink); font-weight: 400; } .read.bad { color: var(--red); }
+.tl { background: var(--group); border: .5px solid var(--line); border-radius: 8px; height: 210px; overflow-y: auto; }
+.t { display: flex; align-items: center; gap: 9px; width: 100%; height: 28px; padding: 0 10px; border-top: .5px solid var(--line); }
+.t:first-child { border-top: 0; } .t:hover { background: var(--hover); }
+.t:disabled { opacity: .5; cursor: default; }
+.t .why { margin-left: auto; color: var(--ink2); font-size: 11.5px; }
+.t .why.ok { color: var(--green); } .t .why.run { color: var(--amber); }
+.sbtn { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.blank { display: grid; place-items: center; height: 100%; color: var(--ink2); text-align: center; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <span style="font:12px var(--mono);color:#77736c">Profiles</span>
+  <button data-count="4">4</button><button data-count="28" class="on">28</button><button data-count="120">120</button>
+  <span class="gap"></span>
+  <button data-look="dark" class="on">Dark</button><button data-look="light">Light</button><button data-reset>Reset Demo</button>
+</div>
+<p class="note">每个配置装了什么，配置再多也能管。左边勾选配置（可搜索、可按类别一键勾选），右边显示勾中的：勾一个是带开关的清单，勾多个或不勾（全部）是按项汇总，写明在几个配置里。Install MCP… 输入 agent 自己的安装命令，装到指定的配置。每个 MCP 可以在单个配置、勾中的配置或全部配置里停用和删除。顶上的 4 / 28 / 120 切换配置数量。数据是示例，只存在这个页面里。</p>
+<div class="stage"><div class="set" id="set"></div></div>
+<script>
+const NAMES = ["work", "lab", "relay", "client-acme", "client-birch", "research", "billing", "ops", "night", "review", "sandbox", "team-a", "team-b", "eu-proxy", "us-proxy", "jp-proxy", "trial-1", "trial-2", "trial-3", "docs", "release", "infra", "mobile", "web", "data", "ml", "support", "archive"];
+const COLORS = ["#7a5af8", "#3fa56b", "#b7791f", "#c2578f", "#2f9bb8", "#8a8f3a", "#c9603a", "#5b7fd6"];
+const KINDS = { "Claude Code": ["MCP Servers", "Skills", "Plugins", "Agents", "Commands"], "Codex": ["MCP Servers", "Skills", "Plugins", "Prompts", "Rules"] };
+const CATALOG = {
+  "Claude Code": [
+    ["MCP Servers", "chrome-devtools", "browser automation", { Transport: "stdio", Command: "npx chrome-devtools-mcp@latest", Environment: "—" }, .7],
+    ["MCP Servers", "postgres", "local database", { Transport: "stdio", Command: "uvx mcp-postgres", Environment: "1 variable · hidden" }, .25],
+    ["MCP Servers", "figma", "design files", { Transport: "http", URL: "https://mcp.example.com/figma", Headers: "1 header · hidden" }, .15],
+    ["MCP Servers", "linear", "issues", { Transport: "http", URL: "https://mcp.example.com/linear", Headers: "1 header · hidden" }, .4],
+    ["Skills", "pdf", "read and fill PDF files", { Files: "6" }, .8], ["Skills", "xlsx", "spreadsheets", { Files: "9" }, .3], ["Skills", "release-notes", "this repo’s release steps", { Files: "2" }, .1],
+    ["Plugins", "status-hud", "status line", { Version: "1.4.2", Marketplace: "example-plugins" }, .6], ["Plugins", "document-skills", "docx, pptx, pdf, xlsx", { Version: "0.9.0", Marketplace: "example-plugins" }, .2],
+    ["Agents", "reviewer", "reads a diff for bugs", { Model: "inherit", Tools: "Read, Grep, Bash" }, .35], ["Agents", "planner", "writes a plan before code", { Model: "opus", Tools: "Read, Grep" }, .15],
+    ["Commands", "/ship", "test, commit, push", { Arguments: "[message]" }, .2],
+  ],
+  "Codex": [
+    ["MCP Servers", "chrome-devtools", "browser automation", { Transport: "stdio", Command: "npx chrome-devtools-mcp@latest", Environment: "—" }, .6],
+    ["MCP Servers", "linear", "issues", { Transport: "http", URL: "https://mcp.example.com/linear", Headers: "1 header · hidden" }, .3],
+    ["Skills", "commit-style", "how commits are written here", { Files: "1" }, .4],
+    ["Prompts", "review", "review the working tree", { Arguments: "—" }, .5], ["Rules", "no-force-push", "never push with --force", { Applies: "git push" }, .3],
+  ],
+};
+const TOGGLED = new Set(["MCP Servers", "Plugins"]);   // what a profile can switch off without removing it
+const HINT = { "Claude Code": "claude mcp add sentry -- npx -y @sentry/mcp-server", "Codex": "codex mcp add sentry -- npx -y @sentry/mcp-server" };
+const rnd = (seed) => { let x = 0; for (const c of seed) x = (x * 31 + c.charCodeAt(0)) >>> 0; x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; return ((x >>> 0) % 1000) / 1000; };
+
+function seed(count) {
+  const db = {};
+  for (const agent of Object.keys(CATALOG)) {
+    const n = agent === "Codex" ? Math.max(2, Math.round(count / 3)) : count;
+    const profiles = [{ id: "default", name: "Default", color: null, shared: false, own: true }];
+    for (let i = 0; i < n - 1; i++) {
+      const base = NAMES[i % NAMES.length], name = i < NAMES.length ? base : `${base}-${Math.floor(i / NAMES.length) + 1}`;
+      profiles.push({ id: `p${i}`, name, color: COLORS[i % COLORS.length], shared: rnd(agent + name + "s") < .22 });
+    }
+    const items = CATALOG[agent].map(([kind, name, about, info, share]) => {
+      const at = {};
+      for (const p of profiles) if (!p.shared && (p.id === "default" ? share > .25 : rnd(agent + name + p.id) < share)) at[p.id] = rnd(name + p.id + "off") < .12 && TOGGLED.has(kind) ? "off" : "on";
+      return { kind, name, about, info, at };
+    });
+    db[agent] = { profiles, items };
+  }
+  return db;
+}
+let COUNT = 28, DB = seed(COUNT);
+const S = { page: "addons", agent: "Claude Code", sel: new Set(["p0"]), pq: "", q: "", open: new Set(), menu: null, sheet: null, toast: null, undo: null };
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const A = () => DB[S.agent];
+const P = (id) => A().profiles.find((p) => p.id === id);
+const dot = (p) => `<span class="dot" style="background:${p.color ?? "transparent"};${p.color ? "" : "box-shadow:0 0 0 1px var(--ink3) inset"}"></span>`;
+/** A profile that shares Default's has whatever Default has, in the state Default has it. */
+const stateOf = (item, pid) => item.at[P(pid).shared ? "default" : pid] ?? null;
+const itemOf = (key) => { const [kind, name] = key.split(/\/(.*)/s); return A().items.find((i) => i.kind === kind && i.name === name); };
+const scope = () => (S.sel.size ? A().profiles.filter((p) => S.sel.has(p.id)) : A().profiles);
+const own = (list) => list.filter((p) => !p.shared);
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+function change(text, fn) {
+  const before = JSON.stringify(DB);
+  fn();
+  S.undo = before; S.toast = text; S.menu = null;
+  clearTimeout(change.t); change.t = setTimeout(() => { S.toast = null; S.undo = null; render(); }, 7000);
+}
+/** `to`: "on" | "off" | null (removed), in each of `pids` that has a say of its own. */
+function setState(item, pids, to, text) {
+  change(text, () => {
+    for (const pid of pids) { if (P(pid).shared) continue; if (to === null) delete item.at[pid]; else if (to === "on" && !(pid in item.at)) item.at[pid] = "on"; else if (pid in item.at) item.at[pid] = to; }
+    if (!Object.keys(item.at).length) A().items.splice(A().items.indexOf(item), 1);
+  });
+}
+
+function render() {
+  const pages = ["Pairing", "Nodes", "Models", "Keys", "Agents", "Profiles", "Add-Ons", "Environment", "General", "Dispatch"];
+  const side = `<div class="sd"><div class="lights"><i></i><i></i><i></i></div>` + pages.map((n) => {
+    const id = n === "Add-Ons" ? "addons" : n.toLowerCase();
+    return `<button class="it ${S.page === id ? "on" : ""}" data-page="${id}"><i></i>${n}</button>`;
+  }).join("") + `</div>`;
+  if (S.page !== "addons") {
+    $("#set").innerHTML = side + `<div class="pg" style="grid-column:2 / -1;grid-template-rows:52px 1fr"><div class="head">${esc(pages.find((n) => n.toLowerCase() === S.page) ?? "")}</div><div class="blank"><div>这一页不在这个示范里。<br><button class="btn" data-page="addons" style="margin-top:8px">Back to Add-Ons</button></div></div></div>`;
+    return;
+  }
+  const keep = document.activeElement?.id, at = document.activeElement?.selectionStart, plTop = $(".pl")?.scrollTop ?? 0, bodyTop = $("#body")?.scrollTop ?? 0, tlTop = $(".tl")?.scrollTop ?? 0;
+  const sc = scope(), one = S.sel.size === 1 ? sc[0] : null;
+  const title = one ? `${dot(one)} ${esc(one.name)}` : S.sel.size ? `${S.sel.size} Profiles` : `All ${A().profiles.length} Profiles`;
+  const sub = one ? (one.id === "default" ? "This Mac’s Own" : one.shared ? "Shares Default’s" : "Isolated") : S.sel.size ? sc.slice(0, 6).map((p) => p.name).join(", ") + (sc.length > 6 ? ` +${sc.length - 6}` : "") : "";
+  $("#set").innerHTML = side + profilesPane() +
+    `<div class="pg"><div class="head"><span>${title}</span><span class="sub">${esc(sub)}</span></div>` +
+    `<div class="bar"><input class="in" id="find" placeholder="Search Add-Ons" value="${esc(S.q)}" style="width:170px"><span class="sp"></span>` +
+    `<button class="btn" data-sheet="copy">Copy from Profile…</button><button class="btn pri" data-sheet="install">Install MCP…</button></div>` +
+    `<div class="body" id="body">${one ? single(one) : many(sc)}</div>` +
+    (S.toast ? `<div class="toast"><span>${esc(S.toast)}</span>${S.undo ? `<button class="btn" data-undo>Undo</button>` : ""}</div>` : "") +
+    (S.sheet ? `<div class="veil" data-veil>${S.sheet.kind === "install" ? installSheet() : copySheet()}</div>` : "") + `</div>`;
+  $(".pl").scrollTop = plTop; $("#body").scrollTop = bodyTop; if ($(".tl")) $(".tl").scrollTop = tlTop;
+  if (keep && $("#" + keep)) { const el = $("#" + keep); el.focus(); try { el.setSelectionRange(at, at); } catch { /* not a text field */ } }
+  if (S.menu) placeMenu();
+}
+
+function profilesPane() {
+  const a = A(), shown = a.profiles.filter((p) => !S.pq || p.name.toLowerCase().includes(S.pq.toLowerCase()));
+  const mcp = (p) => a.items.filter((i) => i.kind === "MCP Servers" && stateOf(i, p.id)).length;
+  return `<div class="pf"><div class="top"><b>Profiles</b><span class="sp"></span><span class="seg">${Object.keys(DB).map((n) => `<button data-agent="${esc(n)}" class="${n === S.agent ? "on" : ""}">${n === "Claude Code" ? "Claude" : esc(n)}</button>`).join("")}</span></div>` +
+    `<div class="flt"><input class="in" id="pfind" placeholder="Filter ${a.profiles.length} Profiles" value="${esc(S.pq)}"></div>` +
+    `<div class="quick"><button class="chipb" data-quick="shown">${S.pq ? "Select Shown" : "Select All"}</button><button class="chipb" data-quick="isolated">Isolated</button><button class="chipb" data-quick="none">None</button></div>` +
+    `<div class="pl">${shown.map((p) => `<div class="p ${S.sel.has(p.id) ? "on" : ""}"><button class="bx ${S.sel.has(p.id) ? "on" : ""}" data-tick="${p.id}" title="Add to the selection">${S.sel.has(p.id) ? "✓" : ""}</button>` +
+      `<button data-only="${p.id}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:28px">${dot(p)}<span class="nm">${esc(p.name)}</span><span class="kd">${p.id === "default" ? "" : p.shared ? "shared · " : ""}${mcp(p)} mcp</span></button></div>`).join("") || `<div class="empty">没有匹配的配置。</div>`}</div>` +
+    `<div class="sum">${S.sel.size ? `${S.sel.size} Selected` : "None Selected · Showing All"}<span class="sp"></span>${S.sel.size ? `<button class="lk" data-quick="none">Clear</button>` : ""}</div></div>`;
+}
+
+const match = (i) => !S.q || `${i.name} ${i.about} ${i.kind}`.toLowerCase().includes(S.q.toLowerCase());
+const details = (i) => `<div class="kv">` + Object.entries(i.info).map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v ${/hidden/.test(v) ? "hid" : ""}">${esc(v)}</span>`).join("") + `</div>`;
+
+/** One profile: what it has, a switch a row. */
+function single(p) {
+  let shown = 0;
+  const groups = KINDS[S.agent].map((kind) => {
+    const rows = A().items.filter((i) => i.kind === kind && stateOf(i, p.id) && match(i));
+    shown += rows.length;
+    if (S.q && !rows.length) return "";
+    const body = rows.length ? rows.map((i) => {
+      const key = `${kind}/${i.name}`, open = S.open.has(key), st = stateOf(i, p.id);
+      const others = A().profiles.filter((x) => x.id !== p.id && stateOf(i, x.id)).length;
+      const det = open ? `<div class="det">${details(i)}<div class="kv" style="margin-top:5px"><span class="k">Also In</span><span class="v" style="font-family:var(--ui)">${others ? `<button class="lk" data-showin="${esc(key)}">${plural(others, "other profile")}</button>` : "—"}</span></div>` +
+        `<div class="acts">` + (p.shared ? `<span style="color:var(--ink2)">和 Default 共用，要改请到 Default。</span><button class="btn" data-only="default">Show Default</button>`
+          : `<button class="btn" data-copyto="${esc(key)}">Copy to Profiles…</button><button class="btn red" data-rm="${esc(key)}@${p.id}">Remove</button>`) + `</div></div>` : "";
+      return `<div class="row ${open ? "open" : ""} ${st === "off" ? "off" : ""}"><div class="rl"><button class="r" data-row="${esc(key)}"><span class="tw">▶</span><span class="nmm">${esc(i.name)}</span><span class="ds">${esc(i.about)}</span></button>` +
+        (st === "off" ? `<span class="tag offt">Off</span>` : "") + `<span class="tag ${p.shared ? "shared" : ""}">${p.shared ? "Shared" : "Own"}</span>` +
+        (TOGGLED.has(kind) ? `<button class="sw ${st === "on" ? "on" : ""}" ${p.shared ? "disabled" : ""} data-sw="${esc(key)}@${p.id}" title="${st === "on" ? "Turn Off" : "Turn On"}"></button>` : "") + `</div>${det}</div>`;
+    }).join("") : `<div class="empty">None</div>`;
+    return `<div class="sl"><span>// ${esc(kind)}</span><span class="c">${rows.length}</span></div><div class="box">${body}</div>`;
+  }).join("");
+  return (S.q && !shown ? `<div class="blank" style="height:200px">没有匹配“${esc(S.q)}”的项。</div>` : groups) +
+    `<p class="foot">开关：在这个配置里停用，不删除。MCP 的环境变量和请求头只显示个数，不显示内容。</p>`;
+}
+
+/** Several profiles, or all: each add-on once, with how many of them have it. */
+function many(sc) {
+  const mine = own(sc);
+  let shown = 0;
+  const groups = KINDS[S.agent].map((kind) => {
+    const rows = A().items.filter((i) => i.kind === kind && match(i) && (S.sel.size === 0 || sc.some((p) => stateOf(i, p.id))));
+    shown += rows.length;
+    if (!rows.length) return S.q ? "" : `<div class="sl"><span>// ${esc(kind)}</span><span class="c">0</span></div><div class="box"><div class="empty">None</div></div>`;
+    const body = rows.map((i) => {
+      const key = `${kind}/${i.name}`, open = S.open.has(key);
+      const on = sc.filter((p) => stateOf(i, p.id) === "on").length, off = sc.filter((p) => stateOf(i, p.id) === "off").length;
+      const missing = mine.filter((p) => !stateOf(i, p.id)), haveOwn = mine.filter((p) => stateOf(i, p.id));
+      const chips = sc.map((p) => { const st = stateOf(i, p.id); return `<button class="chip ${st ? (st === "off" ? "offc" : "") : "no"}" data-menu="chip:${esc(key)}@${p.id}">${st ? `<span class="st ${p.shared ? "s" : st === "on" ? "y" : "o"}">${p.shared ? "◆" : "●"}</span>` : ""}${esc(p.name)}</button>`; }).join("");
+      const det = open ? `<div class="det">${details(i)}<div class="acts">` +
+        `<button class="btn" data-bulk="add:${esc(key)}" ${missing.length ? "" : "disabled"}>Add to ${missing.length} Missing</button>` +
+        (TOGGLED.has(kind) ? `<button class="btn" data-bulk="off:${esc(key)}" ${haveOwn.some((p) => stateOf(i, p.id) === "on") ? "" : "disabled"}>Turn Off</button><button class="btn" data-bulk="on:${esc(key)}" ${haveOwn.some((p) => stateOf(i, p.id) === "off") ? "" : "disabled"}>Turn On</button>` : "") +
+        `<button class="btn red" data-bulk="rm:${esc(key)}" ${haveOwn.length ? "" : "disabled"}>Remove from ${haveOwn.length}</button>` +
+        `<span style="color:var(--ink2)">${S.sel.size ? "作用于勾中的配置" : "作用于全部配置"}</span></div><div class="chips">${chips}</div></div>` : "";
+      return `<div class="row ${open ? "open" : ""}"><div class="rl"><button class="r" data-row="${esc(key)}"><span class="tw">▶</span><span class="nmm">${esc(i.name)}</span><span class="ds">${esc(i.about)}</span></button>` +
+        `<span class="cov" title="${on} on, ${off} off, of ${sc.length}"><span class="covb"><i style="width:${(on / sc.length) * 100}%"></i><u style="width:${(off / sc.length) * 100}%"></u></span>${on + off} of ${sc.length}${off ? ` · ${off} off` : ""}</span></div>${det}</div>`;
+    }).join("");
+    return `<div class="sl"><span>// ${esc(kind)}</span><span class="c">${rows.length}</span></div><div class="box">${body}</div>`;
+  }).join("");
+  return (S.q && !shown ? `<div class="blank" style="height:200px">没有匹配“${esc(S.q)}”的项。</div>` : groups) +
+    `<p class="foot">每一项写明在几个配置里。点开看是哪些配置：实心是装了，划线是停用，虚线框是没装；点一个配置单独改。共用 Default 的配置（◆）跟着 Default 走。</p>`;
+}
+
+function placeMenu() {
+  const anchor = document.querySelector(`[data-menu="${CSS.escape(S.menu)}"]`);
+  if (!anchor) return;
+  const [key, pid] = S.menu.slice(5).split("@"), item = itemOf(key), p = P(pid), st = stateOf(item, pid);
+  let html = `<div class="hd">${esc(item.name)} · ${esc(p.name)}</div>`;
+  if (p.shared) html += `<div class="hd">Shares Default’s</div><button class="mi" data-only="default">Show Default</button>`;
+  else if (!st) html += `<button class="mi" data-chip="on:${esc(S.menu.slice(5))}">Add to ${esc(p.name)}</button>`;
+  else html += (TOGGLED.has(item.kind) ? `<button class="mi" data-chip="${st === "on" ? "off" : "on"}:${esc(S.menu.slice(5))}">${st === "on" ? "Turn Off" : "Turn On"}</button>` : "") +
+    `<button class="mi" data-only="${pid}">Show ${esc(p.name)}</button><div class="sep"></div><button class="mi del" data-chip="rm:${esc(S.menu.slice(5))}">Remove from ${esc(p.name)}</button>`;
+  const menu = document.createElement("div");
+  menu.className = "menu"; menu.innerHTML = html;
+  const pg = document.querySelector(".pg"), box = pg.getBoundingClientRect(), at = anchor.getBoundingClientRect();
+  pg.appendChild(menu);
+  let left = Math.max(8, Math.min(at.left - box.left, box.width - menu.offsetWidth - 8)), top = at.bottom - box.top + 4;
+  if (top + menu.offsetHeight > box.height - 8) top = Math.max(8, at.top - box.top - menu.offsetHeight - 4);
+  menu.style.left = `${left}px`; menu.style.top = `${top}px`;
+}
+
+/** The agent's own command read for what it would add: `<agent> mcp add [flags] <name> -- <command…>`, or with a URL. */
+function readCommand(text) {
+  const words = text.trim().split(/\s+/);
+  if (!text.trim()) return { err: "" };
+  const cli = S.agent === "Codex" ? "codex" : "claude";
+  if (words[0] !== cli) return { err: `要以 ${cli} mcp add 开头：这里选的是 ${S.agent} 的配置。` };
+  if (words[1] !== "mcp" || words[2] !== "add") return { err: `只接受 ${cli} mcp add …` };
+  let i = 3;
+  const flags = [];
+  while (words[i]?.startsWith("-") && words[i] !== "--") { flags.push(words[i]); i += /^(--transport|-t|--scope|-s|--env|-e|--header|-H)$/.test(words[i]) ? 2 : 1; }
+  const name = words[i];
+  if (!name || name === "--") return { err: "缺少服务名。" };
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) return { err: "服务名只能用字母、数字、- 和 _。" };
+  const rest = words.slice(i + 1), dash = rest.indexOf("--"), cmd = (dash >= 0 ? rest.slice(dash + 1) : rest).join(" ");
+  if (!cmd) return { err: "缺少启动命令或地址。" };
+  const http = /^https?:\/\//.test(cmd), secrets = (text.match(/(--env|-e|--header|-H)\s/g) ?? []).length;
+  return { name, cmd, http, secrets };
+}
+
+function targetList(s, why) {
+  const a = A(), shown = a.profiles.filter((p) => !s.q || p.name.toLowerCase().includes(s.q.toLowerCase()));
+  return `<div class="lab"><span>${plural(s.targets.size, "Profile")}</span><span class="sp"></span><input class="in" id="tfind" placeholder="Filter" value="${esc(s.q)}" style="width:130px;height:22px">` +
+    `<button class="lk" data-tq="selection">Selection</button><button class="lk" data-tq="isolated">Isolated</button><button class="lk" data-tq="all">All</button><button class="lk" data-tq="none">None</button></div>` +
+    `<div class="tl">${shown.map((p) => { const w = why(p); return `<button class="t ${s.targets.has(p.id) ? "on" : ""}" ${w.block || s.running || s.done ? "disabled" : ""} data-target="${p.id}"><span class="bx ${s.targets.has(p.id) ? "on" : ""}">${s.targets.has(p.id) ? "✓" : ""}</span>${dot(p)}<span>${esc(p.name)}</span><span class="why ${w.cls ?? ""}">${esc(w.text)}</span></button>`; }).join("")}</div>`;
+}
+
+function installSheet() {
+  const s = S.sheet, r = readCommand(s.text), existing = r.name ? A().items.find((i) => i.kind === "MCP Servers" && i.name === r.name) : null;
+  const why = (p) => p.shared ? { text: "Follows Default", block: true } : s.progress?.[p.id] ? { text: s.progress[p.id] === "ok" ? "✓ Installed" : s.progress[p.id] === "skip" ? "Has It — Skipped" : "Running…", cls: s.progress[p.id] === "run" ? "run" : "ok" }
+    : existing && existing.at[p.id] ? { text: "Has It — Will Skip" } : { text: "" };
+  const n = [...s.targets].filter((id) => !(existing && existing.at[id])).length;
+  return `<div class="sheet"><div><h3>Install MCP · ${esc(S.agent)}</h3>` +
+    `<div class="lab" style="margin-top:0">${S.agent} 自己的安装命令，会在每个选中的配置名下各运行一次</div>` +
+    `<textarea class="cmd" id="cmd" spellcheck="false" placeholder="${esc(HINT[S.agent])}" ${s.running || s.done ? "disabled" : ""}>${esc(s.text)}</textarea>` +
+    `<div class="read ${r.err ? "bad" : ""}">${r.err ? esc(r.err) : r.name ? `Server <b>${esc(r.name)}</b> · ${r.http ? "http" : "stdio"} · <b>${esc(r.cmd)}</b>${r.secrets ? ` · ${plural(r.secrets, "secret")} — kept out of this page` : ""}` : `<button class="lk" data-example>Use the Example</button>`}</div></div>` +
+    `<div style="min-height:0">${targetList(s, why)}</div>` +
+    `<div class="sbtn"><span style="color:var(--ink2);font-size:12px;margin-right:auto">${s.done ? `已在 ${s.installed} 个配置里安装${s.skipped ? `，跳过 ${s.skipped} 个` : ""}。` : existing ? `${esc(r.name)} 已在 ${Object.keys(existing.at).length} 个配置里。` : ""}</span>` +
+    (s.done ? `<button class="btn pri" data-close>Done</button>` : `<button class="btn" data-close ${s.running ? "disabled" : ""}>Cancel</button><button class="btn pri" data-doinstall ${!r.name || !n || s.running ? "disabled" : ""}>${s.running ? "Installing…" : `Install in ${plural(n, "Profile")}`}</button>`) + `</div></div>`;
+}
+
+function copySheet() {
+  const s = S.sheet, a = A(), src = P(s.from) ?? a.profiles[0];
+  const rows = a.items.filter((i) => stateOf(i, src.id) && (!s.only || `${i.kind}/${i.name}` === s.only));
+  const why = (p) => p.shared ? { text: "Follows Default", block: true } : p.id === src.id ? { text: "Source", block: true } : { text: "" };
+  return `<div class="sheet"><div><h3>${s.only ? `Copy ${esc(itemOf(s.only).name)} to Profiles` : "Copy from Profile"}</h3>` +
+    (s.only ? "" : `<div class="lab" style="margin-top:0"><span>From</span><span class="seg">${a.profiles.filter((p) => !p.shared).slice(0, 5).map((p) => `<button data-from="${p.id}" class="${p.id === src.id ? "on" : ""}">${esc(p.name)}</button>`).join("")}</span><span style="color:var(--ink3)">${a.profiles.length > 5 ? "示范里只列前五个" : ""}</span></div>` +
+      `<div class="tl" style="height:150px">${rows.map((i) => { const key = `${i.kind}/${i.name}`; return `<button class="t ${s.picked.has(key) ? "on" : ""}" data-pick="${esc(key)}"><span class="bx ${s.picked.has(key) ? "on" : ""}">${s.picked.has(key) ? "✓" : ""}</span><span style="font:12.5px var(--mono)">${esc(i.name)}</span><span class="why">${esc(i.kind)}</span></button>`; }).join("") || `<div class="empty">Nothing here.</div>`}</div>`) +
+    `</div><div style="min-height:0">${targetList(s, why)}</div>` +
+    `<div class="sbtn"><button class="btn" data-close>Cancel</button><button class="btn pri" data-docopy ${s.picked.size && s.targets.size ? "" : "disabled"}>Copy ${plural(s.picked.size, "Item")} to ${plural(s.targets.size, "Profile")}</button></div></div>`;
+}
+
+const freshTargets = () => new Set(own(scope()).map((p) => p.id));
+document.addEventListener("input", (e) => {
+  const id = e.target.id;
+  if (id === "find") S.q = e.target.value;
+  else if (id === "pfind") S.pq = e.target.value;
+  else if (id === "tfind" && S.sheet) S.sheet.q = e.target.value;
+  else if (id === "cmd" && S.sheet) S.sheet.text = e.target.value;
+  else return;
+  render();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.menu) S.menu = null; else if (S.sheet && !S.sheet.running) S.sheet = null; else return; render(); } });
+document.addEventListener("click", (e) => {
+  if (e.target.matches("input, textarea")) return;
+  const t = e.target.closest("button"), d = t?.dataset ?? {};
+  if (!t) { if (e.target.matches("[data-veil]") && !S.sheet?.running) S.sheet = null; S.menu = null; return render(); }
+  if (t.disabled) return;
+  const a = A(), sc = scope();
+  const pair = (v) => { const [key, pid] = v.split("@"); return { key, pid, item: itemOf(key) }; };
+  if (d.look) { $("#set").classList.toggle("light", d.look === "light"); document.querySelectorAll("[data-look]").forEach((b) => b.classList.toggle("on", b === t)); return; }
+  if (d.count || "reset" in d) {
+    if (d.count) { COUNT = Number(d.count); document.querySelectorAll("[data-count]").forEach((b) => b.classList.toggle("on", b === t)); }
+    DB = seed(COUNT); Object.assign(S, { page: "addons", sel: new Set(["p0"]), pq: "", q: "", open: new Set(), menu: null, sheet: null, toast: null, undo: null });
+  }
+  else if (d.page) { S.page = d.page; S.menu = null; S.sheet = null; }
+  else if (d.agent) { S.agent = d.agent; S.sel = new Set(["p0"]); S.open.clear(); S.pq = ""; S.menu = null; }
+  else if (d.tick) { S.sel.has(d.tick) ? S.sel.delete(d.tick) : S.sel.add(d.tick); S.menu = null; }
+  else if (d.only) { S.sel = new Set([d.only]); S.menu = null; }
+  else if (d.quick) {
+    const shown = a.profiles.filter((p) => !S.pq || p.name.toLowerCase().includes(S.pq.toLowerCase()));
+    S.sel = d.quick === "none" || d.quick === "all" ? new Set() : new Set((d.quick === "isolated" ? shown.filter((p) => !p.shared && p.id !== "default") : shown).map((p) => p.id));
+    S.menu = null;
+  }
+  else if (d.row) { S.open.has(d.row) ? S.open.delete(d.row) : S.open.add(d.row); S.menu = null; }
+  else if (d.menu) S.menu = S.menu === d.menu ? null : d.menu;
+  else if (d.sw) { const { pid, item } = pair(d.sw), to = stateOf(item, pid) === "on" ? "off" : "on"; setState(item, [pid], to, `${item.name} turned ${to} in ${P(pid).name}`); }
+  else if (d.rm) { const { key, pid, item } = pair(d.rm); S.open.delete(key); setState(item, [pid], null, `Removed ${item.name} from ${P(pid).name}`); }
+  else if (d.chip) { const [op, v] = d.chip.split(/:(.*)/s), { pid, item } = pair(v); setState(item, [pid], op === "rm" ? null : op, op === "rm" ? `Removed ${item.name} from ${P(pid).name}` : `${item.name} ${op === "on" && !stateOf(item, pid) ? "added to" : `turned ${op} in`} ${P(pid).name}`); }
+  else if (d.bulk) {
+    const [op, key] = d.bulk.split(/:(.*)/s), item = itemOf(key), mine = own(sc);
+    const pids = (op === "add" ? mine.filter((p) => !stateOf(item, p.id)) : op === "rm" ? mine.filter((p) => stateOf(item, p.id)) : mine.filter((p) => stateOf(item, p.id) === (op === "on" ? "off" : "on"))).map((p) => p.id);
+    setState(item, pids, op === "rm" ? null : op === "add" ? "on" : op, `${item.name} ${op === "add" ? "added to" : op === "rm" ? "removed from" : `turned ${op} in`} ${plural(pids.length, "profile")}`);
+  }
+  else if (d.showin) { const item = itemOf(d.showin); S.sel = new Set(a.profiles.filter((p) => stateOf(item, p.id)).map((p) => p.id)); S.open = new Set([d.showin]); }
+  else if (d.copyto) { const src = [...S.sel][0]; S.sheet = { kind: "copy", only: d.copyto, from: src, picked: new Set([d.copyto]), targets: new Set(), q: "" }; }
+  else if (d.sheet === "install") S.sheet = { kind: "install", text: "", targets: freshTargets(), q: "" };
+  else if (d.sheet === "copy") S.sheet = { kind: "copy", only: null, from: "default", picked: new Set(), targets: freshTargets(), q: "" };
+  else if ("close" in d) S.sheet = null;
+  else if ("example" in d) S.sheet.text = HINT[S.agent];
+  else if (d.target) { S.sheet.targets.has(d.target) ? S.sheet.targets.delete(d.target) : S.sheet.targets.add(d.target); }
+  else if (d.tq) {
+    const s = S.sheet, ok = (p) => !p.shared && !(s.kind === "copy" && p.id === s.from);
+    const shown = a.profiles.filter((p) => !s.q || p.name.toLowerCase().includes(s.q.toLowerCase()));
+    s.targets = d.tq === "none" ? new Set() : new Set((d.tq === "selection" ? own(scope()) : d.tq === "isolated" ? shown.filter((p) => p.id !== "default") : shown).filter(ok).map((p) => p.id));
+  }
+  else if (d.from) { S.sheet.from = d.from; S.sheet.picked.clear(); S.sheet.targets.delete(d.from); }
+  else if (d.pick) { S.sheet.picked.has(d.pick) ? S.sheet.picked.delete(d.pick) : S.sheet.picked.add(d.pick); }
+  else if ("docopy" in d) {
+    const s = S.sheet, keys = [...s.picked], to = [...s.targets], src = s.from;
+    S.sheet = null;
+    change(`Copied ${plural(keys.length, "item")} to ${plural(to.length, "profile")}`, () => keys.forEach((k) => { const item = itemOf(k); to.forEach((pid) => { if (!(pid in item.at)) item.at[pid] = stateOf(item, src) ?? "on"; }); }));
+  }
+  else if ("doinstall" in d) return install();
+  else if ("undo" in d) { if (S.undo) DB = JSON.parse(S.undo); S.undo = null; S.toast = "Undone"; }
+  render();
+});
+
+/** The command run once under each ticked profile, one after the other: the list says how far it is. */
+function install() {
+  const s = S.sheet, r = readCommand(s.text), before = JSON.stringify(DB);
+  let item = A().items.find((i) => i.kind === "MCP Servers" && i.name === r.name);
+  const order = A().profiles.filter((p) => s.targets.has(p.id)).map((p) => p.id);
+  s.running = true; s.progress = {}; s.installed = 0; s.skipped = 0;
+  render();
+  const step = (n) => {
+    if (S.sheet !== s) return;
+    if (n >= order.length) { s.running = false; s.done = true; S.undo = before; S.toast = `Installed ${r.name} in ${plural(s.installed, "profile")}`; S.open.add(`MCP Servers/${r.name}`); return render(); }
+    const pid = order[n];
+    if (item?.at[pid]) { s.progress[pid] = "skip"; s.skipped += 1; render(); return step(n + 1); }
+    s.progress[pid] = "run"; render();
+    setTimeout(() => {
+      if (!item) { item = { kind: "MCP Servers", name: r.name, about: "installed here", info: r.http ? { Transport: "http", URL: r.cmd, Headers: r.secrets ? `${plural(r.secrets, "header")} · hidden` : "—" } : { Transport: "stdio", Command: r.cmd, Environment: r.secrets ? `${plural(r.secrets, "variable")} · hidden` : "—" }, at: {} }; A().items.unshift(item); }
+      item.at[pid] = "on"; s.progress[pid] = "ok"; s.installed += 1; render(); step(n + 1);
+    }, order.length > 30 ? 25 : 160);
+  };
+  step(0);
+}
+render();
+</script>
+</body>
+</html>

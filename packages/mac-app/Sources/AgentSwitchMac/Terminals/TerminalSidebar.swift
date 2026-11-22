@@ -220,7 +220,7 @@ private struct FilterLine: View {
                     PixelSprite(rows: PixelArt.agents[agent] ?? PixelArt.agents["pi"]!, pixel: 2, color: on ? Look.ink : Look.ink2, strength: on ? 1 : 0.6, shadow: false)
                 }
             }
-            Spacer(minLength: 6)
+            Spacer(minLength: 0)
             FilterMark(on: model.filter.recent, help: "Open Terminals and Sessions of the Last \(TerminalListFilter.recentDays) Days") {
                 model.filter.recent.toggle()
             } label: { on in word("Recent", on: on) }
@@ -237,6 +237,8 @@ private extension FilterLine {
         Text(text).font(look.isClassic ? .system(size: 11, weight: on ? .semibold : .medium) : .system(size: 11.5, weight: on ? .bold : .regular, design: .monospaced))
             .foregroundStyle(on ? (look.isClassic ? Color.signal : Look.ink) : Look.ink2)
             .padding(.horizontal, look.isClassic ? 3 : 1)
+            // One line whatever the column's width: narrow, the word was broken in two ("Recen / t", 2026-11-22).
+            .lineLimit(1).fixedSize()
     }
 }
 

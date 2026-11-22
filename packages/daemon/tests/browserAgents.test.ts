@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { BrowserAgents, bridgeCommand, describeCall, FILES_REFUSED, HELD_LOGS_REFUSED, NOT_UPLOADED, RESIZE_REFUSED, terminalOwner, USER_HOLDS_TAB, type AgentConnection, type EngineConnection, type EngineOptions, type JsonRpcMessage, directTools, withoutFileLinks } from "../src/browser/agents.js";
+import { BrowserAgents, bridgeCommand, CALL_TIMED_OUT, describeCall, FILES_REFUSED, HELD_LOGS_REFUSED, NOT_UPLOADED, RESIZE_REFUSED, terminalOwner, USER_HOLDS_TAB, type AgentConnection, type EngineConnection, type EngineOptions, type JsonRpcMessage, directTools, withoutFileLinks } from "../src/browser/agents.js";
 import { BrowserAudit } from "../src/browser/audit.js";
 import { BrowserHost } from "../src/browser/host.js";
 import { YOU, type TabOwner } from "../src/browser/types.js";
@@ -81,14 +81,14 @@ class FakeConnection implements EngineConnection {
 const hosts: BrowserHost[] = [];
 afterEach(async () => { for (const h of hosts.splice(0)) await h.shutdown(); });
 
-function setup(holdWaitMs = 5_000, agentQuietMs = 2_000) {
+function setup(holdWaitMs = 5_000, agentQuietMs = 2_000, callDeadlineMs?: number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-agents-")));
   const driver = new FakeDriver();
   const host = new BrowserHost({ driver, profileDir: join(root, "profile"), files: { protected: { roots: [], exempt: [] }, home: root }, ownPorts: () => [4711], log: () => undefined, mac: true, agentQuietMs });
   hosts.push(host);
   const audit = new BrowserAudit(join(root, "browser", "audit.jsonl"));
   const engines: FakeConnection[] = [];
-  const agents = new BrowserAgents({ host, audit, dir: join(root, "browser"), holdWaitMs, log: () => undefined,
+  const agents = new BrowserAgents({ host, audit, dir: join(root, "browser"), holdWaitMs, ...(callDeadlineMs ? { callDeadlineMs } : {}), log: () => undefined,
     engine: async (opts) => { const c = new FakeConnection(opts, host); engines.push(c); return c; } });
   const auditLines = (): Record<string, unknown>[] => {
     try { return readFileSync(join(root, "browser", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>); } catch { return []; }
@@ -423,6 +423,36 @@ describe("a tab a person holds", () => {
     await tick();
     await host.close(tab);
     expect(isError(await snap)).toBe(false);   // the engine answers for a tab that is gone, as Playwright MCP would
+  });
+
+  it("a call the agent cancels while the engine has it lets the session's next call run; its late answer is dropped", async () => {
+    const { agents, engines } = setup();
+    const c = await connect(agents, agents.mint(CODEX));
+    await c.call("browser_navigate", { url: "https://github.com/" });
+    let release!: () => void;
+    engines[0]!.gate = new Promise((r) => { release = r; });
+    void c.call("browser_snapshot");
+    await waitUntil(() => engines[0]!.calls().length === 2);
+    c.conn.receive({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 2 } });
+    engines[0]!.gate = null;
+    const next = await c.call("browser_tabs", { action: "list" });
+    expect(text(next)).toContain("did browser_tabs");
+    release();
+    await tick(); await tick();
+    expect(c.out.filter((m) => m.id === 2)).toEqual([]);
+  });
+
+  it("a call the engine never answers is given up at the deadline, and the session's next call runs", async () => {
+    const { agents, engines } = setup(5_000, 2_000, 60);
+    const c = await connect(agents, agents.mint(CODEX));
+    await c.call("browser_navigate", { url: "https://github.com/" });
+    engines[0]!.gate = new Promise(() => undefined);
+    const stuck = c.call("browser_snapshot");
+    await waitUntil(() => engines[0]!.calls().length === 2);
+    engines[0]!.gate = null;
+    const next = c.call("browser_tabs", { action: "list" });
+    expect(text(await stuck)).toContain(CALL_TIMED_OUT);
+    expect(text(await next)).toContain("did browser_tabs");
   });
 
   it("people's tabs and other agents' are never a call's target", async () => {

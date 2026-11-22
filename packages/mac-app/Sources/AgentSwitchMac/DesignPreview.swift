@@ -57,6 +57,14 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (nodes) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "addons" {
+                    // Settings › Add-Ons over DemoData's profiles: every profile at once, each add-on with how many have it.
+                    for (name, appearance) in [("settings-addons-dark", NSAppearance(named: .darkAqua)), ("settings-addons", NSAppearance(named: .aqua))] {
+                        try await renderSettings(.addons, model: model, appearance: appearance, height: 760, to: directory.appendingPathComponent("\(name).png"))
+                    }
+                    FileHandle.standardError.write(Data("design preview (Add-Ons) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "profiles" {
                     // A profile's own proxy (docs/profiles-v0.md §4): the sheet once it was applied and checked, and
                     // one whose proxy let nothing out.
@@ -75,6 +83,8 @@ enum DesignPreview {
                         AgentProfile(id: "abc123def0", name: "cwork1", account: "work@example.com", proxy: checked.proxy, exit: checked.exit, color: "violet"),
                         AgentProfile(id: "abc123def1", name: "side", color: "sand"),
                         AgentProfile(id: "abc123def2", name: "lab", account: "lab@example.com", color: "mint"),
+                        // A name and an account as long as they come: shown whole (2026-11-22).
+                        AgentProfile(id: "abc123def4", name: "cvp_ a.rather.long.account.name@example.com", account: "a.rather.long.account.name@example.com", proxy: checked.proxy, exit: ProfileExit(ip: "198.51.100.23", place: "New York City"), color: "olive"),
                         AgentProfile(id: "abc123def3", name: "relay", kind: "api", color: "orchid", api: ProfileApiInfo(baseUrl: "https://relay.example/api", model: "claude-made-up")),
                     ], creatable: true, kinds: ["subscription", "api"])
                     let healthy = try JSONDecoder().decode(ProfileHealth.self, from: Data(#"{"status":"healthy","checkedAt":1794630000000,"message":"已连接，订阅用量读取成功。","windows":[{"label":"5h","usedPercent":23,"resetsAt":1794640000},{"label":"7d","usedPercent":61,"resetsAt":1794700000}]}"#.utf8))
@@ -440,8 +450,9 @@ enum DesignPreview {
         let selectable = (0..<sidebar.numberOfRows).filter { row in
             sidebar.item(atRow: row).map { delegate.outlineView?(sidebar, shouldSelectItem: $0) ?? false } ?? false
         }.count
-        guard selectable == SettingsTab.allCases.count else {
-            throw PreviewError("the settings sidebar selects \(selectable) of its \(SettingsTab.allCases.count) pages")
+        // The app's pages and the one row that is all of Dispatch.
+        guard selectable == SettingsTab.app.count + 1 else {
+            throw PreviewError("the settings sidebar selects \(selectable) of its \(SettingsTab.app.count + 1) rows")
         }
     }
 

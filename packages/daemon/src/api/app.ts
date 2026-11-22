@@ -18,6 +18,7 @@ import { type ApiDeps } from "./shared.js";
 import { mountTasks } from "./tasks.js";
 import { mountTerminals } from "./terminals.js";
 import { mountProfiles } from "./profiles.js";
+import { mountAddons } from "./addons.js";
 import { mountClash } from "./clash.js";
 import { mountThreads } from "./threads.js";
 import { mountUi, uiFile } from "./ui.js";
@@ -39,6 +40,7 @@ export function createApp(deps: ApiDeps): Hono {
   mountSessions(app, deps);
   mountTerminals(app, deps);
   mountProfiles(app, deps);
+  mountAddons(app, deps);
   mountClash(app, deps);
   mountBrowser(app, deps);
   mountProfileBrowsers(app, deps);

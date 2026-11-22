@@ -346,6 +346,9 @@ struct DemoTransport: HTTPTransport {
         case ("PUT", "/settings/workdir"): (status, body) = backend.saveWorkDir(sent["path"] as? String)
         case ("POST", "/pairing"): body = try Self.pairing(now: now)
         case ("POST", "/local/console-link"): body = ["path": "/"]
+        // Settings › Add-Ons (AddonsView): a few made-up profiles and what each has.
+        case ("GET", "/profiles"): body = DemoData.profilesJSON
+        case ("GET", "/profiles/addons"): body = DemoData.addonsJSON(agent: URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "agent" }?.value ?? "claude-code")
         default: body = [:] as [String: Any]
         }
         let data = try JSONSerialization.data(withJSONObject: body)
@@ -378,3 +381,51 @@ struct DemoTransport: HTTPTransport {
     }
 }
 #endif
+
+
+extension DemoData {
+    /// The profiles of the Add-Ons page's demo: `Default`, two with a folder all their own, one that shares `Default`'s.
+    static var profilesJSON: [String: Any] {
+        func agent(_ profiles: [[String: Any]]) -> [String: Any] { ["current": "default", "creatable": true, "kinds": ["subscription", "api"], "profiles": profiles] }
+        let claude: [[String: Any]] = [
+            ["id": "default", "name": "Default", "kind": "subscription", "createdAt": 0, "account": "me@example.com"],
+            ["id": "abc123def0", "name": "work", "kind": "subscription", "createdAt": 0, "color": "violet", "isolated": true, "account": "work@example.com"],
+            ["id": "abc123def1", "name": "lab", "kind": "subscription", "createdAt": 0, "color": "mint", "isolated": true],
+            ["id": "abc123def2", "name": "relay", "kind": "api", "createdAt": 0, "color": "sand"],
+        ]
+        let codex: [[String: Any]] = [
+            ["id": "default", "name": "Default", "kind": "subscription", "createdAt": 0, "account": "me@example.com"],
+            ["id": "c0dex00001", "name": "team", "kind": "subscription", "createdAt": 0, "color": "violet"],
+            ["id": "c0dex00002", "name": "apart", "kind": "subscription", "createdAt": 0, "color": "orchid", "isolated": true],
+        ]
+        return ["agents": ["claude-code": agent(claude), "codex": agent(codex), "opencode": agent([]), "pi": agent([])]]
+    }
+
+    static func addonsJSON(agent: String) -> [String: Any] {
+        func mcp(_ name: String, _ command: String, on: Bool = true, secrets: Int = 0, shared: Bool = false, http: Bool = false) -> [String: Any] {
+            var item: [String: Any] = ["kind": "mcp", "name": name, "shared": shared, "enabled": on, "transport": http ? "http" : "stdio", "command": command]
+            if secrets > 0 { item["secrets"] = secrets }
+            return item
+        }
+        func file(_ kind: String, _ name: String, _ about: String? = nil, shared: Bool = false) -> [String: Any] {
+            var item: [String: Any] = ["kind": kind, "name": name, "shared": shared]
+            if let about { item["about"] = about }
+            return item
+        }
+        if agent == "codex" {
+            let own: [[String: Any]] = [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest"), mcp("linear", "https://mcp.example.com/linear", secrets: 1, http: true), file("skills", "commit-style", "How commits are written here"), file("prompts", "review")]
+            return ["agent": agent, "kinds": ["mcp", "skills", "plugins", "prompts", "rules"], "profiles": [
+                ["id": "default", "items": own], ["id": "c0dex00001", "items": own.map { $0.merging(["shared": true]) { _, new in new } }],
+                ["id": "c0dex00002", "items": [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest", on: false)]],
+            ]]
+        }
+        let pdf = file("skills", "pdf", "Read and fill PDF files"), reviewer = file("agents", "reviewer")
+        return ["agent": agent, "kinds": ["mcp", "skills", "plugins", "agents", "commands"], "profiles": [
+            ["id": "default", "items": [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest"), mcp("figma", "https://mcp.example.com/figma", secrets: 1, http: true), pdf, file("skills", "xlsx", "Spreadsheets"),
+                                        ["kind": "plugins", "name": "status-hud@example-plugins", "shared": false, "enabled": true, "version": "1.4.2"], reviewer, file("commands", "ship")]],
+            ["id": "abc123def0", "items": [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest"), mcp("postgres", "uvx mcp-postgres --password •••", on: false, secrets: 1), pdf, file("skills", "release-notes", "This repo’s release steps"), file("agents", "planner")]],
+            ["id": "abc123def1", "items": [pdf, reviewer]],
+            ["id": "abc123def2", "items": [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest"), file("skills", "pdf", "Read and fill PDF files", shared: true), file("skills", "xlsx", "Spreadsheets", shared: true), file("agents", "reviewer", shared: true), file("commands", "ship", shared: true)]],
+        ]]
+    }
+}

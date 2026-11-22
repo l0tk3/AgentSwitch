@@ -124,6 +124,6 @@ final class TerminalAttentionTests: XCTestCase {
         // One that stopped to ask is the other tracker's; one that ended is not a turn that ended.
         XCTAssertEqual(tracker.newlyDone([terminal("a", .waiting, asks: ["p1"]), terminal("b", .exited)]).map(\.id), [])
         XCTAssertEqual([terminal("a", name: "").noticeName, terminal("a").noticeName], ["Claude Code", "修复登录"])
-        XCTAssertEqual([terminal("a", .waiting, asks: ["p1"]).noticeWait, terminal("a", .waiting).noticeWait], ["Bash: npm test", "等你处理。"])
+        XCTAssertEqual([terminal("a", .waiting, asks: ["p1"]).noticeWait, terminal("a", .waiting).noticeWait], ["Bash: npm test", "等你处理"])
     }
 }

@@ -52,6 +52,16 @@ export class SessionTitles {
 
   custom(harness: string, id: string): string | null { return this.all().get(`${harness}:${id}`)?.custom || null; }
 
+  /** Session `from` is `to` now (it went on under another profile, sessions' ids are not shared between them): its
+   *  title and the user's name for it go with it. */
+  reidentified(harness: string, from: string, to: string): void {
+    const all = this.all(), kept = all.get(`${harness}:${from}`);
+    if (!kept || !to || from === to) return;
+    all.delete(`${harness}:${from}`);
+    all.set(`${harness}:${to}`, { ...kept, at: this.now() });
+    this.later();
+  }
+
   rename(harness: string, id: string, name: string | null): void {
     if (!id) return;
     const key = `${harness}:${id}`, previous = this.all().get(key);
