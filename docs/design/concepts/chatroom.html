@@ -44,6 +44,10 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 /* A profile's colour says who, not what state (§7.2 第 11 条): six, clear of the state colours and the signal. */
 .app { --p-violet: #b18cff; --p-sand: #e2c48d; --p-mint: #7fe3c0; --p-orchid: #e08ce8; --p-olive: #c3c95a; --p-slate: #9db2d9; }
 .tok-pl, .tok-cl { --p-violet: #7a4fe0; --p-sand: #9a7b3f; --p-mint: #1f9a75; --p-orchid: #b043bc; --p-olive: #7c8220; --p-slate: #5a719f; }
+/* A face's colour (2026-11-22, user: 再加上颜色好吧): ten, soft, each clear of the state colours (cyan, amber, green, red),
+   of the signal pink and of the accent blue — so a face's colour is never read as a state. */
+.app { --f0: #b18cff; --f1: #e2c48d; --f2: #7fe3c0; --f3: #e08ce8; --f4: #c3c95a; --f5: #9db2d9; --f6: #f0a585; --f7: #a3a9f5; --f8: #eda0b8; --f9: #86bfc9; }
+.tok-pl, .tok-cl { --f0: #7a4fe0; --f1: #9a7b3f; --f2: #1f9a75; --f3: #b043bc; --f4: #7c8220; --f5: #5a719f; --f6: #c0623a; --f7: #5560d6; --f8: #c2557a; --f9: #2f8496; }
 
 /* ---------- the kit ---------- */
 .px { display: block; image-rendering: pixelated; flex: none; }
@@ -171,7 +175,9 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .s-classic .msg.forme { background: color-mix(in srgb, var(--amber) 9%, transparent); }
 .av { width: 26px; height: 26px; display: grid; place-items: center; color: var(--ink); align-self: start; margin-top: 1px; }
 .s-pixel .av { border: 1px solid var(--ink4); }
-.s-classic .av { border-radius: 8px; background: var(--raise); color: var(--ink); }
+.av { color: var(--c, var(--ink)); }
+.s-pixel .av { border-color: color-mix(in srgb, var(--c, var(--ink4)) 45%, var(--ink4)); }
+.s-classic .av { border-radius: 8px; background: color-mix(in srgb, var(--c, var(--ink3)) 20%, var(--raise)); color: var(--c, var(--ink)); }
 .av.sm { width: 22px; height: 22px; position: relative; flex: none; }
 .av.sm .on { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 12px; height: 12px; background: var(--bg); }
 .s-classic .av.sm .on { border-radius: 50%; }
@@ -364,7 +370,8 @@ button svg { pointer-events: none; }
 <ul>
 <li>每个席位一张 5×5 的图案，左右对称，<b>由名字算出来</b>：同一个名字在哪台设备上都是同一张，不用存、不用选。</li>
 <li>十五个格子决定一张（三列五行，另两列是镜像），去掉太空、太满、整排整列一样的，剩下两万多种；同一个房间里再保证两两至少差六格。</li>
-<li>只用墨色：颜色留给配置和状态。agent 是名字后面那个小图标。你自己是固定的 <code>YOU</code>。</li>
+<li><b>带颜色</b>：十个颜色里的一个，也由名字算出来。十个都避开状态色（青、琥珀、绿、红）、信号粉和强调蓝，所以不会被读成状态。图案两万多种乘十个颜色。agent 是名字后面那个小图标。你自己是固定的 <code>YOU</code>。</li>
+<li>头像有了颜色之后，<b>配置的色点不再出现在消息那一行</b>（两个颜色并排会被当成一回事），只留在成员名单和名片里，名片上写着配置名。</li>
 <li>两种外观是同一张图案，像素外观画方格，经典外观画圆点。下面是 48 个名字各自的样子，切换上面的 Pixel / Classic 一起变。</li>
 </ul>
 <div id="gallery"></div>
@@ -508,6 +515,8 @@ function faceRows(name) {
   }
   return ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"];
 }
+/** Which of the ten colours a name has: from the name too, apart from the pattern's own bits. */
+function faceColor(name) { let h = 0; for (const ch of name) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0; return ((h ^ (h >>> 7)) >>> 0) % 10; }
 function face(name, px = 4) {
   const rows = faceRows(name);
   if (!classic()) return P.sprite(rows, { px });
@@ -517,7 +526,7 @@ function face(name, px = 4) {
 }
 function avatar(seat) {
   if (seat.you) return `<span class="av you">YOU</span>`;
-  return `<span class="av" title="${seat.name}">${face(seat.name)}</span>`;
+  return `<span class="av" style="--c: var(--f${faceColor(seat.name)})" title="${seat.name}">${face(seat.name)}</span>`;
 }
 function rich(text) {
   return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/@([a-z][\w-]*)/g, (m, id) => (SEATS[id] || id === "all" ? `<span class="at${id === "you" ? " me" : ""}" data-card="${id}">@${id}</span>` : m));
@@ -542,7 +551,7 @@ function message(m, prev, r, narrow) {
     ${cont ? "<span></span>" : avatar(seat)}
     <div>
       ${quoted ? `<div class="quote"><span>${quoted.from === "you" ? "You" : quoted.from}</span><span class="cut">${esc(quoted.text.replace(/`/g, "").replace(/@[a-z][\w-]*\s*/g, ""))}</span></div>` : ""}
-      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : seat.name}</span>${seat.you ? "" : `<span class="amk" title="${AG[seat.agent]}">${agentMark(seat.agent, 2)}</span>`}${spot(seat)}<span class="meta">${m.t}</span><span class="num">#${m.n}</span></div>`}
+      ${cont ? "" : `<div class="mh"><span class="who" data-card="${seat.id}">${seat.you ? "You" : seat.name}</span>${seat.you ? "" : `<span class="amk" title="${AG[seat.agent]}">${agentMark(seat.agent, 2)}</span>`}<span class="meta">${m.t}</span><span class="num">#${m.n}</span></div>`}
       <div class="body">${rich(m.text)}</div>
       ${m.file ? `<div class="file">${icon("clip", { px: 1, size: 14 })}<span class="cut">${esc(m.file)}</span></div>` : ""}
       ${receipts(m)}
@@ -580,12 +589,12 @@ function memberRows(r) {
   const by = {};
   for (const id of r.seats) if (id !== "you") (by[SEATS[id].node] ||= []).push(SEATS[id]);
   return Object.entries(by).map(([node, seats]) => `<div class="grp"><span class="label">${node}</span></div>${seats.map((s) =>
-    `<button class="mb" data-card="${s.id}"><span class="av sm">${face(s.name, 3)}<span class="on">${state(s.st)}</span></span><span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${s.model} · ${word(s.st)}${s.started ? " · Started by " + s.by : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
+    `<button class="mb" data-card="${s.id}"><span class="av sm" style="--c: var(--f${faceColor(s.name)})">${face(s.name, 3)}<span class="on">${state(s.st)}</span></span><span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${s.model} · ${word(s.st)}${s.started ? " · Started by " + s.by : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
 }
 function card(id, style) {
   const s = SEATS[id];
   if (!s || s.you) return "";
-  return `<div class="float card" style="${style}"><h3><span class="av">${face(s.name)}</span><span class="grow">@${s.name}</span>${state(s.st)}${spot(s)}</h3>
+  return `<div class="float card" style="${style}"><h3><span class="av" style="--c: var(--f${faceColor(s.name)})">${face(s.name)}</span><span class="grow">@${s.name}</span>${state(s.st)}${spot(s)}</h3>
     <dl><dt>Agent</dt><dd>${AG[s.agent]}</dd><dt>Model</dt><dd>${s.model}</dd><dt>Profile</dt><dd>${s.profile}</dd><dt>Node</dt><dd>${s.node}</dd>
     <dt>Folder</dt><dd class="mono" title="${s.dir}">${s.dir}</dd><dt>Mode</dt><dd>${s.mode}</dd><dt>State</dt><dd>${word(s.st)}</dd><dt>Seated By</dt><dd>${s.by === "you" ? "You" : s.by}</dd></dl>
     <div class="acts"><button class="btn" data-mention="${s.id}">Mention</button><button class="btn" data-act="closecard">Open Terminal</button><button class="btn danger" data-act="closecard">Remove</button></div></div>`;
@@ -709,7 +718,7 @@ function render(keep) {
   document.documentElement.style.colorScheme = "dark";
   document.getElementById("stage").innerHTML = (S.view !== "phone" ? mac() : "") + (S.view !== "mac" ? phone() : "");
   for (const el of document.querySelectorAll("[data-tl]")) { const kept = scrolls.find(([id]) => id === el.closest(".app").id); el.scrollTop = kept ? kept[1] : el.scrollHeight; }
-  document.getElementById("gallery").innerHTML = `<div class="app ${classic() ? "s-classic tok-cd" : "s-pixel tok-pd"}"><div class="gal">${GALLERY.map((n) => `<div><span class="av">${face(n, 5)}</span>${n}</div>`).join("")}</div></div>`;
+  document.getElementById("gallery").innerHTML = `<div class="app ${classic() ? "s-classic tok-cd" : "s-pixel tok-pd"}"><div class="gal">${GALLERY.map((n) => `<div><span class="av" style="--c: var(--f${faceColor(n)})">${face(n, 5)}</span>${n}</div>`).join("")}</div></div>`;
   for (const [id, key] of [["c-style", "style"], ["c-view", "view"], ["c-theme", "theme"]]) for (const b of document.querySelectorAll(`#${id} button`)) b.classList.toggle("on", b.dataset.v === S[key]);
   if (focus) { const t = document.querySelector(`#${focus} [data-draft]`); if (t) { t.focus(); t.setSelectionRange(at, at); grow(t); } }
   const u = new URL(location); u.search = new URLSearchParams({ style: S.style, theme: S.theme, view: S.view, room: S.room, screen: S.phoneScreen }); history.replaceState(null, "", u);
