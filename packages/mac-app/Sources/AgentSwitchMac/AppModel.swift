@@ -76,6 +76,9 @@ final class AppModel {
     var agentJobs: [String: AgentJob] = [:]
     @ObservationIgnored var agentTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored var agentWatch: Task<Void, Never>?
+    /// This Mac's board handed to its service for the other nodes' screens, and what they ask taken from it.
+    @ObservationIgnored var agentsShare: Task<Void, Never>?
+    @ObservationIgnored var agentsShared: Data?
 
     // MARK: gate service (docs/gate-service-v0.md); written by AppModel+GateService.swift
 
@@ -226,6 +229,7 @@ final class AppModel {
             startPolling()
             detectEnvironment()
             watchAgentUpdates()
+            shareAgents()
             refreshKeys()
         }
     }

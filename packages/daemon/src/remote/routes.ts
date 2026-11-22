@@ -176,6 +176,10 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/clash/select"],
   ["POST", "/clash/delays"],
   ["POST", "/clash/phone"],
+  // 设置 › Agents of this node from another node's screen (docs/agents-v0.md §12): the board its app made, and what is
+  // asked of that app. Handing the board over and taking the actions are the app's own, on this Mac alone.
+  ["GET", "/agents/board"],
+  ["POST", "/agents/actions"],
   ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],

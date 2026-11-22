@@ -35,6 +35,31 @@ struct ProfilesSettingsView: View {
     }
 }
 
+/// 设置 › Agents with the node whose installs are shown (agents-v0 §12): this Mac's, or another node's through its app.
+struct AgentsSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var node = ""
+    var body: some View {
+        VStack(spacing: 0) {
+            if !model.nodes.nodes.isEmpty {
+                HStack {
+                    Picker("Node", selection: $node) {
+                        Text("This Mac").tag("")
+                        ForEach(model.nodes.nodes) { peer in
+                            Text(peer.name + (peer.state == .online ? "" : " · Offline")).tag(peer.id)
+                        }
+                    }
+                    Spacer()
+                }.padding()
+            }
+            AgentsView()
+                .environment(\.profileNodeID, node.isEmpty ? nil : node)
+                .id(node)
+        }
+        .task { await model.nodes.refresh(model) }
+    }
+}
+
 extension AppModel {
     /// Ciphertext must belong to the selected node's gate, not this Mac's keypair.
     func sealProfile(_ request: GateSealRequest, on node: String?) async throws -> String {

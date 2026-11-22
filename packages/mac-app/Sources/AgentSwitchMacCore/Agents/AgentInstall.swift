@@ -25,7 +25,7 @@ public enum AgentSource: String, Sendable, Codable, CaseIterable {
 }
 
 /// One install of one agent's CLI.
-public struct AgentInstall: Sendable, Equatable, Identifiable {
+public struct AgentInstall: Sendable, Equatable, Identifiable, Codable {
     public let agent: AgentCLI
     public let source: AgentSource
     /// What a choice of this install is saved as: `stable`, `beta`, `pinned:2.1.280`, `app`, `other:/opt/…/codex`.
@@ -80,7 +80,7 @@ public struct AgentInstall: Sendable, Equatable, Identifiable {
 
 /// Earlier versions a vendor's own install keeps beside the current one (Claude Code's `versions/`, pi's
 /// `releases/`): listed apart so they can be cleared (agents-v0 §6).
-public struct AgentLeftovers: Sendable, Equatable {
+public struct AgentLeftovers: Sendable, Equatable, Codable {
     public let versions: [String]
     public let paths: [String]
     public var bytes: Int64?
@@ -93,7 +93,7 @@ public struct AgentLeftovers: Sendable, Equatable {
 }
 
 /// Everything found for one agent.
-public struct AgentReport: Sendable, Equatable, Identifiable {
+public struct AgentReport: Sendable, Equatable, Identifiable, Codable {
     public let agent: AgentCLI
     public var installs: [AgentInstall]
     public var leftovers: AgentLeftovers?

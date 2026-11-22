@@ -322,7 +322,7 @@ struct SettingsView: View {
         case .dispatchModels: ModelsView(dispatch: true)
         case .permissions: PermissionsView()
         case .keys: KeysView()
-        case .agents: AgentsView()
+        case .agents: AgentsSettingsView()
         case .profiles: ProfilesSettingsView()
         case .addons: AddonsView()
         case .environment: EnvironmentView()

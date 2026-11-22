@@ -271,6 +271,63 @@ extension AppModel {
         AgentUpdates.newer(for: install, channels: agentReleases?.channels(install.agent))
     }
 
+    // MARK: the page as one thing, for this Mac's screen and another node's (agents-v0 §12)
+
+    /// This Mac's 设置 › Agents as it is now.
+    var agentsBoard: AgentsBoard {
+        let layout = agentLayout
+        var paths: [String: [String]] = [:]
+        for report in agents where report.install("stable") != nil { paths[report.agent.rawValue] = AgentNative.uninstallPaths(report.agent, layout: layout) }
+        var applied: [String: String] = [:]
+        for (agent, binary) in agentsApplied { applied[agent.rawValue] = binary }
+        return AgentsBoard(home: self.paths.userHome.path, store: layout.store, storeExists: FileManager.default.fileExists(atPath: layout.store),
+                           agents: agents, releases: agentReleases, checking: agentsChecking, use: agentUse, applied: applied,
+                           running: daemonState.isRunning, jobs: agentJobs, pathNotes: agentPathNotes, uninstallPaths: paths)
+    }
+
+    /// One of the page's buttons, pressed here or on another node's screen. What names an install that is not there
+    /// any more does nothing: the board it was pressed on was an old one.
+    func performAgents(_ action: AgentsAction) {
+        let report = action.agent.flatMap { agent in agents.first { $0.agent == agent } }
+        let install = action.key.flatMap { report?.install($0) }
+        switch action.kind {
+        case .refresh: refreshAgents(force: true)
+        case .check: refreshAgents(force: true); checkAgentUpdates(force: true)
+        case .use: if let agent = action.agent, let install { useAgent(agent, install: install) }
+        case .install:
+            if let agent = action.agent, let source = action.source, source == .stable || source == .beta || source == .pinned {
+                installAgent(agent, source, version: action.version, row: action.row ?? AgentRow.missing(source, available: action.version).id)
+            }
+        case .update: if let install, let version = action.version { updateAgent(install, to: version) }
+        case .delete: if let install { deleteAgent(install) }
+        case .clean: if let agent = action.agent { cleanAgent(agent) }
+        case .cancel: if let agent = action.agent { cancelAgentJob(agent) }
+        case .dismiss: if let agent = action.agent { dismissAgentJob(agent) }
+        case .restart: restartDaemon()
+        }
+    }
+
+    /// While the app runs: this Mac's board is handed to its own service whenever it changed (and every few seconds, so
+    /// the service knows the app is there), and what another node's screen asked is taken from it and done.
+    func shareAgents() {
+        guard !isDemo, agentsShare == nil else { return }
+        agentsShare = Task {
+            var kept = Date.distantPast
+            while !Task.isCancelled {
+                // A job's progress is worth a quicker look than a page nobody changes.
+                try? await Task.sleep(for: .seconds(agentJobs.isEmpty ? 3 : 1))
+                guard daemonState.isRunning else { agentsShared = nil; continue }
+                if agents.isEmpty { refreshAgents() }
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .sortedKeys
+                if let data = try? encoder.encode(agentsBoard), data != agentsShared || Date().timeIntervalSince(kept) > 8 {
+                    if (try? await client.putAgentsBoard(data)) != nil { agentsShared = data; kept = Date() } else { agentsShared = nil }
+                }
+                for action in (try? await client.takeAgentsActions()) ?? [] { performAgents(action) }
+            }
+        }
+    }
+
     #if DEBUG
     /// `-designPreview`: this Mac as it was on 2026-10-06 (docs/design/concepts/agents.html), or an empty one.
     func loadDemoAgents(fresh: Bool = false, full: Bool = false) {

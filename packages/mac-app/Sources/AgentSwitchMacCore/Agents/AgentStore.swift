@@ -24,7 +24,7 @@ public struct AgentStore: Sendable {
     /// Who signs each vendor's releases (measured 2026-10-06 on the stable and the test builds alike).
     public static let teams: [AgentCLI: String] = [.claude: "Q6L2SF6YDW", .codex: "2DC432GLL2", .opencode: "5NZ4Q7NXJ4"]
 
-    public enum Phase: Sendable, Equatable {
+    public enum Phase: Sendable, Equatable, Codable {
         case resolving
         case downloading(received: Int64, total: Int64?)
         case verifying, unpacking, checking

@@ -2,7 +2,7 @@ import Foundation
 
 /// An install, update or delete under way for one agent (docs/agents-v0.md §5): one at a time per agent, shown on the
 /// row it works on.
-public struct AgentJob: Sendable, Equatable {
+public struct AgentJob: Sendable, Equatable, Codable {
     public let agent: AgentCLI
     /// The row it runs on: an install's key (`beta`, `pinned:2.1.280`, `stable`) or a missing row's id (`missing:beta`).
     public let row: String

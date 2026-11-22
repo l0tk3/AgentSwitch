@@ -13,6 +13,34 @@ struct AgentsView: View {
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @State private var confirmRestart = false
     @State private var loadError: String?
+    /// The picked node's board, as its app last handed it over (agents-v0 §12); nil until read, and on this Mac.
+    @State private var remote: AgentsBoard?
+    /// What is shown: another node's installs, not this Mac's.
+    private var onNode: Bool { profileNodeID != nil && !profilesOnly }
+    private var board: AgentsBoard { onNode ? remote ?? AgentsBoard(home: "", store: "", storeExists: false, agents: [], releases: nil, checking: false, use: [:], applied: [:], running: false, jobs: [:], pathNotes: [], uninstallPaths: [:]) : model.agentsBoard }
+
+    /// One of the page's buttons: done here, or asked of the node's own app.
+    private func act(_ action: AgentsAction) {
+        guard onNode else { model.performAgents(action); return }
+        let client = profileClient
+        Task {
+            do { try await client.sendAgents(action); loadError = nil }
+            catch { loadError = (error as? DaemonError)?.reason ?? error.localizedDescription }
+        }
+    }
+
+    /// The node's board, read again every moment while the page shows it.
+    private func followNode() async {
+        guard onNode else { return }
+        while !Task.isCancelled {
+            do {
+                let answer = try await profileClient.agentsBoard()
+                remote = answer.board
+                loadError = answer.fresh ? nil : "这个节点上的 AgentSwitch 应用没有在运行：显示的是它上一次报来的情况。"
+            } catch { loadError = (error as? DaemonError)?.reason ?? error.localizedDescription }
+            try? await Task.sleep(for: .seconds(remote?.jobs.isEmpty == false ? 1 : 3))
+        }
+    }
     /// Each agent's profiles, as the service has them; what went wrong with the last change, by agent.
     @State private var profiles: [String: AgentProfiles] = [:]
     @State private var health: [String: ProfileHealth] = [:]
@@ -41,11 +69,11 @@ struct AgentsView: View {
             Section {
                 LabeledContent("Updates") {
                     HStack(spacing: 6) {
-                        StatusDot(level: model.agentsChecking ? .busy : model.agentUpdateCount > 0 ? .warning : .ok)
+                        StatusDot(level: board.checking ? .busy : board.updateCount > 0 ? .warning : .ok)
                         Text(updatesLine).mono(12).foregroundStyle(.secondary)
                     }
                 }
-                if model.agentsNeedRestart {
+                if board.needsRestart {
                     LabeledContent {
                         Button("Restart Service…") { confirmRestart = true }
                     } label: {
@@ -56,9 +84,9 @@ struct AgentsView: View {
                     }
                 }
             } footer: {
-                if model.agentsNeedRestart {
+                if board.needsRestart {
                     Footer("已更改 AgentSwitch 使用的版本，重启服务后生效。已打开的终端继续使用原来的程序。")
-                } else if let failed = AgentText.failed(model.agentReleases) {
+                } else if let failed = AgentText.failed(board.releases) {
                     Footer(failed)
                 }
             }
@@ -67,8 +95,8 @@ struct AgentsView: View {
             if profilesOnly {
                 ForEach(AgentCLI.allCases) { agent in profilesSection(agent) }
             } else {
-            ForEach(model.agents) { report in
-                AgentSection(report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
+            ForEach(board.agents) { report in
+                AgentSection(board: board, report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
                              restart: { confirmRestart = true })
             }
             }
@@ -77,15 +105,18 @@ struct AgentsView: View {
             Section {
                 LabeledContent("Beta & Pinned") {
                     HStack(spacing: 8) {
-                        Text(model.shortPath(model.agentLayout.store)).mono(12).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(board.short(board.store)).mono(12).foregroundStyle(.secondary).textSelection(.enabled)
                         Text(AgentText.size(storeBytes)).mono(12).foregroundStyle(.secondary)
                         // With nothing stored there is no folder to show (agents-v0 §6).
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.agentLayout.store)]) }
-                            .controlSize(.small)
-                            .disabled(storeBytes == 0 && !FileManager.default.fileExists(atPath: model.agentLayout.store))
+                        // Another node's folder is not on this Mac to be shown.
+                        if !onNode {
+                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: board.store)]) }
+                                .controlSize(.small)
+                                .disabled(storeBytes == 0 && !board.storeExists)
+                        }
                     }
                 }
-                ForEach(model.agentPathNotes, id: \.self) { note in
+                ForEach(board.pathNotes, id: \.self) { note in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         StatusDot(level: .warning)
                         Text(note).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -108,15 +139,17 @@ struct AgentsView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     if profilesOnly { Task { await loadProfiles() } }
-                    else { model.refreshAgents(force: true); model.checkAgentUpdates(force: true) }
+                    else { act(AgentsAction(.check)) }
                 } label: { Label(profilesOnly ? "Refresh" : "Check Now", systemImage: "arrow.clockwise") }
                     .help("Check Now")
-                    .disabled(model.agentsChecking)
+                    .disabled(board.checking)
             }
         }
+        .environment(\.agentsAct, AgentsAct(local: !onNode, run: act))
+        .task { await followNode() }
         .task {
             model.refreshAgents()
-            if !profilesOnly { model.checkAgentUpdates() }
+            if !profilesOnly, !onNode { model.checkAgentUpdates() }
         }
         .sheet(item: $naming) { agent in
             ProfileNewSheet(agent: agent, kinds: profiles[agent.rawValue]?.newKinds ?? ["subscription"]) { profiles = $0 }
@@ -138,23 +171,23 @@ struct AgentsView: View {
             ProfileProxySheet(agent: target.agent, profile: target.profile) { agents in profiles = agents }
         }
         .confirmationDialog("重启服务？", isPresented: $confirmRestart) {
-            Button("Restart Service") { model.restartDaemon() }
+            Button("Restart Service") { act(AgentsAction(.restart)) }
         } message: {
             Text("服务重启后改用新选择的版本。正在运行的任务和已打开的终端将中断。")
         }
         .confirmationDialog(deleteQuestion?.title ?? "", isPresented: deletingShown, presenting: deleting) { install in
-            Button(install.source == .stable ? "Uninstall" : "Delete", role: .destructive) { model.deleteAgent(install) }
+            Button(install.source == .stable ? "Uninstall" : "Delete", role: .destructive) { act(AgentsAction(.delete, agent: install.agent, key: install.key)) }
         } message: { _ in
             Text(deleteQuestion?.message ?? "")
         }
         .confirmationDialog(cleanQuestion?.title ?? "", isPresented: cleaningShown, presenting: cleaning) { agent in
-            Button("Clean Up", role: .destructive) { model.cleanAgent(agent) }
+            Button("Clean Up", role: .destructive) { act(AgentsAction(.clean, agent: agent)) }
         } message: { _ in
             Text(cleanQuestion?.message ?? "")
         }
         .sheet(item: $pinning) { agent in
             PinSheet(agent: agent) { version in
-                model.installAgent(agent, .pinned, version: version, row: AgentInstall.pinnedKey(version))
+                act(AgentsAction(.install, agent: agent, source: .pinned, version: version, row: AgentInstall.pinnedKey(version)))
             }
         }
     }
@@ -176,33 +209,33 @@ struct AgentsView: View {
 
     /// What the dialog asks about the install being deleted: is it the one in use, and what is used after it.
     private var deleteQuestion: (title: String, message: String)? {
-        guard let install = deleting, let report = model.agents.first(where: { $0.agent == install.agent }) else { return nil }
-        let home = model.paths.userHome.path
-        let inUse = model.agentInUse(report)?.key == install.key
+        guard let install = deleting, let report = board.agents.first(where: { $0.agent == install.agent }) else { return nil }
+        let home = board.home
+        let inUse = board.inUse(report)?.key == install.key
         var without = report
         without.installs.removeAll { $0.key == install.key }
         let next = AgentSelection.fallback(without)
         guard install.source == .stable else { return AgentText.deleteQuestion(install, inUse: inUse, next: next, home: home) }
         // The vendor's install goes whole, the versions it keeps beside the current one with it.
         let bytes = install.bytes.map { $0 + (report.leftovers?.bytes ?? 0) }
-        return AgentText.uninstallQuestion(install, paths: model.agentUninstallPaths(install.agent), bytes: bytes, inUse: inUse, next: next, home: home)
+        return AgentText.uninstallQuestion(install, paths: board.uninstallPaths[install.agent.rawValue] ?? [], bytes: bytes, inUse: inUse, next: next, home: home)
     }
 
     private var cleanQuestion: (title: String, message: String)? {
-        guard let agent = cleaning, let report = model.agents.first(where: { $0.agent == agent }), let leftovers = report.leftovers else { return nil }
-        return AgentText.cleanQuestion(agent, leftovers: leftovers, current: report.install("stable")?.version, home: model.paths.userHome.path)
+        guard let agent = cleaning, let report = board.agents.first(where: { $0.agent == agent }), let leftovers = report.leftovers else { return nil }
+        return AgentText.cleanQuestion(agent, leftovers: leftovers, current: report.install("stable")?.version, home: board.home)
     }
 
     private var updatesLine: String {
-        let checked = AgentText.checked(model.agentReleases, checking: model.agentsChecking)
-        guard !model.agentsChecking, model.agentReleases?.checkedAt != nil else { return checked }
-        let count = model.agentUpdateCount
+        let checked = AgentText.checked(board.releases, checking: board.checking)
+        guard !board.checking, board.releases?.checkedAt != nil else { return checked }
+        let count = board.updateCount
         return "\(count == 0 ? "Up to Date" : "\(count) Available") · \(checked)"
     }
 
     /// What the store holds: the betas and the pinned versions.
     private var storeBytes: Int64 {
-        model.agents.flatMap(\.installs).filter { $0.source == .beta || $0.source == .pinned }.reduce(0) { $0 + ($1.bytes ?? 0) }
+        board.agents.flatMap(\.installs).filter { $0.source == .beta || $0.source == .pinned }.reduce(0) { $0 + ($1.bytes ?? 0) }
     }
 
     /// Its sign-ins (docs/profiles-v0.md §3): the one new terminals start under, and others to switch to.
@@ -823,6 +856,8 @@ private struct AgentSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.profileNodeID) private var profileNodeID
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
+    @Environment(\.agentsAct) private var act
+    let board: AgentsBoard
     let report: AgentReport
     let delete: (AgentInstall) -> Void
     let clean: () -> Void
@@ -831,9 +866,9 @@ private struct AgentSection: View {
 
     var body: some View {
         let agent = report.agent
-        let channels = model.agentReleases?.channels(agent)
-        let used = model.agentInUse(report)
-        let job = model.agentJob(agent)
+        let channels = board.releases?.channels(agent)
+        let used = board.inUse(report)
+        let job = board.job(agent)
         // A job that failed holds only its own line until it is read; the others can be used again.
         let busy = job.map { !$0.failed } ?? false
         let rows = AgentRow.rows(report, channels: channels)
@@ -841,30 +876,30 @@ private struct AgentSection: View {
             ForEach(rows) { row in
                 switch row {
                 case .install(let install):
-                    let newer = model.newerVersion(for: install)
+                    let newer = board.newer(for: install)
                     let managed = install.source == .stable || install.source == .beta || install.source == .pinned
-                    InstallRow(install: install, used: used?.key == install.key, newer: newer, detail: AgentText.detail(install, home: model.paths.userHome.path),
+                    InstallRow(install: install, used: used?.key == install.key, newer: newer, detail: AgentText.detail(install, home: board.home),
                                job: job?.row == install.key ? job : nil, busy: busy,
-                               use: { model.useAgent(agent, install: install) },
-                               update: install.source == .stable || install.source == .beta ? newer.map { version in { model.updateAgent(install, to: version) } } : nil,
+                               use: { act.run(AgentsAction(.use, agent: agent, key: install.key)) },
+                               update: install.source == .stable || install.source == .beta ? newer.map { version in { act.run(AgentsAction(.update, agent: agent, key: install.key, version: version)) } } : nil,
                                delete: managed ? { delete(install) } : nil)
                 case .missing(let source, let available):
                     // The vendor's installer picks its own newest where the channel was not read; a beta needs its number.
                     let can = source == .stable || available != nil
                     MissingRow(agent: agent, source: source, available: available, job: job?.row == row.id ? job : nil, busy: busy,
-                               install: can ? { model.installAgent(agent, source, version: available, row: row.id) } : nil)
+                               install: can ? { act.run(AgentsAction(.install, agent: agent, source: source, version: available, row: row.id)) } : nil)
                 case .leftovers(let leftovers):
                     LeftoversRow(leftovers: leftovers, job: job?.row == row.id ? job : nil, busy: busy, clean: clean)
                 }
             }
             // The choice made here is not what the service runs yet: said here, where it was made, with the way to
             // make it so (on 2026-10-06 the line at the top of the page alone went unseen).
-            if model.agentsPending.contains(agent) {
+            if board.pending.contains(agent) {
                 HStack(alignment: .center, spacing: 10) {
                     StatusDot(level: .warning).frame(width: 16)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Applies After Restart")
-                        Text(AgentText.pendingRestart(report, chosen: used, applied: model.agentsApplied[agent]))
+                        Text(AgentText.pendingRestart(report, chosen: used, applied: board.applied(agent)))
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 12)
@@ -898,8 +933,8 @@ private struct AgentSection: View {
     }
 
     private var note: String? {
-        if AgentSelection.lost(report, saved: model.agentUse[report.agent.rawValue]) {
-            let now = model.agentInUse(report).map { "，现改用 \($0.source.title) \($0.version ?? "")" } ?? ""
+        if AgentSelection.lost(report, saved: board.use[report.agent.rawValue]) {
+            let now = board.inUse(report).map { "，现改用 \($0.source.title) \($0.version ?? "")" } ?? ""
             return "原先选用的版本已不存在\(now)。"
         }
         guard report.agent == .pi else { return nil }
@@ -1009,6 +1044,7 @@ private struct JobProgress: View {
     @Environment(AppModel.self) private var model
     @Environment(\.profileNodeID) private var profileNodeID
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
+    @Environment(\.agentsAct) private var act
     let job: AgentJob
 
     var body: some View {
@@ -1016,8 +1052,9 @@ private struct JobProgress: View {
             HStack(spacing: 8) {
                 Text(error).font(.caption).foregroundStyle(Color.failed).lineLimit(3).multilineTextAlignment(.trailing)
                     .frame(maxWidth: 280, alignment: .trailing).textSelection(.enabled)
-                Button("Show Log") { NSWorkspace.shared.open(model.agentLogFile(job.agent)) }.controlSize(.small)
-                Button("OK") { model.dismissAgentJob(job.agent) }.controlSize(.small)
+                // The log is a file on the Mac the job ran on.
+                if act.local { Button("Show Log") { NSWorkspace.shared.open(model.agentLogFile(job.agent)) }.controlSize(.small) }
+                Button("OK") { act.run(AgentsAction(.dismiss, agent: job.agent)) }.controlSize(.small)
             }
         } else {
             HStack(spacing: 8) {
@@ -1027,7 +1064,7 @@ private struct JobProgress: View {
                 } else {
                     ProgressView().controlSize(.small)
                 }
-                Button("Cancel") { model.cancelAgentJob(job.agent) }.controlSize(.small).disabled(!job.cancellable)
+                Button("Cancel") { act.run(AgentsAction(.cancel, agent: job.agent)) }.controlSize(.small).disabled(!job.cancellable)
             }
         }
     }
@@ -1102,5 +1139,18 @@ private struct PinSheet: View {
     private func submit(_ text: String) {
         install(text)
         dismiss()
+    }
+}
+
+/// The page's buttons, for the rows under it: done on this Mac, or asked of the node whose installs are shown.
+struct AgentsAct: @unchecked Sendable {
+    var local = true
+    var run: (AgentsAction) -> Void = { _ in }
+}
+private struct AgentsActKey: EnvironmentKey { static let defaultValue = AgentsAct() }
+extension EnvironmentValues {
+    var agentsAct: AgentsAct {
+        get { self[AgentsActKey.self] }
+        set { self[AgentsActKey.self] = newValue }
     }
 }
