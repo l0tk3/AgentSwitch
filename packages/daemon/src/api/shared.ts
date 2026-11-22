@@ -33,6 +33,11 @@ export type ApiDeps = {
   readonly liveElsewhere?: () => readonly { readonly id: string; readonly name: string; readonly body: Record<string, unknown>; readonly ahead?: number }[];
   /** Turns plaintext credentials in a submission into tokens before anything is stored (router-v0 §9); absent in echo mode. */
   readonly sealer?: Sealer;
+  /** Chat Room's rooms (docs/chatroom-v0.md); absent = off. */
+  readonly rooms?: import("../rooms/store.js").RoomStore;
+  /** Something a room's seats may be waiting for changed (a message, a seat, a pause): what is to be given is looked
+   *  at again. */
+  readonly roomsChanged?: (roomId: string) => void;
   /** Clash Integration (docs/clash-v0.md). */
   readonly clash?: import("../clash/integration.js").ClashIntegration;
   /** The browsers of profiles that have a proxy of their own (docs/profiles-v0.md §5.1). */

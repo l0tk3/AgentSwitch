@@ -180,6 +180,17 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   // asked of that app. Handing the board over and taking the actions are the app's own, on this Mac alone.
   ["GET", "/agents/board"],
   ["POST", "/agents/actions"],
+  // Chat Room (docs/chatroom-v0.md): the rooms on this node, and the user in them.
+  ["GET", "/rooms"],
+  ["POST", "/rooms"],
+  ["GET", "/rooms/:id"],
+  ["PATCH", "/rooms/:id"],
+  ["DELETE", "/rooms/:id"],
+  ["POST", "/rooms/:id/seats"],
+  ["PATCH", "/rooms/:id/seats/:handle"],
+  ["DELETE", "/rooms/:id/seats/:handle"],
+  ["POST", "/rooms/:id/messages"],
+  ["POST", "/rooms/:id/read"],
   ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],
