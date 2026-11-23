@@ -59,8 +59,10 @@ def test_proxy_requires_key_and_mitmdump(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
     assert main(["proxy"]) == 2
     main(["keygen"]); capsys.readouterr()
-    monkeypatch.setattr("secret_gate.cli._find_mitmdump", lambda: None)
+    monkeypatch.setattr("secret_gate.cli._find_mitmdump", lambda: None)          # POSIX: exec's the mitmdump script
+    monkeypatch.setattr("secret_gate.cli._mitmdump_in_process", lambda: None)    # Windows: runs it in this process
     assert main(["proxy"]) == 1
+    assert "not found" in capsys.readouterr().err
 
 
 def test_proxy_argv_listens_locally_without_http2(tmp_path):

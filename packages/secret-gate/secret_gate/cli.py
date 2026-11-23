@@ -92,14 +92,25 @@ def _find_mitmdump() -> str | None:
     return shutil.which("mitmdump")
 
 
+def _mitmdump_in_process():  # noqa: ANN202 - mitmproxy.tools.main.mitmdump, or None
+    """Windows: mitmdump as a function of this interpreter (no exec there, see _cmd_proxy)."""
+    try:
+        from mitmproxy.tools.main import mitmdump
+    except ImportError:
+        return None
+    return mitmdump
+
+
 def _cmd_proxy(args: argparse.Namespace) -> int:
     load_private_key(gate_home())  # fail early with a clear message
     entry = Path(__file__).with_name("mitm_entry.py")
     if sys.platform == "win32":
         # No exec on Windows (os.execv starts a new process and ends this one, so whoever supervises this process,
         # the Windows service host, would see it exit at once): run mitmdump in this process instead.
-        from mitmproxy.tools.main import mitmdump as run_mitmdump
-
+        run_mitmdump = _mitmdump_in_process()
+        if run_mitmdump is None:
+            print("mitmproxy not found; pip install mitmproxy", file=sys.stderr)
+            return 1
         run_mitmdump(mitmdump_argv("mitmdump", entry, args.port, confdir=args.confdir)[1:])
         return 0
     mitmdump = _find_mitmdump()

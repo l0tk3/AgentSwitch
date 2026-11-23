@@ -47,6 +47,7 @@ from .browser_gate import BrowserGate
 from .browser_mask import MaskConfig
 from .constants import SCOPE_ENV_VAR
 from .errors import ValidationError
+from .fsacl import restrict_to_current_user
 from .keystore import gate_home, load_public_key
 from .publish import current_public_key, read_rows
 from .remote_resolver import GateResolver, RemoteResolver
@@ -98,10 +99,11 @@ def parse_command(argv: Sequence[str]) -> list[str]:
 
 
 def private_output_dir(home: Path) -> Path:
-    """0700 directory under the gate home for the downstream's cwd and snapshot/log output."""
+    """0700 directory under the gate home for the downstream's cwd and snapshot/log output (Windows: an ACL for this
+    user only; a mode means nothing there)."""
     out = home / OUTPUT_SUBDIR
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
-    out.chmod(0o700)
+    restrict_to_current_user(out)
     return out
 
 
