@@ -243,6 +243,7 @@ export class RoomDelivery {
       `From: ${who(message.from)}`,
       `To: ${message.to.map((h) => (h === to.handle ? `@${h} (you)` : `@${h}`)).join(", ")}`,
       ...(message.replyTo === undefined ? [] : [`Reply to: #${message.replyTo}`]),
+      ...(message.task === undefined ? [] : [`Task: T${message.task}${((t) => (t ? ` ${t.title}${t.owner ? ` (@${t.owner})` : ""}` : ""))(room.tasks.find((t) => t.n === message.task))}`]),
       hm(message.at),
       ...(message.files?.length ? [`Files: ${message.files.join(", ")}`] : []),
       ...(message.expects === "none" ? ["Reply: not expected"] : message.expects === "answer" ? ["Reply: expected"] : []),

@@ -236,6 +236,7 @@ private struct RoomView: View {
             if room.room.paused { banner } else if let rounds = room.room.rounds { told(rounds) }
             needs
             if let said = model.problem ?? model.error { problem(said) }
+            if let n = model.taskFilter { filterBar(n) }
             timeline
             HairRule(color: Look.line)
             RoomWriter(model: model, room: room)
@@ -327,6 +328,21 @@ private struct RoomView: View {
         .overlay(alignment: .bottom) { HairRule(color: Look.line) }
     }
 
+    /// The timeline narrowed to one task (its label clicked): said, with the way back.
+    private func filterBar(_ n: Int) -> some View {
+        let task = room.tasks.first { $0.n == n }
+        return HStack(spacing: 10) {
+            Text("Only " + RoomTaskLabel.word(n, task?.title)).mono(12).foregroundStyle(Look.ink)
+            if let owner = task?.owner { Text("@" + owner).mono(11.5).foregroundStyle(Look.faint) }
+            Spacer()
+            Button { model.taskFilter = nil } label: { BracketLabel(word: "Show All") }.buttonStyle(BracketButtonStyle(size: 12))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Look.raised)
+        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+    }
+
     @ViewBuilder
     private var timeline: some View {
         if model.rows.isEmpty {
@@ -342,7 +358,7 @@ private struct RoomView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
-                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil))
+                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil, task: { model.taskFilter = $0 }))
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 1).id("end")
@@ -450,6 +466,7 @@ private struct RoomWriter: View {
                 .help(ClassicWords.help("Send ↩", in: look))
             }
             HStack(spacing: 12) {
+                if !room.tasks.isEmpty { taskPicker }
                 Text("只有 @ 才唤醒对方")
                 if room.room.paused { Text("Paused") }
             }
@@ -467,6 +484,26 @@ private struct RoomWriter: View {
                     if !model.offered.isEmpty { names.padding(.leading, 14).padding(.bottom, 4) }
                 }
         }
+    }
+
+    /// Which task the next message is about (2026-11-24): taken from the message answered or the task the timeline
+    /// shows; the user can change it or say none.
+    private var taskPicker: some View {
+        Menu {
+            Button("No Task") { model.draftTask = nil }
+            Divider()
+            ForEach(room.tasks.filter { $0.state != .done || $0.n == model.draftTask }) { task in
+                Button(RoomTaskLabel.word(task.n, task.title)) { model.draftTask = task.n }
+            }
+        } label: {
+            Text(model.draftTask.map { n in "Task: " + RoomTaskLabel.word(n, room.tasks.first { $0.n == n }?.title) } ?? "Task: —")
+                .mono(11.5).foregroundStyle(model.draftTask == nil ? Look.faint : Look.ink2)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(model.draftTask == nil ? Look.faint : Look.ink2)
+        .fixedSize()
+        .help("这条消息属于哪个任务。回复时沿用原消息的任务。")
     }
 
     @ViewBuilder

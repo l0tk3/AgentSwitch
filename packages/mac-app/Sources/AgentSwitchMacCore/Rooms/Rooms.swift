@@ -217,14 +217,17 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
     public let at: Int64
     /// Files it comes with, by where they are on the room's node (§3 附件).
     public let files: [String]
+    /// The task of the room's list it is about (`T3`), as a topic (2026-11-24); nil: about no one task.
+    public let task: Int?
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = []) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil) {
         self.files = files
+        self.task = task
         self.seq = seq
         self.from = from
         self.to = to
@@ -242,6 +245,7 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
         text = try c.decode(String.self, forKey: .text)
         at = RoomJSON.int(c, .at) ?? 0
         files = (try? c.decodeIfPresent([String].self, forKey: .files)) ?? []
+        task = try? c.decodeIfPresent(Int.self, forKey: .task)
     }
 }
 
@@ -674,12 +678,13 @@ public struct RoomRow: Equatable, Sendable, Identifiable {
     /// Messages of one seat within this long run together.
     public static let together: Int64 = 5 * 60 * 1000
 
-    public static func rows(_ room: Room, now: Date = Date(), calendar: Calendar = .current) -> [RoomRow] {
+    /// `task`: only the messages about that task of the list (the label clicked); nil: all of them.
+    public static func rows(_ room: Room, task: Int? = nil, now: Date = Date(), calendar: Calendar = .current) -> [RoomRow] {
         var out: [RoomRow] = []
         var previous: RoomMessage?
-        for message in room.messages {
+        for message in room.messages where task == nil || message.task == task {
             let newDay = previous.map { !calendar.isDate($0.date, inSameDayAs: message.date) } ?? true
-            let continues = !newDay && previous?.from == message.from && message.replyTo == nil && message.at - (previous?.at ?? 0) <= together
+            let continues = !newDay && previous?.from == message.from && message.replyTo == nil && previous?.task == message.task && message.at - (previous?.at ?? 0) <= together
             out.append(RoomRow(message: message, continues: continues, day: newDay ? TimeText.day(message.date, now: now, calendar: calendar) : nil,
                                forYou: message.seq > room.room.readSeq && message.from != Room.you && message.to.contains(Room.you)))
             previous = message
@@ -773,8 +778,9 @@ public extension DaemonClient {
     }
 
     /// The body of what the user says: `files` only when there are some (the service takes no unknown or empty extra).
-    static func sayBody(_ text: String, replyTo: Int?, files: [String]) -> [String: Any] {
+    static func sayBody(_ text: String, replyTo: Int?, files: [String], task: Int? = nil) -> [String: Any] {
         var object: [String: Any] = ["text": text]
+        if let task { object["task"] = task }
         if let replyTo { object["replyTo"] = replyTo }
         if !files.isEmpty { object["files"] = files }
         return object
@@ -819,8 +825,8 @@ public extension DaemonClient {
         _ = try await call("PUT", "/rooms/\(DaemonClient.segment(room))/notes", body: try JSONSerialization.data(withJSONObject: ["text": text]), timeout: 10)
     }
 
-    func say(_ text: String, replyTo: Int? = nil, files: [String] = [], in room: String) async throws {
-        let object = DaemonClient.sayBody(text, replyTo: replyTo, files: files)
+    func say(_ text: String, replyTo: Int? = nil, files: [String] = [], task: Int? = nil, in room: String) async throws {
+        let object = DaemonClient.sayBody(text, replyTo: replyTo, files: files, task: task)
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/messages", body: try JSONSerialization.data(withJSONObject: object), timeout: 10)
     }
 

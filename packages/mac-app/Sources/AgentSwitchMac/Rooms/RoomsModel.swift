@@ -37,6 +37,8 @@ final class RoomsModel {
             replyTo = nil
             files = []
             card = nil
+            taskFilter = nil
+            draftTask = nil
             if let selected { UserDefaults.standard.set(selected, forKey: "roomsSelected") }
         }
     }
@@ -48,7 +50,18 @@ final class RoomsModel {
     /// Put in at the cursor once: a file's token.
     private(set) var insert: InsertRequest?
     var draftHeight: CGFloat = 0
-    var replyTo: Int?
+    var replyTo: Int? { didSet { if let replyTo, let task = room?.messages.first(where: { $0.seq == replyTo })?.task { draftTask = task } } }
+    /// The task the next message is about (its label, 2026-11-24): taken from the message answered, or the one the
+    /// timeline is narrowed to; the user can change it beside the box. nil: about no one task.
+    var draftTask: Int?
+    /// The timeline narrowed to one task's messages (a label clicked); nil: all of them.
+    var taskFilter: Int? {
+        didSet {
+            guard taskFilter != oldValue else { return }
+            if let taskFilter { draftTask = taskFilter }
+            if let room { rows = RoomRow.rows(room, task: taskFilter) }
+        }
+    }
     /// Files the next message comes with, by their paths on this Mac (§3 附件).
     private(set) var files: [String] = []
     private(set) var focusRequests = 0
@@ -97,7 +110,7 @@ final class RoomsModel {
         loaded = true
         selected = room.room.id
         self.room = room
-        rows = RoomRow.rows(room)
+        rows = RoomRow.rows(room, task: taskFilter)
     }
 
     /// The list alone: the rail's mark while another page is shown.
@@ -129,7 +142,7 @@ final class RoomsModel {
                 guard id == selected else { return }
                 roomVersion = answer.version
                 room = answer.value
-                rows = RoomRow.rows(answer.value)
+                rows = RoomRow.rows(answer.value, task: taskFilter)
                 typed()
             }
             if let room, room.room.id == id, room.room.lastSeq > room.room.readSeq {
@@ -263,11 +276,11 @@ final class RoomsModel {
 
     func send() {
         guard canSend, let id = selected else { return }
-        let text = draft, reply = replyTo, sent = files
+        let text = draft, reply = replyTo, sent = files, task = draftTask
         sending = true
         Task {
             do {
-                try await client().say(text, replyTo: reply, files: sent, in: id)
+                try await client().say(text, replyTo: reply, files: sent, task: task, in: id)
                 if draft == text { draft = "" }
                 if files == sent { files = []; attachTokens.clear() }
                 replyTo = nil

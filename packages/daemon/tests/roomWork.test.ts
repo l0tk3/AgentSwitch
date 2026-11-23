@@ -744,3 +744,31 @@ describe("the models of a profile at another vendor's address (2026-11-23)", () 
     expect(vendorAliases({ name: "d", baseUrl: "https://api.deepseek.com/anthropic" })).toEqual({});
   });
 });
+
+describe("a message about one task of the list (2026-11-24)", () => {
+  it("carries the task, keeps it in a reply, says it in the envelope and the log, and is read by it", async () => {
+    const { store, room, say, call, kitOf, home } = made();
+    store.addTask(room.id, "you", { title: "Interface", owner: "api" });              // T1, told to api about T1
+    expect(store.last(room.id)).toMatchObject({ to: ["api"], task: 1 });
+    const asked = await call("POST", `/rooms/${room.id}/messages`, { text: "@ui 表单先等接口", task: 1 });
+    expect(asked.status).toBe(201);
+    expect(asked.body.message.task).toBe(1);
+    expect((await call("POST", `/rooms/${room.id}/messages`, { text: "x", task: 9 })).status).toBe(400);
+    // A reply is about what it answers.
+    await say("ui", "room_post", { text: "好", reply_to: asked.body.message.seq, expects: "none" });
+    expect(store.last(room.id)).toMatchObject({ from: "ui", task: 1 });
+    // Said otherwise, it is about what it says; nothing said and nothing answered: no task.
+    await say("ui", "room_post", { text: "@api 别的事", expects: "answer" });
+    expect(store.last(room.id)!.task).toBeUndefined();
+    // The envelope names the task and who has it.
+    const msg = store.messages(room.id).find((m) => m.task === 1 && m.from === "you" && m.to.includes("ui"))!;
+    const delivery = new RoomDelivery({ store, seat: () => null });
+    expect(delivery.envelope(store.get(room.id), msg, store.get(room.id).seats.find((s) => s.handle === "ui")!)).toContain("Task: T1 Interface (@api)");
+    // Read by task.
+    const read = (await kitOf().call("api", "room_read", { task: 1 })).text;
+    expect(read).toContain("about T1");
+    expect(read).toContain("[T1]");
+    expect(read).not.toContain("别的事");
+    expect(readFileSync(join(home, "room-files", room.id, "_room", "log.md"), "utf8")).toMatch(/· T1 · @ui/);
+  });
+});

@@ -100,6 +100,9 @@ export type Message = {
   /** Whether its sender waits for an answer: `none` — it is told for its knowledge, and answering only adds noise
    *  (a report, a notice); `answer` — it is a question or a request. Absent: the reader judges. */
   readonly expects?: "none" | "answer";
+  /** The task of the room's list it is about (`T3`), as Zulip's topic (2026-11-24, user: 给消息加tag): one room holds
+   *  several pieces of work at once, and a reader follows one. A reply is about what it answers unless it says. */
+  readonly task?: number;
 };
 
 /** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
@@ -541,18 +544,18 @@ export class RoomStore {
     const owner = o.owner === undefined ? undefined : this.member(room, o.owner.replace(/^@/, "").toLowerCase()).handle;
     const task: Task = { n: room.lastTask + 1, title, ...(detail ? { detail } : {}), state: "todo", ...(owner ? { owner } : {}), by: seat.handle, createdAt: this.now(), updatedAt: this.now(), ...(after.length ? { after } : {}) };
     this.save({ ...room, tasks: [...room.tasks, task], lastTask: task.n });
-    if (owner && owner !== seat.handle) this.tell(id, seat.handle, [owner], `T${task.n} 给你：${title}`);
+    if (owner && owner !== seat.handle) this.tell(id, seat.handle, [owner], `T${task.n} 给你：${title}`, task.n);
     return task;
   }
 
   /** The task list speaks for itself (2026-11-23): whoever is given a task, and whoever waits for one that is now
    *  done, is told in the room by the one that did it — no second message has to be written. A muted member's act
    *  tells nobody (it may not post). */
-  private tell(id: string, from: string, to: readonly string[], text: string): void {
+  private tell(id: string, from: string, to: readonly string[], text: string, task?: number): void {
     const here = new Set(this.get(id).seats.filter((s) => s.left === undefined && s.kind === "session").map((s) => s.handle));
     const whom = [...new Set(to)].filter((h) => h !== from && here.has(h));
     if (!whom.length) return;
-    try { this.post(id, { from, text: `〔任务表〕${whom.map((h) => `@${h}`).join(" ")} ${text}`, to: whom, expects: "none" }); } catch { /* muted, or the room is full of words: the list itself still says it */ }
+    try { this.post(id, { from, text: `〔任务表〕${whom.map((h) => `@${h}`).join(" ")} ${text}`, to: whom, expects: "none", ...(task === undefined ? {} : { task }) }); } catch { /* muted, or the room is full of words: the list itself still says it */ }
   }
 
   /** A member changes a task. Taking it (`state: "doing"`) makes it that member's; one another member is doing is not
@@ -581,13 +584,13 @@ export class RoomStore {
     const next: Task = { n: task.n, title, ...(detail ? { detail } : {}), state, ...(owner ? { owner } : {}), by: task.by, createdAt: task.createdAt, updatedAt: this.now(), ...(task.after ? { after: task.after } : {}), ...(note ? { note } : {}) };
     const tasks = room.tasks.map((t) => (t === task ? next : t));
     this.save({ ...room, tasks });
-    if (next.owner && next.owner !== task.owner) this.tell(id, seat.handle, [next.owner], `T${next.n} 给你：${next.title}`);
+    if (next.owner && next.owner !== task.owner) this.tell(id, seat.handle, [next.owner], `T${next.n} 给你：${next.title}`, next.n);
     if (next.state === "done" && task.state !== "done") {
       // Those whose task waited for this one and waits for nothing now, and the member that asked for it.
       const freed = tasks.filter((t) => t.state !== "done" && t.owner && t.after?.includes(next.n) && t.after.every((a) => tasks.find((o) => o.n === a)?.state === "done"));
       const result = next.note ? `（${next.note}）` : "";
-      for (const t of freed) this.tell(id, seat.handle, [t.owner!], `T${next.n} 做完了${result}，T${t.n} 可以开始：${t.title}`);
-      if (!freed.some((t) => t.owner === next.by)) this.tell(id, seat.handle, [next.by], `T${next.n} 做完了${result}：${next.title}`);
+      for (const t of freed) this.tell(id, seat.handle, [t.owner!], `T${next.n} 做完了${result}，T${t.n} 可以开始：${t.title}`, t.n);
+      if (!freed.some((t) => t.owner === next.by)) this.tell(id, seat.handle, [next.by], `T${next.n} 做完了${result}：${next.title}`, next.n);
     }
     return next;
   }
@@ -711,7 +714,7 @@ export class RoomStore {
     return this.save({ ...room, notes: clean ? { text: clean, at: this.now(), by: seat.handle } : null });
   }
 
-  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[]; readonly expects?: "none" | "answer" }): Message {
+  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[]; readonly expects?: "none" | "answer"; readonly task?: number }): Message {
     const room = this.get(id);
     const from = this.seatOf(room, o.from);
     if (from.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
@@ -727,6 +730,8 @@ export class RoomStore {
     // An answer is for the one it answers, whether or not it is named again (2026-11-23: the user answered a
     // session's message and then had to write a second one that was nothing but its name).
     const answered = o.replyTo === undefined ? undefined : this.messages(id, { after: o.replyTo - 1, limit: 1 })[0];
+    if (o.task !== undefined && !room.tasks.some((t) => t.n === o.task)) throw new RoomError(400, `任务表里没有 T${o.task}`);
+    const task = o.task ?? (answered && answered.seq === o.replyTo ? answered.task : undefined);
     const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase()), ...(answered && answered.seq === o.replyTo ? [answered.from] : [])];
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
     for (let i = 0; i < named.length; i++) named[i] = room.renames[named[i]!] ?? named[i]!;
@@ -736,7 +741,7 @@ export class RoomStore {
       ? here.filter((s) => s.kind === "session").map((s) => s.handle)
       : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
-    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}) };
+    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }) };
     const waiting = to.filter((h) => h !== YOU);
     this.count(id, from.handle, { posts: 1 });
     this.messagesOf(id).push(message);
@@ -844,7 +849,7 @@ export class RoomStore {
       put("tasks.md", [`# Tasks of ${room.name}`, "", ...(room.tasks.length ? room.tasks.map((t) => `## T${t.n} [${state(t)}${t.owner ? ` · @${t.owner}` : ""}] ${t.title}\n${t.after?.length ? `After: ${t.after.map((a) => `T${a}`).join(", ")}\n` : ""}Added by @${t.by}\n${t.detail ? `\n${t.detail}\n` : ""}${t.note ? `\nResult: ${t.note}\n` : ""}`) : ["No tasks."]), ""].join("\n"));
       put("notes.md", room.notes ? `# Pinned notes of ${room.name}\n\nLast written by @${room.notes.by}.\n\n${room.notes.text}\n` : `# Pinned notes of ${room.name}\n\nNone.\n`);
       put("members.md", [`# Members of ${room.name}`, "", ...here.map((s) => (s.kind === "user" ? "- @you — the user" : `- @${s.handle} — ${[s.was?.agent, s.was?.name ? `session "${s.was.name}"` : null, s.was?.cwd, s.canAdd ? "admin" : null, s.muted ? "muted" : null].filter(Boolean).join(" · ")}`)), ""].join("\n"));
-      const line = (m: Message): string => `## #${m.seq} · ${stamp(m.at)} · @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n\n${m.text}\n${m.files?.length ? `\nFiles: ${m.files.join(", ")}\n` : ""}\n`;
+      const line = (m: Message): string => `## #${m.seq} · ${stamp(m.at)}${m.task === undefined ? "" : ` · T${m.task}`} · @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n\n${m.text}\n${m.files?.length ? `\nFiles: ${m.files.join(", ")}\n` : ""}\n`;
       const log = join(dir, "log.md");
       if (said && existsSync(log)) appendFileSync(log, line(said), { mode: 0o600 });
       else if (said || !existsSync(log)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(log, `# What was said in ${room.name}\n\n${this.messagesOf(room.id).map(line).join("")}`, { mode: 0o600 }); }

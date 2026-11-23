@@ -48,6 +48,7 @@ const TOOLS: readonly KitTool[] = [
         files: { type: "array", items: { type: "string" }, description: "Files to point the others at, by absolute path on this machine (they are not copied; the others read them where they are)." },
         reply_to: { type: "integer", description: "The number of the message this answers (the #n in its envelope). It is sent to that message's author too." },
         expects: { type: "string", enum: ["none", "answer"], description: "Say it every time you address someone: `none` — you report or inform (done, a result, a file) and want no reply; `answer` — you ask or request and wait for one. Readers are told, and do not answer what expects none." },
+        task: { type: "integer", description: "The task of the room's list this is about (3 for T3): readers follow one piece of work by it. A reply is about what it answers unless you say. Leave it out for what is about no one task." },
         room: ROOM_ARG,
       },
       required: ["text"],
@@ -64,6 +65,7 @@ const TOOLS: readonly KitTool[] = [
         after: { type: "integer", description: "Only messages after this number." },
         from: { type: "string", description: "Only this member's messages." },
         search: { type: "string", description: "Only messages containing this text." },
+        task: { type: "integer", description: "Only messages about this task of the list (3 for T3)." },
         room: ROOM_ARG,
       },
     },
@@ -550,7 +552,8 @@ export class RoomKit {
     const replyTo = int(args.reply_to);
     const files = Array.isArray(args.files) ? args.files.filter((v): v is string => typeof v === "string") : [];
     const expects = args.expects === "none" || args.expects === "answer" ? args.expects : undefined;
-    const message = this.o.store.post(room.id, { from: seat.handle, text, to, files, ...(replyTo === undefined ? {} : { replyTo }), ...(expects ? { expects } : {}) });
+    const task = int(args.task);
+    const message = this.o.store.post(room.id, { from: seat.handle, text, to, files, ...(replyTo === undefined ? {} : { replyTo }), ...(expects ? { expects } : {}), ...(task === undefined ? {} : { task }) });
     this.o.changed?.(room.id);
     this.o.delivery.look();
     const now = this.o.store.get(room.id);
@@ -575,18 +578,19 @@ export class RoomKit {
 
   private read(room: Room, seat: Seat, args: Record<string, unknown>): string {
     const limit = Math.min(Math.max(int(args.limit) ?? 20, 1), 100);
-    const after = int(args.after), from = str(args.from)?.replace(/^@/, "").toLowerCase(), search = str(args.search)?.toLowerCase();
+    const after = int(args.after), from = str(args.from)?.replace(/^@/, "").toLowerCase(), search = str(args.search)?.toLowerCase(), task = int(args.task);
     // Asked for nothing in particular: what it has not read yet, oldest first, and no more.
-    const unreadOnly = after === undefined && !from && !search && args.all !== true;
+    const unreadOnly = after === undefined && !from && !search && task === undefined && args.all !== true;
     let found: Message[] = unreadOnly ? this.o.store.unreadOf(room.id, seat.handle) : this.o.store.messages(room.id, after === undefined ? {} : { after });
     if (from) found = found.filter((m) => m.from === from);
     if (search) found = found.filter((m) => m.text.toLowerCase().includes(search));
+    if (task !== undefined) found = found.filter((m) => m.task === task);
     const total = found.length;
     found = after === undefined && !unreadOnly ? found.slice(-limit) : found.slice(0, limit);
     if (unreadOnly && !total) return `Nothing new in "${room.name}" since you last read. (\`all: true\` shows the latest messages again; the whole log is a file: ${this.o.store.recordDir(room.id)}/log.md.)`;
     const head = unreadOnly
       ? `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. Unread by you: ${found.length}${total > found.length ? ` of ${total} (the oldest first; read again for the rest)` : ""}.`
-      : `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}.`;
+      : `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}${task === undefined ? "" : ` about T${task}`}.`;
     this.o.store.markRead(room.id, seat.handle, found.filter((m) => m.from !== seat.handle).map((m) => m.seq));
     const reads = this.o.store.get(room.id).reads;
     // Of its own messages it is told who has read them and who has not yet.
@@ -600,7 +604,7 @@ export class RoomKit {
       const waits = room.receipts[String(m.seq)]?.[seat.handle];
       if (waits === "sent" || waits === "queued") this.o.store.setReceipt(room.id, m.seq, seat.handle, null);
     }
-    const lines = found.map((m) => `#${m.seq} ${hm(m.at)} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m)}`);
+    const lines = found.map((m) => `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m)}`);
     return [head, ...lines].join("\n\n");
   }
 

@@ -117,6 +117,8 @@ struct RoomRowActions {
     var reveal: ((String) -> Void)?
     /// Opens a message's file in a preview (Quick Look); nil where the room is another node's.
     var preview: ((String) -> Void)?
+    /// The timeline narrowed to a task's messages (its label clicked).
+    var task: (Int) -> Void = { _ in }
 }
 
 /// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
@@ -186,6 +188,7 @@ struct RoomMessageRow: View {
             .buttonStyle(.plain)
             if let agent = seat?.card?.agent { AgentSprite(harness: agent).scaleEffect(0.8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
             Text(TimeText.at(message.date)).mono(11.5).foregroundStyle(Look.faint)
+            if let n = message.task { RoomTaskLabel(n: n, title: room.tasks.first { $0.n == n }?.title) { actions.task(n) } }
         }
         .lineLimit(1)
     }
@@ -640,5 +643,30 @@ struct RoomField: View {
             .grounded(Look.raised, radius: Look.controlRadius)
             .framed(Look.line, radius: Look.controlRadius)
             .onSubmit(submit)
+    }
+}
+
+/// A message's task (2026-11-24, user: 给消息加tag): `T3 登录接口`; a click shows that task's messages alone.
+struct RoomTaskLabel: View {
+    let n: Int
+    let title: String?
+    var action: () -> Void = {}
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Button(action: action) {
+            Text(Self.word(n, title)).mono(11).foregroundStyle(Look.ink2).lineLimit(1)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .grounded(look.isClassic ? Look.raised : Color.clear, radius: 4)
+                .framed(Look.line, radius: look.isClassic ? 4 : 0)
+        }
+        .buttonStyle(.plain)
+        .help("只看这个任务的消息")
+    }
+
+    /// `T3 登录接口`, the title cut to what fits beside a name.
+    static func word(_ n: Int, _ title: String?) -> String {
+        guard let title, !title.isEmpty else { return "T\(n)" }
+        return "T\(n) " + (title.count > 20 ? String(title.prefix(19)) + "…" : title)
     }
 }

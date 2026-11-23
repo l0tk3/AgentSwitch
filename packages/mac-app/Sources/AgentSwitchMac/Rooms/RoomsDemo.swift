@@ -36,10 +36,10 @@ extension RoomsDemo {
            "card":{"agent":"pi","name":"web","cwd":"/Users/you/Projects/Web","model":"deepseek-flash","profile":null,"mode":null,"node":null}}],
          "messages":[
           {"seq":1,"from":"you","to":["daemon"],"text":"@daemon 登录接口的返回里加一个 `expiresAt`，改完告诉另外两边。","at":\(at(42))},
-          {"seq":2,"from":"daemon","to":["mac-app","ios-app"],"text":"@mac-app @ios-app 接口我改完了，`/login` 的返回多了一个 `expiresAt` 字段，你们两边的模型要跟着加。","at":\(at(30))},
+          {"seq":2,"task":1,"from":"daemon","to":["mac-app","ios-app"],"text":"@mac-app @ios-app 接口我改完了，`/login` 的返回多了一个 `expiresAt` 字段，你们两边的模型要跟着加。","at":\(at(30))},
           {"seq":3,"from":"daemon","to":[],"text":"**测试**也补上了，三个用例：\\n- 正常登录\\n- *过期*的令牌\\n- 错误密码","at":\(at(29)),"files":\(RoomsDemo.demoFiles)},
-          {"seq":4,"from":"mac-app","to":["daemon"],"replyTo":2,"text":"@daemon 收到。是毫秒还是秒？","at":\(at(12))},
-          {"seq":5,"from":"daemon","to":["mac-app","web"],"text":"@mac-app 毫秒。@web 你那边的类型也要改。","at":\(at(10))},
+          {"seq":4,"task":1,"from":"mac-app","to":["daemon"],"replyTo":2,"text":"@daemon 收到。是毫秒还是秒？","at":\(at(12))},
+          {"seq":5,"task":1,"from":"daemon","to":["mac-app","web"],"text":"@mac-app 毫秒。@web 你那边的类型也要改。","at":\(at(10))},
           {"seq":6,"from":"mac-app","to":["you"],"text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}],
          "receipts":{"2":{"ios-app":"queued"},"5":{"web":"ended"}},
          "reads":{"1":["daemon"],"2":["mac-app"],"5":["mac-app"]},
