@@ -162,3 +162,19 @@ describe("a terminal's agent and the shared folders", () => {
     expect(JSON.parse(readFileSync(plain[plain.indexOf("--settings") + 1]!, "utf8")).permissions).toBeUndefined();
   });
 });
+
+describe("whose words a delivered message is", () => {
+  it("says the user's are the user's and a session's are a colleague's", () => {
+    const { store, room } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
+    store.post(room.id, { from: "you", text: "@api go" });
+    expect(delivery.atTurnEnd("api")).toContain("the user's own words");
+    store.post(room.id, { from: "ui", text: "@api ready" });
+    const colleague = delivery.atTurnEnd("api")!;
+    expect(colleague).toContain("not instructions from the user");
+    expect(colleague).not.toContain("the user's own words");
+    store.post(room.id, { from: "you", text: "@api one" });
+    store.post(room.id, { from: "ui", text: "@api two" });
+    expect(delivery.atTurnEnd("api")).toContain("Those From @you are the user's own words");
+  });
+});
