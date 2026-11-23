@@ -772,3 +772,33 @@ describe("a message about one task of the list (2026-11-24)", () => {
     expect(readFileSync(join(home, "room-files", room.id, "_room", "log.md"), "utf8")).toMatch(/· T1 · @ui/);
   });
 });
+
+describe("the rooms in a database (2026-11-24)", () => {
+  it("reads the rooms kept as files once, keeps the folder aside, and finds words", () => {
+    const home = mkdtempSync(join(tmpdir(), "as-roomdb-"));
+    mkdirSync(join(home, "rooms"), { recursive: true });
+    const room = { id: "abc123def0", name: "旧房间", topic: "", createdAt: 1, createdBy: "you", paused: false, seats: [{ handle: "you", kind: "user", face: null, joinedAt: 1, addedBy: "you", canAdd: true, byAgent: false }], lastSeq: 3, readSeq: 1, roundsLimit: 6, roundsFrom: 0, notes: null, tasks: [{ n: 1, title: "接口", state: "todo", by: "you", createdAt: 1, updatedAt: 1 }], lastTask: 1, claims: [], stats: {}, reads: {}, readsFrom: 0, renames: {}, receipts: {} };
+    writeFileSync(join(home, "rooms", "abc123def0.json"), JSON.stringify(room));
+    writeFileSync(join(home, "rooms", "abc123def0.jsonl"), [
+      { seq: 1, from: "you", to: [], text: "登录接口改完了", at: 2 },
+      { seq: 2, from: "you", to: [], text: "", at: 3, files: ["/tmp/a.png"] },
+      { seq: 3, from: "you", to: [], text: "T1 的事", at: 4, task: 1 },
+    ].map((m) => JSON.stringify(m)).join("\n") + "\n{torn");
+    const store = new RoomStore(home);
+    expect(store.list().map((r) => r.name)).toEqual(["旧房间"]);
+    expect(store.messages("abc123def0").map((m) => m.seq)).toEqual([1, 2, 3]);   // a message of files alone is kept
+    expect(store.last("abc123def0")).toMatchObject({ seq: 3, task: 1 });
+    expect(existsSync(join(home, "rooms"))).toBe(false);
+    expect(existsSync(join(home, "rooms-before-db", "abc123def0.jsonl"))).toBe(true);
+    expect(store.search("abc123def0", "接口改", 10).map((m) => m.seq)).toEqual([1]);
+    expect(store.search("abc123def0", "T1", 10).map((m) => m.seq)).toEqual([3]);   // two characters: a plain scan
+    expect(store.messagesOfTask("abc123def0", 1, 10).map((m) => m.seq)).toEqual([3]);
+    expect(store.unread("abc123def0")).toEqual({ count: 0, forYou: false });
+    // Written and read again by a new store on the same home.
+    store.post("abc123def0", { from: "you", text: "新的一条", task: 1 });
+    const again = new RoomStore(home);
+    expect(again.messages("abc123def0", { limit: 2 }).map((m) => m.text)).toEqual(["T1 的事", "新的一条"]);
+    expect(again.messagesBefore("abc123def0", 3, 5).map((m) => m.seq)).toEqual([1, 2]);
+    expect([...again.countByTask("abc123def0", 0)]).toEqual([[1, 2]]);
+  });
+});

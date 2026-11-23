@@ -7,7 +7,8 @@
  *  the receipt goes: a room shows only what has not arrived. */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { importFiles, RoomDb, type StoredMessage } from "./db.js";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, sep } from "node:path";
 import { faceOf, type Face } from "./face.js";
@@ -190,10 +191,11 @@ const ID = /^[a-z0-9]{6,24}$/;
 export class RoomStore {
   private readonly dir: string;
   private rooms: Map<string, Room> | null = null;
-  private readonly said = new Map<string, Message[]>();
+  /** Rooms and what was said in them (rooms/db.ts). */
+  private readonly db: RoomDb;
 
   private readonly filesDir: string;
-  constructor(home: string, private readonly now: () => number = Date.now, private readonly trash: (dir: string, name: string) => void = toTrash) { this.dir = join(home, "rooms"); this.filesDir = filesRoot(home); }
+  constructor(home: string, private readonly now: () => number = Date.now, private readonly trash: (dir: string, name: string) => void = toTrash) { this.dir = join(home, "rooms"); this.filesDir = filesRoot(home); this.db = new RoomDb(join(home, "rooms.db")); }
 
   /** A room's shared folder (§9), made when first asked for: what members hand each other as files — a report, a
    *  plan, an interface — is written here and a message only points at it. */
@@ -285,12 +287,25 @@ export class RoomStore {
   /** What was said, oldest first: after `after` when given, the last `limit` otherwise. */
   messages(id: string, o: { readonly after?: number; readonly limit?: number } = {}): Message[] {
     this.get(id);
-    const all = this.messagesOf(id);
-    const from = o.after === undefined ? all : all.filter((m) => m.seq > o.after!);
-    return o.limit !== undefined && from.length > o.limit ? (o.after === undefined ? from.slice(-o.limit) : from.slice(0, o.limit)) : from;
+    const rows = o.after === undefined
+      ? (o.limit === undefined ? this.db.all(id) : this.db.tail(id, o.limit))
+      : this.db.after(id, o.after, o.limit ?? Number.MAX_SAFE_INTEGER);
+    return parsed(rows);
   }
 
-  last(id: string): Message | null { return this.messagesOf(id).at(-1) ?? null; }
+  /** The `limit` before message `seq`, oldest first: the page above what is shown. */
+  messagesBefore(id: string, seq: number, limit: number): Message[] { this.get(id); return parsed(this.db.before(id, seq, limit)); }
+
+  /** The last `limit` about one task, oldest first. */
+  messagesOfTask(id: string, task: number, limit: number): Message[] { this.get(id); return parsed(this.db.taskTail(id, task, limit)); }
+
+  /** The newest `limit` whose words contain `text`, newest first. */
+  search(id: string, text: string, limit: number): Message[] { this.get(id); return parsed(this.db.search(id, text, limit)); }
+
+  /** How many messages after `seq` are about each task. */
+  countByTask(id: string, after: number): Map<number, number> { this.get(id); return this.db.byTask(id, after); }
+
+  last(id: string): Message | null { const row = this.db.last(id); return row ? parsed([row])[0] ?? null : null; }
 
   /** The rooms a terminal sits in (it has not left), with its seat there. */
   roomsOf(terminal: string): { readonly room: Room; readonly seat: Seat }[] {
@@ -305,8 +320,7 @@ export class RoomStore {
   /** How many after what the user has seen, and whether one of them is for the user. */
   unread(id: string): { readonly count: number; readonly forYou: boolean } {
     const room = this.get(id);
-    const fresh = this.messagesOf(id).filter((m) => m.seq > room.readSeq && m.from !== YOU);
-    return { count: fresh.length, forYou: fresh.some((m) => m.to.includes(YOU)) };
+    return this.db.unread(id, room.readSeq);
   }
 
   // ---- rooms
@@ -339,10 +353,8 @@ export class RoomStore {
    *  user is told; nothing stops. */
   rounds(id: string): number {
     const room = this.get(id);
-    const all = this.messagesOf(id);
-    let from = room.roundsFrom;
-    for (const m of all) if (m.from === YOU && m.seq > from) from = m.seq;
-    return all.filter((m) => m.seq > from && m.to.some((h) => h !== YOU)).length;
+    const from = this.db.lastFromYou(id, room.roundsFrom) ?? room.roundsFrom;
+    return this.db.rounds(id, from);
   }
 
   /** The user has seen the rounds go by: counted from here again. */
@@ -378,9 +390,7 @@ export class RoomStore {
   remove(id: string): void {
     const room = this.get(id);
     this.all().delete(id);
-    this.said.delete(id);
-    rmSync(join(this.dir, `${id}.json`), { force: true });
-    rmSync(join(this.dir, `${id}.jsonl`), { force: true });
+    this.db.dropRoom(id);
     this.dropRecordIfAlone(id);
     this.discard(id, room.name);
   }
@@ -449,7 +459,7 @@ export class RoomStore {
     const seat = room.seats.find((s) => s.handle === handle);
     if (!seat) return [];
     const floor = room.lastSeq - MAX_READS;
-    return this.messagesOf(id).filter((m) => m.seq > floor && m.seq > room.readsFrom && m.at >= seat.joinedAt && m.from !== handle && !(room.reads[String(m.seq)]?.includes(handle)));
+    return this.messages(id, { after: Math.max(floor, room.readsFrom, 0) }).filter((m) => m.seq > floor && m.seq > room.readsFrom && m.at >= seat.joinedAt && m.from !== handle && !(room.reads[String(m.seq)]?.includes(handle)));
   }
 
   /** A seat has read these messages: given them whole, or read them itself. Kept in memory and written with the
@@ -655,12 +665,8 @@ export class RoomStore {
     const to = (h: string): string => (h === old ? name : h);
     const key = <T>(record: Readonly<Record<string, T>>): Record<string, T> => Object.fromEntries(Object.entries(record).map(([h, v]) => [to(h), v]));
     // What was said: the record on the disk is written anew, under the new name.
-    const said = this.messagesOf(id).map((m): Message => ({ ...m, from: to(m.from), to: m.to.map(to) }));
-    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    const file = join(this.dir, `${id}.jsonl`), tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, said.map((m) => `${JSON.stringify(m)}\n`).join(""), { mode: 0o600 });
-    renameSync(tmp, file);
-    this.said.set(id, said);
+    const said = this.messages(id).map((m): Message => ({ ...m, from: to(m.from), to: m.to.map(to) }));
+    this.db.tx(() => { for (const m of said) this.db.add(id, m, JSON.stringify(m)); });
     const next: Seat = { ...seat, handle: name };
     const stats = key(room.stats);
     this.all().set(id, { ...room, stats });
@@ -741,12 +747,10 @@ export class RoomStore {
       ? here.filter((s) => s.kind === "session").map((s) => s.handle)
       : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
-    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }) };
+    const message: Message = { seq: Math.max(room.lastSeq, this.db.last(id)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }) };
     const waiting = to.filter((h) => h !== YOU);
     this.count(id, from.handle, { posts: 1 });
-    this.messagesOf(id).push(message);
-    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    appendFileSync(join(this.dir, `${id}.jsonl`), `${JSON.stringify(message)}\n`, { mode: 0o600 });
+    this.db.add(id, message, JSON.stringify(message));
     this.save({
       ...room, lastSeq: message.seq,
       // What the user says, the user has seen.
@@ -783,36 +787,20 @@ export class RoomStore {
     return seat;
   }
 
-  private lastAt(room: Room): number { return this.messagesOf(room.id).at(-1)?.at ?? room.createdAt; }
+  private lastAt(room: Room): number { return this.last(room.id)?.at ?? room.createdAt; }
 
   private all(): Map<string, Room> {
     if (this.rooms) return this.rooms;
+    // The rooms kept as files before the database: read in once, the folder kept aside.
+    if (!this.db.rooms().length) importFiles(this.db, this.dir, { room: roomFrom, message: messageFrom });
     const rooms = new Map<string, Room>();
-    let names: string[] = [];
-    try { names = readdirSync(this.dir); } catch { /* none yet */ }
-    for (const name of names) {
-      if (!name.endsWith(".json")) continue;
-      try {
-        const room = roomFrom(JSON.parse(readFileSync(join(this.dir, name), "utf8")));
-        if (room && `${room.id}.json` === name) rooms.set(room.id, room);
-      } catch { /* a file that is not a room is left alone */ }
+    for (const state of this.db.rooms()) {
+      try { const room = roomFrom(JSON.parse(state)); if (room) rooms.set(room.id, room); } catch { /* not a room */ }
     }
     return (this.rooms = rooms);
   }
 
-  private messagesOf(id: string): Message[] {
-    const have = this.said.get(id);
-    if (have) return have;
-    const list: Message[] = [];
-    let text = "";
-    try { text = readFileSync(join(this.dir, `${id}.jsonl`), "utf8"); } catch { /* nothing said yet */ }
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try { const m = messageFrom(JSON.parse(line)); if (m) list.push(m); } catch { /* a torn last line */ }
-    }
-    this.said.set(id, list);
-    return list;
-  }
+
 
   // ---- the room's record, in its shared folder
 
@@ -852,7 +840,7 @@ export class RoomStore {
       const line = (m: Message): string => `## #${m.seq} · ${stamp(m.at)}${m.task === undefined ? "" : ` · T${m.task}`} · @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n\n${m.text}\n${m.files?.length ? `\nFiles: ${m.files.join(", ")}\n` : ""}\n`;
       const log = join(dir, "log.md");
       if (said && existsSync(log)) appendFileSync(log, line(said), { mode: 0o600 });
-      else if (said || !existsSync(log)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(log, `# What was said in ${room.name}\n\n${this.messagesOf(room.id).map(line).join("")}`, { mode: 0o600 }); }
+      else if (said || !existsSync(log)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(log, `# What was said in ${room.name}\n\n${this.messages(room.id).map(line).join("")}`, { mode: 0o600 }); }
     } catch { /* the record is a convenience: the room itself is kept elsewhere */ }
   }
 
@@ -876,13 +864,17 @@ export class RoomStore {
     const kept = this.all().get(given.id);
     const room: Room = { ...given, stats: kept?.stats ?? given.stats, reads: kept?.reads ?? given.reads };
     this.all().set(room.id, room);
-    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    const file = join(this.dir, `${room.id}.json`), tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(room, null, 2), { mode: 0o600 });
-    renameSync(tmp, file);
+    this.db.putRoom(room.id, JSON.stringify(room));
     this.writeRecord(room);
     return room;
   }
+}
+
+/** Messages as the database keeps them, read back; one that does not read is left out. */
+function parsed(rows: readonly StoredMessage[]): Message[] {
+  const out: Message[] = [];
+  for (const r of rows) { try { const m = messageFrom(JSON.parse(r.body)); if (m) out.push(m); } catch { /* not a message */ } }
+  return out;
 }
 
 function clean(text: string, max: number): string { return [...text.replace(/\s+/g, " ").trim()].slice(0, max).join(""); }
@@ -962,6 +954,7 @@ function roomFrom(v: unknown): Room | null {
 function messageFrom(v: unknown): Message | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
-  if (!num(o.seq) || !str(o.from) || !str(o.text) || !num(o.at)) return null;
-  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}) };
+  // A message of files alone has no words: it is kept all the same.
+  if (!num(o.seq) || !str(o.from) || typeof o.text !== "string" || !num(o.at)) return null;
+  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}) };
 }
