@@ -75,8 +75,9 @@ export type LauncherOptions = {
    *  Codex, Claude Code and OpenCode; absent or null: no browser tool. */
   /** Tests: the Chatroom Kit's tool server (default ROOM_KIT_SCRIPT). */
   readonly roomKitScript?: string;
-  /** Where the rooms' shared folders are (docs/chatroom-v0.md §9): Claude Code and Codex are let read and write there
-   *  from the start, as in their own folder — a session is seated in a room long after it started. Absent: not. */
+  /** Where the rooms' shared folders are (docs/chatroom-v0.md §9): Claude Code (by a permission rule) and Codex (as
+   *  one more writable folder) are let read and write there from the start — a session is seated in a room long after
+   *  it started. Absent: not. */
   readonly roomFiles?: string;
   readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => BridgeCommand | null;
   /** Terminals that outlive the service (docs/terminal-v0.md §10): companions' servers run on held ptys too. */
@@ -246,7 +247,7 @@ export function proxyEnv(proxy: string): Record<string, string> {
   return { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ALL_PROXY: proxy, https_proxy: proxy, http_proxy: proxy, all_proxy: proxy, NO_PROXY: local, no_proxy: local };
 }
 
-export function claudeHookSettings(command: string, prot?: ProtectedPaths): Record<string, unknown> {
+export function claudeHookSettings(command: string, prot?: ProtectedPaths, roomFiles?: string): Record<string, unknown> {
   const hook = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }] }];
   // Beside the hook itself, a program left waiting when the session comes to rest (docs/chatroom-v0.md §12): a Chat
   // Room message for this session ends it, and Claude Code wakes up with what it said (`asyncRewake`). In the
@@ -254,8 +255,11 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
   const resting = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }, { type: "command", command: `${command} wait`, asyncRewake: true }] }];
   const rule = (tool: string, path: string) => [`${tool}(/${path})`, `${tool}(/${path}/**)`];
   const deny = prot ? [...new Set([...(prot.readDenied ?? []).flatMap(rootSpellings).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap(rootSpellings).flatMap((p) => rule("Edit", p))])] : [];
+  // The rooms' shared folders (docs/chatroom-v0.md §9) are read and written without asking, by a rule and not as
+  // one more working folder: `--add-dir` made Claude Code ask at every start whether the folder is trusted.
+  const allow = roomFiles ? [`Read(/${roomFiles}/**)`, `Edit(/${roomFiles}/**)`] : [];
   return {
-    ...(deny.length ? { permissions: { deny } } : {}),
+    ...(deny.length || allow.length ? { permissions: { ...(allow.length ? { allow } : {}), ...(deny.length ? { deny } : {}) } } : {}),
     hooks: {
       SessionStart: resting(QUICK_HOOK_TIMEOUT_S),
       UserPromptSubmit: hook(QUICK_HOOK_TIMEOUT_S),
@@ -329,9 +333,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const quiet = { ...(req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {}), ...(req.configHome ? { DISABLE_ERROR_REPORTING: "1" } : {}) };
         Object.assign(env, quiet);
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}) };
-        writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
+        writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected, opts.roomFiles), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
         const args = ["--settings", settings, ...(req.isolated ? ["--setting-sources", "user"] : [])];
-        if (opts.roomFiles) args.push("--add-dir", opts.roomFiles);
         {
           // The Chatroom Kit (docs/chatroom-v0.md §6): its tools are there only while this session sits in a room.
           const kit = { type: "stdio", command: node, args: [opts.roomKitScript ?? ROOM_KIT_SCRIPT], env: { AGENTSWITCH_TERMINAL_ID: req.id, AGENTSWITCH_TERMINAL_URL: opts.hookUrl(), AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken } };

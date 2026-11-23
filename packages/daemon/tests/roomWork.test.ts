@@ -1,6 +1,6 @@
 /** A room's shared folder, task list, and who is changing which files (docs/chatroom-v0.md §9). */
 
-import { existsSync, mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -144,17 +144,21 @@ describe("who is changing which files", () => {
 });
 
 describe("a terminal's agent and the shared folders", () => {
-  it("lets Claude Code and Codex read and write there from the start, and says nothing of it when there are none", async () => {
+  it("lets Claude Code and Codex read and write there from the start, without Claude Code asking about the folder", async () => {
     const { agentLauncher } = await import("../src/terminals/launch.js");
     const root = mkdtempSync(join(tmpdir(), "as-roomw-launch-"));
     const files = join(root, "Application Support", "room-files");
     const make = (roomFiles?: string) => agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:1", stateDir: join(root, "state"), env: { PATH: "/usr/bin", HOME: root }, codexLayer: () => false, ...(roomFiles ? { roomFiles } : {}) });
-    for (const harness of ["claude-code", "codex"] as const) {
-      const args = make(files)({ id: `a-${harness}`, harness, cwd: root, mode: "manual", hookToken: "t" }).args;
-      expect(args[args.indexOf("--add-dir") + 1]).toBe(files);
-      // Claude Code takes several folders after it: a flag follows, never the session's own words.
-      expect(args[args.indexOf("--add-dir") + 2]).toMatch(/^-/);
-      expect(make()({ id: `b-${harness}`, harness, cwd: root, mode: "manual", hookToken: "t" }).args).not.toContain("--add-dir");
-    }
+    // Codex: one more writable folder. Claude Code: a rule in its settings, and not `--add-dir`, which made it ask
+    // at every start whether the folder is trusted.
+    const codex = make(files)({ id: "a-codex", harness: "codex", cwd: root, mode: "manual", hookToken: "t" }).args;
+    expect(codex[codex.indexOf("--add-dir") + 1]).toBe(files);
+    const claude = make(files)({ id: "a-claude", harness: "claude-code", cwd: root, mode: "manual", hookToken: "t" }).args;
+    expect(claude).not.toContain("--add-dir");
+    const settings = JSON.parse(readFileSync(claude[claude.indexOf("--settings") + 1]!, "utf8")) as { permissions: { allow: string[] } };
+    expect(settings.permissions.allow).toEqual([`Read(/${files}/**)`, `Edit(/${files}/**)`]);
+    for (const harness of ["claude-code", "codex"] as const) expect(make()({ id: `b-${harness}`, harness, cwd: root, mode: "manual", hookToken: "t" }).args).not.toContain("--add-dir");
+    const plain = make()({ id: "c-claude", harness: "claude-code", cwd: root, mode: "manual", hookToken: "t" }).args;
+    expect(JSON.parse(readFileSync(plain[plain.indexOf("--settings") + 1]!, "utf8")).permissions).toBeUndefined();
   });
 });
