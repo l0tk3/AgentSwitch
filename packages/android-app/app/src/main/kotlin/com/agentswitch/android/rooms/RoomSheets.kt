@@ -58,6 +58,7 @@ import com.agentswitch.android.terminals.ProfileDot
 import com.agentswitch.android.terminals.TerminalStatusMark
 import com.agentswitch.kit.api.RoomClaim
 import com.agentswitch.kit.api.RoomSeat
+import com.agentswitch.kit.api.RoomSessionSearch
 import com.agentswitch.kit.api.SeatState
 import com.agentswitch.kit.api.TerminalInfo
 import com.agentswitch.kit.api.TerminalStatus
@@ -256,10 +257,14 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
     var name by remember { mutableStateOf("") }
     var topic by remember { mutableStateOf("") }
     var picked by remember { mutableStateOf(setOf<String>()) }
+    // The search over the sessions to pick: by name, agent, model, profile and folder (RoomSessionSearch).
+    var query by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val seated = (purpose as? RoomSessionsPurpose.Add)?.seated ?: emptySet()
     val terminals = app.terminals.terminals.filter { it.isRunning && it.id !in seated }.sortedByDescending { maxOf(it.lastOutputAt, it.createdAt) }
+    // The ones the search leaves; picked ones the search hides stay picked.
+    val shown = RoomSessionSearch.filter(terminals, query)
     val ready = !working && (if (creating) name.isNotBlank() else picked.isNotEmpty())
 
     LaunchedEffect(Unit) { app.refreshTerminals() }
@@ -305,13 +310,20 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
     ) {
         if (creating) RoomNameFields(name, { name = it }, topic, { topic = it })
         FormSection("Running Sessions", footer = "进了房间的会话可以收发房间消息；只有 @ 才唤醒它。") {
-            if (terminals.isEmpty()) {
+            if (terminals.isNotEmpty()) {
                 FormRow(first = true) {
-                    Text(if (creating) "没有开着的终端。可以先建房间，之后再拉会话。" else "没有可以拉进来的会话：开着的终端都已在房间里。", Modifier.weight(1f), color = Theme.secondaryInk, style = plain(15))
+                    if (LocalLook.current.isClassic) LookSymbolIcon(LookSymbol.Magnifier, side = 16.dp, color = Theme.inkDim)
+                    else Text("/", color = Theme.signal, style = mono(15, FontWeight.Bold))
+                    PlainField(query, { query = it }, Modifier.weight(1f), placeholder = "Search", keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
                 }
             }
-            terminals.forEachIndexed { i, t ->
-                FormRow(first = i == 0, onClick = { picked = if (t.id in picked) picked - t.id else picked + t.id }) { SessionRow(t, t.id in picked) }
+            if (shown.isEmpty()) {
+                FormRow(first = terminals.isEmpty()) {
+                    Text(if (terminals.isNotEmpty()) "没有找到匹配的会话。" else if (creating) "没有开着的终端。可以先建房间，之后再拉会话。" else "没有可以拉进来的会话：开着的终端都已在房间里。", Modifier.weight(1f), color = Theme.secondaryInk, style = plain(15))
+                }
+            }
+            shown.forEach { t ->
+                FormRow(first = false, onClick = { picked = if (t.id in picked) picked - t.id else picked + t.id }) { SessionRow(t, t.id in picked) }
             }
         }
         error?.let { Text(it, Modifier.padding(horizontal = Theme.Space.l, vertical = Theme.Space.m), color = Theme.failed, style = plain(13)) }

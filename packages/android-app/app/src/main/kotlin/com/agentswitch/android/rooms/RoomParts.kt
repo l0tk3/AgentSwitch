@@ -28,6 +28,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agentswitch.android.components.inlineAnnotated
 import com.agentswitch.android.design.BrailleSpinner
 import com.agentswitch.android.design.ClassicWaitingDot
 import com.agentswitch.android.design.Fonts
@@ -37,6 +38,7 @@ import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.WaitingSquare
 import com.agentswitch.android.design.colorOf
 import com.agentswitch.kit.api.RoomFace
+import com.agentswitch.kit.api.RoomMarkdown
 import com.agentswitch.kit.api.RoomSeat
 import com.agentswitch.kit.api.RoomText
 import com.agentswitch.kit.api.SeatState
@@ -178,12 +180,13 @@ object RoomWords {
 
     /**
      * A message's text as it is drawn: `@names` of seats firm (the classic look: in the accent), the user's own on a
-     * ground, `code` in the code font.
+     * ground, `code` in the code font; the plain words' Markdown as it reads (RoomMarkdown), a link tapped to `onLink`.
      */
-    fun text(text: String, handles: Set<String>, classic: Boolean, ink: Color, base: Color, signal: Color, code: Color): AnnotatedString = buildAnnotatedString {
+    fun text(text: String, handles: Set<String>, classic: Boolean, ink: Color, base: Color, signal: Color, code: Color, onLink: (String) -> Unit = {}): AnnotatedString = buildAnnotatedString {
+        var lineStart = true
         for (piece in RoomText.pieces(text, handles)) {
             when (piece) {
-                is RoomText.Piece.Text -> append(piece.text)
+                is RoomText.Piece.Text -> append(inlineAnnotated(RoomMarkdown.runs(piece.text, lineStart), onLink, signal, code))
                 is RoomText.Piece.Code -> withStyle(SpanStyle(fontFamily = Fonts.mono, fontSize = 14.sp, background = code)) { append(piece.text) }
                 is RoomText.Piece.Mention -> {
                     val me = piece.name == RoomSeat.you
@@ -194,6 +197,11 @@ object RoomWords {
                     }
                     withStyle(style) { append(if (me) " @${piece.name} " else "@${piece.name}") }
                 }
+            }
+            lineStart = when (piece) {
+                is RoomText.Piece.Text -> piece.text.endsWith("\n")
+                is RoomText.Piece.Code -> piece.text.endsWith("\n")
+                is RoomText.Piece.Mention -> false
             }
         }
     }

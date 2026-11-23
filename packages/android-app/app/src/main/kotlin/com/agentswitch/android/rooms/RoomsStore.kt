@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.agentswitch.kit.api.APIError
 import com.agentswitch.kit.api.AgentSwitchAPI
+import com.agentswitch.kit.api.RoomAttachTokens
 import com.agentswitch.kit.api.RoomDetail
 import com.agentswitch.kit.api.RoomFilePath
 import com.agentswitch.kit.api.RoomFiles
@@ -121,7 +122,13 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
     var gone: Boolean by mutableStateOf(false)
         private set
     var error: String? by mutableStateOf(null)
-    var draft: String by mutableStateOf("")
+    private var draftText: String by mutableStateOf("")
+    var draft: String
+        get() = draftText
+        set(value) { if (value != draftText) { draftText = value; tokensChanged() } }
+
+    /** The `[Image #1]` / `[File …]` tokens standing in the box for the pictures (RoomAttachTokens), by each one's id. */
+    private val attachTokens = RoomAttachTokens()
 
     /** The message being answered. */
     var replyTo: Int? by mutableStateOf(null)
@@ -170,7 +177,10 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
     /** Picked pictures join the ones waiting; what is over the most a message takes is left out and said. */
     fun attach(picked: List<Pair<String, ByteArray>>, thumbnail: (ByteArray) -> Bitmap?) {
         val taken = picked.take(attachmentRoom.coerceAtLeast(0))
-        attachments = attachments + taken.map { (name, data) -> RoomAttachment(nextAttachment++, name, data, thumbnail(data)) }
+        val made = taken.map { (name, data) -> RoomAttachment(nextAttachment++, name, data, thumbnail(data)) }
+        attachments = attachments + made
+        // Each stands in the box as its token, at the end of what is written.
+        draft = RoomAttachTokens.appended(made.map { attachTokens.add(it.id.toString(), it.name) }, draft)
         if (taken.size < picked.size) error = "一条消息最多带 ${RoomFilePath.maxPerMessage} 个文件，多出的没有添加。"
     }
 
@@ -178,6 +188,18 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
         if (sending) return
         attachments = attachments.filter { it.id != id }
         put.remove(id)
+        attachTokens.forget(id.toString())?.let { draft = RoomAttachTokens.removing(it, draft) }
+    }
+
+    /** A token deleted from the box takes its picture off (not while they are going). */
+    private fun tokensChanged() {
+        if (sending) return
+        if (draftText.isEmpty() && attachments.isEmpty()) { attachTokens.clear(); return }
+        val gone = attachTokens.gone(draftText).toSet()
+        if (gone.isNotEmpty()) {
+            attachments = attachments.filter { it.id.toString() !in gone }
+            gone.forEach { put.remove(it.toLong()) }
+        }
     }
 
     /** A file of the shared folder as the Mac last listed it (its size), by where it is on the Mac. */
@@ -255,6 +277,7 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
             api.say(text, id, replyTo, paths)
             draft = ""
             attachments = emptyList()
+            attachTokens.clear()
             put.clear()
             replyTo = null
             etag = null

@@ -229,6 +229,8 @@ struct RoomSessionsSheet: View {
     @State private var name = ""
     @State private var topic = ""
     @State private var picked: Set<String> = []
+    /// The search over the sessions to pick: by name, agent, model, profile and folder (RoomSessionSearch).
+    @State private var query = ""
     @State private var working = false
     @State private var error: String?
 
@@ -240,6 +242,9 @@ struct RoomSessionsSheet: View {
         return app.terminals.terminals.filter { $0.isRunning && !seated.contains($0.id) }
             .sorted { max($0.lastOutputAt, $0.createdAt) > max($1.lastOutputAt, $1.createdAt) }
     }
+
+    /// The ones the search leaves; picked ones the search hides stay picked.
+    private var shown: [TerminalInfo] { RoomSessionSearch.filter(terminals, query: query) }
 
     private var ready: Bool {
         !working && (creating ? !name.trimmingCharacters(in: .whitespaces).isEmpty : !picked.isEmpty)
@@ -255,11 +260,12 @@ struct RoomSessionsSheet: View {
                     }
                 }
                 Section {
-                    if terminals.isEmpty {
-                        Text(creating ? "没有开着的终端。可以先建房间，之后再拉会话。" : "没有可以拉进来的会话：开着的终端都已在房间里。")
+                    if !terminals.isEmpty { searchLine }
+                    if shown.isEmpty {
+                        Text(!terminals.isEmpty ? "没有找到匹配的会话。" : creating ? "没有开着的终端。可以先建房间，之后再拉会话。" : "没有可以拉进来的会话：开着的终端都已在房间里。")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
-                    ForEach(terminals) { t in
+                    ForEach(shown) { t in
                         Button { if !picked.insert(t.id).inserted { picked.remove(t.id) } } label: { row(t) }.buttonStyle(.plain)
                     }
                 } header: {
@@ -288,6 +294,22 @@ struct RoomSessionsSheet: View {
         }
         .presentationDetents(creating ? [.large] : [.medium, .large])
         .task { await app.refreshTerminals() }
+    }
+
+    /// `/ Search`, as on the Terminals page.
+    private var searchLine: some View {
+        HStack(spacing: 8) {
+            if look.isClassic {
+                Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(Theme.inkDim)
+            } else {
+                Text("/").font(.system(size: 15, weight: .bold, design: .monospaced)).foregroundStyle(Theme.signal)
+            }
+            TextField("Search", text: $query).autocorrectionDisabled().textInputAutocapitalization(.never)
+            if !query.isEmpty {
+                Button { query = "" } label: { LookGlyph(glyph: "×", symbol: "xmark.circle.fill", size: 15) }
+                    .buttonStyle(.plain).foregroundStyle(Theme.inkDim).accessibilityLabel("Clear")
+            }
+        }
     }
 
     private func row(_ t: TerminalInfo) -> some View {

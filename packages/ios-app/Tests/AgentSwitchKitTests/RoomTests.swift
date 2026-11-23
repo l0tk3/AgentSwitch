@@ -506,4 +506,60 @@ final class RoomTests: XCTestCase {
             XCTAssertEqual(message, "empty file")
         }
     }
+
+    // MARK: - the box, the add-sessions search, a message's Markdown (the Mac's 2026-11-23 change)
+
+    func testAttachTokensStandForFilesInTheBox() {
+        var t = RoomAttachTokens()
+        XCTAssertEqual(t.add("a", name: "photo-1.jpg"), "[Image #1]")
+        XCTAssertEqual(t.add("b", name: "photo-2.PNG"), "[Image #2]")
+        XCTAssertEqual(t.add("/a/notes.md"), "[File notes.md]")
+        XCTAssertEqual(t.add("/b/notes.md"), "[File notes.md #2]")
+        XCTAssertEqual(t.add("a", name: "photo-1.jpg"), "[Image #1]")
+        XCTAssertEqual(t.gone(in: ""), [])
+        XCTAssertEqual(t.gone(in: "看 [Image #1] [Image #2] [File notes.md] [File notes.md #2]"), [])
+        XCTAssertEqual(t.gone(in: "看 [Image #1] [File notes.md] [File notes.md #2]"), ["b"])
+        XCTAssertEqual(t.forget("/a/notes.md"), "[File notes.md]")
+        XCTAssertEqual(t.add("c", name: "x.heic"), "[Image #2]")
+        XCTAssertEqual(RoomAttachTokens.appended(["[Image #1]"], to: "看"), "看 [Image #1] ")
+        XCTAssertEqual(RoomAttachTokens.appended(["[Image #1]", "[Image #2]"], to: ""), "[Image #1] [Image #2] ")
+        XCTAssertEqual(RoomAttachTokens.removing("[Image #1]", from: "看 [Image #1] 这个"), "看 这个")
+    }
+
+    func testAddSessionsSearch() {
+        let a = TerminalInfo(id: "t1", harness: "claude-code", cwd: "/Users/u/Work/api", model: "claude-opus-5-5", name: "修复登录", status: .idle,
+                             createdAt: 1, lastOutputAt: 1, profile: TerminalProfile(name: "Work"))
+        let b = TerminalInfo(id: "t2", harness: "codex", cwd: "/Users/u/Play/site", model: "gpt-6-luna", name: "Site", status: .idle, createdAt: 1, lastOutputAt: 1)
+        let all = [a, b]
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "  ").map(\.id), ["t1", "t2"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "登录").map(\.id), ["t1"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "CODEX").map(\.id), ["t2"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "claude code").map(\.id), ["t1"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "opus 5.5").map(\.id), ["t1"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "luna").map(\.id), ["t2"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "work").map(\.id), ["t1"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "play/site").map(\.id), ["t2"])
+        XCTAssertEqual(RoomSessionSearch.filter(all, query: "nothing").map(\.id), [])
+    }
+
+    func testMarkdownOfAMessage() {
+        func bold(_ a: AttributedString) -> String {
+            a.runs.filter { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }.map { String(a[$0.range].characters) }.joined(separator: "|")
+        }
+        let cjk = RoomMarkdown.attributed("**原因**：dpsk", lineStart: true)
+        XCTAssertEqual(String(cjk.characters), "原因：dpsk")
+        XCTAssertEqual(bold(cjk), "原因")
+        let list = RoomMarkdown.attributed("# 结果\n- *过期*的令牌\n  * 二级\n+ ~~旧~~\n2 * 3 = 6", lineStart: true)
+        XCTAssertEqual(String(list.characters), "结果\n• 过期的令牌\n  • 二级\n• 旧\n2 * 3 = 6")
+        XCTAssertEqual(bold(list), "结果")
+        XCTAssertTrue(list.runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true && String(list[$0.range].characters) == "过期" })
+        XCTAssertTrue(list.runs.contains { $0.inlinePresentationIntent?.contains(.strikethrough) == true })
+        let link = RoomMarkdown.attributed("看 [文档](https://example.com/a)", lineStart: true)
+        XCTAssertEqual(String(link.characters), "看 文档")
+        XCTAssertEqual(link.runs.compactMap(\.link).first, URL(string: "https://example.com/a"))
+        // A stretch after a mention does not start a line: its `-` stays.
+        XCTAssertEqual(String(RoomMarkdown.attributed("- x", lineStart: false).characters), "- x")
+        // An attachment token stays as typed.
+        XCTAssertEqual(String(RoomMarkdown.attributed("看 [Image #1] ", lineStart: true).characters), "看 [Image #1] ")
+    }
 }

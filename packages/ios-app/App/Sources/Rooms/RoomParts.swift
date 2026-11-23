@@ -136,12 +136,25 @@ enum RoomWords {
     static func who(_ handle: String) -> String { handle == RoomSeat.you ? "You" : handle }
 
     /// A message's text as it is drawn: `@names` of seats firm (the classic look: in the accent), the user's own on a
-    /// ground, `code` in the code font.
+    /// ground, `code` in the code font; the plain words' Markdown as it reads (RoomMarkdown).
     static func text(_ text: String, handles: Set<String>, look: InterfaceLook) -> AttributedString {
         var out = AttributedString()
+        var lineStart = true
         for piece in RoomText.pieces(text, handles: handles) {
+            defer {
+                switch piece {
+                case .text(let s), .code(let s): lineStart = s.hasSuffix("\n")
+                case .mention: lineStart = false
+                }
+            }
             switch piece {
-            case .text(let s): out += AttributedString(s)
+            case .text(let s):
+                var run = RoomMarkdown.attributed(s, lineStart: lineStart)
+                for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
+                    run[r.range].font = .system(size: 14, design: .monospaced)
+                    run[r.range].backgroundColor = Theme.code
+                }
+                out += run
             case .code(let s):
                 var run = AttributedString(s)
                 run.font = .system(size: 14, design: .monospaced)

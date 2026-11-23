@@ -69,7 +69,9 @@ final class RoomPageModel {
     /// The room was deleted (here or elsewhere): the page closes.
     private(set) var gone = false
     var error: String?
-    var draft = ""
+    var draft = "" { didSet { if draft != oldValue { tokensChanged() } } }
+    /// The `[Image #1]` tokens standing in the box for the pictures (RoomAttachTokens), by each one's id.
+    @ObservationIgnored private var attachTokens = RoomAttachTokens()
     /// The message being answered.
     var replyTo: Int?
     private(set) var sending = false
@@ -108,6 +110,8 @@ final class RoomPageModel {
         let made = await Task.detached(priority: .userInitiated) { RoomAttachment.prepared(files) }.value
         let taken = Array(made.ready.prefix(attachmentRoom))
         attachments += taken
+        // Each stands in the box as its token, at the end of what is written.
+        draft = RoomAttachTokens.appended(taken.map { attachTokens.add($0.id.uuidString, name: $0.name) }, to: draft)
         if made.unread > 0 {
             sendError = "有 \(made.unread) 张图片读不出来或超过 25 MB，没有加上。"
         } else if taken.count < made.ready.count {
@@ -120,6 +124,15 @@ final class RoomPageModel {
     func removeAttachment(_ id: UUID) {
         guard !sending else { return }
         attachments.removeAll { $0.id == id }
+        if let token = attachTokens.forget(id.uuidString) { draft = RoomAttachTokens.removing(token, from: draft) }
+    }
+
+    /// A token deleted from the box takes its picture off (not while they are going).
+    private func tokensChanged() {
+        guard !sending else { return }
+        if draft.isEmpty && attachments.isEmpty { attachTokens.clear(); return }
+        let gone = Set(attachTokens.gone(in: draft))
+        if !gone.isEmpty { attachments.removeAll { gone.contains($0.id.uuidString) } }
     }
 
     /// The words a message of pictures alone is written with: the service takes no message without words.
@@ -174,6 +187,7 @@ final class RoomPageModel {
             try await api.say(text, in: id, replyTo: replyTo, files: paths)
             draft = ""
             attachments = []
+            attachTokens.clear()
             replyTo = nil
             etag = nil
             await refresh(api)

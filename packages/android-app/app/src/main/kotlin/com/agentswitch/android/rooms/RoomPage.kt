@@ -84,6 +84,7 @@ import com.agentswitch.kit.api.RoomReceiptLine
 import com.agentswitch.kit.api.RoomRow
 import com.agentswitch.kit.api.RoomSeat
 import com.agentswitch.kit.api.RoomText
+import com.agentswitch.android.components.LocalOpenLink
 import com.agentswitch.kit.api.roundsSeen
 import com.agentswitch.kit.api.updateRoom
 import kotlinx.coroutines.delay
@@ -347,7 +348,7 @@ private fun MessageRow(
                         }
                     }
                     Text(
-                        RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code),
+                        RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code, LocalOpenLink.current),
                         Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
                     )
                     // The files it comes with (they are on the Mac): a picture shown, another file as a card; a tap opens one.
