@@ -25,11 +25,13 @@ function made() {
   const changed: string[] = [];
   const resumed: string[] = [];
   const stopped: string[] = [];
+  const renamed: string[] = [];
   const org = {
     profiles: async () => [], models: async () => ({}), check: async () => ({ status: "healthy", checkedAt: 0, message: "" }),
     sessions: async () => ({ running: [], resumable: [] }),
     start: async () => "started",
     resume: async (req: { session: string; cwd: string }) => { resumed.push(`${req.session}@${req.cwd}`); states.set("t9", "idle"); return { id: "t9" }; },
+    rename: async (terminal: string, name: string) => { renamed.push(`${terminal}=${name}`); },
     stop: async (terminal: string, transcript?: boolean) => { stopped.push(transcript ? `${terminal}+record` : terminal); return terminal !== "gone"; },
   };
   const kit = new RoomKit({ store, seat, delivery, now: () => now, changed: (id) => { changed.push(id); }, org: () => org });
@@ -42,7 +44,7 @@ function made() {
     const res = await app.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
     return { status: res.status, body: await res.json() as any };
   };
-  return { home, store, trashed, kit, room, say, call, changed, states, resumed, stopped, kitOf: () => kit, later: (minutes: number) => { now += minutes * 60_000; } };
+  return { home, store, trashed, kit, room, say, call, changed, states, resumed, stopped, renamed, kitOf: () => kit, later: (minutes: number) => { now += minutes * 60_000; } };
 }
 
 describe("a room's shared folder", () => {
@@ -548,28 +550,32 @@ describe("the room's seats, several at once (§6.2)", () => {
 
 describe("a seat's name", () => {
   it("is the session's own to change, carries everything the room keeps, and its old name still reaches it", async () => {
-    const { home, store, room, say, call } = made();
+    const { home, store, room, say, call, renamed } = made();
     store.post(room.id, { from: "you", text: "@api @ui start" });
     store.post(room.id, { from: "ui", text: "@api which port?" });
     store.addTask(room.id, "ui", { title: "Form", owner: "ui" });
     store.setTask(room.id, "ui", 1, { state: "doing" });
     await say("ui", "room_changing", { paths: ["/w/form.ts"] });
-    expect((await say("ui", "room_rename", { name: "Frontend!" })).text).toContain("You are @frontend now");
+    const said = (await say("ui", "room_rename", { name: "Frontend  Form" })).text;
+    expect(said).toContain("You are @frontend-form in");
+    // Its own name in AgentSwitch is changed with it: the user's renaming, done by the session itself.
+    expect(said).toContain('Your session is called "Frontend Form" in AgentSwitch now');
+    expect(renamed).toEqual(["ui=Frontend Form"]);
     const now = store.get(room.id);
-    expect(now.seats.map((s) => s.handle)).toEqual(["you", "api", "frontend"]);
-    expect(store.messages(room.id).map((m) => [m.from, m.to])).toEqual([["you", ["api", "frontend"]], ["frontend", ["api"]]]);
-    expect(now.receipts).toEqual({ 1: { api: "sent", frontend: "sent" }, 2: { api: "sent" } });
-    expect(now.tasks[0]).toMatchObject({ owner: "frontend", by: "frontend" });
-    expect(now.claims[0]!.handle).toBe("frontend");
-    expect(now.stats.frontend).toMatchObject({ posts: 1 });
+    expect(now.seats.map((s) => s.handle)).toEqual(["you", "api", "frontend-form"]);
+    expect(store.messages(room.id).map((m) => [m.from, m.to])).toEqual([["you", ["api", "frontend-form"]], ["frontend-form", ["api"]]]);
+    expect(now.receipts).toEqual({ 1: { api: "sent", "frontend-form": "sent" }, 2: { api: "sent" } });
+    expect(now.tasks[0]).toMatchObject({ owner: "frontend-form", by: "frontend-form" });
+    expect(now.claims[0]!.handle).toBe("frontend-form");
+    expect(now.stats["frontend-form"]).toMatchObject({ posts: 1 });
     expect(now.stats.ui).toBeUndefined();
     // The old name still reaches it; it is nobody else's to take; the record on the disk says the new one.
-    expect(store.post(room.id, { from: "api", text: "@ui 8080" }).to).toEqual(["frontend"]);
+    expect(store.post(room.id, { from: "api", text: "@ui 8080" }).to).toEqual(["frontend-form"]);
     expect((await say("api", "room_rename", { name: "ui" })).isError).toBe(true);
     expect((await say("api", "room_rename", { name: "you" })).isError).toBe(true);
-    expect(new RoomStore(home).messages(room.id)[1]!.from).toBe("frontend");
+    expect(new RoomStore(home).messages(room.id)[1]!.from).toBe("frontend-form");
     // A session renames only itself; the user renames anyone.
-    expect(() => store.rename(room.id, "api", "frontend", "x")).toThrow("renames only itself");
+    expect(() => store.rename(room.id, "api", "frontend-form", "x")).toThrow("renames only itself");
     expect((await call("PATCH", `/rooms/${room.id}/seats/api`, { name: "backend" })).body.seat.handle).toBe("backend");
     expect(store.roomsOf("api")[0]!.seat.handle).toBe("backend");
   });

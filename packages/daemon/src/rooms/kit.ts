@@ -23,6 +23,9 @@ export type KitOrg = {
    *  says why not. */
   start(req: { readonly agent: string; readonly cwd: string; readonly profile?: string; readonly model?: string; readonly mode?: string; readonly resume?: string }): Promise<string>;
   /** The session behind an ended terminal goes on in a new one (§6.2). Throws a RoomError that says why not. */
+  /** The user's own name for a session, as the screens show it (the terminal list, the session's title): the same
+   *  renaming the user does there. Throws a RoomError that says why not. */
+  rename(terminal: string, name: string): Promise<void>;
   /** Ends a terminal; `transcript`: its conversation's record goes with it. Whether it was there to end. */
   stop(terminal: string, transcript?: boolean): Promise<boolean>;
   resume(req: { readonly agent: string; readonly cwd: string; readonly session: string; readonly profile?: string; readonly model?: string; readonly effort?: string; readonly mode?: string }): Promise<{ readonly id: string }>;
@@ -81,8 +84,8 @@ const TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_rename",
-    description: "Change your own name in an AgentSwitch Chat Room you sit in. Your first name was taken from whatever your session was called when it was seated, and may say nothing of what you do here (\"hello\", \"untitled-2\"). If so, take one that tells the others what to address you for: your role or your part of the work, short, lower case (`backend`, `ios`, `reviewer`). Everything the room keeps moves to the new name, and your old name still reaches you. Do it once, early; do not rename again without a reason.",
-    inputSchema: { type: "object", properties: { name: { type: "string", description: "The new name, without @: letters, digits and dashes." }, room: ROOM_ARG }, required: ["name"] },
+    description: "Rename yourself: this session's name in AgentSwitch — what the user sees in the list of terminals and sessions — and with it your @name in the Chat Room you sit in. Your name was taken from whatever the session was first called, and may say nothing of what you do (\"hello\", \"untitled-2\", the first words of an old request). If so, take one that says what you are for: your role or your part of the work, a few words at most (`Chat Room backend`, `iOS app`, `reviewer`). Your @name is made from it (lower case, dashes); everything the room keeps moves to it, and your old @name still reaches you. Do it once, early; do not rename again without a reason.",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "The new name: a few words, as the user will read it." }, room: ROOM_ARG }, required: ["name"] },
   },
   {
     name: "room_tasks",
@@ -253,10 +256,15 @@ export class RoomKit {
         case "room_notes": return { text: this.notes(room, seat, args) };
         case "room_files": return { text: this.files(room) };
         case "room_rename": {
-          const was = seat.handle;
-          const now = this.o.store.rename(room.id, seat.handle, seat.handle, typeof args.name === "string" ? args.name : "");
+          const was = seat.handle, wanted = (typeof args.name === "string" ? args.name : "").replace(/\s+/g, " ").trim();
+          // The room's name first (it may be taken), then the session's own in AgentSwitch, the user's renaming done
+          // by the session itself (user, 2026-11-23: "把改名接口暴露给它自己").
+          const now = this.o.store.rename(room.id, seat.handle, seat.handle, wanted);
+          let said = "";
+          try { await this.o.org?.()?.rename(terminal, wanted.slice(0, 80)); said = ` Your session is called "${wanted.slice(0, 80)}" in AgentSwitch now.`; }
+          catch (err) { if (err instanceof RoomError) said = ` (Your session's own name in AgentSwitch was not changed: ${err.message})`; else throw err; }
           this.o.changed?.(room.id);
-          return { text: now.handle === was ? `You are @${was} already.` : `You are @${now.handle} now in "${room.name}" (was @${was}; that name still reaches you). The others see the new name everywhere.` };
+          return { text: `${now.handle === was ? `Your @name stays @${was}.` : `You are @${now.handle} in "${room.name}" now (was @${was}; that name still reaches you).`}${said}` };
         }
         case "room_tasks": return { text: this.tasks(room, seat, args) };
         case "room_changing": return { text: this.changing(room, seat, args) };

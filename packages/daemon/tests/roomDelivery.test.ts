@@ -201,6 +201,7 @@ describe("bringing sessions in (Admin)", () => {
         check: async (agent, profile) => ({ status: "unhealthy", checkedAt: 1, message: `${agent}/${profile} signed out` }),
         start: async (req) => { started.push(req); const id = `new${started.length}`; states.set(id, "idle"); return id; },
         stop: async () => true,
+        rename: async () => undefined,
         resume: async (terminal) => { const id = `back-${terminal}`; states.set(id, "idle"); return { id }; },
       }),
     });
