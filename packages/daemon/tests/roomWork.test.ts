@@ -545,3 +545,32 @@ describe("the room's seats, several at once (§6.2)", () => {
     expect((await call("DELETE", `/rooms/${room.id}/seats/b?close=nope`)).status).toBe(400);
   });
 });
+
+describe("a seat's name", () => {
+  it("is the session's own to change, carries everything the room keeps, and its old name still reaches it", async () => {
+    const { home, store, room, say, call } = made();
+    store.post(room.id, { from: "you", text: "@api @ui start" });
+    store.post(room.id, { from: "ui", text: "@api which port?" });
+    store.addTask(room.id, "ui", { title: "Form", owner: "ui" });
+    store.setTask(room.id, "ui", 1, { state: "doing" });
+    await say("ui", "room_changing", { paths: ["/w/form.ts"] });
+    expect((await say("ui", "room_rename", { name: "Frontend!" })).text).toContain("You are @frontend now");
+    const now = store.get(room.id);
+    expect(now.seats.map((s) => s.handle)).toEqual(["you", "api", "frontend"]);
+    expect(store.messages(room.id).map((m) => [m.from, m.to])).toEqual([["you", ["api", "frontend"]], ["frontend", ["api"]]]);
+    expect(now.receipts).toEqual({ 1: { api: "sent", frontend: "sent" }, 2: { api: "sent" } });
+    expect(now.tasks[0]).toMatchObject({ owner: "frontend", by: "frontend" });
+    expect(now.claims[0]!.handle).toBe("frontend");
+    expect(now.stats.frontend).toMatchObject({ posts: 1 });
+    expect(now.stats.ui).toBeUndefined();
+    // The old name still reaches it; it is nobody else's to take; the record on the disk says the new one.
+    expect(store.post(room.id, { from: "api", text: "@ui 8080" }).to).toEqual(["frontend"]);
+    expect((await say("api", "room_rename", { name: "ui" })).isError).toBe(true);
+    expect((await say("api", "room_rename", { name: "you" })).isError).toBe(true);
+    expect(new RoomStore(home).messages(room.id)[1]!.from).toBe("frontend");
+    // A session renames only itself; the user renames anyone.
+    expect(() => store.rename(room.id, "api", "frontend", "x")).toThrow("renames only itself");
+    expect((await call("PATCH", `/rooms/${room.id}/seats/api`, { name: "backend" })).body.seat.handle).toBe("backend");
+    expect(store.roomsOf("api")[0]!.seat.handle).toBe("backend");
+  });
+});

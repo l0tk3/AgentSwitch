@@ -98,8 +98,8 @@ export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (term
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
 const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: z.string().max(MAX_TOPIC * 4).optional(), paused: z.boolean().optional(), roundsLimit: z.number().int().min(2).max(100).optional() }).strict();
 const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boolean().optional() }).strict();
-const SetSeat = z.object({ canAdd: z.boolean().optional(), muted: z.boolean().optional() }).strict()
-  .refine((o) => o.canAdd !== undefined || o.muted !== undefined, "nothing to change");
+const SetSeat = z.object({ canAdd: z.boolean().optional(), muted: z.boolean().optional(), name: z.string().min(1).max(100).optional() }).strict()
+  .refine((o) => o.canAdd !== undefined || o.muted !== undefined || o.name !== undefined, "nothing to change");
 const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(4096)).max(10).optional(), expects: z.enum(["none", "answer"]).optional() }).strict();
 const WriteNotes = z.object({ text: z.string().max(100_000) }).strict();
 const Read = z.object({ seq: z.number().int().nonnegative() }).strict();
@@ -256,7 +256,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase();
       if (body.data.canAdd !== undefined) rooms.setCanAdd(id, handle, body.data.canAdd);
       if (body.data.muted !== undefined) rooms.setMuted(id, YOU, handle, body.data.muted);
-      const seat = rooms.get(id).seats.find((s) => s.handle === handle);
+      const named = body.data.name === undefined ? handle : rooms.rename(id, YOU, handle, body.data.name).handle;
+      const seat = rooms.get(id).seats.find((s) => s.handle === named);
       if (!seat) throw new RoomError(404, `房间里没有 @${handle}`);
       return c.json({ seat: seatView(seat, host(), hasKit) });
     } catch (err) { return refused(c, err); }

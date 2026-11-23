@@ -80,6 +80,11 @@ const TOOLS: readonly KitTool[] = [
     inputSchema: { type: "object", properties: { room: ROOM_ARG } },
   },
   {
+    name: "room_rename",
+    description: "Change your own name in an AgentSwitch Chat Room you sit in. Your first name was taken from whatever your session was called when it was seated, and may say nothing of what you do here (\"hello\", \"untitled-2\"). If so, take one that tells the others what to address you for: your role or your part of the work, short, lower case (`backend`, `ios`, `reviewer`). Everything the room keeps moves to the new name, and your old name still reaches you. Do it once, early; do not rename again without a reason.",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "The new name, without @: letters, digits and dashes." }, room: ROOM_ARG }, required: ["name"] },
+  },
+  {
     name: "room_tasks",
     description: "The task list of an AgentSwitch Chat Room you sit in: who does what and how far it is, seen by every member and the user. Without `action` it lists the tasks. `add` a task for work that is not on the list yet (a title that says what is done when it is done; `after` for tasks that must come first; `owner` to give it to a member). Whoever a task is given to, and whoever waits for one that is done, is told in the room by itself: do not post that again. `take` a task before you start on it — one another member is doing can not be taken, so two never do the same work. `done` when it is finished, with `note`: the result in one line, or the path of the file that holds it. `release` gives back one you can not finish. Look here before you start something, and keep your own tasks true: others plan by them.",
     inputSchema: {
@@ -247,6 +252,12 @@ export class RoomKit {
         case "room_read": return { text: this.read(room, seat, args) };
         case "room_notes": return { text: this.notes(room, seat, args) };
         case "room_files": return { text: this.files(room) };
+        case "room_rename": {
+          const was = seat.handle;
+          const now = this.o.store.rename(room.id, seat.handle, seat.handle, typeof args.name === "string" ? args.name : "");
+          this.o.changed?.(room.id);
+          return { text: now.handle === was ? `You are @${was} already.` : `You are @${now.handle} now in "${room.name}" (was @${was}; that name still reaches you). The others see the new name everywhere.` };
+        }
         case "room_tasks": return { text: this.tasks(room, seat, args) };
         case "room_changing": return { text: this.changing(room, seat, args) };
         default: return { text: this.members(room, seat) };

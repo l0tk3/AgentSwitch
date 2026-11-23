@@ -158,6 +158,8 @@ export type Room = {
    *  how many characters, how many messages it posted, how many tool calls it made here. The tokens are the agent's
    *  own to say; these are what the room adds. */
   readonly stats: Readonly<Record<string, SeatStats>>;
+  /** Names seats went by before they were renamed, each with the name it is now: an `@old` still finds its seat. */
+  readonly renames: Readonly<Record<string, string>>;
   /** What has not arrived: message number → handle → where it is. */
   readonly receipts: Readonly<Record<string, Readonly<Record<string, Receipt>>>>;
 };
@@ -287,7 +289,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, renames: {}, receipts: {} };
     this.save(room);
     return room;
   }
@@ -574,6 +576,51 @@ export class RoomStore {
     return { claim, overlaps: others.map((c) => ({ ...c, paths: c.paths.filter((p) => paths.some((q) => meets(p, q))) })).filter((c) => c.paths.length) };
   }
 
+  /** A seat takes another name (user, 2026-11-23: a session whose name says nothing of what it does renames itself).
+   *  A seat's first name comes from what its session was called when it sat down — "你好", "agentswitch-浏览器连接失败"
+   *  — and says nothing to whoever must pick the right member to address. The session itself or the user may change
+   *  it. Everything the room keeps is carried over to the new name — what it said, what waits for it, its tasks,
+   *  what it is changing, its counts — so the room reads as if it had always been called so; the old name is kept
+   *  only to find it by (`@old` still reaches it). */
+  rename(id: string, by: string, handle: string, wanted: string): Seat {
+    const room = this.get(id);
+    const seat = this.seatOf(room, handle);
+    const actor = this.seatOf(room, by);
+    if (seat.kind === "user") throw new RoomError(400, "用户的名字不能改");
+    if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    if (actor.kind !== "user" && actor.handle !== seat.handle) throw new RoomError(403, "A session renames only itself; the user may rename anyone.");
+    const name = handleFrom(wanted, "");
+    if (!name) throw new RoomError(400, "A name needs letters or digits.");
+    if (name === seat.handle) return seat;
+    const taken = new Set([...room.seats.map((s) => s.handle), ...Object.keys(room.renames).filter((old) => room.renames[old] !== seat.handle)]);
+    if (name === YOU || name === ALL || taken.has(name) || freeHandle(name, new Set()) !== name) throw new RoomError(409, `The name @${name} is taken or reserved in this room; choose another.`);
+    const old = seat.handle;
+    const to = (h: string): string => (h === old ? name : h);
+    const key = <T>(record: Readonly<Record<string, T>>): Record<string, T> => Object.fromEntries(Object.entries(record).map(([h, v]) => [to(h), v]));
+    // What was said: the record on the disk is written anew, under the new name.
+    const said = this.messagesOf(id).map((m): Message => ({ ...m, from: to(m.from), to: m.to.map(to) }));
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    const file = join(this.dir, `${id}.jsonl`), tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, said.map((m) => `${JSON.stringify(m)}\n`).join(""), { mode: 0o600 });
+    renameSync(tmp, file);
+    this.said.set(id, said);
+    const next: Seat = { ...seat, handle: name };
+    const stats = key(room.stats);
+    this.all().set(id, { ...room, stats });
+    this.save({
+      ...room,
+      seats: room.seats.map((s) => (s === seat ? next : { ...s, addedBy: to(s.addedBy), ...(s.muted ? { muted: { ...s.muted, by: to(s.muted.by) } } : {}) })),
+      receipts: Object.fromEntries(Object.entries(room.receipts).map(([seq, of]) => [seq, key(of)])),
+      tasks: room.tasks.map((t) => ({ ...t, by: to(t.by), ...(t.owner ? { owner: to(t.owner) } : {}) })),
+      claims: room.claims.map((c) => ({ ...c, handle: to(c.handle) })),
+      notes: room.notes ? { ...room.notes, by: to(room.notes.by) } : null,
+      createdBy: to(room.createdBy),
+      renames: { ...Object.fromEntries(Object.entries(room.renames).map(([was, now]) => [was, to(now)])), [old]: name },
+      stats,
+    });
+    return next;
+  }
+
   setCanAdd(id: string, handle: string, on: boolean): Seat {
     const room = this.get(id);
     const seat = this.seatOf(room, handle);
@@ -625,6 +672,7 @@ export class RoomStore {
     const answered = o.replyTo === undefined ? undefined : this.messages(id, { after: o.replyTo - 1, limit: 1 })[0];
     const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase()), ...(answered && answered.seq === o.replyTo ? [answered.from] : [])];
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
+    for (let i = 0; i < named.length; i++) named[i] = room.renames[named[i]!] ?? named[i]!;
     // `@all` is the user's alone (§4). Written by a session it is words and calls nobody: refusing the whole message
     // for it cost a session its report twice (2026-11-23), when it only spoke of the rule.
     const to = named.includes(ALL) && from.kind === "user"
@@ -785,7 +833,7 @@ function roomFrom(v: unknown): Room | null {
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
-    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats,
+    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
   };
 }
 
