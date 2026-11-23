@@ -2028,7 +2028,7 @@ describe("terminal pieces", () => {
     expect(settings).toEqual(claudeHookSettings('"/n/node" "/h/hook.js"'));
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);
     // Left waiting when it comes to rest, for a Chat Room message to wake it with (docs/chatroom-v0.md §12).
-    for (const event of ["Stop", "SessionStart"]) expect(settings.hooks[event][0].hooks).toEqual([{ type: "command", command: '"/n/node" "/h/hook.js"', timeout: settings.hooks.Stop[0].hooks[0].timeout }, { type: "command", command: '"/n/node" "/h/hook.js" wait', asyncRewake: true }]);
+    for (const event of ["Stop", "SessionStart"]) expect(settings.hooks[event][0].hooks).toEqual([{ type: "command", command: '"/n/node" "/h/hook.js"', timeout: settings.hooks.Stop[0].hooks[0].timeout }, { type: "command", command: '"/n/node" "/h/hook.js" wait', asyncRewake: true, timeout: 12 * 3600 }]);
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
     // "Continue" goes on in the same session; a fork only when asked for.
     const codex = launch({ id: "t2", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
