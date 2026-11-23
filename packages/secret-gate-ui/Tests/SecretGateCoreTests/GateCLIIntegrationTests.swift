@@ -19,13 +19,13 @@ final class GateCLIIntegrationTests: XCTestCase {
         let cli = GateCLI(executable: exe, home: home)
 
         XCTAssertEqual(try cli.listKeys(), [])
-        var keys = try cli.newKey(named: "work", makeCurrent: true)
-        XCTAssertEqual(keys.map(\.name), ["work"])
-        XCTAssertTrue(keys[0].current)
-        keys = try cli.newKey(named: "home", makeCurrent: false)
-        XCTAssertEqual(keys.first { $0.current }?.name, "work")
-        keys = try cli.useKey(named: "home")
-        XCTAssertEqual(keys.first { $0.current }?.name, "home")
+        let first = try cli.keygen()
+        XCTAssertEqual(first.count, 1)
+        XCTAssertTrue(first[0].current)
+        XCTAssertThrowsError(try cli.keygen(), "a second keygen without --force replaces nothing")
+        let rotated = try cli.keygen(force: true)
+        XCTAssertEqual(rotated.count, 1)
+        XCTAssertNotEqual(rotated[0].public, first[0].public)
 
         let entries = [
             TokenEntry(label: "a/pass", hosts: "a.example.com", value: "pw-fake-1234"),

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A keypair as reported by `secret-gate keys --json`.
+/// The gate's one keypair as reported by `secret-gate keys --json` (one row, or none before `keygen`).
 public struct Keypair: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let `public`: String
@@ -33,7 +33,7 @@ public enum SecretUse: String, CaseIterable, Codable, Sendable {
         switch self {
         case .http: return "http（代理替换）"
         case .otp: return "otp（取验证码）"
-        case .exec: return "exec（本地命令模板）"
+        case .exec: return "exec（作为环境变量交给命令）"
         }
     }
 }

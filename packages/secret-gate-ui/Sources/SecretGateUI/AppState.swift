@@ -22,22 +22,24 @@ final class AppState: ObservableObject {
     @Published private(set) var busy = false
     @Published var errorMessage: String?
 
-    var current: Keypair? { keys.first(where: \.current) }
+    var current: Keypair? { keys.first(where: \.current) ?? keys.first }
 
     private var cli: GateCLI {
         GateCLI(executable: URL(fileURLWithPath: cliPath), home: URL(fileURLWithPath: gateHome))
     }
 
-    // MARK: keypairs
+    // MARK: keypair
 
     func refreshKeys() { let cli = cli; perform { try cli.listKeys() } assign: { self.keys = $0 } }
 
-    func createKey(named name: String, makeCurrent: Bool) {
-        let cli = cli
-        perform { try cli.newKey(named: name, makeCurrent: makeCurrent) } assign: { self.keys = $0 }
-    }
+    /// The first key of an empty gate home.
+    func generateKey() { let cli = cli; perform { try cli.keygen() } assign: { self.keys = $0 } }
 
-    func useKey(_ key: Keypair) { let cli = cli; perform { try cli.useKey(named: key.name) } assign: { self.keys = $0 } }
+    /// `keygen --force`, after the page's warning: ciphertexts sealed for the old key stop working.
+    func rotateKey() {
+        let cli = cli
+        perform { try cli.keygen(force: true) } assign: { self.keys = $0; self.results = [] }
+    }
 
     // MARK: entries
 

@@ -44,9 +44,9 @@ struct TokenGeneratorView: View {
     private var header: some View {
         HStack {
             if let cur = state.current {
-                Label("当前密钥对：\(cur.name)", systemImage: "key.fill")
+                Label("密钥：\(cur.name)", systemImage: "key.fill")
             } else {
-                Label("没有当前密钥对，先在左边生成一个", systemImage: "exclamationmark.triangle")
+                Label("还没有密钥，先在左边生成", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
             }
             Spacer()

@@ -1,16 +1,17 @@
 # secret-gate-ui
 
-Native macOS (SwiftUI) front end for `packages/secret-gate`: manage named keypairs and mint
+Native macOS (SwiftUI) front end for `packages/secret-gate` on a gate without the system service: show the
+gate's one keypair, rotate it, and mint
 `enc:v1:` tokens, one at a time or in batches. It does no cryptography itself; every action
 shells out to the `secret-gate` CLI with `SECRET_GATE_HOME` set, and secret values travel only
 over stdin. The private key is never read or displayed.
 
 ```
-┌ 密钥对 ──────────────┐ ┌ 生成密文 ─────────────────────────────────────────────┐
-│ ● work   <pubkey> ⧉  │ │ 当前密钥对：work        [粘贴批量导入] [加一行]        │
-│ ○ home   <pubkey> ⧉  │ │ label | host,host | 密码/TOTP ▾ | ⊖                     │
-│          设为当前     │ │ ●●●●●●●●   ☑http ☐otp ☐exec                            │
-│                  [+]  │ │ ...                                    [全部生成 ⌘↩]  │
+┌ 密钥 ────────────────┐ ┌ 生成密文 ─────────────────────────────────────────────┐
+│ ⚿ default            │ │ 密钥：default           [粘贴批量导入] [加一行]        │
+│   <pubkey> ⧉         │ │ label | host,host | 密码/TOTP ▾ | ⊖                     │
+│ 轮换密钥…            │ │ ●●●●●●●●   ☑http ☐otp ☐exec                            │
+│                      │ │ ...                                    [全部生成 ⌘↩]  │
 └──────────────────────┘ │ 结果：2 成功 0 失败   [复制全部] [保存为 JSON] [清空]  │
                          └───────────────────────────────────────────────────────┘
 ```
@@ -28,9 +29,10 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
 
 ## Features
 
-- **Keypairs**: list, generate with a name, switch the current one, copy a public key.
-  Creating a keypair never switches silently unless it is the first; tokens minted earlier
-  keep working because the gate decrypts with every keypair it holds.
+- **Keypair** (gate-simple-v0 §1): the gate has one. Its public key with a copy button; 生成密钥 on an
+  empty gate home (`keygen`); 轮换密钥… replaces it with `keygen --force` after a warning — every
+  token minted earlier stops working and has to be sealed again. With the system service installed,
+  the key lives in the service and the AgentSwitch app rotates it (`system rotate-key`).
 - **Tokens**: label, sites (comma separated; a bare `host[:port]`, `*.example.com`, an IP, or a full URL
   such as `https://core.example:8600/login` — the token binds to `host:port` only, the URL with its
   scheme goes into the CONTEXT.md entry so the model knows http from https), kind
@@ -64,6 +66,7 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
 ## CLI contract used
 
 ```
-secret-gate keys --json [list | new <name> [--use] | use <name>]
+secret-gate keys --json       # one row {name, public, current} or []
+secret-gate keygen [--force]
 secret-gate enc --batch      # stdin: [{label, hosts, kind, uses, value}] → stdout: [{label, token|error}]
 ```

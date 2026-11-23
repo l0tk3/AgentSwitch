@@ -33,17 +33,17 @@ public struct GateCLI: Sendable {
         return try JSONDecoder().decode([Keypair].self, from: out)
     }
 
-    public func newKey(named name: String, makeCurrent: Bool) throws -> [Keypair] {
-        var args = ["keys", "--json", "new", name]
-        if makeCurrent { args.append("--use") }
-        return try JSONDecoder().decode([Keypair].self, from: try run(args))
+    /// The gate has one keypair (gate-simple-v0 §1). `keygen` makes it; `force` replaces it, after which every
+    /// ciphertext sealed for the old key stops working. Answers the fresh list (one row).
+    public func keygen(force: Bool = false) throws -> [Keypair] {
+        _ = try run(["keygen"] + (force ? ["--force"] : []))
+        return try listKeys()
     }
 
-    public func useKey(named name: String) throws -> [Keypair] {
-        try JSONDecoder().decode([Keypair].self, from: try run(["keys", "--json", "use", name]))
-    }
+    /// Said before `keygen(force: true)`.
+    public static let rotationWarning = "轮换后将生成新的密钥对，旧私钥随即删除。已有的密文全部无法再解密，需要用新公钥重新封装。此操作无法撤销。"
 
-    /// Encrypts every entry for the *current* keypair. Per-entry errors come back in the result.
+    /// Encrypts every entry for the gate's keypair. Per-entry errors come back in the result.
     public func encrypt(_ entries: [TokenEntry]) throws -> [TokenResult] {
         let payload = try JSONSerialization.data(withJSONObject: entries.map(\.batchObject))
         let out = try run(["enc", "--batch"], stdin: payload, acceptExit: [0, 1])

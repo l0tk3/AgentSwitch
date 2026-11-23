@@ -2,74 +2,51 @@ import AppKit
 import SecretGateCore
 import SwiftUI
 
+/// The gate's one keypair (gate-simple-v0 §1): its public key, and rotation by `keygen --force` after a warning. This
+/// app drives a gate without the system service; with the service installed, the AgentSwitch app rotates the key.
 struct KeypairsView: View {
     @EnvironmentObject private var state: AppState
-    @State private var showingNew = false
-    @State private var newName = ""
-    @State private var makeCurrent = true
+    @State private var confirmingRotate = false
 
     var body: some View {
         List {
-            Section("密钥对") {
-                if state.keys.isEmpty {
-                    Text("还没有密钥对。点右上角 + 生成一个。").foregroundStyle(.secondary)
-                }
-                ForEach(state.keys) { key in
-                    KeypairRow(key: key, onUse: { state.useKey(key) })
+            Section("密钥") {
+                if let key = state.current {
+                    KeypairRow(key: key)
+                    Button("轮换密钥…") { confirmingRotate = true }
+                        .disabled(state.busy)
+                } else {
+                    Text("还没有密钥。").foregroundStyle(.secondary)
+                    Button("生成密钥") { state.generateKey() }
+                        .disabled(state.busy)
                 }
             }
         }
-        .navigationTitle("密钥对")
+        .navigationTitle("密钥")
         .toolbar {
             ToolbarItem { Button { state.refreshKeys() } label: { Image(systemName: "arrow.clockwise") }.help("刷新") }
-            ToolbarItem { Button { showingNew = true } label: { Image(systemName: "plus") }.help("生成密钥对") }
         }
-        .sheet(isPresented: $showingNew) { newKeySheet }
-    }
-
-    private var newKeySheet: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("生成新的密钥对").font(.headline)
-            TextField("名字，例如 work、home、test", text: $newName)
-                .textFieldStyle(.roundedBorder)
-            Toggle("生成后设为当前（之后的密文都用它加密）", isOn: $makeCurrent)
-            Text("私钥写入 <gate home>/keys/<名字>/key.priv，权限 0600，界面永远不显示它。")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Spacer()
-                Button("取消") { showingNew = false }
-                Button("生成") {
-                    state.createKey(named: newName.trimmingCharacters(in: .whitespaces), makeCurrent: makeCurrent)
-                    newName = ""
-                    showingNew = false
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
+        .confirmationDialog("轮换网关密钥？", isPresented: $confirmingRotate) {
+            Button("轮换", role: .destructive) { state.rotateKey() }
+        } message: {
+            Text(GateCLI.rotationWarning)
         }
-        .padding(20)
-        .frame(width: 420)
     }
 }
 
 private struct KeypairRow: View {
     let key: Keypair
-    let onUse: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: key.current ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(key.current ? Color.accentColor : Color.secondary)
-                Text(key.name).font(.body.weight(key.current ? .semibold : .regular))
-                Spacer()
-                if !key.current {
-                    Button("设为当前", action: onUse).buttonStyle(.link).font(.caption)
-                }
+                Image(systemName: "key.fill").foregroundStyle(Color.accentColor)
+                Text(key.name).font(.body.weight(.semibold))
             }
             HStack(spacing: 6) {
                 Text(key.public).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(key.public, forType: .string)
