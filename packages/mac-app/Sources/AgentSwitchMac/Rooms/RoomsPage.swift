@@ -313,6 +313,10 @@ private struct RoomView: View {
             StatusMark(level: .error)
             Text(text).font(.system(size: 12.5)).foregroundStyle(Color.failed).lineLimit(2).fixedSize(horizontal: false, vertical: true)
             Spacer()
+            if model.problem != nil {
+                Button { model.dismissProblem() } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 12).foregroundStyle(Look.ink2).frame(width: 22, height: 22).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).help("Dismiss")
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
@@ -664,7 +668,10 @@ private struct RoomSheet: View {
 
     private func pick(_ terminal: TerminalInfo) -> some View {
         let on = picked.contains(terminal.id)
+        // A session sits in one room at a time: one that sits elsewhere is shown, and can not be picked.
+        let held = model.roomHolding(terminal.id, besides: kind == .add ? model.selected : nil)
         return Button {
+            guard held == nil else { return }
             if on { picked.removeAll { $0 == terminal.id } } else { picked.append(terminal.id) }
         } label: {
             HStack(spacing: 10) {
@@ -674,12 +681,16 @@ private struct RoomSheet: View {
                 Text([HarnessName.display(terminal.harness), terminal.model.map(ModelName.display)].compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1)
                 Spacer(minLength: 4)
+                if let held { Text("In " + held.name).mono(11.5).foregroundStyle(Look.faint).lineLimit(1).truncationMode(.middle) }
                 if let color = terminal.profileColor { ProfileDot(color: color) }
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
+            .opacity(held == nil ? 1 : 0.45)
         }
         .buttonStyle(.plain)
+        .disabled(held != nil)
+        .help(held.map { "已经在房间「\($0.name)」里。一个会话同一时间只能在一个房间。" } ?? "")
     }
 }

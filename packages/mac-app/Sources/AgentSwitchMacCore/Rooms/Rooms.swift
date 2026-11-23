@@ -313,8 +313,10 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public let forYou: Bool
     /// Sessions have exchanged this many messages with no word from the user (§7); nil under the room's limit.
     public let rounds: Int?
+    /// The sessions seated here, by terminal: a session sits in one room at a time.
+    public let terminals: [String]
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -327,6 +329,7 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
         unread = (try? c.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
         forYou = (try? c.decodeIfPresent(Bool.self, forKey: .forYou)) ?? false
         rounds = try? c.decodeIfPresent(Int.self, forKey: .rounds)
+        terminals = (try? c.decodeIfPresent([String].self, forKey: .terminals)) ?? []
     }
 
     /// The list's second line: who said the last thing and what, on one line; the topic before anything is said.
