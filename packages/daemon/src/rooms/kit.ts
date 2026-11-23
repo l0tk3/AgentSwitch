@@ -4,6 +4,7 @@
  *
  *  Every answer is plain text for an agent to read. A refusal says why, and is an answer too: the agent goes on. */
 
+import { statSync } from "node:fs";
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
@@ -221,6 +222,57 @@ export async function resumeEnded(store: RoomStore, org: Pick<KitOrg, "resume" |
   return done;
 }
 
+/** How long a member asked to hand over before it is ended is waited for, and how often its note is looked at.
+ *  Tests make these short. */
+export const HANDOFF = { waitMs: 120_000, pollMs: 2_000 };
+const ENDING = new Set<string>();
+
+/** Whether a member should hand over before it is ended (2026-11-24, user: 结束前先让它写交接): its session is still
+ *  there to write, and it holds unfinished work of the list. */
+export function owesHandoff(room: Room, seat: Seat, live: boolean): boolean {
+  return live && room.tasks.some((t) => t.owner === seat.handle && (t.state === "doing" || t.state === "blocked"));
+}
+
+/** A member out of the room and its session ended (`transcript`: and its record deleted). One that owes a handover is
+ *  first asked for it, in the room, and ended once its note is written or `HANDOFF.waitMs` has gone by — in the
+ *  background: the caller is told "handing over" at once. */
+export async function closeSeat(o: { readonly store: RoomStore; readonly stop: (terminal: string, transcript: boolean) => Promise<boolean>; readonly changed?: (roomId: string) => void; readonly look?: () => void; readonly now?: () => number },
+  roomId: string, handle: string, by: string, transcript: boolean, handoff: boolean): Promise<"closed" | "gone" | "handing over"> {
+  const room = o.store.get(roomId);
+  const seat = room.seats.find((x) => x.handle === handle);
+  if (!seat) throw new RoomError(404, `There is no @${handle} in this room.`);
+  const finish = async (): Promise<boolean> => {
+    if (o.store.get(roomId).seats.find((x) => x.handle === handle)?.left === undefined) o.store.unseat(roomId, handle, by);
+    const ended = seat.terminal ? await o.stop(seat.terminal, transcript) : false;
+    o.changed?.(roomId);
+    o.look?.();
+    return ended;
+  };
+  if (!handoff) return (await finish()) ? "closed" : "gone";
+  const key = `${roomId}:${handle}`;
+  if (ENDING.has(key)) return "handing over";
+  ENDING.add(key);
+  const now = o.now ?? Date.now;
+  const asked = now();
+  const owns = room.tasks.filter((t) => t.owner === handle && (t.state === "doing" || t.state === "blocked")).map((t) => `T${t.n}`);
+  try {
+    o.store.post(roomId, { from: by, text: `〔交接〕@${handle} 你马上要被结束。先用 room_update { what: "handoff" } 写交接：做了什么、做到哪、下一步、文件在哪（你手上有 ${owns.join("、")}）。写完就会被结束，最多等 ${Math.round(HANDOFF.waitMs / 60_000) || 1} 分钟。`, to: [handle], expects: "none" });
+  } catch { /* the asker may not post (muted): ended after the wait all the same */ }
+  o.changed?.(roomId);
+  o.look?.();
+  void (async () => {
+    try {
+      for (let waited = 0; waited < HANDOFF.waitMs; waited += HANDOFF.pollMs) {
+        const file = o.store.handoffPath(roomId, handle);
+        if (file && statSync(file).mtimeMs >= asked) break;
+        await new Promise((r) => setTimeout(r, HANDOFF.pollMs));
+      }
+      await finish();
+    } catch { /* the room went meanwhile */ } finally { ENDING.delete(key); }
+  })();
+  return "handing over";
+}
+
 export class RoomKit {
   constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number; /** Tests: how long a started session is waited for. */ readonly kitWaitMs?: number }) {}
 
@@ -262,7 +314,7 @@ export class RoomKit {
       }
       if (!TOOLS.some((t) => t.name === name)) return { text: `There is no tool ${asked} in the Chatroom Kit.`, isError: true };
       const { room, seat } = this.where(terminal, str(args.room));
-      this.o.store.count(room.id, seat.handle, { calls: 1 });
+      this.o.store.count(room.id, seat.handle, { calls: 1 }, int(args.task) ?? (name === "room_tasks" ? int(args.n) : undefined));
       switch (name) {
         case "room_post": return { text: this.post(room, seat, args) };
         case "room_read": return { text: this.read(room, seat, args) };
@@ -441,10 +493,11 @@ export class RoomKit {
         // Only what a session brought up: the user's own sessions are the user's to close.
         if (!target.byAgent) throw new RoomError(403, `@${target.handle} was started by the user, not by a session: only the user closes it. You can kick it out of the room.`);
         if (!target.terminal) throw new RoomError(409, `@${target.handle} has no terminal.`);
-        if (target.left === undefined) this.o.store.unseat(room.id, target.handle, me.handle);
-        const ended = await org.stop(target.terminal, action === "delete");
-        this.o.changed?.(room.id);
-        this.o.delivery.look();
+        const live = this.o.seat(target.terminal);
+        const how = await closeSeat({ store: this.o.store, stop: (t, transcript) => org.stop(t, transcript), changed: (r) => this.o.changed?.(r), look: () => this.o.delivery.look(), ...(this.o.now ? { now: this.o.now } : {}) },
+          room.id, target.handle, me.handle, action === "delete", target.left === undefined && owesHandoff(room, target, !!live && live.state !== "exited"));
+        if (how === "handing over") return `@${target.handle} holds unfinished tasks: it was asked to write its handover note first, and is ${action === "delete" ? "deleted" : "ended"} once it has (at most ${Math.round(HANDOFF.waitMs / 60_000) || 1} min). Nothing more to do.`;
+        const ended = how === "closed";
         return ended
           ? `@${target.handle} is ${action === "delete" ? "deleted" : "ended"}: out of "${room.name}", its terminal closed${action === "delete" ? " and its conversation's record deleted" : "; its conversation is kept and can be resumed"}.`
           : `@${target.handle} is out of "${room.name}"; its terminal was not there to close any more (already closed, or the service started again since).`;
@@ -530,6 +583,7 @@ export class RoomKit {
           line(task, all),
           ...(claims.length ? [`Being changed for it: ${claims.map((c) => `@${c.handle}: ${c.paths.join(", ")}`).join("; ")}`] : []),
           ...(handoff ? [`@${task.owner}'s handover note: ${handoff}`] : []),
+          ...((c) => (c ? [`Cost so far (what the room counts; tokens are the agents' own): ${c.wakes} wakes with ${c.chars} characters, ${c.posts} messages, ${c.calls} tool calls`] : []))(store.get(room.id).taskStats[String(task.n)]),
           said.length ? `Its latest ${said.length} message${said.length === 1 ? "" : "s"} (whole: room_read { seq }; all of them: room_read { task: ${task.n} }):` : "No messages about it yet.",
           ...said.map((m) => this.line(m)),
         ].join("\n");

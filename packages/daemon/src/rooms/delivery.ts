@@ -40,6 +40,8 @@ const WAIT_MS = 3 * 60_000;
 const GONE_MS = 15_000;
 /** Earlier messages are named in a line each, this many at most; the rest are counted. */
 const NAMED = 8;
+/** The room is told at most this often that the user is talking to a member in its terminal. */
+const TYPED_NOTE_MS = 10 * 60_000;
 const hm = (at: number): string => { const t = new Date(at); return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
 
 /** States in which a message waits for the seat (it will take it later by itself). */
@@ -54,6 +56,8 @@ export class RoomDelivery {
   private readonly told = new Set<string>();
   /** When a terminal's waiting program was last there. */
   private readonly seen = new Map<string, number>();
+  /** When the room was last told that the user typed into a member's terminal, by room and seat. */
+  private readonly typedAt = new Map<string, number>();
   private now(): number { return (this.o.now ?? Date.now)(); }
 
   constructor(private readonly o: DeliveryOptions) {}
@@ -78,6 +82,24 @@ export class RoomDelivery {
     if (!waiting.length) return null;
     for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
     return this.given(terminal, waiting);
+  }
+
+  /** The user typed into a member's terminal directly (2026-11-24): the room would not know, and whoever plans by it
+   *  (an admin, the dispatcher) would go on as if nothing changed. The room is told in a line (said by the member, to
+   *  nobody: it wakes nobody), at most once in ten minutes; the session is reminded, with that prompt, to say in the
+   *  room what changes. A room's own delivery typed in (`[Room …`) is not the user. */
+  userTyped(terminal: string, prompt: string): string | null {
+    if (/^\s*\[Room /.test(prompt)) return null;
+    const sits = this.o.store.roomsOf(terminal);
+    if (!sits.length) return null;
+    const now = this.now();
+    for (const { room, seat } of sits) {
+      const key = `${room.id}:${seat.handle}`;
+      if (now - (this.typedAt.get(key) ?? 0) < TYPED_NOTE_MS) continue;
+      this.typedAt.set(key, now);
+      try { this.o.store.post(room.id, { from: seat.handle, text: "〔终端〕用户刚在我的终端里直接跟我说了话。", expects: "none" }); } catch { /* muted: the reminder still goes */ }
+    }
+    return `You sit in AgentSwitch Chat Room${sits.length > 1 ? "s" : ""} ${sits.map((x) => `"${x.room.name}" (as @${x.seat.handle})`).join(", ")}. The user just spoke to you directly in your terminal, not in the room. If it changes what you are doing for the room (a task, a plan, what you hand over), say so there in a line (room_post, expects none); otherwise carry on.`;
   }
 
   /** The agent's waiting program asks. One per terminal: a later one takes the place of the one before. */
@@ -171,7 +193,7 @@ export class RoomDelivery {
   private counted(terminal: string, waiting: readonly { room: Room; seat: Seat; message: Message }[], text: string): void {
     this.told.add(terminal);
     const last = waiting[waiting.length - 1]!;
-    this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length });
+    this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length }, last.message.task);
     // Read: the one it was given whole. The earlier ones it saw a line of are read when it reads the room.
     this.o.store.markRead(last.room.id, last.seat.handle, [last.message.seq]);
   }

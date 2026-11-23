@@ -309,6 +309,9 @@ export type TerminalHostOptions = {
   readonly mail?: (id: string, takes: boolean) => string | null;
   /** What a session in the middle of a turn is given at once, between two of its tool calls; null: nothing. */
   readonly mailNow?: (id: string) => string | null;
+  /** The user typed a prompt into the terminal itself (not a room's delivery): a word to give the session with it,
+   *  or null (docs/chatroom-v0.md: a member the user talks to directly is reminded to tell its room). */
+  readonly prompted?: (id: string, prompt: string) => string | null;
   /** The program ended (or never started): what was made for this terminal's agent ends too (its browser session). */
   readonly onExit?: (id: string) => void;
   /** A terminal's agent writes this conversation now — one it was started on, or one it says it is in: under which
@@ -948,7 +951,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1523,7 +1526,11 @@ export class TerminalHost {
         // its sub-agents with it.
         if (p.source === "compact") return null;
         this.noSubagents(s); this.setStatus(s, "idle"); return null;
-      case "UserPromptSubmit": this.settleAll(s, "working"); s.calls.clear(); this.progressed(s, null); this.setStatus(s, "working"); return null;
+      case "UserPromptSubmit": {
+        this.settleAll(s, "working"); s.calls.clear(); this.progressed(s, null); this.setStatus(s, "working");
+        const extra = agentId ? null : this.opts.prompted?.(s.id, typeof p.prompt === "string" ? p.prompt : "") ?? null;
+        return extra ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: extra } } : null;
+      }
       case "Stop": {
         this.settleAll(s, "idle"); s.calls.clear(); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); this.daybreakLooks(s);
         // A room's messages that waited for this turn to end (docs/chatroom-v0.md §5, §12): it goes on with them

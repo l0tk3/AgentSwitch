@@ -172,6 +172,9 @@ export type Room = {
    *  how many characters, how many messages it posted, how many tool calls it made here. The tokens are the agent's
    *  own to say; these are what the room adds. */
   readonly stats: Readonly<Record<string, SeatStats>>;
+  /** The same counts per task of the list (2026-11-24: what one piece of work cost): a wake given a message about
+   *  it, a message about it, a tool call that named it. By task number. */
+  readonly taskStats: Readonly<Record<string, SeatStats>>;
   /** Who has read which message (user, 2026-11-23: "哪个 session 已读未读"): message number → the seats that were
    *  given it whole, or read it themselves with room_read. Its sender is not listed (it wrote it). Kept for the last
    *  `MAX_READS` messages. */
@@ -345,7 +348,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, reads: {}, readsFrom: 0, renames: {}, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, taskStats: {}, reads: {}, readsFrom: 0, renames: {}, receipts: {} };
     this.save(room);
     return room;
   }
@@ -492,12 +495,15 @@ export class RoomStore {
 
   /** Adds to what a seat has cost. Kept in memory and written with the room's next change: a count is not worth a
    *  write of its own, and one lost over a crash is no loss. */
-  count(id: string, handle: string, add: Partial<SeatStats>): void {
+  count(id: string, handle: string, add: Partial<SeatStats>, task?: number): void {
     const room = this.all().get(id);
     if (!room) return;
-    const was = room.stats[handle] ?? { wakes: 0, chars: 0, posts: 0, calls: 0 };
-    const now = { wakes: was.wakes + (add.wakes ?? 0), chars: was.chars + (add.chars ?? 0), posts: was.posts + (add.posts ?? 0), calls: was.calls + (add.calls ?? 0) };
-    this.all().set(id, { ...room, stats: { ...room.stats, [handle]: now } });
+    const plus = (was: SeatStats | undefined): SeatStats => {
+      const w = was ?? { wakes: 0, chars: 0, posts: 0, calls: 0 };
+      return { wakes: w.wakes + (add.wakes ?? 0), chars: w.chars + (add.chars ?? 0), posts: w.posts + (add.posts ?? 0), calls: w.calls + (add.calls ?? 0) };
+    };
+    const onTask = task !== undefined && room.tasks.some((t) => t.n === task);
+    this.all().set(id, { ...room, stats: { ...room.stats, [handle]: plus(room.stats[handle]) }, ...(onTask ? { taskStats: { ...room.taskStats, [String(task)]: plus(room.taskStats[String(task)]) } } : {}) });
   }
 
   /** The agent's session behind a seat, as its terminal says it now: kept for when the terminal is gone. */
@@ -768,7 +774,7 @@ export class RoomStore {
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
     const message: Message = { seq: Math.max(room.lastSeq, this.db.last(id)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }) };
     const waiting = to.filter((h) => h !== YOU);
-    this.count(id, from.handle, { posts: 1 });
+    this.count(id, from.handle, { posts: 1 }, message.task);
     this.db.add(id, message, JSON.stringify(message));
     this.save({
       ...room, lastSeq: message.seq,
@@ -881,7 +887,7 @@ export class RoomStore {
   private save(given: Room): Room {
     // The counts are added to in memory between two writes (`count`): the newest are the ones kept.
     const kept = this.all().get(given.id);
-    const room: Room = { ...given, stats: kept?.stats ?? given.stats, reads: kept?.reads ?? given.reads };
+    const room: Room = { ...given, stats: kept?.stats ?? given.stats, taskStats: kept?.taskStats ?? given.taskStats, reads: kept?.reads ?? given.reads };
     this.all().set(room.id, room);
     this.db.putRoom(room.id, JSON.stringify(room));
     this.writeRecord(room);
@@ -893,6 +899,16 @@ export class RoomStore {
 function parsed(rows: readonly StoredMessage[]): Message[] {
   const out: Message[] = [];
   for (const r of rows) { try { const m = messageFrom(JSON.parse(r.body)); if (m) out.push(m); } catch { /* not a message */ } }
+  return out;
+}
+
+function statsFrom(v: unknown): Record<string, SeatStats> {
+  const out: Record<string, SeatStats> = {};
+  for (const [k, c] of Object.entries((v ?? {}) as Record<string, unknown>)) {
+    if (!c || typeof c !== "object") continue;
+    const o = c as Record<string, unknown>;
+    out[k] = { wakes: num(o.wakes) ? o.wakes : 0, chars: num(o.chars) ? o.chars : 0, posts: num(o.posts) ? o.posts : 0, calls: num(o.calls) ? o.calls : 0 };
+  }
   return out;
 }
 
@@ -966,7 +982,7 @@ function roomFrom(v: unknown): Room | null {
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
-    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, readsFrom: num(o.readsFrom) ? o.readsFrom : (num(o.lastSeq) ? o.lastSeq : 0), reads: Object.fromEntries(Object.entries((o.reads ?? {}) as Record<string, unknown>).filter(([seq, v]) => /^\d+$/.test(seq) && Array.isArray(v)).map(([seq, v]) => [seq, (v as unknown[]).filter(str)])), renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
+    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, taskStats: statsFrom(o.taskStats), readsFrom: num(o.readsFrom) ? o.readsFrom : (num(o.lastSeq) ? o.lastSeq : 0), reads: Object.fromEntries(Object.entries((o.reads ?? {}) as Record<string, unknown>).filter(([seq, v]) => /^\d+$/.test(seq) && Array.isArray(v)).map(([seq, v]) => [seq, (v as unknown[]).filter(str)])), renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
   };
 }
 

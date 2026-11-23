@@ -20,6 +20,7 @@ export type { SeatCard, SeatState } from "../rooms/state.js";
 import type { TerminalHost, TerminalInfo } from "../terminals/host.js";
 import { profileModelLists } from "./profileModels.js";
 import { roomOrg } from "./roomOrg.js";
+import { closeSeat, owesHandoff } from "../rooms/kit.js";
 import { parseBody, versionedJson, type ApiDeps } from "./shared.js";
 
 export type SeatView = {
@@ -165,7 +166,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   const whole = (room: Room, messages: readonly Message[]) => ({
     room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
-    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, claims: rooms.claims(room.id), reads: room.reads,
+    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, taskStats: room.taskStats, claims: rooms.claims(room.id), reads: room.reads,
   });
 
   const seat = (roomId: string, terminal: string, canAdd: boolean | undefined): Seat => {
@@ -335,12 +336,18 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     try {
       const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase(), close = c.req.query("close");
       if (close !== undefined && close !== "end" && close !== "delete") return c.json({ error: "close is end or delete" }, 400);
-      const seat = rooms.get(id).seats.find((s) => s.handle === handle);
+      const room = rooms.get(id), seat = room.seats.find((s) => s.handle === handle);
+      // Ended with work unfinished: it writes its handover note first, unless the user says now (`now=1`).
+      if (close && seat?.terminal && deps.callLocal) {
+        const live = host()?.get(seat.terminal);
+        const handoff = c.req.query("now") !== "1" && seat.left === undefined && owesHandoff(room, seat, !!live && live.status !== "exited");
+        const org = roomOrg(deps.callLocal);
+        const how = await closeSeat({ store: rooms, stop: (t, transcript) => org.stop(t, transcript), changed: (r) => deps.roomsChanged?.(r) }, id, handle, YOU, close === "delete", handoff);
+        return c.json({ ok: true, closed: how === "closed", handingOver: how === "handing over" });
+      }
       if (seat?.left === undefined) rooms.unseat(id, handle);
-      let closed = false;
-      if (close && seat?.terminal && deps.callLocal) closed = await roomOrg(deps.callLocal).stop(seat.terminal, close === "delete");
       deps.roomsChanged?.(id);
-      return c.json({ ok: true, closed });
+      return c.json({ ok: true, closed: false });
     } catch (err) { return refused(c, err); }
   });
 

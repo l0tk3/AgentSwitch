@@ -540,9 +540,9 @@ describe("the room's seats, several at once (§6.2)", () => {
     expect(store.roomsOf("new-s-a")[0]?.seat.handle).toBe("a");
     expect(store.roomsOf("new-s-b")[0]?.seat.handle).toBe("b");
     expect(store.roomsOf("c")[0]?.seat.handle).toBe("c");    // still running: left alone
-    expect((await call("DELETE", `/rooms/${room.id}/seats/c?close=end`)).body).toEqual({ ok: true, closed: true });
+    expect((await call("DELETE", `/rooms/${room.id}/seats/c?close=end`)).body).toMatchObject({ ok: true, closed: true, handingOver: false });
     expect(calls).toContain("DELETE /terminals/c");
-    expect((await call("DELETE", `/rooms/${room.id}/seats/a?close=delete`)).body).toEqual({ ok: true, closed: true });
+    expect((await call("DELETE", `/rooms/${room.id}/seats/a?close=delete`)).body).toMatchObject({ ok: true, closed: true, handingOver: false });
     expect(calls).toContain("DELETE /terminals/new-s-a?transcript=1");
     expect((await call("DELETE", `/rooms/${room.id}/seats/b?close=nope`)).status).toBe(400);
   });
@@ -873,5 +873,48 @@ describe("a Kit that does not fill a session's context (2026-11-24)", () => {
     const size = (t: string): number => JSON.stringify(kitOf().tools(t)).length;
     expect(size("ui")).toBeLessThan(5600);      // was 10 381 characters for a member
     expect(size("api")).toBeLessThan(7200);     // and 15 362 for an admin
+  });
+});
+
+describe("ending a member that holds unfinished work (2026-11-24)", () => {
+  it("asks it for its handover note first and ends it once written, or at once when nothing is owed", async () => {
+    const { HANDOFF, closeSeat } = await import("../src/rooms/kit.js");
+    HANDOFF.waitMs = 2_000; HANDOFF.pollMs = 20;
+    const { store, room } = made();
+    const stopped: string[] = [];
+    const stop = async (t: string) => { stopped.push(t); return true; };
+    store.addTask(room.id, "you", { title: "Form", owner: "ui" });
+    store.setTask(room.id, "ui", 1, { state: "doing" });
+    expect(await closeSeat({ store, stop }, room.id, "ui", "you", false, true)).toBe("handing over");
+    expect(store.last(room.id)!.text).toContain("〔交接〕@ui 你马上要被结束");
+    expect(stopped).toEqual([]);
+    store.handoff(room.id, "ui", "表单做了一半，在 Form.swift");
+    for (let i = 0; i < 50 && !stopped.length; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(stopped).toEqual(["ui"]);
+    expect(store.get(room.id).seats.find((s) => s.handle === "ui")!.left).toBeDefined();
+    // Nothing owed: at once.
+    expect(await closeSeat({ store, stop }, room.id, "api", "you", false, false)).toBe("closed");
+    expect(stopped).toEqual(["ui", "api"]);
+    HANDOFF.waitMs = 120_000; HANDOFF.pollMs = 2_000;
+  });
+});
+
+describe("the user talking to a member in its terminal (2026-11-24)", () => {
+  it("tells the room once in a while and reminds the member, but not for a room's own delivery", () => {
+    const { store, room, later } = made();
+    let now = new Date(2026, 10, 23, 10, 0).getTime();
+    const delivery = new RoomDelivery({ store, seat: () => null, now: () => now });
+    expect(delivery.userTyped("ui", "[Room login · #3]\nFrom: @api")).toBeNull();
+    const told = delivery.userTyped("ui", "先别改表单了")!;
+    expect(told).toContain('"login" (as @ui)');
+    expect(told).toContain("say so there in a line");
+    expect(store.last(room.id)).toMatchObject({ from: "ui", to: [], text: "〔终端〕用户刚在我的终端里直接跟我说了话。" });
+    const count = store.messages(room.id).length;
+    delivery.userTyped("ui", "再说一句");
+    expect(store.messages(room.id).length).toBe(count);          // not again within ten minutes
+    now += 11 * 60_000; later(11);
+    delivery.userTyped("ui", "又一句");
+    expect(store.messages(room.id).length).toBe(count + 1);
+    expect(delivery.userTyped("nobody", "hi")).toBeNull();
   });
 });
