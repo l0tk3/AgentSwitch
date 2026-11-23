@@ -162,7 +162,7 @@ def test_bootstrap_checks_the_published_keys_and_ca(service, capsys, monkeypatch
     code, out, err = _run(capsys, ["bootstrap", "claude-code"])
     assert code == 0, err
     assert "[ok  ] keypair: the gate service publishes a current keypair" in err
-    assert "published by the gate service" in err and str(service.public / "ca.pem") in out
+    assert "published by the gate service" in err and json.dumps(str(service.public / "ca.pem")) in out
 
 
 def test_unavailable_service_is_reported_not_bypassed(monkeypatch, capsys, tmp_path):

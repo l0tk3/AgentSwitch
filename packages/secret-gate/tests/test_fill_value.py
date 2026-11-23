@@ -68,7 +68,8 @@ def test_fill_value_is_fill_only_host_checked_for_every_frame_and_never_recorded
     "not json", {"token": "x"}, {"token": "enc:v1:abc", "urls": [LOGIN]}, {"urls": [LOGIN], "token": 1},
     {"token": None, "urls": []}, {"token": "t", "urls": "https://a/"}, {"token": "t", "urls": [LOGIN] * 17},
     {"token": "t", "urls": [LOGIN], "extra": 1}, "x" * ((1 << 17) + 1),
-])
+], ids=lambda payload: repr(payload)[:40])   # short ids: Windows refuses an environment variable (PYTEST_CURRENT_TEST)
+                                             # over 32767 characters
 def test_fill_value_rejects_bad_requests(gate_home, monkeypatch, capsys, payload):
     code, out, err = _cli(monkeypatch, capsys, payload)
     assert code == 2 and out is None and err.startswith("error:")

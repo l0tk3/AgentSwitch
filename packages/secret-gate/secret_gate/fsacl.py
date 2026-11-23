@@ -33,6 +33,7 @@ IS_WINDOWS = sys.platform == "win32"
 SYSTEM_SID = "S-1-5-18"
 ADMINISTRATORS_SID = "S-1-5-32-544"
 USERS_SID = "S-1-5-32-545"
+OWNER_RIGHTS_SID = "S-1-3-4"
 TRUSTED_INSTALLER_SID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
 GATE_SERVICE_NAME = "AgentSwitchGate"
 
@@ -80,14 +81,21 @@ class Ace:
     inherit_only: bool = False
 
 
-def acl_problem(aces: Iterable[Ace] | None, trusted: Iterable[str], *, write: bool = False) -> str | None:
-    """Why a DACL lets someone untrusted read (`write`: change) the object, or None. `aces` None is a NULL DACL."""
+def acl_problem(aces: Iterable[Ace] | None, trusted: Iterable[str], *, write: bool = False,
+                owner: str | None = None) -> str | None:
+    """Why a DACL lets someone untrusted read (`write`: change) the object, or None. `aces` None is a NULL DACL.
+
+    An entry for OWNER RIGHTS (S-1-3-4) grants whoever owns the object, so it counts as an entry for `owner` (None:
+    unknown, untrusted). Windows puts one in the ACL of a user's temporary directory, so everything created there
+    carries it."""
     if aces is None:
         return "no access control list (everyone has access)"
     wanted = WRITES if write else READS
     allowed = frozenset(trusted)
     for ace in aces:
         if ace.kind != ACCESS_ALLOWED or ace.inherit_only or not ace.mask & wanted:
+            continue
+        if ace.sid == OWNER_RIGHTS_SID and owner in allowed:
             continue
         if ace.sid not in allowed:
             return f"{'writable' if write else 'readable'} by {ace.sid}"
@@ -216,14 +224,14 @@ def restrict_to_current_user(path: Path) -> None:
 
 def private_problem(path: Path) -> str | None:
     """Windows: why `path` may be read by someone it should not be (None: only trusted accounts)."""
-    aces, _owner = read_acl(path)
-    return acl_problem(aces, trusted_sids())
+    aces, owner = read_acl(path)
+    return acl_problem(aces, trusted_sids(), owner=owner)
 
 
 def write_problem(path: Path) -> str | None:
     """Windows: why `path` may be changed by someone it should not be."""
-    aces, _owner = read_acl(path)
-    return acl_problem(aces, trusted_sids(), write=True)
+    aces, owner = read_acl(path)
+    return acl_problem(aces, trusted_sids(), write=True, owner=owner)
 
 
 def windows_dir() -> str:

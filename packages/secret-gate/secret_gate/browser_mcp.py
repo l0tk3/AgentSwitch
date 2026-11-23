@@ -188,9 +188,12 @@ def service_setup(env: dict[str, str], client: RpcClient, out_dir: Path) -> Brow
 
 @contextmanager
 def user_output_dir() -> Iterator[Path]:
-    """A 0700 temporary directory of the login user for the downstream's output, removed at exit."""
+    """A 0700 temporary directory of the login user for the downstream's output, removed at exit (Windows: mkdtemp's
+    mode is ignored there, the directory gets an ACL for this user only)."""
     path = Path(tempfile.mkdtemp(prefix="secret-gate-browser-"))
     try:
+        if sys.platform == "win32":
+            restrict_to_current_user(path)
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)

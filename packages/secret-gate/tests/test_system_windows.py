@@ -363,6 +363,10 @@ def test_acl_problem_names_whoever_should_not_be_there():
     assert acl_problem([Ace("allow", USERS_SID, fsacl.FILE_APPEND_DATA)], trusted, write=True) == f"writable by {USERS_SID}"
     assert acl_problem([Ace("deny", USERS_SID, fsacl.FILE_ALL_ACCESS)], trusted) is None
     assert acl_problem([Ace("allow", "S-1-3-0", fsacl.FILE_ALL_ACCESS, inherit_only=True)], trusted) is None
+    owner_rights = [Ace("allow", fsacl.OWNER_RIGHTS_SID, fsacl.FILE_ALL_ACCESS)]     # whoever owns the object
+    assert acl_problem(owner_rights, trusted, owner=OWNER) is None
+    assert acl_problem(owner_rights, trusted, owner=USERS_SID, write=True) == f"writable by {fsacl.OWNER_RIGHTS_SID}"
+    assert acl_problem(owner_rights, trusted) == f"readable by {fsacl.OWNER_RIGHTS_SID}"     # owner unknown
 
 
 def test_the_pipe_of_a_path():

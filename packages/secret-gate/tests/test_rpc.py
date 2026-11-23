@@ -22,6 +22,7 @@ from secret_gate.rpc_protocol import MAX_REQUEST_BYTES, RemoteError, decode_requ
 from secret_gate.rpc_server import prepare_socket_path
 from secret_gate.tokens import make_token
 from tests.fixtures import fake_secrets as fs
+from tests.conftest import WINDOWS
 from tests.service_fixtures import running_service, short_dir
 
 SCOPE = "rpc-scope-0123456789abcdefgh"
@@ -154,7 +155,7 @@ def test_mcp_methods_run_inside_the_service_and_redact():
         lines = _audit(svc)
         http_line = next(line for line in lines if line["method"] == "mcp.http" and line["ok"])
         assert http_line["labels"] == ["portal-a/pass"] and http_line["host"] == "portal-a.example.com"
-        assert {"ts", "scope", "event", "method", "uid", "ok"} <= set(lines[0])
+        assert {"ts", "scope", "event", "method", "sid" if WINDOWS else "uid", "ok"} <= set(lines[0])
 
 
 def test_mcp_http_transport_errors_name_the_failure_only():
@@ -418,7 +419,9 @@ def test_secret_gate_rpc_process_end_to_end_on_windows():
                     break
                 except OSError:
                     time.sleep(0.05)
-            assert stream is not None
+            if stream is None:
+                proc.kill()
+                pytest.fail(f"no pipe from `secret-gate rpc`: {proc.communicate(timeout=10)[1].decode(errors='replace')}")
             try:
                 stream.sendall(b'{"id": 1, "method": "status"}\n')
                 status = json.loads(stream.readline(1 << 20))["result"]

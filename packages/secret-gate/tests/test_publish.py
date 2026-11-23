@@ -83,7 +83,7 @@ def test_ca_publication_copies_the_certificate_never_the_key(tmp_path):
     assert publish_ca(confdir, public) is False                           # the proxy has not made its CA yet
     (confdir / "mitmproxy-ca-cert.pem").write_bytes(CERT)
     assert publish_ca(confdir, public) is True
-    assert (public / "ca.pem").read_bytes() == CERT and _mode(public / "ca.pem") == 0o644
+    assert (public / "ca.pem").read_bytes() == CERT and (WINDOWS or _mode(public / "ca.pem") == 0o644)
     assert publish_ca(confdir, public) is True                            # unchanged: nothing rewritten
     (confdir / "mitmproxy-ca-cert.pem").write_bytes(b"-----BEGIN RSA PRIVATE KEY-----\n" + CERT)
     with pytest.raises(KeyStoreError, match="不是证书"):

@@ -19,6 +19,7 @@ from secret_gate.reload import (
     valid_pattern,
 )
 from secret_gate.upstream_tls import UPSTREAM_INSECURE_FILE, UpstreamTlsAddon, parse_insecure_hosts
+from tests.conftest import WINDOWS
 
 
 class FakeLoop:
@@ -102,8 +103,10 @@ def test_read_refuses_untrustworthy_files(tmp_path, setup, match):
 def test_read_reports_stat_errors(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("")
+    # POSIX: a path under a regular file (ENOTDIR). Windows calls that "not found", so a name it refuses instead.
+    path = tmp_path / "bad<name" / UPSTREAM_INSECURE_FILE if WINDOWS else blocker / UPSTREAM_INSECURE_FILE
     with pytest.raises(ValidationError, match="cannot stat"):
-        read_insecure_hosts(blocker / UPSTREAM_INSECURE_FILE)   # a path under a regular file
+        read_insecure_hosts(path)
 
 
 def test_reload_patterns_reports_the_diff(tmp_path):
