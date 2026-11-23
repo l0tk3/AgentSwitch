@@ -123,3 +123,19 @@ describe("who is changing which files", () => {
     expect(store.claims(room.id)).toEqual([]);
   });
 });
+
+describe("a terminal's agent and the shared folders", () => {
+  it("lets Claude Code and Codex read and write there from the start, and says nothing of it when there are none", async () => {
+    const { agentLauncher } = await import("../src/terminals/launch.js");
+    const root = mkdtempSync(join(tmpdir(), "as-roomw-launch-"));
+    const files = join(root, "Application Support", "room-files");
+    const make = (roomFiles?: string) => agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:1", stateDir: join(root, "state"), env: { PATH: "/usr/bin", HOME: root }, codexLayer: () => false, ...(roomFiles ? { roomFiles } : {}) });
+    for (const harness of ["claude-code", "codex"] as const) {
+      const args = make(files)({ id: `a-${harness}`, harness, cwd: root, mode: "manual", hookToken: "t" }).args;
+      expect(args[args.indexOf("--add-dir") + 1]).toBe(files);
+      // Claude Code takes several folders after it: a flag follows, never the session's own words.
+      expect(args[args.indexOf("--add-dir") + 2]).toMatch(/^-/);
+      expect(make()({ id: `b-${harness}`, harness, cwd: root, mode: "manual", hookToken: "t" }).args).not.toContain("--add-dir");
+    }
+  });
+});
