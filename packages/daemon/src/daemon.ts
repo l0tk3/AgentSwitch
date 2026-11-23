@@ -558,6 +558,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
       mail: (id, takes) => (roomKit.has(id) ? roomDelivery.atTurnEnd(id, takes) : null),
+      mailNow: (id) => (roomKit.has(id) ? roomDelivery.duringTurn(id) : null),
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? {
         onExit: (id: string) => {

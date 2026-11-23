@@ -418,3 +418,25 @@ describe("whether a message expects a reply", () => {
     expect(store.last(room.id)!.expects).toBe("none");
   });
 });
+
+describe("what a session is given, and when", () => {
+  it("gets the user's word between two tool calls, a colleague's at the turn's end, and nothing it has read itself", async () => {
+    const { store, room, say } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "busy", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
+    store.post(room.id, { from: "api", text: "@ui the interface is in interface.md" });
+    expect(delivery.duringTurn("ui")).toBeNull();                     // a colleague does not interrupt
+    store.post(room.id, { from: "you", text: "@ui 先停一下" });
+    const now = delivery.duringTurn("ui")!;
+    expect(now).toContain("@ui 先停一下");
+    expect(now).not.toContain("interface.md");
+    expect(delivery.duringTurn("ui")).toBeNull();                     // given once
+    expect(delivery.atTurnEnd("ui")).toContain("interface.md");       // the colleague's, when the turn ends
+    // Read by itself: not given again.
+    store.post(room.id, { from: "api", text: "@ui one more" });
+    expect((await say("ui", "room_read", { after: 2 })).text).toContain("one more");
+    // (#1 was given at the turn's end just now and is dealt with when the next one ends; #3 waits no more.)
+    expect(store.get(room.id).receipts).toEqual({ 1: { ui: "delivered" } });
+    expect(delivery.atTurnEnd("ui")).toBeNull();
+    expect(store.get(room.id).receipts).toEqual({});
+  });
+});

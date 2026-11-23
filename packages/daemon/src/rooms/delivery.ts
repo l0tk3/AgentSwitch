@@ -67,6 +67,17 @@ export class RoomDelivery {
     return this.take(terminal);
   }
 
+  /** A session in the middle of a turn, between two of its tool calls: what the user wrote to it is given now, not
+   *  when the turn ends — a turn runs a quarter of an hour, and the user's word is the one that may change what it
+   *  is doing (2026-11-23: two requests of the user's were read by the session's own room_read long before they
+   *  were given). What other sessions wrote waits for the turn's end as before: a colleague does not interrupt. */
+  duringTurn(terminal: string): string | null {
+    const waiting = this.waitingFor(terminal).filter((w) => w.message.from === YOU);
+    if (!waiting.length) return null;
+    for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
+    return this.textOf(waiting);
+  }
+
   /** The agent's waiting program asks. One per terminal: a later one takes the place of the one before. */
   wait(terminal: string, signal?: AbortSignal): Promise<Waited> {
     this.waiters.get(terminal)?.({ stop: true });

@@ -225,7 +225,7 @@ export class RoomKit {
       const { room, seat } = this.where(terminal, str(args.room));
       switch (name) {
         case "room_post": return { text: this.post(room, seat, args) };
-        case "room_read": return { text: this.read(room, args) };
+        case "room_read": return { text: this.read(room, seat, args) };
         case "room_notes": return { text: this.notes(room, seat, args) };
         case "room_files": return { text: this.files(room) };
         case "room_tasks": return { text: this.tasks(room, seat, args) };
@@ -466,7 +466,7 @@ export class RoomKit {
     return room.notes ? `Pinned notes of "${room.name}" (last written by @${room.notes.by}, ${hm(room.notes.at)}):\n\n${room.notes.text}` : `"${room.name}" has no pinned notes yet.`;
   }
 
-  private read(room: Room, args: Record<string, unknown>): string {
+  private read(room: Room, seat: Seat, args: Record<string, unknown>): string {
     const limit = Math.min(Math.max(int(args.limit) ?? 20, 1), 100);
     const after = int(args.after), from = str(args.from)?.replace(/^@/, "").toLowerCase(), search = str(args.search)?.toLowerCase();
     let found: Message[] = this.o.store.messages(room.id, after === undefined ? {} : { after });
@@ -475,6 +475,11 @@ export class RoomKit {
     const total = found.length;
     found = after === undefined ? found.slice(-limit) : found.slice(0, limit);
     const head = `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}.`;
+    // What it reads here it has: a message that still waited for it is not given to it a second time.
+    for (const m of found) {
+      const waits = room.receipts[String(m.seq)]?.[seat.handle];
+      if (waits === "sent" || waits === "queued") this.o.store.setReceipt(room.id, m.seq, seat.handle, null);
+    }
     const lines = found.map((m) => `#${m.seq} ${hm(m.at)} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}`);
     return [head, ...lines].join("\n\n");
   }

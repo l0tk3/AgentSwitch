@@ -307,6 +307,8 @@ export type TerminalHostOptions = {
    *  goes on with a text given at this moment (the answer to its end-of-turn hook) — the text, or null for none. For
    *  an agent that does not, it is only told. */
   readonly mail?: (id: string, takes: boolean) => string | null;
+  /** What a session in the middle of a turn is given at once, between two of its tool calls; null: nothing. */
+  readonly mailNow?: (id: string) => string | null;
   /** The program ended (or never started): what was made for this terminal's agent ends too (its browser session). */
   readonly onExit?: (id: string) => void;
   /** A terminal's agent writes this conversation now — one it was started on, or one it says it is in: under which
@@ -946,7 +948,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1572,6 +1574,12 @@ export class TerminalHost {
           ? same.find((x) => x.call === call) ?? same.find((x) => !x.call && JSON.stringify(x.ask.input) === input)
           : same.find((x) => JSON.stringify(x.ask.input) === input) ?? (same.length === 1 ? same[0] : undefined);
         if (exact) this.settle(s, exact.ask.id, null, "working");
+        // Between two tool calls of Claude Code's own turn (not a sub-agent's), what must not wait for the turn's end
+        // is put in front of it (docs/chatroom-v0.md §5): the user's words in a room.
+        if (s.harness === "claude-code" && !agentId) {
+          const now = this.opts.mailNow?.(s.id) ?? null;
+          if (now) return { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: now } };
+        }
         return null;
       }
       case "Notification": {
