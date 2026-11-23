@@ -435,7 +435,7 @@ describe("what a session is given, and when", () => {
     expect(delivery.atTurnEnd("ui")).toContain("interface.md");       // the colleague's, when the turn ends
     // Read by itself: not given again.
     store.post(room.id, { from: "api", text: "@ui one more" });
-    expect((await say("ui", "room_read", { after: 2 })).text).toContain("one more");
+    expect((await say("ui", "room_read", {})).text).toContain("one more");
     // (#1 was given at the turn's end just now and is dealt with when the next one ends; #3 waits no more.)
     expect(store.get(room.id).receipts).toEqual({ 1: { ui: "delivered" } });
     expect(delivery.atTurnEnd("ui")).toBeNull();
@@ -825,5 +825,53 @@ describe("a stuck task, a long message, and asking for some of what was said (20
     const last = store.last(room.id)!.seq;
     const page = await call("GET", `/rooms/${room.id}/messages?before=${last}&limit=1`);
     expect(page.body.messages.map((m: { seq: number }) => m.seq)).toEqual([last - 1]);
+  });
+});
+
+describe("a Kit that does not fill a session's context (2026-11-24)", () => {
+  it("gives short unread whole, long ones and the overflow as lines, a message whole by number in parts, and a task's card", async () => {
+    const { store, room, say } = made();
+    store.post(room.id, { from: "you", text: "@ui 短的一条" });
+    store.post(room.id, { from: "you", text: `@ui ${"长".repeat(5000)}` });
+    for (let i = 0; i < 8; i++) store.post(room.id, { from: "you", text: `@ui ${String(i).repeat(600)}` });
+    const first = (await say("ui", "room_read", {})).text;
+    expect(first).toContain("Unread by you: 10 (10 for you)");
+    expect(first).toContain("#1 11-23 10:00 @you → @ui\n@ui 短的一条");
+    expect(first).toMatch(/#2 11-23 10:00 @you → @ui: @ui 长+… \(5004 chars\)/);
+    expect(first).toContain("#3 11-23 10:00 @you → @ui\n@ui 000");          // short ones after it still come whole
+    expect(first.length).toBeLessThan(7000);
+    expect(first).toMatch(/stay unread for your next room_read/);
+    // The long one counts as read (asked for by number); the overflow does not.
+    const second = (await say("ui", "room_read", {})).text;
+    expect(second).not.toContain("#2 ");
+    expect(second).toContain("#10 ");
+    // Whole, in parts.
+    const part1 = (await say("ui", "room_read", { seq: 2 })).text;
+    expect(part1).toContain("part 1 of 2");
+    expect(part1).toContain("{ seq: 2, part: 2 }");
+    expect((await say("ui", "room_read", { seq: 2, part: 2 })).text).toContain("part 2 of 2");
+    expect((await say("ui", "room_read", { seq: 99 })).isError).toBe(true);
+    // A task's card; blocked through the Kit.
+    store.addTask(room.id, "you", { title: "Form", owner: "ui" });
+    await say("ui", "room_post", { text: "表单做了一半", task: 1, expects: "none" });
+    const card = (await say("api", "room_tasks", { action: "show", n: 1 })).text;
+    expect(card).toContain("T1 [to do · @ui] Form");
+    expect(card).toMatch(/@ui: 表单做了一半/);
+    expect((await say("ui", "room_tasks", { action: "block", n: 1 })).isError).toBe(true);
+    expect((await say("ui", "room_tasks", { action: "block", n: 1, note: "等接口" })).text).toContain("T1 is blocked: 等接口");
+    expect((await say("api", "room_tasks", {})).text).toContain("T1 [BLOCKED · @ui] Form");
+    // The tools by their new names, and the old names still answered.
+    expect((await say("ui", "room_info", { show: "files" })).text).toContain("shared folder");
+    expect((await say("ui", "room_update", { what: "notes", text: "约定：毫秒" })).text).toContain("pinned notes");
+    expect((await say("ui", "room_notes", {})).text).toContain("约定：毫秒");
+    expect((await say("ui", "room_info", { show: "rooms" })).text).toContain('"login"');
+  });
+
+  it("keeps the tools' own words short", () => {
+    const { kitOf, store, room } = made();
+    store.setCanAdd(room.id, "api", true);
+    const size = (t: string): number => JSON.stringify(kitOf().tools(t)).length;
+    expect(size("ui")).toBeLessThan(5600);      // was 10 381 characters for a member
+    expect(size("api")).toBeLessThan(7200);     // and 15 362 for an admin
   });
 });

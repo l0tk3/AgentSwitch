@@ -7,7 +7,7 @@
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
-import { MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
+import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
 
 /** What bringing sessions in needs of the rest of AgentSwitch (§6 开了“拉会话”才有的): the lists, a check, and
  *  starting a session. Given by the composition root; nothing here carries a credential or an account. */
@@ -36,19 +36,23 @@ export type KitAnswer = { readonly text: string; readonly isError?: true };
 
 const ROOM_ARG = { type: "string", description: "The room, by its name or id. Needed only when you sit in more than one room." };
 
+/** The Kit, small (2026-11-24, user: 不让模型上下文瞬间填满又能检索到需要的数据): five tools, and one more for an
+ *  admin. What they answer is bounded — an index first, a whole message when it is asked for by its number — so a
+ *  session that reads the room does not fill its context with it. The tools of before are still answered by their
+ *  old names (an agent lists its tools once and keeps calling them), see ALIASES. */
 const TOOLS: readonly KitTool[] = [
   {
     name: "room_post",
-    description: "Say something in an AgentSwitch Chat Room you sit in. Other sessions there are colleagues working on their own tasks; the user reads the room too. Write @name in the text (or list names in `to`) to send it to those members: they are woken with it, each when it can take it. Without an @ the message is only written into the room and wakes nobody. This returns at once and does not wait for a reply: a reply arrives later as a room message addressed to you. Keep it short and exact (what changed, what you need, file paths); do not chat. Nothing from your own session that the room's task does not need: no credentials, accounts, or private matters of the user's.",
+    description: `Say something in an AgentSwitch Chat Room you sit in; the user reads it too. @name (or \`to\`) sends it to those members and wakes them; without an @ it wakes nobody. Returns at once; a reply comes later as a room message. At most ${MAX_SESSION_TEXT} characters: the conclusion, what you need, paths — anything longer goes into a file in the shared folder (room_info files) and the message names it. No credentials or private matters of the user's.`,
     inputSchema: {
       type: "object",
       properties: {
         text: { type: "string", description: "The message. @name addresses a member; @you is the user." },
         to: { type: "array", items: { type: "string" }, description: "Members to address, besides any @name in the text." },
-        files: { type: "array", items: { type: "string" }, description: "Files to point the others at, by absolute path on this machine (they are not copied; the others read them where they are)." },
-        reply_to: { type: "integer", description: "The number of the message this answers (the #n in its envelope). It is sent to that message's author too." },
-        expects: { type: "string", enum: ["none", "answer"], description: "Say it every time you address someone: `none` — you report or inform (done, a result, a file) and want no reply; `answer` — you ask or request and wait for one. Readers are told, and do not answer what expects none." },
-        task: { type: "integer", description: "The task of the room's list this is about (3 for T3): readers follow one piece of work by it. A reply is about what it answers unless you say. Leave it out for what is about no one task." },
+        files: { type: "array", items: { type: "string" }, description: "Absolute paths of files to point at (not copied)." },
+        reply_to: { type: "integer", description: "The #n this answers; its author gets it too." },
+        expects: { type: "string", enum: ["none", "answer"], description: "When you address someone: none — a report, no reply wanted; answer — a question or request." },
+        task: { type: "integer", description: "The task this is about (3 for T3). A reply keeps the task of what it answers." },
         room: ROOM_ARG,
       },
       required: ["text"],
@@ -56,130 +60,120 @@ const TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_read",
-    description: "Read an AgentSwitch Chat Room you sit in. With no arguments: what you have not read yet, and nothing you have — each message is read once. Or: the latest again (`all`), those after a number, from one member, or containing a text. Messages not addressed to you are not sent to you; this is how you see them.",
+    description: "Read a Chat Room you sit in. No arguments: what you have not read yet, each message once — short ones whole, the rest as one line each. `seq`: one message whole (`part` for the next part of a long one). `search` (words), `task`, `from`, `before`: an index, one line a message, newest last — then ask for the ones you need by `seq`. Messages not addressed to you reach you only this way.",
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", description: "How many, at most (default 20, up to 100)." },
-        all: { type: "boolean", description: "The latest messages again, read or not. Without it (and without after/from/search) you get only what you have not read yet." },
-        after: { type: "integer", description: "Only messages after this number." },
-        from: { type: "string", description: "Only this member's messages." },
-        search: { type: "string", description: "Only messages containing this text." },
-        task: { type: "integer", description: "Only messages about this task of the list (3 for T3)." },
+        seq: { type: "integer", description: "One message, whole." },
+        part: { type: "integer", description: "With seq: the part of a long message (1, 2, …)." },
+        search: { type: "string", description: "Messages whose words contain this." },
+        task: { type: "integer", description: "Messages about this task (3 for T3)." },
+        from: { type: "string", description: "One member's messages." },
+        before: { type: "integer", description: "The page of messages before this number." },
         room: ROOM_ARG,
       },
     },
-  },
-  {
-    name: "room_members",
-    description: "Who sits in an AgentSwitch Chat Room you sit in: each member's @name, agent, model, profile, folder, and its state now (whether a message to it would be taken now, later, or not at all).",
-    inputSchema: { type: "object", properties: { room: ROOM_ARG } },
-  },
-  {
-    name: "room_notes",
-    description: "The pinned notes of an AgentSwitch Chat Room you sit in: one shared text all members read and write — what was agreed (conventions, interfaces, who does what, what is left). Without `text` this reads them. With `text` it replaces the whole notes with that text: read first, then write back everything that should stay plus your change. Use it for what must outlast the conversation, not for chatting.",
-    inputSchema: { type: "object", properties: { text: { type: "string", description: "The whole new notes. Omit to read." }, room: ROOM_ARG } },
-  },
-  {
-    name: "room_files",
-    description: "The shared folder of an AgentSwitch Chat Room you sit in: its absolute path and the files in it, newest first. Every member reads and writes this folder directly, with its own file tools. Hand over anything longer than a few lines as a file here — a report, a plan, an interface, a diff, a log — and room_post only its path and one sentence of what it says: nothing is lost in retelling and nobody pays to read it twice. Give a file a name that says what it is, and write a new file rather than changing another member's.",
-    inputSchema: { type: "object", properties: { room: ROOM_ARG } },
-  },
-  {
-    name: "room_handoff",
-    description: "Write your handover note for an AgentSwitch Chat Room you sit in: what only you know and whoever takes your work over will need — what you were doing, how far it is (what is done and checked, what is half done), what comes next, what to watch out for, and where the files are. It replaces your earlier note. Write it when you are asked to hand over, when you are about to stop with work unfinished, and before a long task's context is lost; a new member reads it from the room's record (the `_room` folder in the shared folder, with the log, the tasks and the notes).",
-    inputSchema: { type: "object", properties: { text: { type: "string", description: "The note, in plain words. Paths rather than pasted contents." }, room: ROOM_ARG }, required: ["text"] },
-  },
-  {
-    name: "room_rename",
-    description: "Change a name in the AgentSwitch Chat Room you sit in: the @name others address a member by. It is a nickname for this room only — a session's own name in AgentSwitch is another thing (session_rename). A member's first @name was taken from whatever its session was called when it was seated and may say nothing of what it does here (\"hello\", \"untitled-2\"); take one that says what to address you for, short, lower case (`backend`, `ios`, `reviewer`). Without `handle` it is your own; an admin may rename another member with `handle`. Everything the room keeps moves to the new name, and the old one still reaches its member. Once, early; not again without a reason.",
-    inputSchema: { type: "object", properties: { name: { type: "string", description: "The new @name, without @: letters, digits and dashes." }, handle: { type: "string", description: "Admins only: the member to rename. Omit for yourself." }, room: ROOM_ARG }, required: ["name"] },
-  },
-  {
-    name: "session_rename",
-    description: "Change your own session's name in AgentSwitch: what the user sees in the list of terminals and sessions (the user's own renaming, done by you). It is your real name, apart from your @name in a room (room_rename), and the two need not match. Use it when the name says nothing of what this session is about — the first words of an old request, \"hello\" — and give a few words that do.",
-    inputSchema: { type: "object", properties: { name: { type: "string", description: "The new name: a few words, as the user will read it." } }, required: ["name"] },
   },
   {
     name: "room_tasks",
-    description: "The task list of an AgentSwitch Chat Room you sit in: who does what and how far it is, seen by every member and the user. Without `action` it lists the tasks. `add` a task for work that is not on the list yet (a title that says what is done when it is done; `after` for tasks that must come first; `owner` to give it to a member). Whoever a task is given to, and whoever waits for one that is done, is told in the room by itself: do not post that again. `take` a task before you start on it — one another member is doing can not be taken, so two never do the same work. `done` when it is finished, with `note`: what the others need and no retelling — the names of what you made, file and line, the check you ran and its result, or the path of the file that holds it. `release` gives back one you can not finish. Look here before you start something, and keep your own tasks true: others plan by them.",
+    description: "The room's task list: who does what, seen by all. No action: the list. `show` n: one task with its latest messages and who changes which files — enough to take it over. `add` (title; detail; after: tasks first; owner). `take` before you start; `block` with `note` when you can not go on (the asker and the user are told); `done` with `note` (the result in a line: names, file:line, the check run, or the file that holds it); `release`; `edit`; `remove`. Whoever a task is given to or freed for is told by itself: do not post it again.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["list", "add", "take", "done", "release", "edit", "remove"], description: "Default: list." },
-        n: { type: "integer", description: "The task's number (the 3 of T3), for take, done, release, edit, remove." },
-        title: { type: "string", description: "For add (and edit)." },
-        detail: { type: "string", description: "For add (and edit): what exactly, where, how it is checked." },
-        after: { type: "array", items: { type: "integer" }, description: "For add: numbers of the tasks that must be done first." },
-        owner: { type: "string", description: "For add or edit: the member whose task it is (@name)." },
-        note: { type: "string", description: "For done (or edit): the result in a line, or the file that holds it." },
+        action: { type: "string", enum: ["list", "show", "add", "take", "block", "done", "release", "edit", "remove"] },
+        n: { type: "integer", description: "The task's number (3 for T3)." },
+        title: { type: "string" },
+        detail: { type: "string" },
+        after: { type: "array", items: { type: "integer" }, description: "For add: tasks that must be done first." },
+        owner: { type: "string", description: "@name." },
+        note: { type: "string", description: "For block, done, edit." },
         room: ROOM_ARG,
       },
     },
   },
   {
-    name: "room_changing",
-    description: "Tell the members of an AgentSwitch Chat Room you sit in which files or folders you are about to change, so that two sessions do not change the same file unknowingly. Give `paths` (absolute; a folder covers what is in it) before you edit; it replaces what you said before and lapses by itself after `minutes` (default " + 30 + "). You are told at once if another member said it is changing the same files: then talk to it in the room before you touch them. It is a word to the others, not a lock: nothing is blocked. `paths: []` when you are done. Without `paths` it lists what everyone is changing now.",
+    name: "room_info",
+    description: "About a room you sit in. `members` (default): who is here, their agent, model, folder and state. `notes`: the pinned notes all members keep. `files`: the shared folder's path and its files, newest first — hand anything long over as a file there. `changing`: which files members said they are changing now. `rooms`: the rooms you sit in.",
+    inputSchema: { type: "object", properties: { show: { type: "string", enum: ["members", "notes", "files", "changing", "rooms"] }, room: ROOM_ARG } },
+  },
+  {
+    name: "room_update",
+    description: "Change something of yours in a room. `notes` with text: replaces the whole pinned notes (read them first, write back what stays). `changing` with paths: the files you are about to change (absolute; [] when done; lapses after `minutes`) — you are told if another member said the same files. `handoff` with text: your handover note — what you did, how far, what next, where the files are. `rename` with name: your @name here (an admin may give `handle`). `session_rename` with name: your session's own name in AgentSwitch.",
     inputSchema: {
       type: "object",
       properties: {
-        paths: { type: "array", items: { type: "string" }, description: "Absolute paths of the files or folders you are changing. Empty: none any more. Omit to list." },
-        minutes: { type: "integer", description: "For how long (default 30, up to 240). Say it again to go on." },
-        why: { type: "string", description: "What for, in a few words (or the task: T3)." },
+        what: { type: "string", enum: ["notes", "changing", "handoff", "rename", "session_rename"] },
+        text: { type: "string" },
+        name: { type: "string" },
+        handle: { type: "string" },
+        paths: { type: "array", items: { type: "string" } },
+        minutes: { type: "integer" },
+        why: { type: "string" },
         room: ROOM_ARG,
       },
+      required: ["what"],
     },
   },
 ];
 
 /** For an admin: a session whose `Admin` switch (the `canAdd` of its seat) is on. */
 const ORG_TOOLS: readonly KitTool[] = [
-  { name: "rooms", description: "The Chat Rooms that exist in AgentSwitch: name, id, topic, how many members. (You may add sessions, so you can see them.)", inputSchema: { type: "object", properties: {} } },
   {
-    name: "room_create",
-    description: "Make a new AgentSwitch Chat Room and take a seat in it (you keep your seats elsewhere). Give it a short name and a one-sentence topic: members read the topic first. Then bring sessions in with room_add.",
-    inputSchema: { type: "object", properties: { name: { type: "string" }, topic: { type: "string", description: "One sentence: what this room is for." } }, required: ["name"] },
-  },
-  {
-    name: "room_add",
-    description: "Bring a session into a Chat Room you sit in. One of three: (1) a session that is running — give `terminal` (from `sessions`); (2) a new session — give `agent` and `cwd`, and optionally `profile`, `model`, `mode`; (3) an existing session resumed — give `agent`, `resume` (its id from `sessions`) and `cwd`, optionally `profile` to continue it under another profile. A session you start can not start sessions itself, and you may start at most " + MAX_STARTED + ". It joins idle and knows nothing of your task: after adding it, room_post an @message that says exactly what you need from it. Before you add one, ask whether you can say now what this part and that part each hand over: if you can and neither waits for the other, add a member; if one waits for the other, do the first part first; if you can not say yet, the work is not ready to be split.",
+    name: "room_admin",
+    description: "For a room's admin. `sessions` (search, limit): running sessions and ones that can be resumed. `profiles`, `models` (agent), `check` (agent, profile). `add`: bring a session in — `terminal` (running), or `agent` + `cwd` (new; profile, model, mode — default bypass), or `agent` + `resume` + `cwd`. It joins knowing nothing: then room_post it what you need. Before adding, ask whether you can say what each part hands over and neither waits for the other; if not, the work is not ready to split. You may start at most " + MAX_STARTED + " sessions. `resume`, `mute`, `unmute`, `kick`, `end` (closes a session a session started; its conversation kept), `delete` (and its record) — with `handle` (`resume` all: every ended one). `create`: a new room (name, topic). `rooms`: every room.",
     inputSchema: {
       type: "object",
       properties: {
-        terminal: { type: "string", description: "A running session's terminal id." },
-        agent: { type: "string", enum: ["claude-code", "codex", "opencode", "pi"] },
-        cwd: { type: "string", description: "The folder the session works in (absolute path)." },
-        profile: { type: "string", description: "A profile id from `profiles`; default: the agent's current one." },
-        model: { type: "string", description: "A model id from `models`; default: the agent's own default." },
-        mode: { type: "string", enum: ["manual", "auto", "bypass"], description: "How it asks for permission; default bypass." },
-        resume: { type: "string", description: "The id of an existing session to resume." },
+        action: { type: "string", enum: ["sessions", "profiles", "models", "check", "add", "resume", "mute", "unmute", "kick", "end", "delete", "create", "rooms"] },
+        handle: { type: "string" }, terminal: { type: "string" }, agent: { type: "string", enum: ["claude-code", "codex", "opencode", "pi"] },
+        cwd: { type: "string" }, profile: { type: "string" }, model: { type: "string" }, mode: { type: "string", enum: ["manual", "auto", "bypass"] },
+        resume: { type: "string" }, name: { type: "string" }, topic: { type: "string" }, search: { type: "string" }, limit: { type: "integer" },
         room: ROOM_ARG,
       },
+      required: ["action"],
     },
   },
-  {
-    name: "room_manage",
-    description: "Admin actions in a Chat Room you sit in, if the user made you an admin of the room (the Admin switch on your card): `resume` a member whose session has ended, bringing the same conversation back; `mute` a member that floods the room or does not do its work (it can still read and work, but not post or write the notes); `unmute` it; `kick` it out of the room (its session keeps running); `end` a session that a session started (with room_add) — out of the room and its terminal closed, its conversation kept (it can be resumed); `delete` it — the same, and its conversation's record deleted too: for helpers whose work is done, also ones already kicked. A session the user started is never ended or deleted from here. Only the user can mute or kick another admin, and nobody can manage themselves or the user.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        action: { type: "string", enum: ["resume", "mute", "unmute", "kick", "end", "delete"] },
-        handle: { type: "string", description: "The member's @name. For `resume`, `all` brings back every member whose session has ended." },
-        room: ROOM_ARG,
-      },
-      required: ["action", "handle"],
-    },
-  },
-  { name: "profiles", description: "AgentSwitch's profiles per agent: id, name, whether it is a subscription or pays by an API key, and the result and time of its last health check. No accounts, no keys.", inputSchema: { type: "object", properties: {} } },
-  { name: "models", description: "The models each agent offers now, for room_add's `model`.", inputSchema: { type: "object", properties: { agent: { type: "string", description: "Only this agent's." } } } },
-  { name: "sessions", description: "Sessions that can be brought into a room: the ones running in AgentSwitch's terminals (with their terminal id and state), and recent ones that can be resumed (with their id, title, folder, time). Truncated: ask with `search` to narrow.", inputSchema: { type: "object", properties: { search: { type: "string", description: "Only sessions whose title or folder contains this." }, limit: { type: "integer", description: "How many resumable ones at most (default 20, up to 50)." } } } },
-  { name: "profile_check", description: "Check again whether a profile can reach its service. For a Claude subscription profile this sends one real request and may use a little quota: use it only when the last result (in `profiles`) is old or you are about to start a session under it.", inputSchema: { type: "object", properties: { agent: { type: "string" }, profile: { type: "string", description: "The profile's id." } }, required: ["agent", "profile"] } },
 ];
+
+/** The tools of before, answered still: an agent that listed them keeps calling them by these names. */
+const ALIASES: Readonly<Record<string, (args: Record<string, unknown>) => [string, Record<string, unknown>]>> = {
+  room_members: (a) => ["room_info", { ...a, show: "members" }],
+  room_files: (a) => ["room_info", { ...a, show: "files" }],
+  room_notes: (a) => (typeof a.text === "string" ? ["room_update", { ...a, what: "notes" }] : ["room_info", { ...a, show: "notes" }]),
+  room_changing: (a) => (Array.isArray(a.paths) ? ["room_update", { ...a, what: "changing" }] : ["room_info", { ...a, show: "changing" }]),
+  room_handoff: (a) => ["room_update", { ...a, what: "handoff" }],
+  room_rename: (a) => ["room_update", { ...a, what: "rename" }],
+  session_rename: (a) => ["room_update", { ...a, what: "session_rename" }],
+  rooms: (a) => ["room_admin", { ...a, action: "rooms" }],
+  room_create: (a) => ["room_admin", { ...a, action: "create" }],
+  room_add: (a) => ["room_admin", { ...a, action: "add" }],
+  room_manage: (a) => ["room_admin", { ...a }],
+  profiles: (a) => ["room_admin", { ...a, action: "profiles" }],
+  models: (a) => ["room_admin", { ...a, action: "models" }],
+  sessions: (a) => ["room_admin", { ...a, action: "sessions" }],
+  profile_check: (a) => ["room_admin", { ...a, action: "check" }],
+};
+
+/** How much one answer of room_read may be: what is past it is given as one line a message. */
+const READ_BUDGET = 4000;
+/** A message given whole in the unread is at most this long; past it, a line and its number. */
+const WHOLE_UP_TO = 1200;
+/** One part of a long message asked for by its number. */
+const PART = 3000;
+/** Lines in an index. */
+const INDEX_LINES = 30;
+
 const NO_ROOM = "This session sits in no Chat Room now. The user (or an admin of a room) seats a session in a room.";
 const NOT_ALLOWED = "This session is not an admin of the room: the user has not turned on Admin for it (the switch is on its card in the room).";
 const ago = (at: number, now: number): string => { const m = Math.round((now - at) / 60_000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 
 const hm = (at: number): string => { const t = new Date(at); return `${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
+/** Of its own message, a session is told who has read it and who has not yet. */
+const readBy = (m: Message, me: string, reads: Readonly<Record<string, readonly string[]>>, lead: string): string => {
+  if (m.from !== me || !m.to.length) return "";
+  const sessions = m.to.filter((h) => h !== YOU), read = sessions.filter((h) => reads[String(m.seq)]?.includes(h)), not = sessions.filter((h) => !read.includes(h));
+  return sessions.length ? `${lead}[${read.length ? `read by ${read.map((h) => `@${h}`).join(" ")}` : "read by nobody yet"}${not.length && read.length ? `; not yet: ${not.map((h) => `@${h}`).join(" ")}` : ""}]` : "";
+};
 const int = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) ? v : typeof v === "string" && /^\d+$/.test(v) ? Number(v) : undefined);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
@@ -257,48 +251,35 @@ export class RoomKit {
 
   /** One call of a tool by a terminal's session. The switch is looked at now, each time: turned off, the next call
    *  is refused whatever the agent still lists. */
-  async call(terminal: string, name: string, args: Record<string, unknown>): Promise<KitAnswer> {
+  async call(terminal: string, asked: string, given: Record<string, unknown>): Promise<KitAnswer> {
+    const [name, args] = ALIASES[asked]?.(given) ?? [asked, given];
     try {
-      if (ORG_TOOLS.some((t) => t.name === name)) {
+      if (name === "room_admin") {
         const org = this.o.org?.();
         if (!this.o.store.roomsOf(terminal).length) throw new RoomError(403, NO_ROOM);
         if (!this.o.store.mayAdd(terminal) || !org) throw new RoomError(403, NOT_ALLOWED);
-        return { text: await this.organize(org, terminal, name, args) };
+        return { text: await this.organize(org, terminal, str(args.action) ?? "", args) };
       }
-      if (!TOOLS.some((t) => t.name === name)) return { text: `There is no tool ${name} in the Chatroom Kit.`, isError: true };
+      if (!TOOLS.some((t) => t.name === name)) return { text: `There is no tool ${asked} in the Chatroom Kit.`, isError: true };
       const { room, seat } = this.where(terminal, str(args.room));
       this.o.store.count(room.id, seat.handle, { calls: 1 });
       switch (name) {
         case "room_post": return { text: this.post(room, seat, args) };
         case "room_read": return { text: this.read(room, seat, args) };
-        case "room_notes": return { text: this.notes(room, seat, args) };
-        case "room_files": return { text: this.files(room) };
-        case "room_handoff": {
-          const file = this.o.store.handoff(room.id, seat.handle, typeof args.text === "string" ? args.text : "");
-          this.o.changed?.(room.id);
-          return { text: `Your handover note is kept at ${file}. Whoever takes your work over reads it there; tell them it exists (room_post, expects none) if someone is waiting for it.` };
-        }
-        case "room_rename": {
-          const other = str(args.handle)?.replace(/^@/, "").toLowerCase();
-          const target = other && other !== seat.handle ? room.seats.find((x) => x.handle === (room.renames[other] ?? other)) : seat;
-          if (!target) throw new RoomError(404, `There is no @${other} in this room.`);
-          const was = target.handle;
-          const now = this.o.store.rename(room.id, seat.handle, target.handle, typeof args.name === "string" ? args.name : "");
-          this.o.changed?.(room.id);
-          const who = target === seat ? "You are" : `@${was} is`;
-          return { text: now.handle === was ? `${who} @${was} already.` : `${who} @${now.handle} in "${room.name}" now (was @${was}; that name still reaches ${target === seat ? "you" : "it"}). A room's nickname only: ${target === seat ? "your session's own name in AgentSwitch is unchanged (session_rename changes that)" : "its session's own name is unchanged"}.` };
-        }
-        case "session_rename": {
-          const wanted = (typeof args.name === "string" ? args.name : "").replace(/\s+/g, " ").trim().slice(0, 80);
-          if (!wanted) throw new RoomError(400, "session_rename needs a name.");
-          const org = this.o.org?.();
-          if (!org) throw new RoomError(409, "Sessions can not be renamed from here on this service.");
-          await org.rename(terminal, wanted);
-          return { text: `This session is called "${wanted}" in AgentSwitch now. Your @name in the room is still @${seat.handle} (room_rename changes that).` };
-        }
         case "room_tasks": return { text: this.tasks(room, seat, args) };
-        case "room_changing": return { text: this.changing(room, seat, args) };
-        default: return { text: this.members(room, seat) };
+        case "room_info": {
+          switch (str(args.show) ?? "members") {
+            case "notes": return { text: this.notes(room, seat, {}) };
+            case "files": return { text: this.files(room) };
+            case "changing": return { text: this.changing(room, seat, {}) };
+            case "rooms": {
+              const sits = this.o.store.roomsOf(terminal);
+              return { text: sits.map((x) => `"${x.room.name}" (${x.room.id}) — you are @${x.seat.handle}${x.seat.canAdd ? ", admin" : ""}${x.room.topic ? ` · ${x.room.topic}` : ""}`).join("\n") };
+            }
+            default: return { text: this.members(room, seat) };
+          }
+        }
+        default: return { text: await this.update(terminal, room, seat, args) };
       }
     } catch (err) {
       if (err instanceof RoomError) return { text: err.message, isError: true };
@@ -306,15 +287,48 @@ export class RoomKit {
     }
   }
 
-  private async organize(org: KitOrg, terminal: string, name: string, args: Record<string, unknown>): Promise<string> {
+  private async update(terminal: string, room: Room, seat: Seat, args: Record<string, unknown>): Promise<string> {
+    switch (str(args.what)) {
+      case "notes":
+        if (typeof args.text !== "string") throw new RoomError(400, "room_update notes needs `text`, the whole new notes.");
+        return this.notes(room, seat, args);
+      case "changing": return this.changing(room, seat, { ...args, paths: Array.isArray(args.paths) ? args.paths : [] });
+      case "handoff": {
+        const file = this.o.store.handoff(room.id, seat.handle, typeof args.text === "string" ? args.text : "");
+        this.o.changed?.(room.id);
+        return `Your handover note is kept at ${file}. Whoever takes your work over reads it there; tell them it exists (room_post, expects none) if someone is waiting for it.`;
+      }
+      case "rename": {
+        const other = str(args.handle)?.replace(/^@/, "").toLowerCase();
+        const target = other && other !== seat.handle ? room.seats.find((x) => x.handle === (room.renames[other] ?? other)) : seat;
+        if (!target) throw new RoomError(404, `There is no @${other} in this room.`);
+        const was = target.handle;
+        const now = this.o.store.rename(room.id, seat.handle, target.handle, typeof args.name === "string" ? args.name : "");
+        this.o.changed?.(room.id);
+        const who = target === seat ? "You are" : `@${was} is`;
+        return now.handle === was ? `${who} @${was} already.` : `${who} @${now.handle} in "${room.name}" now (was @${was}; that name still reaches ${target === seat ? "you" : "it"}). A room's nickname only: ${target === seat ? "your session's own name in AgentSwitch is unchanged (room_update session_rename changes that)" : "its session's own name is unchanged"}.`;
+      }
+      case "session_rename": {
+        const wanted = (typeof args.name === "string" ? args.name : "").replace(/\s+/g, " ").trim().slice(0, 80);
+        if (!wanted) throw new RoomError(400, "session_rename needs a name.");
+        const org = this.o.org?.();
+        if (!org) throw new RoomError(409, "Sessions can not be renamed from here on this service.");
+        await org.rename(terminal, wanted);
+        return `This session is called "${wanted}" in AgentSwitch now. Your @name in the room is still @${seat.handle} (room_update rename changes that).`;
+      }
+      default: throw new RoomError(400, "room_update: `what` is notes, changing, handoff, rename or session_rename.");
+    }
+  }
+
+  private async organize(org: KitOrg, terminal: string, action: string, args: Record<string, unknown>): Promise<string> {
     const now = (this.o.now ?? Date.now)();
-    switch (name) {
+    switch (action) {
       case "rooms": {
         const mine = new Set(this.o.store.roomsOf(terminal).map((s) => s.room.id));
         const all = this.o.store.list();
         return [`${all.length} room${all.length === 1 ? "" : "s"}:`, ...all.map((r) => `"${r.name}" (${r.id})${mine.has(r.id) ? " — you sit here" : ""} · ${r.seats.filter((s) => s.left === undefined).length} members${r.paused ? " · paused" : ""}${r.topic ? `\n  ${r.topic}` : ""}`)].join("\n");
       }
-      case "room_create": {
+      case "create": {
         const me = this.o.store.roomsOf(terminal).find((s) => s.seat.canAdd)!;
         const live = this.o.seat(terminal);
         const { mode: _mode, node: _node, ...was } = live?.card ?? { ...me.seat.was!, mode: null, node: null };
@@ -322,10 +336,10 @@ export class RoomKit {
         const room = this.o.store.create({ name: typeof args.name === "string" ? args.name : "", ...(topic ? { topic } : {}), by: me.seat.handle });
         const seat = this.o.store.seat(room.id, { terminal, was, canAdd: true, by: me.seat.handle });
         this.o.changed?.(room.id);
-        return `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you). Bring sessions in with room_add (room: "${room.id}"). You sit in more than one room now: name the room in each call.`;
+        return `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you). Bring sessions in with room_admin { action: "add", room: "${room.id}"). You sit in more than one room now: name the room in each call.`;
       }
-      case "room_add": return this.add(org, terminal, args);
-      case "room_manage": return this.manage(org, terminal, args);
+      case "add": return this.add(org, terminal, args);
+      case "resume": case "mute": case "unmute": case "kick": case "end": case "delete": return this.manage(org, terminal, args);
       case "profiles": {
         const all = await org.profiles();
         return [`${all.length} profiles:`, ...all.map((p) => `${p.agent} · ${p.id} · "${p.name}" · ${p.kind === "api" ? "API key" : "subscription"} · ${p.health ? `${p.health.status}, checked ${ago(p.health.checkedAt, now)}${p.health.message ? ` (${p.health.message})` : ""}` : "not checked yet"}`)].join("\n");
@@ -344,18 +358,19 @@ export class RoomKit {
         const open = new Set(all.running.map((s) => s.terminal));
         const resumable = all.resumable.filter((s) => hit(s.title, s.cwd)).slice(0, limit);
         return [
-          `Running (${running.length}) — add with room_add { terminal }:`,
+          `Running (${running.length}) — add with room_admin { action: "add", terminal }:`,
           ...running.map((s) => `  ${s.terminal} · ${s.agent} · "${s.name}" · ${s.cwd} · ${s.state}${s.profile ? ` · profile ${s.profile}` : ""}${s.terminal === terminal ? " · (you)" : seated.has(s.terminal) ? " · in a room" : ""}`),
-          `Can be resumed (${resumable.length} shown) — add with room_add { agent, resume, cwd }:`,
+          `Can be resumed (${resumable.length} shown) — add with room_admin { action: "add", agent, resume, cwd }:`,
           ...resumable.filter((s) => !open.has(s.id)).map((s) => `  ${s.agent} · ${s.id} · "${s.title}" · ${s.cwd} · ${ago(s.updatedAt, now)}${s.profile ? ` · profile ${s.profile}` : ""}`),
         ].join("\n");
       }
-      default: {
+      case "check": {
         const agent = str(args.agent), profile = str(args.profile);
-        if (!agent || !profile) throw new RoomError(400, "profile_check needs `agent` and `profile` (an id from `profiles`).");
+        if (!agent || !profile) throw new RoomError(400, "room_admin check needs `agent` and `profile` (an id from `profiles`).");
         const result = await org.check(agent, profile);
         return `${agent} · ${profile}: ${result.status}${result.message ? ` — ${result.message}` : ""} (checked just now)`;
       }
+      default: throw new RoomError(400, "room_admin: `action` is sessions, profiles, models, check, add, resume, mute, unmute, kick, end, delete, create or rooms.");
     }
   }
 
@@ -365,7 +380,7 @@ export class RoomKit {
     const sit = (target: string, started: boolean): string => {
       const live = this.o.seat(target);
       if (!live) throw new RoomError(404, `There is no running session with terminal id ${target}. See \`sessions\`.`);
-      if (live.state === "exited") throw new RoomError(409, "That session has ended; resume it instead (room_add with `agent`, `resume`, `cwd`).");
+      if (live.state === "exited") throw new RoomError(409, "That session has ended; resume it instead (room_admin add with `agent`, `resume`, `cwd`).");
       const { mode: _mode, node: _node, ...was } = live.card;
       const seat = this.o.store.seat(room.id, { terminal: target, was, by: me.handle, ...(started ? { byAgent: true, starter: terminal } : {}) });
       this.o.changed?.(room.id);
@@ -375,7 +390,7 @@ export class RoomKit {
       if (running === terminal) throw new RoomError(400, "That is you; you already sit here.");
       return sit(running, false);
     }
-    if (!agent || !cwd) throw new RoomError(400, "room_add needs `terminal` (a running session), or `agent` and `cwd` (a new session; with `resume` an existing one).");
+    if (!agent || !cwd) throw new RoomError(400, "room_admin add needs `terminal` (a running session), or `agent` and `cwd` (a new session; with `resume` an existing one).");
     if (this.o.store.startedBy(terminal) >= MAX_STARTED) throw new RoomError(409, `You have started ${MAX_STARTED} sessions that still sit in rooms; that is the most one session may. Work with them, or ask the user.`);
     // A session started for a room runs in bypass unless the caller says otherwise (2026-11-24, user).
     const mode = str(args.mode) || "bypass";
@@ -397,7 +412,7 @@ export class RoomKit {
     if (!me.canAdd) throw new RoomError(403, NOT_ALLOWED);
     if (me.muted) throw new RoomError(403, `@${me.handle} is muted by @${me.muted.by}: it can not manage the room until it is unmuted.`);
     const action = str(args.action), name = str(args.handle)?.replace(/^@/, "").toLowerCase();
-    if (!action || !name) throw new RoomError(400, "room_manage needs `action` and `handle`.");
+    if (!action || !name) throw new RoomError(400, "room_admin needs `action` and `handle`.");
     if (action === "resume" && name === "all") {
       const done = await resumeEnded(this.o.store, org, room.id, (t) => this.o.seat(t)?.state ?? null, (id) => {
         const card = this.o.seat(id)?.card;
@@ -438,7 +453,7 @@ export class RoomKit {
         this.o.store.unseat(room.id, target.handle, me.handle);
         this.o.changed?.(room.id);
         this.o.delivery.look();
-        return `@${target.handle} is out of "${room.name}". Its session keeps running outside the room; the user or an admin can bring it back with room_add.`;
+        return `@${target.handle} is out of "${room.name}". Its session keeps running outside the room; the user or an admin can bring it back with room_admin add.`;
       }
       case "resume": {
         if (target.left !== undefined) throw new RoomError(403, `@${target.handle} has left the room.`);
@@ -453,7 +468,7 @@ export class RoomKit {
         this.o.delivery.look();
         return `@${back.handle} is back in "${room.name}" with the same conversation (${[agentName(was.agent), was.model, was.cwd].filter(Boolean).join(" · ")}). It knows nothing new of your task: room_post an @${back.handle} message if it should go on.`;
       }
-      default: throw new RoomError(400, "room_manage: action is resume, mute, unmute, kick or end.");
+      default: throw new RoomError(400, "room_admin: action is resume, mute, unmute, kick, end or delete.");
     }
   }
 
@@ -476,7 +491,7 @@ export class RoomKit {
     const need = (): number => { if (n === undefined) throw new RoomError(400, `room_tasks ${action} needs \`n\`, the task's number.`); return n; };
     const line = (t: Task, all: readonly Task[]): string => {
       const waits = (t.after ?? []).filter((a) => all.some((o) => o.n === a && o.state !== "done"));
-      return `T${t.n} [${t.state === "todo" ? "to do" : t.state}${t.owner ? ` · @${t.owner}${t.owner === seat.handle ? " (you)" : ""}` : ""}] ${t.title}${waits.length ? ` — waits for ${waits.map((a) => `T${a}`).join(", ")}` : ""}${t.detail ? `\n    ${t.detail.replace(/\n/g, "\n    ")}` : ""}${t.note ? `\n    → ${t.note.replace(/\n/g, "\n    ")}` : ""}`;
+      return `T${t.n} [${t.state === "todo" ? "to do" : t.state === "blocked" ? "BLOCKED" : t.state}${t.owner ? ` · @${t.owner}${t.owner === seat.handle ? " (you)" : ""}` : ""}] ${t.title}${waits.length ? ` — waits for ${waits.map((a) => `T${a}`).join(", ")}` : ""}${t.detail ? `\n    ${t.detail.replace(/\n/g, "\n    ")}` : ""}${t.note ? `\n    → ${t.note.replace(/\n/g, "\n    ")}` : ""}`;
     };
     const told = (text: string): string => { this.o.changed?.(room.id); return text; };
     switch (action) {
@@ -499,6 +514,26 @@ export class RoomKit {
         return told(`T${task.n} is done.${note ? "" : " (No note given: say the result in one line with action edit, or post it.)"}${freed.length ? `\nNow free to start: ${freed.map((t) => `T${t.n}${t.owner ? ` (@${t.owner}, told)` : ""}`).join(", ")}.` : ""}`);
       }
       case "release": { const task = store.setTask(room.id, seat.handle, need(), { state: "todo" }); return told(`T${task.n} is to do again, nobody's.`); }
+      case "block": {
+        const note = str(args.note);
+        const task = store.setTask(room.id, seat.handle, need(), { state: "blocked", ...(note ? { note } : {}) });
+        return told(`T${task.n} is blocked: ${task.note}. The one who asked for it and the user were told; take it again (take) when you can go on.`);
+      }
+      case "show": {
+        // Enough to take it over: the task, what it waits for, who changes what for it, and its latest messages.
+        const all = room.tasks, task = all.find((t) => t.n === need());
+        if (!task) throw new RoomError(404, `There is no T${n}.`);
+        const said = store.messagesOfTask(room.id, task.n, 10);
+        const claims = store.claims(room.id).filter((c) => c.handle === task.owner || (c.why ?? "").includes(`T${task.n}`));
+        const handoff = task.owner ? store.handoffPath(room.id, task.owner) : null;
+        return [
+          line(task, all),
+          ...(claims.length ? [`Being changed for it: ${claims.map((c) => `@${c.handle}: ${c.paths.join(", ")}`).join("; ")}`] : []),
+          ...(handoff ? [`@${task.owner}'s handover note: ${handoff}`] : []),
+          said.length ? `Its latest ${said.length} message${said.length === 1 ? "" : "s"} (whole: room_read { seq }; all of them: room_read { task: ${task.n} }):` : "No messages about it yet.",
+          ...said.map((m) => this.line(m)),
+        ].join("\n");
+      }
       case "edit": {
         const title = str(args.title), owner = str(args.owner);
         const task = store.setTask(room.id, seat.handle, need(), { ...(title ? { title } : {}), ...(typeof args.detail === "string" ? { detail: args.detail } : {}), ...(typeof args.note === "string" ? { note: args.note } : {}), ...(owner ? { owner } : {}) });
@@ -511,7 +546,8 @@ export class RoomKit {
         const count = (s: string): number => all.filter((t) => t.state === s).length;
         const done = all.filter((t) => t.state === "done").sort((a, b) => b.updatedAt - a.updatedAt);
         return [
-          `Tasks of "${room.name}": ${count("doing")} doing · ${count("todo")} to do · ${count("done")} done`,
+          `Tasks of "${room.name}": ${count("doing")} doing · ${count("blocked")} blocked · ${count("todo")} to do · ${count("done")} done`,
+          ...all.filter((t) => t.state === "blocked").map((t) => line(t, all)),
           ...all.filter((t) => t.state === "doing").map((t) => line(t, all)),
           ...all.filter((t) => t.state === "todo").map((t) => line(t, all)),
           ...done.slice(0, 10).map((t) => line(t, all)),
@@ -576,35 +612,86 @@ export class RoomKit {
   }
 
   private read(room: Room, seat: Seat, args: Record<string, unknown>): string {
-    const limit = Math.min(Math.max(int(args.limit) ?? 20, 1), 100);
-    const after = int(args.after), from = str(args.from)?.replace(/^@/, "").toLowerCase(), search = str(args.search)?.toLowerCase(), task = int(args.task);
-    // Asked for nothing in particular: what it has not read yet, oldest first, and no more.
-    const unreadOnly = after === undefined && !from && !search && task === undefined && args.all !== true;
-    let found: Message[] = unreadOnly ? this.o.store.unreadOf(room.id, seat.handle) : this.o.store.messages(room.id, after === undefined ? {} : { after });
+    const seq = int(args.seq);
+    if (seq !== undefined) return this.one(room, seat, seq, int(args.part) ?? 1);
+    const search = str(args.search), task = int(args.task), before = int(args.before), after = int(args.after);
+    const from = str(args.from)?.replace(/^@/, "").toLowerCase();
+    if (!search && task === undefined && before === undefined && after === undefined && !from && args.all !== true) return this.unread(room, seat);
+    // An index: one line a message, newest last; the ones it needs it asks for by number.
+    const store = this.o.store;
+    const limit = Math.min(Math.max(int(args.limit) ?? INDEX_LINES, 1), 100);
+    let found: Message[] = search ? store.search(room.id, search, 300).reverse()
+      : task !== undefined ? store.messagesOfTask(room.id, task, 300)
+      : before !== undefined ? store.messagesBefore(room.id, before, 300)
+      : after !== undefined ? store.messages(room.id, { after, limit: 300 })
+      : store.messages(room.id, { limit: 300 });
     if (from) found = found.filter((m) => m.from === from);
-    if (search) found = found.filter((m) => m.text.toLowerCase().includes(search));
     if (task !== undefined) found = found.filter((m) => m.task === task);
     const total = found.length;
-    found = after === undefined && !unreadOnly ? found.slice(-limit) : found.slice(0, limit);
-    if (unreadOnly && !total) return `Nothing new in "${room.name}" since you last read. (\`all: true\` shows the latest messages again; the whole log is a file: ${this.o.store.recordDir(room.id)}/log.md.)`;
-    const head = unreadOnly
-      ? `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. Unread by you: ${found.length}${total > found.length ? ` of ${total} (the oldest first; read again for the rest)` : ""}.`
-      : `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}${task === undefined ? "" : ` about T${task}`}.`;
-    this.o.store.markRead(room.id, seat.handle, found.filter((m) => m.from !== seat.handle).map((m) => m.seq));
-    const reads = this.o.store.get(room.id).reads;
-    // Of its own messages it is told who has read them and who has not yet.
-    const readBy = (m: Message): string => {
-      if (m.from !== seat.handle || !m.to.length) return "";
-      const sessions = m.to.filter((h) => h !== YOU), read = sessions.filter((h) => reads[String(m.seq)]?.includes(h)), not = sessions.filter((h) => !read.includes(h));
-      return sessions.length ? `\n[${read.length ? `read by ${read.map((h) => `@${h}`).join(" ")}` : "read by nobody yet"}${not.length && read.length ? `; not yet: ${not.map((h) => `@${h}`).join(" ")}` : ""}]` : "";
-    };
-    // What it reads here it has: a message that still waited for it is not given to it a second time.
-    for (const m of found) {
-      const waits = room.receipts[String(m.seq)]?.[seat.handle];
-      if (waits === "sent" || waits === "queued") this.o.store.setReceipt(room.id, m.seq, seat.handle, null);
+    const shown = after !== undefined ? found.slice(0, limit) : found.slice(-limit);
+    const what = [search ? `containing "${search}"` : "", task === undefined ? "" : `about T${task}`, from ? `from @${from}` : "", before === undefined ? "" : `before #${before}`, after === undefined ? "" : `after #${after}`].filter(Boolean).join(", ");
+    if (!total) return `No messages in "${room.name}"${what ? ` ${what}` : ""}.`;
+    const more = total > shown.length ? ` (${total - shown.length} more${after !== undefined ? ` after #${shown.at(-1)!.seq}` : `: before: ${shown[0]!.seq}`})` : "";
+    const reads = store.get(room.id).reads;
+    return [`"${room.name}": ${shown.length} of ${total} message${total === 1 ? "" : "s"}${what ? ` ${what}` : ""}${more}. Whole: room_read { seq }.`, ...shown.map((m) => `${this.line(m, search)}${readBy(m, seat.handle, reads, " ")}`)].join("\n");
+  }
+
+  /** One message as a line of an index: who, when, which task, the start of it (or the words around `hit`). */
+  private line(m: Message, hit?: string): string {
+    const words = m.text.replace(/\s+/g, " ").trim();
+    let shown = [...words].slice(0, 80).join("");
+    if (hit) {
+      const at = words.toLowerCase().indexOf(hit.toLowerCase());
+      if (at > 40) shown = `…${[...words.slice(at - 30)].slice(0, 80).join("")}`;
     }
-    const lines = found.map((m) => `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m)}`);
-    return [head, ...lines].join("\n\n");
+    const long = [...words].length > [...shown.replace(/^…/, "")].length;
+    return `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}: ${shown}${long ? "…" : ""}${long ? ` (${[...words].length} chars)` : ""}${m.files?.length ? ` [${m.files.length} file${m.files.length === 1 ? "" : "s"}]` : ""}`;
+  }
+
+  /** What it has not read: the short ones whole while they fit, the rest a line each (read them by number). */
+  private unread(room: Room, seat: Seat): string {
+    const store = this.o.store;
+    const fresh = store.unreadOf(room.id, seat.handle);
+    if (!fresh.length) return `Nothing new in "${room.name}" since you last read. (An index of the latest: room_read { before: ${room.lastSeq + 1} }; one task's: { task }; words: { search }.)`;
+    const byTask = new Map<number, number>();
+    for (const m of fresh) if (m.task !== undefined) byTask.set(m.task, (byTask.get(m.task) ?? 0) + 1);
+    const forMe = fresh.filter((m) => m.to.includes(seat.handle)).length;
+    const head = `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. Unread by you: ${fresh.length}${forMe ? ` (${forMe} for you)` : ""}${byTask.size ? ` — ${[...byTask].map(([t, n]) => `T${t}: ${n}`).join(", ")}` : ""}.`;
+    const reads = store.get(room.id).reads;
+    let used = head.length;
+    const blocks: string[] = [], lines: string[] = [], read: number[] = [];
+    let later = 0;
+    for (const m of fresh) {
+      const whole = `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m, seat.handle, reads, "\n")}`;
+      if ([...m.text].length <= WHOLE_UP_TO && used + whole.length <= READ_BUDGET) { blocks.push(whole); used += whole.length + 2; read.push(m.seq); continue; }
+      // Too long to give whole: a line now, and it counts as read (it is asked for by its number). Past what fits:
+      // a line, and it stays unread for the next read.
+      if ([...m.text].length > WHOLE_UP_TO) { lines.push(this.line(m)); read.push(m.seq); } else { lines.push(this.line(m)); later++; }
+      if (lines.length >= INDEX_LINES) break;
+    }
+    store.markRead(room.id, seat.handle, read.filter((n) => fresh.find((m) => m.seq === n)!.from !== seat.handle));
+    // What it was given whole it has: a message that still waited for it is not given to it a second time.
+    for (const n of read) {
+      const waits = room.receipts[String(n)]?.[seat.handle];
+      if (waits === "sent" || waits === "queued") store.setReceipt(room.id, n, seat.handle, null);
+    }
+    const left = fresh.length - blocks.length - lines.length;
+    const tail = lines.length ? [`${lines.length} more as one line each${later ? ` (${later} stay unread for your next room_read)` : ""}${left > 0 ? `, and ${left} after them` : ""} — whole: room_read { seq }:`, ...lines] : [];
+    return [head, ...blocks, ...(tail.length ? [tail.join("\n")] : [])].join("\n\n");
+  }
+
+  /** One message whole, by its number; a long one in parts. */
+  private one(room: Room, seat: Seat, seq: number, part: number): string {
+    const m = this.o.store.messages(room.id, { after: seq - 1, limit: 1 })[0];
+    if (!m || m.seq !== seq) throw new RoomError(404, `There is no #${seq} in "${room.name}".`);
+    const chars = [...m.text];
+    const parts = Math.max(1, Math.ceil(chars.length / PART));
+    const p = Math.min(Math.max(part, 1), parts);
+    const text = chars.slice((p - 1) * PART, p * PART).join("");
+    if (m.from !== seat.handle) this.o.store.markRead(room.id, seat.handle, [m.seq]);
+    const waits = room.receipts[String(m.seq)]?.[seat.handle];
+    if (waits === "sent" || waits === "queued") this.o.store.setReceipt(room.id, m.seq, seat.handle, null);
+    return `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}${parts > 1 ? ` — part ${p} of ${parts}` : ""}\n${text}${m.files?.length && p === parts ? `\nFiles: ${m.files.join(", ")}` : ""}${p < parts ? `\n(room_read { seq: ${m.seq}, part: ${p + 1} } for the rest)` : ""}`;
   }
 
   private members(room: Room, me: Seat): string {

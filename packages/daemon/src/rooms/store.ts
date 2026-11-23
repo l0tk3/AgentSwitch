@@ -208,6 +208,12 @@ export class RoomStore {
     return dir;
   }
 
+  /** Where a member's handover note is, when it has written one. */
+  handoffPath(id: string, handle: string): string | null {
+    const file = join(this.recordDir(id), `handoff-${handle}.md`);
+    return existsSync(file) ? file : null;
+  }
+
   /** A member's own handover note (§9 交接): what only it knows — what it was doing, how far it is, what comes next,
    *  what to watch out for — kept in the room's record for whoever takes its work over. Where it is. */
   handoff(id: string, handle: string, text: string): string {
