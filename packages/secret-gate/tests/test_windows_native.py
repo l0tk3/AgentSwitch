@@ -44,6 +44,23 @@ def test_set_acl_is_exactly_the_grants_and_resets_what_is_below(tmp_path):
     assert {a.sid for a in fsacl.read_acl(top)[0]} == {fsacl.SYSTEM_SID, fsacl.current_user_sid()}
 
 
+def test_owner_rights_count_as_the_owner_and_an_acl_others_may_write_is_refused(tmp_path):
+    """The user's temporary directory carries an OWNER RIGHTS entry (S-1-3-4): files made there are this user's. The
+    admin's upstream-insecure.txt is trusted by its real ACL, refused once Users may change it."""
+    from secret_gate.errors import ValidationError
+    from secret_gate.reload import read_insecure_hosts
+
+    path = tmp_path / "upstream-insecure.txt"
+    path.write_text("a.example\n")
+    fsacl.set_acl(path, ((fsacl.OWNER_RIGHTS_SID, "full"), (fsacl.SYSTEM_SID, "full")))
+    assert fsacl.owner_sid(path) in fsacl.trusted_sids()          # this user (or Administrators, on Windows Server)
+    assert fsacl.private_problem(path) is None and fsacl.write_problem(path) is None
+    assert read_insecure_hosts(path) == {"a.example"}
+    fsacl.set_acl(path, ((fsacl.OWNER_RIGHTS_SID, "full"), (fsacl.USERS_SID, "modify")))
+    with pytest.raises(ValidationError, match=f"writable by {fsacl.USERS_SID}"):
+        read_insecure_hosts(path)
+
+
 def test_keygen_makes_a_home_only_this_user_can_read_and_a_readable_key_is_refused(tmp_path):
     home = tmp_path / "gate"
     create_keypair(home)
