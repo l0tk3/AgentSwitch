@@ -12,7 +12,7 @@ import { z } from "zod";
 import { contentType } from "../files/names.js";
 import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatSession, type SeatStats, type SeatWas } from "../rooms/store.js";
 import type { Running } from "../rooms/follow.js";
-import { resumeSeat } from "../rooms/kit.js";
+import { resumeEnded, resumeSeat } from "../rooms/kit.js";
 import { YOU } from "../rooms/names.js";
 import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
 
@@ -28,6 +28,10 @@ export type SeatView = {
   /** Muted by an admin or the user (§6.2): it reads and works but may not post or write the notes. */
   readonly muted: boolean; readonly mutedBy: string | null;
   readonly state: SeatState | null; readonly card: SeatCard | null;
+  /** What its own screen asks now, when it shows a list to choose from (Claude Code's "trust this folder?" at its
+   *  start): the question and the rows. Answered with `POST /terminals/:id/choices`, or for all at once with
+   *  `POST /rooms/:id/trust`. Null: nothing. */
+  readonly asks: { readonly title: string; readonly options: readonly string[]; readonly selected: number; readonly trust: boolean } | null;
   /** What the seat has cost so far as the room counts it (store.ts `SeatStats`); null for the user. */
   readonly stats: SeatStats | null;
   /** Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
@@ -44,11 +48,22 @@ const LISTS_ONCE: ReadonlySet<string> = new Set(["codex", "opencode"]);
 export function seatState(info: TerminalInfo | null): SeatState {
   if (!info || info.status === "exited") return "exited";
   if (info.notices.some((n) => n.id === TROUBLE_NOTICE)) return "reconnecting";
+  // Its own screen asks something (a list to choose from: "trust this folder?" at its start): it needs the user.
+  if (info.choices && info.status !== "working") return "waiting";
   return info.status === "working" ? "busy" : info.status;
 }
 
 function wasOf(info: TerminalInfo): SeatWas {
   return { agent: info.harness, name: info.name, cwd: info.workdir, model: info.modelNow ?? info.model, profile: info.profile?.name ?? null, ...(info.profile?.color ? { color: info.profile.color } : {}) };
+}
+
+/** The row that says yes to "do you trust this folder?", when that is what a terminal's screen asks; null: it asks
+ *  something else, or nothing. Only this one question is ever answered for several sessions at once. */
+export function trustYes(info: TerminalInfo): { readonly pick: number; readonly label: string } | null {
+  const asked = info.choices;
+  if (!asked || !/\btrust\b/i.test(`${asked.title} ${asked.text ?? ""}`)) return null;
+  const pick = asked.options.findIndex((o) => /^yes\b/i.test(o.label.trim()));
+  return pick < 0 ? null : { pick, label: asked.options[pick]!.label };
 }
 
 /** The agent's session behind a terminal, as a seat keeps it (§6.2); null until the agent has said its id. */
@@ -74,9 +89,10 @@ export function seatLive(info: TerminalInfo | null): SeatLive | null {
 export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean, stats?: SeatStats): SeatView {
   const info = seat.terminal ? host?.get(seat.terminal) ?? null : null;
   const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null, muted: seat.muted !== undefined, mutedBy: seat.muted?.by ?? null };
-  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null, stats: null };
+  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null, stats: null, asks: null };
   const was = info ? wasOf(info) : seat.was ?? null;
-  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false, stats: stats ?? { wakes: 0, chars: 0, posts: 0, calls: 0 } };
+  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false, stats: stats ?? { wakes: 0, chars: 0, posts: 0, calls: 0 },
+    asks: info?.choices && info.status !== "exited" ? { title: info.choices.title, options: info.choices.options.map((o) => o.label), selected: info.choices.selected, trust: trustYes(info) !== null } : null };
 }
 
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
@@ -270,8 +286,57 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     } catch (err) { return refused(c, err); }
   });
 
-  app.delete("/rooms/:id/seats/:handle", (c) => {
-    try { rooms.unseat(c.req.param("id"), c.req.param("handle")); return c.json({ ok: true }); } catch (err) { return refused(c, err); }
+  // A seat leaves. `?close=end`: its terminal is closed too (its conversation kept); `?close=delete`: and its
+  // conversation's record deleted (§6.2 结束、删除). The user may do this to any seat.
+  app.delete("/rooms/:id/seats/:handle", async (c) => {
+    try {
+      const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase(), close = c.req.query("close");
+      if (close !== undefined && close !== "end" && close !== "delete") return c.json({ error: "close is end or delete" }, 400);
+      const seat = rooms.get(id).seats.find((s) => s.handle === handle);
+      if (seat?.left === undefined) rooms.unseat(id, handle);
+      let closed = false;
+      if (close && seat?.terminal && deps.callLocal) closed = await roomOrg(deps.callLocal).stop(seat.terminal, close === "delete");
+      deps.roomsChanged?.(id);
+      return c.json({ ok: true, closed });
+    } catch (err) { return refused(c, err); }
+  });
+
+  // Every member whose session has ended is brought back (§6.2 批量恢复); each says how it went.
+  app.post("/rooms/:id/resume", async (c) => {
+    try {
+      const id = c.req.param("id");
+      rooms.get(id);
+      if (!deps.callLocal) throw new RoomError(503, "这个服务不能恢复会话。");
+      // What a terminal's record says of its session while it is still here is kept first: the seat resumes from that.
+      for (const seat of rooms.get(id).seats) {
+        const info = seat.terminal && seat.left === undefined ? host()?.get(seat.terminal) ?? null : null;
+        const session = info ? sessionOf(info) : null;
+        if (session) rooms.note(id, seat.handle, session);
+      }
+      const done = await resumeEnded(rooms, roomOrg(deps.callLocal), id, (t) => { const info = host()?.get(t); return info ? info.status : null; }, (t) => { const now = host()?.get(t); return now ? wasOf(now) : null; });
+      deps.roomsChanged?.(id);
+      return c.json({ resumed: done.filter((d) => !d.error).map((d) => d.handle), failed: done.filter((d) => d.error) });
+    } catch (err) { return refused(c, err); }
+  });
+
+  // "Do you trust this folder?" answered yes for every member whose screen asks exactly that (§6.2): a session just
+  // started in a folder its agent was never in stops there, and a room may hold several. Nothing else a screen asks
+  // is answered here.
+  app.post("/rooms/:id/trust", (c) => {
+    try {
+      const id = c.req.param("id");
+      const terminals = host();
+      const trusted: string[] = [];
+      for (const seat of rooms.get(id).seats) {
+        if (seat.kind !== "session" || seat.left !== undefined || !seat.terminal || !terminals) continue;
+        const info = terminals.get(seat.terminal);
+        const yes = info ? trustYes(info) : null;
+        if (!yes) continue;
+        try { terminals.choose(seat.terminal, yes.pick, yes.label); trusted.push(seat.handle); } catch { /* its screen moved on */ }
+      }
+      deps.roomsChanged?.(id);
+      return c.json({ trusted });
+    } catch (err) { return refused(c, err); }
   });
 
   // The user speaks. Only the user's words come in here: a session speaks through its own channel (Chatroom Kit).

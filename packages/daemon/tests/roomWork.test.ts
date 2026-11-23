@@ -480,12 +480,68 @@ describe("ending a helper (§6.2)", () => {
     // `ui` was seated by the user: not an admin's to end.
     expect(await say("api", "room_manage", { action: "end", handle: "ui" })).toMatchObject({ isError: true, text: expect.stringContaining("started by the user") });
     const helper = store.seat(room.id, { terminal: "h1", was: { agent: "claude-code", name: "helper", cwd: "/w", model: null, profile: null }, by: "api", byAgent: true, starter: "api" });
-    expect((await say("api", "room_manage", { action: "end", handle: helper.handle })).text).toContain("its terminal closed and its conversation's record deleted");
-    expect(stopped).toEqual(["h1+record"]);
+    expect((await say("api", "room_manage", { action: "end", handle: helper.handle })).text).toContain("its conversation is kept and can be resumed");
+    expect(stopped).toEqual(["h1"]);
+    // Deleted: the record goes too — also for one that is out of the room already.
+    expect((await say("api", "room_manage", { action: "delete", handle: helper.handle })).text).toContain("its conversation's record deleted");
+    expect(stopped).toEqual(["h1", "h1+record"]);
     expect(store.roomsOf("h1")).toEqual([]);
     // One kicked before is ended all the same; one whose terminal is gone is said so.
     const second = store.seat(room.id, { terminal: "gone", was: { agent: "claude-code", name: "second", cwd: "/w", model: null, profile: null }, by: "api", byAgent: true, starter: "api" });
     store.unseat(room.id, second.handle, "api");
     expect((await say("api", "room_manage", { action: "end", handle: second.handle })).text).toContain("was not there to close any more");
+  });
+});
+
+describe("the room's seats, several at once (§6.2)", () => {
+  function hosted() {
+    const store = new RoomStore(mkdtempSync(join(tmpdir(), "as-batch-")));
+    const info = (id: string, over: Record<string, unknown> = {}) => ({ id, harness: "claude-code", cwd: `/start/${id}`, workdir: `/start/${id}`, model: "sonnet", modelNow: null, modeNow: null, mode: "manual", effort: null, name: id, status: "idle", notices: [], choices: null, agentSessionId: `s-${id}`, resumedFrom: null, forked: false, profile: null, ...over });
+    const terminals = new Map<string, any>([["a", info("a")], ["b", info("b")], ["c", info("c")]]);
+    const chosen: string[] = [], calls: string[] = [];
+    const host = { get: (id: string) => terminals.get(id) ?? null, list: () => [...terminals.values()], choose: (id: string, pick: number, label: string) => { chosen.push(`${id}:${pick}:${label}`); terminals.set(id, { ...terminals.get(id), choices: null }); } };
+    const callLocal = async (method: string, path: string, body?: any) => {
+      calls.push(`${method} ${path}`);
+      if (method === "GET" && path === "/terminals") return { status: 200, body: { terminals: [...terminals.values()] } };
+      if (method === "POST" && path === "/terminals/resume") { const id = `new-${body.agentSessionId}`; terminals.set(id, info(id, { agentSessionId: body.agentSessionId })); return { status: 201, body: { terminal: { id } } }; }
+      if (method === "DELETE") { const id = path.split("/")[2]!.split("?")[0]!; const had = terminals.delete(id); return { status: had ? 200 : 404, body: {} }; }
+      return { status: 404, body: {} };
+    };
+    const app = new Hono();
+    mountRooms(app, { rooms: store, callLocal, terminals: { host } } as unknown as ApiDeps);
+    const call = async (method: string, path: string) => { const res = await app.request(path, { method }); return { status: res.status, body: await res.json() as any }; };
+    const room = store.create({ name: "r" });
+    for (const t of ["a", "b", "c"]) store.seat(room.id, { terminal: t, was: { agent: "claude-code", name: t, cwd: `/start/${t}`, model: null, profile: null } });
+    return { store, room, terminals, chosen, calls, call, info };
+  }
+
+  it("says yes to \"trust this folder?\" for every member that asks exactly that, and shows what each screen asks", async () => {
+    const { room, terminals, chosen, call, info } = hosted();
+    const trust = { title: "Do you trust the files in this folder?", text: "Claude Code may read files here.", options: [{ label: "Yes, proceed" }, { label: "No, exit" }], selected: 0 };
+    terminals.set("a", info("a", { choices: trust }));
+    terminals.set("b", info("b", { choices: { title: "Pick a model", options: [{ label: "Yes please" }, { label: "No" }], selected: 0 } }));
+    const seats = (await call("GET", `/rooms/${room.id}`)).body.seats as any[];
+    expect(seats.find((s) => s.handle === "a")).toMatchObject({ state: "waiting", asks: { title: trust.title, options: ["Yes, proceed", "No, exit"], trust: true } });
+    expect(seats.find((s) => s.handle === "b").asks.trust).toBe(false);
+    expect(seats.find((s) => s.handle === "c").asks).toBeNull();
+    expect((await call("POST", `/rooms/${room.id}/trust`)).body).toEqual({ trusted: ["a"] });
+    expect(chosen).toEqual(["a:0:Yes, proceed"]);
+  });
+
+  it("brings back every member that has ended, and closes or deletes a seat's terminal with it", async () => {
+    const { store, room, terminals, calls, call, info } = hosted();
+    terminals.set("a", info("a", { status: "exited" }));
+    terminals.delete("b");                                  // its record is gone: resumed from what the seat kept
+    store.note(room.id, "b", { id: "s-b", cwd: "/start/b" });
+    const done = await call("POST", `/rooms/${room.id}/resume`);
+    expect(done.body).toEqual({ resumed: ["a", "b"], failed: [] });
+    expect(store.roomsOf("new-s-a")[0]?.seat.handle).toBe("a");
+    expect(store.roomsOf("new-s-b")[0]?.seat.handle).toBe("b");
+    expect(store.roomsOf("c")[0]?.seat.handle).toBe("c");    // still running: left alone
+    expect((await call("DELETE", `/rooms/${room.id}/seats/c?close=end`)).body).toEqual({ ok: true, closed: true });
+    expect(calls).toContain("DELETE /terminals/c");
+    expect((await call("DELETE", `/rooms/${room.id}/seats/a?close=delete`)).body).toEqual({ ok: true, closed: true });
+    expect(calls).toContain("DELETE /terminals/new-s-a?transcript=1");
+    expect((await call("DELETE", `/rooms/${room.id}/seats/b?close=nope`)).status).toBe(400);
   });
 });

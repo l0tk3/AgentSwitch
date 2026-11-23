@@ -197,6 +197,8 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/rooms/:id/read"],
   ["POST", "/rooms/:id/rounds/ok"],
   ["PUT", "/rooms/:id/notes"],
+  ["POST", "/rooms/:id/resume"],
+  ["POST", "/rooms/:id/trust"],
   ["POST", "/rooms/:id/tasks"],
   ["PATCH", "/rooms/:id/tasks/:n"],
   ["DELETE", "/rooms/:id/tasks/:n"],
