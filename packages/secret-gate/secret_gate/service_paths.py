@@ -7,18 +7,24 @@ Once `<root>/gate-service.json` exists, every process but the service's own is a
 account owns `gate-public/`) keep working on their gate home directly, exactly like a gate without service.
 
 Where `<root>` and the rest are depends on the system (platform/): `SystemLayout(prefix, platform)`; `SystemLayout.native()`
-is this machine's. `prefix` relocates every system path (`secret-gate system … --root`), for tests.
+is this machine's. `prefix` relocates every system path (`secret-gate system … --root`), for tests; a Windows path
+(`C:\\ProgramData\\AgentSwitch`) moves under it without its drive.
+
+Windows (gate-simple-v0 §5): `gate.sock` names a named pipe (winpipe.py), and peers are SIDs: gate-service.json has
+`ownerSid` instead of `ownerUid`, and the service's own processes are the ones running as `NT SERVICE\\AgentSwitchGate`.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
+from . import fsacl
 from .errors import ServiceUnavailable, ValidationError
 from .platform import MACOS, GatePlatform, native
 
@@ -66,8 +72,10 @@ class SystemLayout:
     def native(cls, prefix: Path = Path("/")) -> SystemLayout:
         return cls(prefix, native())
 
-    def system(self, path: Path) -> Path:
-        return Path(self.prefix) / path.relative_to("/")
+    def system(self, path: PurePath) -> Path:
+        if Path(self.prefix) == Path("/"):
+            return Path(str(path))
+        return Path(self.prefix).joinpath(*PurePath(path).parts[1:])
 
     @property
     def root(self) -> Path:
@@ -139,7 +147,8 @@ def socket_path(env: Mapping[str, str] | None = None) -> Path:
     return public_dir(env) / SOCKET_FILE
 
 
-def client_socket(env: Mapping[str, str] | None = None, uid: int | None = None) -> Path | None:
+def client_socket(env: Mapping[str, str] | None = None, uid: int | None = None, *, sid: str | None = None,
+                  windows: bool = fsacl.IS_WINDOWS) -> Path | None:
     """The service socket when this process is a client of the gate service, else None (a gate without service).
 
     Whether the service is installed is decided by `<root>/gate-service.json` (root-owned, written by `system
@@ -153,7 +162,13 @@ def client_socket(env: Mapping[str, str] | None = None, uid: int | None = None) 
       that is there but is not a socket, or a socket the service account does not own, raises ServiceUnavailable.
 
     Without the file the old rule stands: a socket of another user makes this process a client.
+
+    Windows: the same decision by gate-service.json; the service's own processes are those running as the service's
+    account (`sid`, default this process's), and a client always gets the path (its pipe is checked on connect,
+    winpipe.connect). Without the file there is no service to find: a pipe has no owner to look at before connecting.
     """
+    if windows:
+        return _client_pipe(public_dir(env), sid)
     uid = os.getuid() if uid is None else uid
     public = public_dir(env)
     path = public / SOCKET_FILE
@@ -173,6 +188,15 @@ def client_socket(env: Mapping[str, str] | None = None, uid: int | None = None) 
     if info.st_uid != service_uid:
         raise ServiceUnavailable(f"{SERVICE_UNAVAILABLE}（{path} 不属于网关服务账户）")
     return path
+
+
+def _client_pipe(public: Path, sid: str | None, own_sid: Callable[[], str] | None = None) -> Path | None:
+    if not _exists(config_path_for(public)):
+        return None
+    me = sid or (own_sid or fsacl.current_user_sid)()
+    if me == fsacl.GATE_SERVICE_SID:
+        return None
+    return public / SOCKET_FILE
 
 
 def _exists(path: Path) -> bool:
@@ -212,32 +236,53 @@ def config_path_for(public: Path) -> Path:
 # -- gate-service.json ---------------------------------------------------------------------------
 
 _CONFIG_KEYS = frozenset({"ownerUid", "proxyPort", "runtimeVersion", "installedAt"})
+_WINDOWS_CONFIG_KEYS = frozenset({"ownerSid", "proxyPort", "runtimeVersion", "installedAt"})
+# A user's SID: a local or domain account (S-1-5-21-…) or an Entra ID account (S-1-12-1-…); never a well-known one.
+USER_SID_PATTERN = re.compile(r"S-1-5-21(-[0-9]{1,10}){3,6}|S-1-12-1(-[0-9]{1,10}){4,6}")
+
+
+def is_user_sid(text: object) -> bool:
+    return isinstance(text, str) and USER_SID_PATTERN.fullmatch(text) is not None
 
 
 @dataclass(frozen=True)
 class ServiceConfig:
-    owner_uid: int
+    """gate-service.json. `owner_uid` on macOS and Linux, `owner_sid` on Windows: the login user allowed on the
+    interface (exactly one of the two)."""
+
+    owner_uid: int | None
     proxy_port: int
     runtime_version: str
     installed_at: str
+    owner_sid: str | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {"ownerUid": self.owner_uid, "proxyPort": self.proxy_port,
+        owner = {"ownerSid": self.owner_sid} if self.owner_sid is not None else {"ownerUid": self.owner_uid}
+        return {**owner, "proxyPort": self.proxy_port,
                 "runtimeVersion": self.runtime_version, "installedAt": self.installed_at}
 
     @classmethod
     def from_json(cls, data: object) -> ServiceConfig:
+        if isinstance(data, dict) and set(data) == _WINDOWS_CONFIG_KEYS:
+            if not is_user_sid(data["ownerSid"]):
+                raise ValidationError(f"{SERVICE_CONFIG_FILE} 格式无效：ownerSid 应为用户的 SID")
+            return cls._rest(data, owner_uid=None, owner_sid=data["ownerSid"])
         if not isinstance(data, dict) or set(data) != _CONFIG_KEYS:
             raise ValidationError(f"{SERVICE_CONFIG_FILE} 格式无效：字段应为 {sorted(_CONFIG_KEYS)}")
-        owner, port = data["ownerUid"], data["proxyPort"]
+        owner = data["ownerUid"]
         if not _is_int(owner) or not 0 < owner < 2**31:
             raise ValidationError(f"{SERVICE_CONFIG_FILE} 格式无效：ownerUid 应为正整数")
+        return cls._rest(data, owner_uid=owner, owner_sid=None)
+
+    @classmethod
+    def _rest(cls, data: dict, *, owner_uid: int | None, owner_sid: str | None) -> ServiceConfig:
+        port = data["proxyPort"]
         if not _is_int(port) or not 0 < port < 65536:
             raise ValidationError(f"{SERVICE_CONFIG_FILE} 格式无效：proxyPort 应为 1–65535")
         if not all(isinstance(data[k], str) and len(data[k]) <= 200 for k in ("runtimeVersion", "installedAt")):
             raise ValidationError(f"{SERVICE_CONFIG_FILE} 格式无效：runtimeVersion、installedAt 应为字符串")
-        return cls(owner_uid=owner, proxy_port=port, runtime_version=data["runtimeVersion"],
-                   installed_at=data["installedAt"])
+        return cls(owner_uid=owner_uid, proxy_port=port, runtime_version=data["runtimeVersion"],
+                   installed_at=data["installedAt"], owner_sid=owner_sid)
 
 
 def _is_int(value: object) -> bool:

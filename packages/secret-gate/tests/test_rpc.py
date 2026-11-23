@@ -37,12 +37,14 @@ def _audit(svc) -> list[dict]:
     return [json.loads(line) for line in svc.audit.read_text().splitlines()]
 
 
+@pytest.mark.posix
 def test_peer_uid_is_the_kernels_record_of_the_other_end():
     a, b = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
     with a, b:
         assert peer_uid(a) == os.getuid() == peer_uid(b)
 
 
+@pytest.mark.posix
 def test_socket_is_0666_and_only_allowed_uids_get_an_answer():
     with running_service() as svc:
         assert stat.S_IMODE(svc.socket.stat().st_mode) == 0o666
@@ -204,6 +206,7 @@ def test_browser_config_and_logs_tail():
                 svc.client.call("logs.tail", params)
 
 
+@pytest.mark.posix
 def test_protocol_errors_are_answered_in_chinese_and_the_connection_survives():
     with running_service() as svc, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.connect(str(svc.socket))
@@ -217,6 +220,7 @@ def test_protocol_errors_are_answered_in_chinese_and_the_connection_survives():
         assert json.loads(reader.readline())["id"] == 9
 
 
+@pytest.mark.posix
 def test_requests_over_one_mebibyte_are_refused():
     with running_service() as svc, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.connect(str(svc.socket))
@@ -253,6 +257,7 @@ def test_a_slow_call_does_not_hold_up_other_clients():
         assert results[0]["body"] == "done"
 
 
+@pytest.mark.posix
 def test_stale_socket_is_replaced_but_a_live_one_or_a_file_is_not():
     with short_dir() as root:
         path = root / "gate.sock"
@@ -274,6 +279,7 @@ def test_no_service_means_unavailable_never_a_local_fallback(tmp_path):
         RpcClient(tmp_path / "gate.sock").call("status")
 
 
+@pytest.mark.posix
 def test_secret_gate_rpc_process_end_to_end():
     """`secret-gate rpc` as launchd runs it: env only, config next to the public dir, SIGTERM removes the socket.
     A home without a keypair gets one at start (a fresh install; gate-simple-v0 §6)."""
@@ -320,3 +326,122 @@ def test_allowed_uids_come_from_gate_service_json(tmp_path, capsys):
     assert owner_uids(config_loader(path))() == frozenset({0, 501})
     path.write_text(json.dumps({"ownerUid": 501}))
     assert owner_uids(config_loader(path))() == frozenset({0})             # invalid: root only
+
+
+# -- Windows: the same service on a named pipe (gate-simple-v0 §5) -----------------------------------------------------
+
+@pytest.mark.windows
+def test_pipe_only_allowed_sids_get_an_answer():
+    from secret_gate.fsacl import SYSTEM_SID
+
+    with running_service() as svc:
+        assert svc.client.call("status")["version"]
+        assert _audit(svc)[0]["sid"] == svc.service._config().owner_sid
+    with running_service(allowed=frozenset({SYSTEM_SID})) as svc:          # this test user is not allowed
+        with pytest.raises(ServiceUnavailable, match="连接被关闭"):
+            svc.client.call("status")
+        assert not svc.audit.exists()                                     # refused before any request was answered
+
+
+@pytest.mark.windows
+def test_pipe_protocol_errors_and_large_requests():
+    from secret_gate.winpipe import connect
+
+    with running_service() as svc:
+        stream = connect(svc.socket, 5)
+        try:
+            for line, reason in ((b"not json\n", "有效的 JSON"), (b'{"id": 1}\n', "method"),
+                                 (b'{"id": 2, "method": "nope"}\n', "未知方法")):
+                stream.sendall(line)
+                reply = json.loads(stream.readline(1 << 20))
+                assert reply["ok"] is False and reason in reply["error"]
+            stream.sendall(b'{"id": 9, "method": "status"}\n')
+            assert json.loads(stream.readline(1 << 20))["id"] == 9
+        finally:
+            stream.close()
+        stream = connect(svc.socket, 5)
+        try:
+            stream.sendall(b'{"id": 1, "method": "status", "params": {"x": "' + b"a" * MAX_REQUEST_BYTES + b'"}}\n')
+            assert json.loads(stream.readline(1 << 20)) == {"id": None, "ok": False, "error": "请求超过 1 MiB"}
+        finally:
+            stream.close()
+
+
+@pytest.mark.windows
+def test_pipe_client_refuses_a_pipe_someone_else_made():
+    """The client checks who created the pipe before sending anything (a squatter cannot pass for the service)."""
+    from secret_gate.fsacl import GATE_SERVICE_SID
+    from secret_gate.winpipe import connect
+
+    with running_service() as svc:
+        with pytest.raises(OSError, match="not created by the gate service account"):
+            connect(svc.socket, 5, expected_owner=GATE_SERVICE_SID)
+        (svc.root / "gate-service.json").write_text("{}")                 # service mode: only the service's pipe
+        with pytest.raises(ServiceUnavailable, match="not created by the gate service account"):
+            svc.client.call("status")
+
+
+@pytest.mark.windows
+def test_pipe_name_is_claimed_once():
+    from secret_gate.rpc_methods import GateService
+    from secret_gate.rpc_server import PipeRpcServer
+
+    with running_service() as svc:
+        with pytest.raises(OSError, match="already exists"):
+            PipeRpcServer(svc.socket, GateService(svc.home, svc.public, lambda: None), lambda: frozenset(), None)
+
+
+@pytest.mark.windows
+def test_secret_gate_rpc_process_end_to_end_on_windows():
+    """`secret-gate rpc` as the Windows service host runs it: env only, config next to the public dir, a pipe."""
+    import sys
+
+    from secret_gate.fsacl import current_user_sid
+    from secret_gate.service_paths import ServiceConfig
+    from secret_gate.winpipe import connect
+
+    with short_dir() as root:
+        home, public = root / "gate", root / "gate-public"
+        home.mkdir()
+        public.mkdir()
+        config = ServiceConfig(owner_uid=None, owner_sid=current_user_sid(), proxy_port=18081, runtime_version="t",
+                               installed_at="t")
+        (root / "gate-service.json").write_text(json.dumps(config.to_json()))
+        env = {**os.environ, "SECRET_GATE_HOME": str(home), "SECRET_GATE_PUBLIC": str(public)}
+        proc = subprocess.Popen([sys.executable, "-m", "secret_gate.cli", "rpc"], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            stream = None
+            for _ in range(200):
+                try:
+                    stream = connect(public / "gate.sock", 5, expected_owner=current_user_sid())
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert stream is not None
+            try:
+                stream.sendall(b'{"id": 1, "method": "status"}\n')
+                status = json.loads(stream.readline(1 << 20))["result"]
+            finally:
+                stream.close()
+            assert status["proxyPort"] == 18081 and status["proxyRunning"] is False
+            rows = json.loads((public / "keys.json").read_text())
+            assert [r["name"] for r in rows] == ["main"] and rows[0]["publicKey"] == (home / "key.pub").read_text().strip()
+        finally:
+            proc.terminate()
+            _, err = proc.communicate(timeout=10)
+        assert b"listening on" in err and b"generated one" in err
+
+
+def test_allowed_sids_come_from_gate_service_json(tmp_path, capsys):
+    from secret_gate.fsacl import SYSTEM_SID
+    from secret_gate.rpc_server import config_loader, owner_sids
+    from secret_gate.service_paths import ServiceConfig
+
+    path = tmp_path / "gate-service.json"
+    assert owner_sids(config_loader(path))() == frozenset({SYSTEM_SID})   # missing: SYSTEM only
+    sid = "S-1-5-21-1004336348-1177238915-682003330-1001"
+    path.write_text(json.dumps(ServiceConfig(None, 8080, "v", "t", owner_sid=sid).to_json()))
+    assert owner_sids(config_loader(path))() == frozenset({SYSTEM_SID, sid})
+    path.write_text(json.dumps(ServiceConfig(501, 8080, "v", "t").to_json()))
+    assert owner_sids(config_loader(path))() == frozenset({SYSTEM_SID})   # a POSIX config names no SID

@@ -1,7 +1,8 @@
 """Client of the gate service's `gate.sock` (gate-service-v0 §3): one connection per call.
 
 A call that cannot reach the service fails with "凭据网关服务无响应"; it never falls back to a local gate
-(that would quietly undo the isolation, §4 Mac 应用).
+(that would quietly undo the isolation, §4 Mac 应用). On Windows the same path names a named pipe (winpipe.py), and
+the client first checks that the pipe was created by the gate service's account.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import socket
 from pathlib import Path
 from typing import Any
 
+from . import fsacl
 from .errors import ServiceUnavailable
 from .rpc_protocol import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, ProtocolError, decode_response, encode
 from .service_paths import SERVICE_UNAVAILABLE
@@ -39,11 +41,14 @@ class RpcClient:
             raise ProtocolError("请求超过 1 MiB")
         timeout = self._timeout or SLOW_METHOD_TIMEOUTS.get(method, DEFAULT_TIMEOUT_SECONDS)
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(timeout)
-                sock.connect(str(self._path))
-                sock.sendall(line)
-                reply = _read_line(sock)
+            if fsacl.IS_WINDOWS:
+                reply = self._call_pipe(line, timeout)
+            else:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(timeout)
+                    sock.connect(str(self._path))
+                    sock.sendall(line)
+                    reply = _read_line(sock)
         except TimeoutError:
             raise ServiceUnavailable(f"{SERVICE_UNAVAILABLE}（等待超时）") from None
         except (ConnectionResetError, BrokenPipeError):
@@ -55,8 +60,19 @@ class RpcClient:
             raise ServiceUnavailable(f"{SERVICE_UNAVAILABLE}（连接被关闭）")
         return decode_response(reply, request_id)
 
+    def _call_pipe(self, line: bytes, timeout: float) -> bytes:
+        """Windows: the named pipe for this path, created by the gate service's account (winpipe.connect)."""
+        from .winpipe import connect
 
-def _read_line(sock: socket.socket) -> bytes:
+        stream = connect(self._path, timeout)
+        try:
+            stream.sendall(line)
+            return _read_line(stream)
+        finally:
+            stream.close()
+
+
+def _read_line(sock: socket.socket | Any) -> bytes:
     chunks: list[bytes] = []
     size = 0
     while True:

@@ -25,6 +25,9 @@ from tests.fixtures import fake_secrets as fs
 from tests.service_fixtures import OWNER_CONFIG, running_service, short_dir
 
 SCOPE = "cli-scope-0123456789abcdefghij"
+# A uid that is not this process's: what a login user's process is to the service (Windows ignores it: there the
+# service's own processes are told apart by their SID, and this test process's is never the service's).
+OTHER_UID = getattr(os, "getuid", lambda: 0)() + 1
 
 
 @pytest.fixture
@@ -45,6 +48,7 @@ def _run(capsys, argv, stdin: str | None = None, monkeypatch=None) -> tuple[int,
     return code, captured.out, captured.err
 
 
+@pytest.mark.posix
 def test_client_mode_needs_a_socket_of_another_user(tmp_path):
     with short_dir() as root:
         env = {"SECRET_GATE_PUBLIC": str(root)}
@@ -193,7 +197,7 @@ def stopped_service(monkeypatch, tmp_path):
         svc.server.server_close()
         assert not svc.socket.exists()
         monkeypatch.setenv("SECRET_GATE_PUBLIC", str(svc.public))
-        monkeypatch.setattr("secret_gate.cli.client_socket", partial(client_socket, uid=os.getuid() + 1))
+        monkeypatch.setattr("secret_gate.cli.client_socket", partial(client_socket, uid=OTHER_UID))
         yield svc, planted
 
 
@@ -222,17 +226,18 @@ def test_mcp_and_browser_components_never_go_local_once_installed(stopped_servic
     from secret_gate import browser_mcp
     from secret_gate.mcp_backend import RemoteMcpBackend, default_backend
 
-    monkeypatch.setattr("secret_gate.mcp_backend.client_socket", partial(client_socket, uid=os.getuid() + 1))
+    monkeypatch.setattr("secret_gate.mcp_backend.client_socket", partial(client_socket, uid=OTHER_UID))
     backend = default_backend()
     assert isinstance(backend, RemoteMcpBackend)
     with pytest.raises(ServiceUnavailable, match="凭据网关服务无响应"):
         backend.describe("enc:v1:" + "A" * 30)
-    monkeypatch.setattr(browser_mcp, "client_socket", partial(client_socket, uid=os.getuid() + 1))
+    monkeypatch.setattr(browser_mcp, "client_socket", partial(client_socket, uid=OTHER_UID))
     monkeypatch.setattr(browser_mcp, "local_setup", lambda *_a: pytest.fail("a local browser gate was set up"))
     with pytest.raises(ServiceUnavailable, match="凭据网关服务无响应"):
         asyncio.run(browser_mcp.serve(["true"]))
 
 
+@pytest.mark.posix
 def test_installed_service_refuses_a_socket_that_is_not_the_services(monkeypatch):
     with short_dir() as root:
         public = root / "gate-public"
@@ -258,6 +263,22 @@ def test_installed_service_refuses_a_socket_that_is_not_the_services(monkeypatch
                 client_socket(env, uid=other + 1)
         finally:
             sock.close()
+
+
+def test_windows_decides_by_gate_service_json_and_the_service_sid():
+    """Windows: no socket file to look at; gate-service.json decides, and only the service's account is not a
+    client (its pipe is checked when connecting, winpipe.connect)."""
+    from secret_gate.fsacl import GATE_SERVICE_SID
+
+    user = "S-1-5-21-1004336348-1177238915-682003330-1001"
+    with short_dir() as root:
+        public = root / "gate-public"
+        public.mkdir()
+        env = {"SECRET_GATE_PUBLIC": str(public)}
+        assert client_socket(env, windows=True, sid=user) is None             # no service: a local gate
+        (root / "gate-service.json").write_text("{}")
+        assert client_socket(env, windows=True, sid=user) == public / "gate.sock"
+        assert client_socket(env, windows=True, sid=GATE_SERVICE_SID) is None  # the service's own processes
 
 
 def test_without_gate_service_json_the_cli_is_a_local_gate(monkeypatch, capsys, tmp_path):

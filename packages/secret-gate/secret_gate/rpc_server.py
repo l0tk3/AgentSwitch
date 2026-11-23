@@ -7,8 +7,13 @@ Linux; platform/), every other user is disconnected before a byte is read. One t
 `mcp.http` never holds up another client. A service started without a keypair generates one (a fresh install, or a home whose key was
 deleted); replacing it is `secret-gate system rotate-key` (root), never a call on this socket.
 
-Every call writes one line to `<gate home>/logs/rpc-audit.jsonl` (0600): time, method, peer uid, the scope's
-short hash, token labels, host, result. Never a value, a ciphertext or the scope itself.
+Windows (gate-simple-v0 §5): the same server on a named pipe (`PipeRpcServer`, transport in winpipe.py). Peers are
+SIDs instead of uids: SYSTEM and the `ownerSid` of gate-service.json. The pipe's DACL admits only those; the SID of
+the client's token is checked again after its first line (Windows lets a server look at the client only once it has
+read from the pipe), and a refused client gets no answer.
+
+Every call writes one line to `<gate home>/logs/rpc-audit.jsonl` (0600): time, method, peer uid (Windows: SID), the
+scope's short hash, token labels, host, result. Never a value, a ciphertext or the scope itself.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from . import fsacl
 from .audit import Audit
 from .errors import GateError, ValidationError
 from .keyring import create_keypair, has_keypair
@@ -50,12 +56,22 @@ IDLE_TIMEOUT_SECONDS = 300.0
 MAX_CONNECTIONS = 64
 ROOT_UID = 0
 
+Peer = int | str  # a uid (POSIX) or a SID (Windows)
+
 
 def owner_uids(config: Callable[[], ServiceConfig | None]) -> Callable[[], frozenset[int]]:
     """root and gate-service.json's ownerUid; root alone when the file is missing or invalid."""
     def allowed() -> frozenset[int]:
         cfg = config()
-        return frozenset({ROOT_UID} | ({cfg.owner_uid} if cfg else set()))
+        return frozenset({ROOT_UID} | ({cfg.owner_uid} if cfg and cfg.owner_uid is not None else set()))
+    return allowed
+
+
+def owner_sids(config: Callable[[], ServiceConfig | None]) -> Callable[[], frozenset[str]]:
+    """Windows: SYSTEM and gate-service.json's ownerSid; SYSTEM alone when the file is missing or invalid."""
+    def allowed() -> frozenset[str]:
+        cfg = config()
+        return frozenset({fsacl.SYSTEM_SID} | ({cfg.owner_sid} if cfg and cfg.owner_sid else set()))
     return allowed
 
 
@@ -71,6 +87,49 @@ def config_loader(path: Path) -> Callable[[], ServiceConfig | None]:
 
 def _log(line: str) -> None:
     print(f"secret-gate rpc: {line}", file=sys.stderr, flush=True)
+
+
+def _shown(peer: Peer) -> str:
+    return f"uid {peer}" if isinstance(peer, int) else peer
+
+
+class _Answers:
+    """What both servers do with a request line: decode, call, audit, encode. Never raises."""
+
+    service: GateService
+    _audit_path: Path | None
+    _audit_lock: threading.Lock
+
+    def answer(self, line: bytes, peer: Peer) -> dict[str, Any]:
+        request_id, method, params = None, "?", {}
+        try:
+            request_id, method, params = decode_request(line)
+            reply = self.service.call(method, params)
+        except ProtocolError as exc:
+            self._audit(method, peer, params, ok=False, error=str(exc))
+            return failed(request_id, str(exc))
+        except GateError as exc:
+            self._audit(method, peer, params, ok=False, error=str(exc))
+            return failed(request_id, str(exc))
+        except Exception as exc:  # noqa: BLE001 - a bug must answer this call, not kill the connection thread
+            _log(f"{method}: internal error {type(exc).__name__}")
+            self._audit(method, peer, params, ok=False, error=type(exc).__name__)
+            return failed(request_id, ERR_INTERNAL)
+        self._audit(method, peer, params, ok=True, labels=reply.labels, host=reply.host)
+        return ok(request_id, reply.value)
+
+    def _audit(self, method: str, peer: Peer, params: dict[str, Any], *, ok: bool, error: str | None = None,
+               labels: tuple[str, ...] = (), host: str | None = None) -> None:
+        scope = params.get("scope") if isinstance(params.get("scope"), str) else None
+        extra: dict[str, Any] = {"uid": peer} if isinstance(peer, int) else {"sid": peer}
+        if labels:
+            extra["labels"] = list(labels)
+        if host:
+            extra["host"] = host
+        if error:
+            extra["error"] = error[:300]
+        with self._audit_lock:
+            Audit(self._audit_path, scope).record("rpc", method=method[:64], ok=ok, **extra)
 
 
 class _Handler(socketserver.StreamRequestHandler):
@@ -108,7 +167,11 @@ class _Handler(socketserver.StreamRequestHandler):
         return True
 
 
-class RpcServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+# socketserver has no UnixStreamServer where Python has no AF_UNIX (Windows); PipeRpcServer serves there.
+_UnixServer: Any = getattr(socketserver, "UnixStreamServer", socketserver.TCPServer)
+
+
+class RpcServer(_Answers, socketserver.ThreadingMixIn, _UnixServer):
     daemon_threads = True
     block_on_close = False
 
@@ -140,36 +203,6 @@ class RpcServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         finally:
             self._slots.release()
 
-    def answer(self, line: bytes, uid: int) -> dict[str, Any]:
-        """One request line in, one response out; never raises."""
-        request_id, method, params = None, "?", {}
-        try:
-            request_id, method, params = decode_request(line)
-            reply = self.service.call(method, params)
-        except ProtocolError as exc:
-            self._audit(method, uid, params, ok=False, error=str(exc))
-            return failed(request_id, str(exc))
-        except GateError as exc:
-            self._audit(method, uid, params, ok=False, error=str(exc))
-            return failed(request_id, str(exc))
-        except Exception as exc:  # noqa: BLE001 - a bug must answer this call, not kill the connection thread
-            _log(f"{method}: internal error {type(exc).__name__}")
-            self._audit(method, uid, params, ok=False, error=type(exc).__name__)
-            return failed(request_id, ERR_INTERNAL)
-        self._audit(method, uid, params, ok=True, labels=reply.labels, host=reply.host)
-        return ok(request_id, reply.value)
-
-    def _audit(self, method: str, uid: int, params: dict[str, Any], *, ok: bool, error: str | None = None,
-               labels: tuple[str, ...] = (), host: str | None = None) -> None:
-        scope = params.get("scope") if isinstance(params.get("scope"), str) else None
-        extra: dict[str, Any] = {"labels": list(labels)} if labels else {}
-        if host:
-            extra["host"] = host
-        if error:
-            extra["error"] = error[:300]
-        with self._audit_lock:
-            Audit(self._audit_path, scope).record("rpc", method=method[:64], uid=uid, ok=ok, **extra)
-
     def server_close(self) -> None:
         super().server_close()
         try:
@@ -177,6 +210,76 @@ class RpcServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
                 self.path.unlink()
         except OSError:
             pass
+
+
+class PipeRpcServer(_Answers):
+    """Windows: the same server on the named pipe for `path` (winpipe.pipe_name); `serve_forever`, `shutdown` and
+    `server_close` as on socketserver. `allowed_sids`: the peers, read again for every connection."""
+
+    def __init__(self, path: Path, service: GateService, allowed_sids: Callable[[], frozenset[str]],
+                 audit_path: Path | None, *, own_sid: str | None = None) -> None:
+        from . import winpipe
+
+        self.service = service
+        self.allowed_uids = allowed_sids
+        self._audit_path = audit_path
+        self._audit_lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        self._stopped = threading.Event()
+        self._stopped.set()
+        self.path = Path(path)
+        self.listener = winpipe.PipeListener(winpipe.pipe_name(self.path), own_sid or fsacl.current_user_sid(),
+                                             allowed_sids)
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        self._stopped.clear()
+        try:
+            while True:
+                stream = self.listener.accept(poll_interval)
+                if stream is None:
+                    return
+                if not self._slots.acquire(blocking=False):
+                    stream.close()
+                    continue
+                threading.Thread(target=self._connection, args=(stream,), daemon=True).start()
+        finally:
+            self._stopped.set()
+
+    def _connection(self, stream: Any) -> None:
+        from . import winpipe
+
+        try:
+            stream.settimeout(IDLE_TIMEOUT_SECONDS)
+            line = stream.readline(MAX_REQUEST_BYTES + 1)
+            if not line:
+                return
+            try:
+                sid = winpipe.client_sid(stream)
+            except Exception as exc:  # noqa: BLE001 - pywintypes.error: no identity, no answer
+                _log(f"peer check failed ({exc}); connection closed")
+                return
+            if sid not in self.allowed_uids():
+                _log(f"{_shown(sid)} is not allowed; connection closed")
+                return
+            while line:
+                if len(line) > MAX_REQUEST_BYTES and not line.endswith(b"\n"):
+                    stream.sendall(encode(failed(None, ERR_TOO_LARGE)))
+                    stream.flush()
+                    return
+                stream.sendall(encode(self.answer(line.rstrip(b"\n"), sid)))
+                line = stream.readline(MAX_REQUEST_BYTES + 1)
+        except (OSError, TimeoutError):
+            return
+        finally:
+            stream.close()
+            self._slots.release()
+
+    def shutdown(self) -> None:
+        self.listener.close()
+        self._stopped.wait(10)
+
+    def server_close(self) -> None:
+        self.listener.close()
 
 
 def prepare_socket_path(path: Path) -> None:
@@ -199,13 +302,15 @@ def prepare_socket_path(path: Path) -> None:
     raise ValidationError(f"{path} 上已有服务在运行")
 
 
-def build_server(home: Path, public: Path, config_path: Path, **service_kwargs: Any) -> RpcServer:
+def build_server(home: Path, public: Path, config_path: Path, **service_kwargs: Any) -> RpcServer | PipeRpcServer:
     config = config_loader(config_path)
     if not has_keypair(home):
         create_keypair(home)
         _log(f"no keypair in {home}: generated one")
     service = GateService(home, public, config, **service_kwargs)
     service.publish()
+    if fsacl.IS_WINDOWS:
+        return PipeRpcServer(public / SOCKET_FILE, service, owner_sids(config), Path(home) / AUDIT_FILE)
     return RpcServer(public / SOCKET_FILE, service, owner_uids(config), Path(home) / AUDIT_FILE)
 
 
@@ -219,7 +324,8 @@ def _cmd_rpc(args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    _log(f"listening on {server.path} (pid {os.getpid()}, {time.strftime('%Y-%m-%dT%H:%M:%S')})")
+    where = getattr(server, "listener", None)
+    _log(f"listening on {where.name if where else server.path} (pid {os.getpid()}, {time.strftime('%Y-%m-%dT%H:%M:%S')})")
     try:
         server.serve_forever()
     finally:
@@ -228,6 +334,7 @@ def _cmd_rpc(args: argparse.Namespace) -> int:
 
 
 def add_rpc_parser(sub: argparse._SubParsersAction) -> None:
-    r = sub.add_parser("rpc", help="gate service only: serve <SECRET_GATE_PUBLIC>/gate.sock (gate-service-v0 §3)")
+    r = sub.add_parser("rpc", help="gate service only: serve <SECRET_GATE_PUBLIC>/gate.sock (gate-service-v0 §3; "
+                                   "a named pipe on Windows)")
     r.add_argument("--config", help="gate-service.json (default: next to the public directory)")
     r.set_defaults(fn=_cmd_rpc)
