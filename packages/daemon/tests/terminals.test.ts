@@ -2009,7 +2009,7 @@ describe("terminal pieces", () => {
 
   it("launches Claude Code with this terminal's own hooks and Codex with notify; a missing agent cannot start", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-launch-"));
-    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", SECRET_GATE_REPAIR_KEY: "k" } });
+    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" } });
     const claude = launch({ id: "t1", harness: "claude-code", cwd: "/tmp", model: "claude-opus-5-5", mode: "manual", hookToken: "tok" });
     expect(claude.args).toEqual(["--settings", join(stateDir, "t1", "settings.json"), "--mcp-config", join(stateDir, "t1", "mcp.json"), "--model", "claude-opus-5-5", "--permission-mode", "manual"]);
     // How hard it thinks, in each agent's own argument (harness/efforts.ts).
@@ -2023,7 +2023,6 @@ describe("terminal pieces", () => {
     // asking is stated, not left to the user's config.toml
     expect(launch({ id: "t8", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).toContain('-a on-request -c default_permissions="agentswitch" -c permissions.agentswitch={ extends = ":read-only", filesystem = {} }');
     expect(claude.env).toMatchObject({ AGENTSWITCH_TERMINAL_ID: "t1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "tok", AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:4711", TERM: "xterm-256color" });
-    expect(claude.env.SECRET_GATE_REPAIR_KEY).toBeUndefined();
     const settings = JSON.parse(readFileSync(join(stateDir, "t1", "settings.json"), "utf8"));
     expect(settings).toEqual(claudeHookSettings('"/n/node" "/h/hook.js"'));
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);

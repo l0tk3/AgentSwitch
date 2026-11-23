@@ -56,9 +56,7 @@ import { defaultGate, gateHealth, gateNotFound, proxyEndpoint, warmBrowserMcp, t
 import { gateRefsExecutor } from "./executors/gateRefs.js";
 import { gateRefs } from "./secrets/refs.js";
 import { gateMinter } from "./secrets/minter.js";
-import { credentialGate } from "./secrets/credentialRepair.js";
 import { platformExperience } from "./engine/platformContext.js";
-import { credentialRepairExecutor } from "./executors/credentialRepair.js";
 import { routerSealer, type Sealer } from "./secrets/sealer.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
@@ -418,10 +416,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The sealer (router-v0 §9) is the same text-only agent plus `secret-gate enc --batch`; only with real executors, which require the gate.
   const gate = cfg.executors === "real" ? defaultGate() : null;
   const sealer = overrides.sealer ?? (summarizer && gate ? routerSealer(oracle("sealer"), gateMinter(gate), () => loadContext(contextPath).text, targets.router.timeout_ms) : undefined);
-  // gate-next-v0 §1/§3: per-execution enc:ref: scope and proxy health, inside the repair bridge so its handoff notes
-  // and repaired tokens are registered too.
-  const scoped = gate ? executors.map((executor) => gateRefsExecutor(executor, { refs: gateRefs(gate), health: () => gateHealth(gate) })) : executors;
-  const wiredExecutors = gate && summarizer ? scoped.map((executor) => credentialRepairExecutor(executor, { gate: credentialGate(gate), router: oracle("credential-repair"), store })) : scoped;
+  // gate-next-v0 §1/§3: per-execution enc:ref: scope and proxy health.
+  const wiredExecutors = gate ? executors.map((executor) => gateRefsExecutor(executor, { refs: gateRefs(gate), health: () => gateHealth(gate) })) : executors;
   // Kept browser logins (threads-v0 §4b): real executors only; the directory is read-denied to them (prot.readDenied).
   const browserSlots = cfg.executors === "real" ? new BrowserSlots(join(cfg.home, BROWSER_PROFILES_DIR)) : undefined;
   // The shared browser's Chrome is the user's own too, so its clones are swept the same way.

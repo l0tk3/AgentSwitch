@@ -14,8 +14,7 @@ export const SEAL_TIMEOUT_MS = 30_000;
 export const MIN_VALUE_LENGTH = 8;
 /** A value only ever turned into TOTP codes has no such floor at the gate (its base32 check stands); shorter is noise. */
 const MIN_OTP_VALUE_LENGTH = 4;
-/** The model's quoted grant for a seed import, and a token label. */
-const MAX_SEED_EVIDENCE_CHARS = 4000;
+/** A token label. */
 const MAX_LABEL_CHARS = 64;
 const EXISTING_TOKEN = /\benc:v1:[A-Za-z0-9_=-]{16,}/g;
 const SEAL_ERROR = {
@@ -27,7 +26,7 @@ const SEAL_ERROR = {
 } as const;
 
 /** One sealed value: a model-inferred field candidate and its token. Never the value; field is not user confirmation. */
-export type CredentialPurpose = "secret" | "totp_code" | "totp_seed_import";
+export type CredentialPurpose = "secret" | "totp_code";
 /** What a sealed value may be used for. "fill" lets the gate type it into a page; with the gate running as its own
  *  service account (gate-service-v0 §1) a value without it never leaves the service for the browser. */
 export type SealUse = "http" | "fill" | "otp" | "exec";
@@ -35,7 +34,7 @@ export type SealUse = "http" | "fill" | "otp" | "exec";
 /** A value typed into a website: sent by tools, and typed into the page by the browser gate. */
 export const WEB_FORM_USES: readonly SealUse[] = ["http", "fill"];
 
-export type SealedEntry = { readonly label: string; readonly field: string; readonly kind: "secret" | "totp"; readonly hosts: readonly string[]; readonly uses: readonly SealUse[]; readonly token: string; readonly purpose?: CredentialPurpose; readonly seed_import_hosts?: readonly string[] };
+export type SealedEntry = { readonly label: string; readonly field: string; readonly kind: "secret" | "totp"; readonly hosts: readonly string[]; readonly uses: readonly SealUse[]; readonly token: string; readonly purpose?: CredentialPurpose };
 export type SealResult =
   | { readonly ok: true; readonly text: string; readonly sealed: readonly SealedEntry[]; readonly ms: number }
   | { readonly ok: false; readonly code: "unroutable" | "unavailable"; readonly error: string; readonly ms: number };
@@ -48,9 +47,8 @@ const Found = z.object({
   label: z.string().min(1),
   field: z.string().default(""),
   kind: z.enum(["secret", "totp"]).default("secret"),
-  purpose: z.enum(["secret", "totp_code", "totp_seed_import"]).optional(),
-  seed_import_hosts: z.array(z.string()).optional(),
-  seed_import_evidence: z.string().max(MAX_SEED_EVIDENCE_CHARS).optional(),
+  // An unknown purpose (an older reply shape) is dropped, not a reason to reject the whole reply.
+  purpose: z.enum(["secret", "totp_code"]).optional().catch(undefined),
   hosts: z.array(z.string()).default([]),
   uses: z.array(z.enum(["http", "fill", "otp", "exec"])).min(1).default([...WEB_FORM_USES]),
 });
@@ -61,7 +59,7 @@ export type SealReply = { readonly secrets: readonly FoundSecret[]; readonly lay
 export const SEAL_SYSTEM = `You find credentials in a task text so they can be replaced by secret-gate ciphertext before any other model sees the task.
 Another model will then carry out the task seeing only the ciphertext. Your "field" and "layout" are candidate interpretations, not confirmed facts or user authorization.
 Reply with one JSON object only:
-{"layout":"…or null","secrets":[{"value":"…","field":"…","label":"site/what","purpose":"secret|totp_code|totp_seed_import","kind":"secret|totp","hosts":["host[:port]"],"uses":["http","fill"]|["http"]|["otp"]|["exec"],"seed_import_hosts":[],"seed_import_evidence":"…exact original quote, or omit"}]}
+{"layout":"…or null","secrets":[{"value":"…","field":"…","label":"site/what","purpose":"secret|totp_code","kind":"secret|totp","hosts":["host[:port]"],"uses":["http","fill"]|["http"]|["otp"]|["exec"]}]}
 Rules:
 - Records: users paste accounts as delimited lines (a|b|c, tab- or comma-separated, "----"-separated). Split every record into its fields and judge each field on its own. Never mark a whole line or several fields as one value.
 - "layout": when the text has delimited records, one line naming each position in order, e.g. "email | password | birth year | country | Google app password | session key". Otherwise null. Preserve positions; when a position's meaning is uncertain, name it "field N (type unconfirmed)" instead of guessing from a familiar record format.
@@ -69,13 +67,12 @@ Rules:
 - In earlier-turn/environment context, [existing-sealed:N] stands for ciphertext that was already sealed. These are reference markers, never new credential values or authorization evidence; do not mark them, expand them, or infer extra permissions from them. Surrounding original site/field/purpose text remains available. Existing enc:v1: tokens are also already sealed, not plaintext credentials to mint again. Only identify new plaintext values in the current Task text.
 - Mark: passwords, app passwords, PINs, API keys, session keys and cookies, tokens, TOTP seeds, recovery codes, and account names, emails and phone numbers that log in to something.
 - "purpose" describes the operation explicitly requested in the user's task, not merely the credential's format. Use "secret" for ordinary credentials. A TOTP seed used to generate a login verification code is "totp_code", kind "totp", uses ["otp"]. A six-digit code already supplied by the user is an ordinary "secret", not a seed.
-- Only when the user's own task explicitly requests entering, importing or storing the TOTP seed itself in a named destination, use "totp_seed_import", kind "secret", uses ["http","fill"], and exact destination hosts already named in that task, the user's environment context or the user's earlier turn. This direct seed import REQUIRES "seed_import_evidence": a nonempty exact source quote explicitly authorizing the seed import. Without that quote, do not select totp_seed_import or change a seed into secret/http. Do not invent destinations, add the credential issuer's host, use wildcards, or infer seed import from an executor's suggestion. Completing login or two-factor authentication is NOT seed import: it needs a generated verification code, not the seed itself. For example, "登录并完成2FA" is totp_code; "将2FA种子录入管理平台的种子字段" is totp_seed_import.
-- If the user explicitly requests BOTH generating verification codes AND importing the same seed, keep purpose "totp_code", kind "totp", uses ["otp"], and put only the explicitly authorized import destinations in optional "seed_import_hosts". Every grant must be an exact host already in this entry's "hosts" and named in the user's task, environment context or earlier turn. "seed_import_evidence" must copy a nonempty exact quote from that source that explicitly authorizes importing the seed. A login/2FA request alone grants no seed import. Omit the grant when authorization is absent; never obtain it from an executor, a generated thread title, or your own inference. For a direct seed-only import (purpose "totp_seed_import"), no grant is needed: use secret/http directly and leave seed_import_hosts empty.
+- A TOTP seed in the task is always "totp_code", kind "totp", uses ["otp"], even when the task asks to enter the seed itself somewhere: the user seals a seed a site needs separately, by hand. Never change a seed into secret/http/fill.
 - Do not mark: URLs, hostnames, product names, file paths, years, dates, countries, regions, plan names, ordinary words. The executor needs those in the clear.
 - "field": the candidate meaning in a few plain words, e.g. "login email", "account password", "Google app password", "session key", "TOTP seed". Prefer the user's explicit description over a format-based guess. If ambiguous, use a position-based name such as "record 1 field 3 (type unconfirmed)"; do not infer its type just because a destination is expected to have that field. Still seal the sensitive value. Downstream agents may challenge the candidate through the existing question flow; a corrected label does not change the token's permissions.
 - "label" is short: <site>/<what>, e.g. finance/pass, gmail/app-pass. Only [A-Za-z0-9._/-]. Several records: add the record number, e.g. acct1/pass, acct2/pass.
 - "hosts": every site this task will type or send the value to, as host or host:port. That is the destination, which may differ from the service the credential belongs to: to enter a Gmail account into platform X, X is the host (add Gmail only if the task also logs into Gmail). Take hosts from URLs in the text; when the text only names a site ("the finance system", "grafana"), find it in the user's environment context or the earlier turn. Leave empty only when nothing names a destination.
-- "uses": ["http","fill"] for values typed into a website (passwords, account secrets, explicitly requested TOTP seed imports); ["http"] alone for API keys and tokens that tools send in request headers or bodies and that are never typed into a page; ["otp"] for TOTP seeds used to generate verification codes; ["exec"] for values used by local commands.
+- "uses": ["http","fill"] for values typed into a website (passwords, account secrets); ["http"] alone for API keys and tokens that tools send in request headers or bodies and that are never typed into a page; ["otp"] for TOTP seeds used to generate verification codes; ["exec"] for values used by local commands.
 - Nothing sensitive: {"secrets":[],"layout":null}.`;
 
 export function sealMessage(text: string, environment: string, ctx: SealContext = {}): string {
@@ -115,7 +112,7 @@ function cleanLabel(label: string): string {
 }
 
 export type PlannedEntry = MintEntry & { readonly field: string; readonly purpose?: CredentialPurpose };
-export type Plan = { readonly entries: readonly PlannedEntry[]; readonly unroutable: readonly string[]; readonly missingImportAuthorization: readonly string[]; readonly skipped: readonly string[]; readonly records: readonly string[] };
+export type Plan = { readonly entries: readonly PlannedEntry[]; readonly unroutable: readonly string[]; readonly skipped: readonly string[]; readonly records: readonly string[] };
 
 const DELIMITERS = ["|", "\t", "----", ",", ";"] as const;
 const MIN_RECORD_FIELDS = 3;
@@ -142,18 +139,16 @@ export function splitRecord(f: FoundSecret, recordNo: number): FoundSecret[] {
 /** Shorter than the gate will seal: MIN_VALUE_LENGTH for anything typed, sent or passed to a command, a lower noise
  *  floor for a value used only for TOTP codes. Characters are counted as code points, as Python's `len` does. */
 export function tooShort(f: Pick<FoundSecret, "value" | "uses" | "purpose">): boolean {
-  const otpOnly = f.purpose === "totp_code" || (f.purpose !== "totp_seed_import" && f.uses.every((u) => u === "otp"));
+  const otpOnly = f.purpose === "totp_code" || f.uses.every((u) => u === "otp");
   return [...f.value].length < (otpOnly ? MIN_OTP_VALUE_LENGTH : MIN_VALUE_LENGTH);
 }
 
 /** What to mint. A value the text does not contain, or too short for the gate to seal (`tooShort`), is skipped
  *  (nothing to replace, or nothing the gate would mint; such a value stays as typed, as one under the old floor of 4
  *  did). An http secret without a host is unroutable: the gate would refuse it. */
-export function planSeal(text: string, found: readonly FoundSecret[], destinationEvidence: string | readonly string[] = text): Plan {
-  const sources = typeof destinationEvidence === "string" ? [destinationEvidence] : destinationEvidence;
-  const hostEvidence = sources.join("\n");
+export function planSeal(text: string, found: readonly FoundSecret[]): Plan {
   const seen = new Set<string>();
-  const entries: PlannedEntry[] = [], unroutable: string[] = [], missingImportAuthorization: string[] = [], skipped: string[] = [], records: string[] = [];
+  const entries: PlannedEntry[] = [], unroutable: string[] = [], skipped: string[] = [], records: string[] = [];
   found.forEach((f, i) => {
     if (tooShort(f) || !text.includes(f.value) || seen.has(f.value)
       || /^\[existing-sealed:\d+\]$/.test(f.value) || /^enc:v1:[A-Za-z0-9_=-]{16,}$/.test(f.value)) { skipped.push(f.label); return; }
@@ -162,26 +157,12 @@ export function planSeal(text: string, found: readonly FoundSecret[], destinatio
     const hosts = [...new Set(f.hosts.map(hostOf).filter(Boolean))];
     const base = cleanLabel(f.label);
     const label = entries.some((e) => e.label === base) ? `${base}-${i + 1}` : base;
-    const kind = f.purpose === "totp_seed_import" ? "secret" : f.purpose === "totp_code" ? "totp" : f.kind;
-    const uses: MintEntry["uses"] = f.purpose === "totp_seed_import" ? [...WEB_FORM_USES] : f.purpose === "totp_code" ? ["otp"] : [...new Set(f.uses)];
-    const importHosts = f.purpose === "totp_seed_import" ? [] : [...new Set((f.seed_import_hosts ?? []).map(hostOf))];
-    const sourceQuote = f.seed_import_evidence;
-    if ((f.purpose === "totp_seed_import" || importHosts.length) && (!sourceQuote?.trim() || !sources.some((source) => source.includes(sourceQuote)))) {
-      unroutable.push(label); missingImportAuthorization.push(label); return;
-    }
-    if ((uses.includes("http") || uses.includes("fill")) && !hosts.length || f.purpose === "totp_seed_import" && hosts.some((host) => !evidencedExactHost(host, hostEvidence))) { unroutable.push(label); return; }
-    if (importHosts.length && (kind !== "totp" || !uses.includes("otp")
-      || importHosts.some((host) => !hosts.includes(host) || !evidencedExactHost(host, hostEvidence)))) { unroutable.push(label); return; }
-    entries.push({ label, field: f.field.trim() || label, value: f.value, kind, hosts, uses, ...(f.purpose ? { purpose: f.purpose } : {}), ...(importHosts.length ? { seed_import_hosts: importHosts } : {}) });
+    const kind = f.purpose === "totp_code" ? "totp" : f.kind;
+    const uses: MintEntry["uses"] = f.purpose === "totp_code" ? ["otp"] : [...new Set(f.uses)];
+    if ((uses.includes("http") || uses.includes("fill")) && !hosts.length) { unroutable.push(label); return; }
+    entries.push({ label, field: f.field.trim() || label, value: f.value, kind, hosts, uses, ...(f.purpose ? { purpose: f.purpose } : {}) });
   });
-  return { entries, unroutable, missingImportAuthorization, skipped, records };
-}
-
-/** Seed import may not silently expand to an invented host, subdomain, port or wildcard. */
-function evidencedExactHost(host: string, evidence: string): boolean {
-  if (!/^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*|\[[0-9a-f:]+\])(?::\d{1,5})?$/i.test(host)) return false;
-  const literal = host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<![a-z0-9._:\\[\\]-])${literal}(?![a-z0-9._:\\[\\]-])`, "i").test(evidence);
+  return { entries, unroutable, skipped, records };
 }
 
 /** The iPhone app cuts a task's text at "\n\n[AgentSwitch sealed the credentials" to show it (ios-app MessageDisplay);
@@ -210,18 +191,18 @@ async function askModel(router: Router, message: string, signal: AbortSignal, as
 }
 
 /** Ask, and once more with feedback if whole records came back marked; still whole → split them mechanically. */
-async function planWithRetry(router: Router, text: string, message: string, destinationEvidence: readonly string[], signal: AbortSignal, assertActive: () => void): Promise<{ ok: true; plan: Plan; layout: string | null } | { ok: false; error: string }> {
+async function planWithRetry(router: Router, text: string, message: string, signal: AbortSignal, assertActive: () => void): Promise<{ ok: true; plan: Plan; layout: string | null } | { ok: false; error: string }> {
   let parsed = await askModel(router, message, signal, assertActive);
   if (!parsed.ok) return parsed;
-  let plan = planSeal(text, parsed.secrets, destinationEvidence);
+  let plan = planSeal(text, parsed.secrets);
   if (plan.records.length) {
     const again = await askModel(router, `${message}\n\n${RECORD_FEEDBACK(plan.records)}`, signal, assertActive);
-    if (again.ok) { parsed = again; plan = planSeal(text, again.secrets, destinationEvidence); }
+    if (again.ok) { parsed = again; plan = planSeal(text, again.secrets); }
   }
   if (plan.records.length) {
     const whole = parsed.secrets.filter((f) => plan.records.includes(f.label));
     const rest = parsed.secrets.filter((f) => !plan.records.includes(f.label));
-    plan = planSeal(text, [...rest, ...whole.flatMap((f, i) => splitRecord(f, i + 1))], destinationEvidence);
+    plan = planSeal(text, [...rest, ...whole.flatMap((f, i) => splitRecord(f, i + 1))]);
   }
   return { ok: true, plan, layout: parsed.layout };
 }
@@ -253,18 +234,17 @@ export function routerSealer(router: Router, minter: Minter, environment: () => 
         assertActive();
         const userEnvironment = environment();
         assertActive();
-        // Only the model view is compacted. Authorization quotes and hosts are checked against original sources.
-        const planned = await planWithRetry(router, text, sealMessage(text, userEnvironment, ctx), [text, userEnvironment, ctx.parentTask ?? ""], controller.signal, assertActive);
+        // Only the model view is compacted (existing tokens become markers).
+        const planned = await planWithRetry(router, text, sealMessage(text, userEnvironment, ctx), controller.signal, assertActive);
         assertActive();
         if (!planned.ok) return unavailable(SEAL_ERROR.unavailable);
         const { plan, layout } = planned;
-        if (plan.missingImportAuthorization.length) return { ok: false, code: "unroutable", error: "缺少这些 TOTP 种子录入操作的原文授权依据。请在消息中明确说明将种子录入哪个站点的哪个字段；仅登录或生成验证码不会授予种子导入权限。", ms: ms() };
         if (plan.unroutable.length) return { ok: false, code: "unroutable", error: "无法确定这些凭据所属的站点。请在任务中注明站点或网址，或将站点添加到 CONTEXT.md。", ms: ms() };
         assertActive();
         const minted = await minter(plan.entries);
         assertActive();
         if (minted.length !== plan.entries.length || minted.some((entry) => "error" in entry || !/^enc:v1:[A-Za-z0-9_=-]{16,}$/.test(entry.token))) return unavailable(SEAL_ERROR.encryption);
-        const sealed: SealedEntry[] = plan.entries.map((e, i) => ({ label: e.label, field: e.field, kind: e.kind, hosts: e.hosts, uses: e.uses, token: (minted[i] as { token: string }).token, ...(e.purpose ? { purpose: e.purpose } : {}), ...(e.seed_import_hosts?.length ? { seed_import_hosts: e.seed_import_hosts } : {}) }));
+        const sealed: SealedEntry[] = plan.entries.map((e, i) => ({ label: e.label, field: e.field, kind: e.kind, hosts: e.hosts, uses: e.uses, token: (minted[i] as { token: string }).token, ...(e.purpose ? { purpose: e.purpose } : {}) }));
         const replaced = applyTokens(text, plan.entries.map((e, i) => ({ value: e.value, token: sealed[i]!.token })));
         const assembled = replaced + legend(sealed, layout);
         assertActive();

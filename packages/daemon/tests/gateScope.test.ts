@@ -20,7 +20,6 @@ const gate: GateOptions = { bin: "/g/secret-gate", home: "/h/.secret-gate", prox
 const scope = "Sc0pe_Fixture-0123456789abcdefgh";
 const scoped = `http://scope:${scope}@127.0.0.1:8080`;
 const transfer: TransferGrant = { source: ["crm.example.com"], destination: ["erp.example.com:8443"], fields: ["email", "phone"], purpose: "把客户联系方式登记到 ERP" };
-const repair = { url: "http://127.0.0.1:5555/credential-repair", key: "repair-key" };
 const proxyVars = ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"] as const;
 
 const dirs: string[] = [];
@@ -63,28 +62,27 @@ describe("gate wiring with an execution scope", () => {
   });
 
   it("Claude shape: scope for both gate processes, the grant only for the browser gate, nothing in argv", () => {
-    const servers = claudeMcpServers(gate, "/p", true, repair, { scope, transfer });
-    expect(servers["secret-gate"]!.env).toEqual({ SECRET_GATE_HOME: gate.home, SECRET_GATE_SCOPE: scope, SECRET_GATE_REPAIR_URL: repair.url, SECRET_GATE_REPAIR_KEY: repair.key });
+    const servers = claudeMcpServers(gate, "/p", true, { scope, transfer });
+    expect(servers["secret-gate"]!.env).toEqual({ SECRET_GATE_HOME: gate.home, SECRET_GATE_SCOPE: scope });
     expect(servers.playwright!.env).toEqual({ SECRET_GATE_HOME: gate.home, SECRET_GATE_SCOPE: scope, SECRET_GATE_TRANSFER: JSON.stringify(transfer) });
     expect(JSON.stringify([servers["secret-gate"]!.args, servers.playwright!.args])).not.toContain(scope);
     expect(servers.playwright!.args).toContain("--proxy-server=http://127.0.0.1:8080");   // Chromium cannot carry proxy credentials
-    expect(claudeMcpServers(gate, "/p", true, undefined, { transfer }).playwright!.env).toEqual({ SECRET_GATE_HOME: gate.home });
+    expect(claudeMcpServers(gate, "/p", true, { transfer }).playwright!.env).toEqual({ SECRET_GATE_HOME: gate.home });
     expect(claudeMcpServers(gate, "/p", true).playwright!.env).toEqual({ SECRET_GATE_HOME: gate.home });
   });
 
   it("OpenCode shape: the same split in `environment`", () => {
-    const { mcp } = opencodeGateConfig(gate, "/p", true, repair, { scope, transfer }) as { mcp: Record<string, { command: string[]; environment: Record<string, string> }> };
+    const { mcp } = opencodeGateConfig(gate, "/p", true, { scope, transfer }) as { mcp: Record<string, { command: string[]; environment: Record<string, string> }> };
     expect(mcp["secret-gate"]!.environment.SECRET_GATE_SCOPE).toBe(scope);
     expect(mcp["secret-gate"]!.environment.SECRET_GATE_TRANSFER).toBeUndefined();
     expect(JSON.parse(mcp.playwright!.environment.SECRET_GATE_TRANSFER!)).toEqual(transfer);
-    expect(mcp.playwright!.environment.SECRET_GATE_REPAIR_KEY).toBeUndefined();
     expect(JSON.stringify(mcp.playwright!.command)).not.toContain(scope);
-    const plain = opencodeExecConfig(gate, "/p", false, {}, undefined, { scope, transfer }) as { mcp: Record<string, unknown> };
+    const plain = opencodeExecConfig(gate, "/p", false, {}, { scope, transfer }) as { mcp: Record<string, unknown> };
     expect(Object.keys(plain.mcp)).toEqual(["secret-gate"]);
   });
 
   it("Codex shape: scoped proxy in shell_environment_policy.set, scope in both MCP env tables, grant JSON a valid TOML string", () => {
-    const toml = codexGateToml(gate, "/p", true, repair, { scope, transfer });
+    const toml = codexGateToml(gate, "/p", true, { scope, transfer });
     const set = toml.split("\n").find((l) => l.startsWith("set = "))!;
     for (const k of proxyVars) expect(set).toContain(`${k} = ${JSON.stringify(scoped)}`);
     const gateEnvTable = toml.split("[mcp_servers.secret-gate.env]\n")[1]!.split("\n[")[0]!;
@@ -93,10 +91,9 @@ describe("gate wiring with an execution scope", () => {
     const pwEnv = toml.split("[mcp_servers.playwright.env]\n")[1]!;
     expect(tomlValue(pwEnv, "SECRET_GATE_SCOPE")).toBe(scope);
     expect(JSON.parse(tomlValue(pwEnv, "SECRET_GATE_TRANSFER")!)).toEqual(transfer);
-    expect(tomlValue(pwEnv, "SECRET_GATE_REPAIR_KEY")).toBeNull();
     const args = toml.split("\n").find((l) => l.startsWith("args = ") && l.includes("browser"))!;
     expect(args).not.toContain(scope);
-    expect(codexConfigToml(gate, "/p", true, null, "", undefined, {})).not.toContain("SECRET_GATE_SCOPE");
+    expect(codexConfigToml(gate, "/p", true, null, "", {})).not.toContain("SECRET_GATE_SCOPE");
     expect(codexGateToml(gate, "/p", true)).toMatch(/set = \{.*http_proxy = "http:\/\/127.0.0.1:8080".*\}/);
   });
 });

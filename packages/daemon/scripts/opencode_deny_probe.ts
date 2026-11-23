@@ -78,7 +78,6 @@ try {
   const input: ExecutionInput = {
     taskId: "deny-probe", task: brief, brief, cwd, model: MODEL, effort: null, handoffNote: null, context: null, knownTokens: new Set(),
     threadHome: null, resume: null, attachments: [], browser: false, gateScope: randomBytes(24).toString("base64url"), transfer: null,
-    credentialRepair: { url: "http://127.0.0.1:9/credential-repair", key: randomBytes(16).toString("hex") },
     signal: abort.signal,
     emit: (type, payload) => console.error(`${at()} ${type}: ${JSON.stringify(payload).slice(0, 220)}`),
     approve: async (action) => { console.error(`${at()} APPROVAL denied: ${action}`); return "deny"; },

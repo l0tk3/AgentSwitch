@@ -7,9 +7,6 @@ import type { ExecutionOutcome } from "../core/outcome.js";
 import type { TransferGrant } from "../core/transfer.js";
 
 export type ApprovalDecision = "allow" | "deny";
-/** Per-execution loopback capability. Only the gate MCP process receives this credential. */
-export type CredentialRepair = { readonly url: string; readonly key: string };
-
 export type ExecutionInput = {
   readonly taskId: string;
   readonly task: string;
@@ -26,7 +23,6 @@ export type ExecutionInput = {
   readonly feedback?: string | null;
   /** Genuine enc:v1: tokens for this task; executors that can rewrite tool inputs repair damaged copies against it. */
   readonly knownTokens: ReadonlySet<string>;
-  readonly credentialRepair?: CredentialRepair;
   /** This execution's enc:ref: scope (gate-next-v0 §1), set by the refs wrapper. A capability: only the gate processes
    *  (SECRET_GATE_SCOPE) and the shell tools' proxy URL carry it; never argv, prompts, events or logs. */
   readonly gateScope?: string | null;
@@ -47,7 +43,7 @@ export type ExecutionInput = {
   readonly browserProfile?: string;
   readonly signal: AbortSignal;
   /** Stream progress; the engine persists and fans out. `agent` = a sub-agent the harness spawned (background-v0 §2). */
-  readonly emit: (type: "text" | "tool_call" | "tool_result" | "agent" | "credential_repair" | "transfer_grant", payload: Record<string, unknown>) => void;
+  readonly emit: (type: "text" | "tool_call" | "tool_result" | "agent" | "transfer_grant", payload: Record<string, unknown>) => void;
   /** What it is writing at the moment (docs/simple-view-v0.md §5.14): the part of its answer being written, its whole
    *  text so far; null once that part is in the task's events (`text`) or nothing is being written. Shown while it is
    *  written, never stored. Absent: nobody watches. */

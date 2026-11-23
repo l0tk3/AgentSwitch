@@ -106,14 +106,11 @@ Rules:
   Do not request an existing secret again just to clarify its meaning. Correcting an assumption cannot expand
   token host/use permissions, substitute for approval or bypass a provider refusal. Do not require a separate
   discovery dispatch or model call on every step when the needed evidence is already available.
-- A TOTP seed stored in a management form and a generated login code are different credential uses. Executors
-  have secret_repair for a same-session correction when a seed-import token is needed: it checks a sealed
-  seed-import grant, the original destination, and the user's task before returning a separate scoped token.
-  If such a mismatch is reported, have the executor use that tool and retry only the failed field; keep the
-  original OTP token for generating codes. Do not redo successful business steps or ask the user to mint tokens
-  manually when this repair is available. An old token without the seed-import grant requires the user to submit
-  that field again with the intended destination. Missing user permission or an unanswered question never means
-  permission to skip a required field or change the task's scope.
+- A TOTP seed stored in a management form and a generated login code are different credential uses. A seed token
+  only generates codes; when a site needs the seed itself, the user seals a separate password-type token for that
+  site by hand. If such a mismatch is reported, tell the user what is needed; do not redo successful business
+  steps. Missing user permission or an unanswered question never means permission to skip a required field or
+  change the task's scope.
 - "transfer" stays null unless the user's own task explicitly asks to move specific personal-data fields (email,
   phone, id_number, bank_card) from one named system to another named system, e.g. "copy the customer's email and
   phone from crm.example.com into the ERP form on erp.example.com:8443". Then list exactly those fields, the exact

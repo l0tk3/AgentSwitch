@@ -6,7 +6,7 @@
 export const DEFAULT_EXECUTOR_TIMEOUT_MS = 30 * 60_000;
 
 /** Outer deadline around one supporting text-only model call (thread summary, supervisor verdict or answer, completion
- *  check, credential-repair authorization), start-up included. The daemon passes targets.yaml `router.timeout_ms` to
+ *  check), start-up included. The daemon passes targets.yaml `router.timeout_ms` to
  *  the calls themselves; this bounds whatever waits on them. */
 export const SUPPORT_CALL_TIMEOUT_MS = 45_000;
 

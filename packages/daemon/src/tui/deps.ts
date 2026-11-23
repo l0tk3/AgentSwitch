@@ -72,8 +72,8 @@ export type ConfigDeps = {
   /** `text` edited in the user's editor (`$VISUAL`, `$EDITOR`, else vi), on the terminal the screen gives up meanwhile;
    *  `name` is the file's name (its suffix picks the editor's mode). What it was saved as. */
   readonly edit: (text: string, name: string) => Promise<string>;
-  /** This node's gate's key pairs (keeper/gateKeys.ts). */
-  readonly keys: { list(): Promise<Keypair[]>; create(name: string, use: boolean): Promise<Keypair[]>; use(name: string): Promise<Keypair[]>; retire(name: string): Promise<Keypair[]> };
+  /** This node's gate key pair (keeper/gateKeys.ts): at most one row; `create` runs `secret-gate keygen`. */
+  readonly keys: { list(): Promise<Keypair[]>; create(): Promise<Keypair[]> };
   /** `agentswitch doctor`'s lines. */
   readonly doctor: () => Promise<string[]>;
 };

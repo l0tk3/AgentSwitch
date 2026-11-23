@@ -31,7 +31,7 @@ function world() {
   let settings: NodeSettings = { name: "box", lan: "10.0.0.9" };
   let servers: McpServer[] = [{ name: "files", kind: "stdio", command: "npx", args: ["-y", "files-mcp"], env: {}, headers: {}, enabled: true, harnesses: ["claude-code", "codex", "opencode"], approval: "ask", note: "" }];
   let skills: Skill[] = [{ name: "notes", description: "Write notes", path: "/h/skills/notes", files: 0, enabled: true, harnesses: ["claude-code", "codex", "opencode"] }];
-  let keypairs: Keypair[] = [{ name: "main", public: "PUBLICKEYMAIN0123456789", current: true }, { name: "old", public: "PUBLICKEYOLD0123456789", current: false, legacy: true }];
+  let keypairs: Keypair[] = [{ name: "main", public: "PUBLICKEYMAIN0123456789", current: true, legacy: false }];
   const client = {
     profiles: vi.fn(async () => ({ agents })),
     createProfile: vi.fn(async (agent: ProfileAgent, name: string, kind: "subscription" | "api", api?: { key: string; baseUrl?: string; model?: string }) => {
@@ -86,13 +86,11 @@ function world() {
   const edit = vi.fn(async (text: string, name: string) => { edits.push({ text, name }); return editTo(text); });
   const keys = {
     list: vi.fn(async () => keypairs),
-    create: vi.fn(async (name: string, use: boolean) => { keypairs = [...keypairs.map((k) => (use ? { ...k, current: false } : k)), { name, public: "NEWPUBLIC0123456789", current: use }]; return keypairs; }),
-    use: vi.fn(async (name: string) => { keypairs = keypairs.map((k) => ({ ...k, current: k.name === name })); return keypairs; }),
-    retire: vi.fn(async (name: string) => { keypairs = keypairs.filter((k) => k.name !== name); return keypairs; }),
+    create: vi.fn(async () => { keypairs = [{ name: "main", public: "NEWPUBLIC0123456789", current: true, legacy: false }]; return keypairs; }),
   };
   const doctor = vi.fn(async () => ["", "// runtime", "✓ node             v24.6.0", "✗ secret-gate      not at /x", "! installed        running from a checkout"]);
   const deps: ConfigDeps = { client, remote: null, seal, node, edit, keys, doctor };
-  return { client, seal, node, deps, settings: () => settings, edits, edit, setEdit: (f: (text: string) => string) => { editTo = f; }, keys, doctor };
+  return { client, seal, node, deps, settings: () => settings, edits, edit, setEdit: (f: (text: string) => string) => { editTo = f; }, keys, setKeys: (next: Keypair[]) => { keypairs = next; }, doctor };
 }
 
 const shown: { unmount(): void }[] = [];
@@ -411,20 +409,24 @@ describe("agentswitch config", { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(w.client.putSkill).toHaveBeenCalledWith("notes", { harnesses: ["claude-code", "opencode"] }));
   });
 
-  it("makes a key pair current, and deletes one only when asked in so many words", async () => {
+  it("shows the one key pair's public key, with nothing to switch or delete", async () => {
     const w = world();
     const ui = open(w.deps, "keys");
-    await ui.until("Current · PUBLICKEYMAIN");
-    await ui.press(KEY.enter, KEY.down, KEY.enter);              // old
-    await ui.until("Keys › old");
-    expect(ui.frame()).toContain("PUBLICKEYOLD0123456789");
-    await ui.press(KEY.down, KEY.down, KEY.enter);               // Delete…, after Make Current
-    await ui.until("can never be opened again");
-    await ui.press("n");
-    expect(w.keys.retire).not.toHaveBeenCalled();
-    await ui.press(KEY.up, KEY.enter);                           // Make Current
-    await ui.until("old is the current key pair.");
-    expect(w.keys.use).toHaveBeenCalledWith("old");
+    await ui.until("PUBLICKEYMAIN0123456789");
+    expect(ui.frame()).toContain("Public Key");
+    expect(ui.frame()).not.toMatch(/Make Current|Delete|New Key Pair|Create Key Pair/);
+    expect(w.keys.create).not.toHaveBeenCalled();
+  });
+
+  it("makes the key pair when there is none yet", async () => {
+    const w = world();
+    w.setKeys([]);
+    const ui = open(w.deps, "keys");
+    await ui.until("There is no key pair yet.");
+    await ui.press(KEY.enter, KEY.enter);                        // into the page, Create Key Pair
+    await ui.until("Created the key pair.");
+    expect(w.keys.create).toHaveBeenCalledTimes(1);
+    await ui.until("NEWPUBLIC0123456789");
   });
 
   it("shows doctor's lines marked, and asks again", async () => {

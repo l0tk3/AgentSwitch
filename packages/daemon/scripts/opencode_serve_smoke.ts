@@ -50,7 +50,6 @@ async function run(executor: ReturnType<typeof opencodeExecutor>, cwd: string, b
   const input: ExecutionInput = {
     taskId: "serve-smoke", task: brief, brief, cwd, model: MODEL, effort: null, handoffNote: null, context: null, knownTokens: new Set(),
     threadHome: null, resume, attachments: [], browser: false, gateScope: randomBytes(24).toString("base64url"), transfer: null,
-    credentialRepair: { url: "http://127.0.0.1:9/credential-repair", key: randomBytes(16).toString("hex") },
     signal: new AbortController().signal,
     emit: (type, payload) => { events.push({ type, payload }); console.error(`  ${type}: ${JSON.stringify(payload).slice(0, 140)}`); },
     approve: async (action) => { console.error(`  APPROVAL (denied by the smoke): ${action}`); return "deny"; },
@@ -81,7 +80,7 @@ try {
   checks.run1ScopedProxyInShell = existsSync(join(cwd1, "proxy_check.txt")) && readFileSync(join(cwd1, "proxy_check.txt"), "utf8").trim() === "1";
   checks.run1NotStandalone = !r1.events.some((e) => String(e.payload.text ?? "").includes("resident server not used"));
   const names = existsSync(join(gateHome, "mcp-env-names.json")) ? JSON.parse(readFileSync(join(gateHome, "mcp-env-names.json"), "utf8")) as string[] : [];
-  checks.gateMcpGotScopeAndRepairVars = names.includes("SECRET_GATE_SCOPE") && names.includes("SECRET_GATE_REPAIR_KEY");
+  checks.gateMcpGotScope = names.includes("SECRET_GATE_SCOPE");
   checks.gateMcpHasNoServerPassword = !names.some((n) => /^OPENCODE_(SERVER_)?PASSWORD$/.test(n));
   checks.mcpRemovedAfterRun = ((await server.call<{ data?: unknown[] }>("GET", `/api/mcp?${locationQuery(cwd1)}`)).data ?? []).length === 0;
 

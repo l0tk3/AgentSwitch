@@ -53,7 +53,6 @@ describe("seal helpers", () => {
     expect(tooShort({ value: "密码密码密码密码", uses: ["http"] })).toBe(false);
     expect(tooShort({ value: "MZXW6YQ", uses: ["otp"] })).toBe(false);
     expect(tooShort({ value: "MZXW6YQ", uses: ["otp"], purpose: "totp_code" })).toBe(false);
-    expect(tooShort({ value: "MZXW6YQ", uses: ["otp"], purpose: "totp_seed_import" })).toBe(true);  // typed into a page
     expect(tooShort({ value: "abc", uses: ["otp"] })).toBe(true);
     const plan = planSeal("pw Pass123 key sk-abcdefgh", [
       { value: "Pass123", label: "a/pass", field: "", kind: "secret", hosts: ["a.example"], uses: ["http", "fill"] },
@@ -65,15 +64,15 @@ describe("seal helpers", () => {
   });
 
   it("values typed into a page carry 'fill' so the gate service may type them (gate-service-v0 §1); API keys need not", () => {
-    // The model's reply without "uses" means a website value; seed imports are typed into a form field too.
+    // The model's reply without "uses" means a website value; a TOTP seed only ever makes codes (gate-simple-v0 §1).
     expect(parseSealReply(reply([{ value: "Hunter2!", label: "finance/pass", hosts: ["core"] }]))).toMatchObject({ ok: true, secrets: [{ uses: ["http", "fill"] }] });
     const text = "密码 Hunter2! 接口密钥 sk-live-abcdef12 种子 JBSWY3DPEHPK3PXP 录入 mfa.example 的种子字段";
     const plan = planSeal(text, [
       { value: "Hunter2!", label: "site/pass", field: "", kind: "secret", hosts: ["core"], uses: ["http", "fill"] },
       { value: "sk-live-abcdef12", label: "api/key", field: "", kind: "secret", hosts: ["api.example"], uses: ["http"] },
-      { value: "JBSWY3DPEHPK3PXP", label: "mfa/seed", field: "", kind: "totp", hosts: ["mfa.example"], uses: ["otp"], purpose: "totp_seed_import", seed_import_evidence: "录入 mfa.example 的种子字段" },
+      { value: "JBSWY3DPEHPK3PXP", label: "mfa/seed", field: "", kind: "totp", hosts: ["mfa.example"], uses: ["otp"], purpose: "totp_code" },
     ]);
-    expect(plan.entries.map((e) => [e.label, e.uses])).toEqual([["site/pass", ["http", "fill"]], ["api/key", ["http"]], ["mfa/seed", ["http", "fill"]]]);
+    expect(plan.entries.map((e) => [e.label, e.uses])).toEqual([["site/pass", ["http", "fill"]], ["api/key", ["http"]], ["mfa/seed", ["otp"]]]);
     expect(planSeal("pw Hunter2!", [{ value: "Hunter2!", label: "x/pass", field: "", kind: "secret", hosts: [], uses: ["fill"] }]).unroutable).toEqual(["x/pass"]);
   });
 

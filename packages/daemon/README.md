@@ -197,7 +197,7 @@ for launchd): `serve` logs an error at start-up when it is not, and every run ch
 fails the attempt as `gate_unavailable`, which stops the task (every harness shares the proxy, so there is no
 retry or switch, and it is no mark against the model).
 
-Short references (gate-next-v0 §1, `src/executors/gateRefs.ts`, inside the credential-repair bridge): each run
+Short references (gate-next-v0 §1, `src/executors/gateRefs.ts`): each run
 gets a fresh scope (`randomBytes(24)`), the task's known `enc:v1:` tokens are registered under it with
 `secret-gate refs register` (scope on stdin only), and task, brief, handoff, context, platform memory, feedback
 and answers given during the run reach the executor as `enc:ref:` references. The scope goes to `secret-gate mcp`
@@ -206,7 +206,7 @@ registry MCP servers keep the plain proxy. Outcome text, event payloads, approva
 are mapped back to `enc:v1:` (records keep stable ciphertext, approvers see which credential is meant), and the
 scope, raw or as its Proxy-Authorization base64, becomes `[scope]`; `secret-gate refs release` runs in `finally`.
 If the refs CLI fails, the run goes ahead with full tokens and no scope, and a `text` event says so. Claude's MCP
-config (gate env: scope, repair key, grant) goes to the CLI as a 0600 file in the run's private dir
+config (gate env: scope, grant) goes to the CLI as a 0600 file in the run's private dir
 (`--mcp-config <file>`), never inline: the SDK would otherwise put it into argv, which `ps` shows to every user.
 
 Field transfer (§5.2): the router may set `transfer` (`source`/`destination` exact hosts, 1-8 each; `fields` ⊆
@@ -242,9 +242,9 @@ calls go direct), and a lifetime tied to the daemon (it exits when its stdin clo
 reused: its agents deny shell and edit, and its sessions run in task directories too, where they would see an
 execution's runtime MCP servers. Per execution, through the API: the session (`location` = cwd, agent `build`, model,
 `permissions` = the standalone config's rules), its shell env (`PUT …/environment` replaces it: the daemon's env
-without proxy or repair variables, the gate proxy carrying the execution scope, `SECRET_GATE_HOME`, `NO_PROXY`),
+without proxy variables, the gate proxy carrying the execution scope, `SECRET_GATE_HOME`, `NO_PROXY`),
 the guidance as an instruction entry, and the MCP servers (`PUT /api/experimental/mcp/<name>?location=<cwd>`:
-secret-gate with scope and repair bridge, the browser gate with scope and grant, registry servers). A resume
+secret-gate with scope, the browser gate with scope and grant, registry servers). A resume
 continues the thread's session in place (rules patched in, model switched to the verdict's); a session that is gone,
 in another directory or still running gets a new one, as `run` did. Sub-agent sessions inherit the rules but not
 the env or the instruction entry, so the executor sets both as soon as a child shows up. Before the prompt, a few
@@ -681,7 +681,7 @@ import only those listed for it (and itself):
 | `ui/` | desktop console at `/ui`: `index.html` shell, `app.css`, `app.js` (render loop, click routing, polling), `lib/{api,state,actions}.js`, `views/{home,task,log,ext,ctx,quota}.js` |
 | `src/executors/{types,echo,gate,instructions,lifecycle,opencode,codex,claude}.ts` | executor interface, echo, gate wiring + proxy health, global guidance, run deadline/abort, the three real executors |
 | `src/executors/opencode{Server,ServeRun,ServeMap,Shared}.ts` | OpenCode executors' resident server: process + client, one execution on it, API mapping, what both OpenCode paths share |
-| `src/executors/{gateRefs,credentialRepair}.ts`, `src/secrets/refs.ts` | per-run wrappers: enc:ref: scope (refs CLI client), credential-repair bridge |
+| `src/executors/gateRefs.ts`, `src/secrets/refs.ts` | per-run wrapper: enc:ref: scope (refs CLI client) |
 | `src/executors/protected.ts` | protected paths: deny decision for Claude, deny patterns for OpenCode, snapshot/restore backstop for all |
 | `src/threads/memory.ts`, `src/router/record.ts` | MEMORY.md append/lint; track record aggregation + guards (router input) |
 | `src/threads/{types,fold,summary,handoff}.ts` | thread model + fold policies, `foldThread`, the summarizer (router model, zod, lint), handoff package (`git status`/`diff --stat`) + rendering |

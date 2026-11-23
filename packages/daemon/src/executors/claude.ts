@@ -12,7 +12,7 @@ import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../core/outcome.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
-import { claudeMcpServers, gateEnv, gateRun, mcpServerEnv, reportTransfer, withoutCredentialRepair, type GateOptions } from "./gate.js";
+import { claudeMcpServers, gateEnv, gateRun, mcpServerEnv, reportTransfer, type GateOptions } from "./gate.js";
 import type { TransferGrant } from "../core/transfer.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
@@ -224,8 +224,8 @@ function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: Readonly
 type RunSetup = { readonly options: Options; readonly runDir: string; readonly transfer: TransferGrant | null };
 
 /** MCP config as a 0600 file in the run's private (0700) dir. The SDK would put `mcpServers`, env included, into the
- *  CLI's argv as `--mcp-config '<json>'`, readable by any local user through `ps`: that env holds the execution scope,
- *  the repair key and the transfer grant. `--mcp-config <file>` is read by the CLI at start (verified against the
+ *  CLI's argv as `--mcp-config '<json>'`, readable by any local user through `ps`: that env holds the execution scope
+ *  and the transfer grant. `--mcp-config <file>` is read by the CLI at start (verified against the
  *  bundled 2.1.278 CLI: argv carries only the path, the servers get their env). Removed with the run dir. */
 export function mcpConfigFile(runDir: string, mcpServers: Record<string, unknown>): string {
   const path = join(runDir, "mcp.json");
@@ -256,7 +256,7 @@ function runOptions(runDir: string, input: ExecutionInput, opts: ClaudeExecutorO
   const run = gateRun(input, browser);
   // The Bash tool inherits this env: its proxy URL carries the execution scope; registry MCP servers do not.
   const baseEnv = { ...(opts.gate ? gateEnv(opts.gate, run.scope) : {}), ...claudeHomeEnv(input.threadHome) };
-  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser, input.credentialRepair, run) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
+  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser, run) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
   reportTransfer(input, run, "claude-code", !!opts.gate, browser);
   const options: Options = {
     cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
@@ -264,7 +264,7 @@ function runOptions(runDir: string, input: ExecutionInput, opts: ClaudeExecutorO
     // The answer as it is written (docs/simple-view-v0.md §5.14): the API's own pieces, `stream_event`.
     maxTurns: opts.maxTurns ?? DEFAULT_MAX_TURNS, abortController: abort, includePartialMessages: !!input.writing,
     ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
-    env: { ...withoutCredentialRepair(process.env), ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
+    env: { ...process.env, ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
     ...(input.resume ? { resume: input.resume } : {}),
     ...(Object.keys(mcpServers).length ? { extraArgs: { "mcp-config": mcpConfigFile(runDir, mcpServers) } } : {}),
     ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),

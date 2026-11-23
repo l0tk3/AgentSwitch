@@ -23,7 +23,6 @@ const gate: GateOptions = { bin: "/g/secret-gate", home: "/h/.secret-gate", prox
 const scope = "Sc0pe_Fixture-0123456789abcdefgh";
 const scoped = `http://scope:${scope}@127.0.0.1:8080`;
 const transfer: TransferGrant = { source: ["crm.example.com"], destination: ["erp.example.com:8443"], fields: ["email"], purpose: "登记联系人" };
-const repair = { url: "http://127.0.0.1:5555/credential-repair", key: "repair-key-fixture-0001" };
 const prot: ProtectedPaths = { roots: ["/h/.agentswitch", "/h/.secret-gate"], exempt: [] };
 const registry: McpServer = { name: "notes", kind: "stdio", command: "/bin/notes-mcp", args: ["--x"], env: { NOTES_TOKEN: "enc:v1:abc" }, headers: {}, enabled: true, harnesses: ["opencode"], approval: "ask", note: "" };
 
@@ -53,7 +52,7 @@ type Events = { type: string; payload: Record<string, unknown> }[];
 function input(cwd: string, over: Partial<ExecutionInput> = {}, events: Events = []): ExecutionInput {
   return { taskId: "t1", task: "copy the contact", brief: "copy the contact", cwd, model: "deepseek/deepseek-flash", effort: null,
     handoffNote: null, context: null, knownTokens: new Set(), threadHome: null, resume: null, attachments: [], browser: true,
-    gateScope: scope, transfer, credentialRepair: repair, signal: new AbortController().signal,
+    gateScope: scope, transfer, signal: new AbortController().signal,
     emit: (type, payload) => { events.push({ type, payload }); }, approve: async () => "deny", ask: async () => null, ...over };
 }
 
@@ -88,22 +87,21 @@ describe("OpenCode executor on the resident server: per-execution wiring", () =>
     expect(s.permissions).toContainEqual({ action: "webfetch", resource: "*", effect: "deny" });
     expect(s.permissions).toContainEqual({ action: "read", resource: "/h/.secret-gate/*", effect: "deny" });
     expect(s.permissions).toContainEqual({ action: "shell", resource: "*/h/.agentswitch*", effect: "deny" });
-    // The shell env during the run: scoped proxy, gate home, NO_PROXY; never the repair capability or a server password.
+    // The shell env during the run: scoped proxy, gate home, NO_PROXY; never a server password.
     const env = s.envHistory[0]!;
     for (const k of ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"]) expect(env[k]).toBe(scoped);
     expect(env.SECRET_GATE_HOME).toBe(gate.home);
     expect(env.NO_PROXY).toContain("api.deepseek.com");
     expect(env.PWD).toBe(cwd);
-    expect(Object.keys(env).filter((k) => /REPAIR|OPENCODE_(SERVER_)?PASSWORD/.test(k))).toEqual([]);
+    expect(Object.keys(env).filter((k) => /OPENCODE_(SERVER_)?PASSWORD/.test(k))).toEqual([]);
     expect(s.instructions.agentswitch).toBe(executorInstructions());
-    // MCP servers while the model ran: the gate's with scope, repair bridge and grant; the registry's with the plain proxy.
+    // MCP servers while the model ran: the gate's with scope and grant; the registry's with the plain proxy.
     const sg = during["secret-gate"] as { command: string[]; environment: Record<string, string> };
     expect(sg.command).toEqual(["/g/secret-gate", "mcp"]);
-    expect(sg.environment).toMatchObject({ SECRET_GATE_SCOPE: scope, SECRET_GATE_REPAIR_KEY: repair.key, SECRET_GATE_REPAIR_URL: repair.url });
+    expect(sg.environment).toMatchObject({ SECRET_GATE_SCOPE: scope });
     const pw = during.playwright as { environment: Record<string, string> };
     expect(pw.environment.SECRET_GATE_SCOPE).toBe(scope);
     expect(JSON.parse(pw.environment.SECRET_GATE_TRANSFER!)).toEqual(transfer);
-    expect(pw.environment.SECRET_GATE_REPAIR_KEY).toBeUndefined();
     const notes = during.notes as { command: string[]; environment: Record<string, string> };
     expect(notes.command).toEqual(["/bin/notes-mcp", "--x"]);
     expect(notes.environment.HTTPS_PROXY).toBe(gate.proxy);
@@ -118,7 +116,7 @@ describe("OpenCode executor on the resident server: per-execution wiring", () =>
     expect(fake.liveMcp(cwd)).toEqual({});
     expect(s.env!.HTTPS_PROXY).toBe(gate.proxy);
     expect(JSON.stringify(s.env)).not.toContain(scope);
-    expect(fake.requests.some((q) => q.path.includes(scope) || q.path.includes(repair.key))).toBe(false);
+    expect(fake.requests.some((q) => q.path.includes(scope))).toBe(false);
   });
 
   it("two executions in different directories at once: each location and session holds only its own scope", async () => {
@@ -388,32 +386,31 @@ describe("OpenCode executor on the resident server: fallback and secrets", () =>
     expect(fake.replies.every((x) => x.body.decision === "reject")).toBe(true);
   });
 
-  it("scope, repair key and grant stay out of error text, logs and events even when the server echoes them", async () => {
+  it("scope and grant stay out of error text, logs and events even when the server echoes them", async () => {
     const cwd = dir("echo");
-    const echoBody = JSON.stringify({ _tag: "InvalidRequestError", message: `bad config ${scope} ${repair.key}` });
+    const echoBody = JSON.stringify({ _tag: "InvalidRequestError", message: `bad config ${scope}` });
     fake.failures.push({ method: "PUT", path: /\/api\/experimental\/mcp\/secret-gate/, status: 400, times: 1, body: echoBody });
     const out = join(root, "standalone.json");
     const events: Events = [];
     await opencodeExecutor({ server, binary: standaloneBin(out), gate, log: (l) => logs.push(l) }).run(input(cwd, {}, events));
     const text = JSON.stringify({ logs, events: events.filter((e) => e.type === "text") });
     expect(text).toContain("HTTP 400 InvalidRequestError");
-    for (const secret of [scope, repair.key, JSON.stringify(transfer)]) expect(text).not.toContain(secret);
+    for (const secret of [scope, JSON.stringify(transfer)]) expect(text).not.toContain(secret);
   });
 
-  it("the server process: stdio mode, proxy-free env without repair vars, 0600 config without MCP, exits when stopped", async () => {
+  it("the server process: stdio mode, proxy-free env without a server password, 0600 config without MCP, exits when stopped", async () => {
     const out = join(root, "spawned.json");
     const bin = join(root, "fake-serve");
     writeFileSync(bin, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(out)},JSON.stringify({argv:process.argv.slice(2),env:process.env}));console.log(JSON.stringify({url:'http://127.0.0.1:9'}));process.stdin.resume();process.stdin.on('end',()=>process.exit(0));`, { mode: 0o700 });
     const home = join(root, "exec-home");
     const saved = { ...process.env };
-    Object.assign(process.env, { HTTPS_PROXY: "http://proxy:1", SECRET_GATE_REPAIR_KEY: "k", OPENCODE_SERVER_PASSWORD: "leak" });
+    Object.assign(process.env, { HTTPS_PROXY: "http://proxy:1", OPENCODE_SERVER_PASSWORD: "leak" });
     const s = new OpenCodeExecServer({ binary: bin, home, config: opencodeServeConfig(gate, prot, join(home, "skills")), log: () => undefined });
-    try { await s.start(); } finally { for (const k of ["HTTPS_PROXY", "SECRET_GATE_REPAIR_KEY", "OPENCODE_SERVER_PASSWORD"]) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
+    try { await s.start(); } finally { for (const k of ["HTTPS_PROXY", "OPENCODE_SERVER_PASSWORD"]) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
     expect(s.running).toBe(true);
     const seen = JSON.parse(readFileSync(out, "utf8")) as { argv: string[]; env: Record<string, string> };
     expect(seen.argv).toEqual(["serve", "--stdio", "--port", "0", "--hostname", "127.0.0.1"]);
     expect(seen.env.HTTPS_PROXY).toBeUndefined();
-    expect(seen.env.SECRET_GATE_REPAIR_KEY).toBeUndefined();
     expect(seen.env.OPENCODE_SERVER_PASSWORD).toBeUndefined();
     expect(seen.env.OPENCODE_PASSWORD).toMatch(/^[\w-]{20,}$/);
     expect(statSync(seen.env.OPENCODE_CONFIG!).mode & 0o777).toBe(0o600);

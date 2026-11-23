@@ -2,7 +2,7 @@
  *  configures per run stays per run:
  *  - shell env (PUT …/environment, per session): scoped gate proxy, SECRET_GATE_HOME, NO_PROXY; the server's own env
  *    has no proxy, so OpenCode's model calls go direct;
- *  - MCP servers (PUT /api/experimental/mcp/<name>?location=<cwd>): secret-gate with the scope and repair bridge, the
+ *  - MCP servers (PUT /api/experimental/mcp/<name>?location=<cwd>): secret-gate with the scope, the
  *    browser gate with the scope and §5.2 grant, the registry's servers; removed again in `finally`;
  *  - permissions (session ruleset = the standalone config's rules), instructions (session instruction entry), model,
  *    agent, location = cwd, resume of the thread's session.
@@ -128,10 +128,10 @@ class ServeExecution {
     this.browser = (opts.browser ?? true) && input.browser;
     this.wiring = gateRun(input, this.browser);
     this.loc = locationQuery(input.cwd);
-    this.secrets = [this.wiring.scope, input.credentialRepair?.key, this.wiring.transfer ? JSON.stringify(this.wiring.transfer) : null].filter((s): s is string => !!s);
+    this.secrets = [this.wiring.scope, this.wiring.transfer ? JSON.stringify(this.wiring.transfer) : null].filter((s): s is string => !!s);
   }
 
-  /** Error text that leaves this module never carries the scope, the repair key or the grant. */
+  /** Error text that leaves this module never carries the scope or the grant. */
   redact(text: string): string { return this.secrets.reduce((t, s) => t.split(s).join("[redacted]"), text); }
 
   private log(line: string): void { (this.opts.log ?? ((l: string) => console.error(l)))(this.redact(line)); }
@@ -177,14 +177,14 @@ class ServeExecution {
     return toRuleset(permission);
   }
 
-  /** The gate's servers with this execution's scope, repair bridge and grant, then the registry's (plain proxy). */
+  /** The gate's servers with this execution's scope and grant, then the registry's (plain proxy). */
   private mcpServers(): Record<string, Json> {
     const ext = this.opts.extensions ?? NO_EXTENSIONS;
     const registry = opencodeMcpFromRegistry(ext.mcpFor("opencode"), mcpServerEnv(this.gate));
     // A kept session slot is used as is (and never removed here); otherwise a throw-away profile for this run.
     if (this.gate && this.browser && !this.input.browserProfile) this.profileDir = mkdtempSync(join(tmpdir(), "agentswitch-ocs-"));
     const profile = this.input.browserProfile ?? join(this.profileDir ?? tmpdir(), "profile");
-    const gated = this.gate ? opencodeGateConfig(this.gate, profile, this.browser, this.input.credentialRepair, this.wiring).mcp : {};
+    const gated = this.gate ? opencodeGateConfig(this.gate, profile, this.browser, this.wiring).mcp : {};
     return runtimeMcp({ ...gated, ...registry });
   }
 

@@ -30,9 +30,9 @@ describe("OpenCode serve mapping", () => {
       b: { type: "remote", url: "https://m.example.com", headers: { H: "1" }, enabled: true },
       off: { type: "local", command: ["y"], enabled: false },
     })).toEqual({ a: { type: "local", command: ["x", "mcp"], environment: { K: "v" } }, b: { type: "remote", url: "https://m.example.com", headers: { H: "1" } } });
-    const env = shellEnv(gate, "SCOPE", "/w", { PATH: "/bin", HTTPS_PROXY: "http://other", SECRET_GATE_REPAIR_KEY: "k", OPENCODE_SERVER_PASSWORD: "p", OPENCODE_CONFIG: "/c" });
+    const env = shellEnv(gate, "SCOPE", "/w", { PATH: "/bin", HTTPS_PROXY: "http://other", OPENCODE_SERVER_PASSWORD: "p", OPENCODE_CONFIG: "/c" });
     expect(env).toMatchObject({ PATH: "/bin", HTTPS_PROXY: "http://scope:SCOPE@127.0.0.1:8080", PWD: "/w", GIT_EDITOR: "true", SECRET_GATE_HOME: "/h/.secret-gate" });
-    expect(Object.keys(env).filter((k) => /REPAIR|OPENCODE_/.test(k))).toEqual([]);
+    expect(Object.keys(env).filter((k) => /OPENCODE_/.test(k))).toEqual([]);
     expect(shellEnv(null, "SCOPE", "/w", { PATH: "/bin", https_proxy: "x" })).toEqual({ PATH: "/bin", PWD: "/w", GIT_EDITOR: "true" });
   });
 

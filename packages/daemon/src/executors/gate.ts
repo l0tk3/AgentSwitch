@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TransferGrant } from "../core/transfer.js";
 import { which } from "../util/which.js";
-import type { CredentialRepair, ExecutionInput } from "./types.js";
+import type { ExecutionInput } from "./types.js";
 
 export type GateOptions = {
   readonly bin: string;            // .../packages/secret-gate/.venv/bin/secret-gate
@@ -146,19 +146,13 @@ export function gateHealth(gate: Pick<GateOptions, "proxy">, timeoutMs = HEALTH_
   });
 }
 
-/** Keep the repair capability out of harness processes, ordinary shell tools and user extensions. */
-export function withoutCredentialRepair(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const { SECRET_GATE_REPAIR_URL: _url, SECRET_GATE_REPAIR_KEY: _key, ...rest } = env;
-  return rest;
-}
-
-function gateMcpEnv(gate: GateOptions, repair?: CredentialRepair, run: GateRun = {}): Record<string, string> {
-  return { SECRET_GATE_HOME: gate.home, ...(run.scope ? { SECRET_GATE_SCOPE: run.scope } : {}), ...(repair ? { SECRET_GATE_REPAIR_URL: repair.url, SECRET_GATE_REPAIR_KEY: repair.key } : {}) };
+function gateMcpEnv(gate: GateOptions, run: GateRun = {}): Record<string, string> {
+  return { SECRET_GATE_HOME: gate.home, ...(run.scope ? { SECRET_GATE_SCOPE: run.scope } : {}) };
 }
 
 /** The browser gate: home and scope, plus the §5.2 grant as JSON, only ever together with a scope. */
 function browserMcpEnv(gate: GateOptions, run: GateRun): Record<string, string> {
-  return { ...gateMcpEnv(gate, undefined, run), ...(run.scope && run.transfer ? { SECRET_GATE_TRANSFER: JSON.stringify(run.transfer) } : {}) };
+  return { ...gateMcpEnv(gate, run), ...(run.scope && run.transfer ? { SECRET_GATE_TRANSFER: JSON.stringify(run.transfer) } : {}) };
 }
 
 /** Env vars a spawned MCP server needs to run at all; the MCP stdio transport does not inherit
@@ -200,8 +194,8 @@ export function warmBrowserMcp(gate: GateOptions | null, run: (cmd: string, args
 }
 
 /** MCP servers in Claude Code / Agent SDK shape. */
-export function claudeMcpServers(gate: GateOptions, profile: string, browser: boolean, repair?: CredentialRepair, run: GateRun = {}): Record<string, { type: "stdio"; command: string; args: string[]; env: Record<string, string> }> {
-  const env = gateMcpEnv(gate, repair, run);
+export function claudeMcpServers(gate: GateOptions, profile: string, browser: boolean, run: GateRun = {}): Record<string, { type: "stdio"; command: string; args: string[]; env: Record<string, string> }> {
+  const env = gateMcpEnv(gate, run);
   return {
     "secret-gate": { type: "stdio", command: gate.bin, args: ["mcp"], env },
     ...(browser ? { playwright: { type: "stdio", command: gate.bin, args: playwrightArgs(gate, profile), env: browserMcpEnv(gate, run) } } : {}),
@@ -209,8 +203,8 @@ export function claudeMcpServers(gate: GateOptions, profile: string, browser: bo
 }
 
 /** OpenCode `mcp` + `permission` sections. */
-export function opencodeGateConfig(gate: GateOptions, profile: string, browser: boolean, repair?: CredentialRepair, run: GateRun = {}): { mcp: Record<string, unknown>; readDeny: Record<string, string> } {
-  const environment = gateMcpEnv(gate, repair, run);
+export function opencodeGateConfig(gate: GateOptions, profile: string, browser: boolean, run: GateRun = {}): { mcp: Record<string, unknown>; readDeny: Record<string, string> } {
+  const environment = gateMcpEnv(gate, run);
   return {
     mcp: {
       "secret-gate": { type: "local", command: [gate.bin, "mcp"], enabled: true, environment },
@@ -223,11 +217,11 @@ export function opencodeGateConfig(gate: GateOptions, profile: string, browser: 
 const tomlTable = (env: Record<string, string>): string => Object.entries(env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join("\n");
 
 /** Codex config.toml sections (proxy only for the shell tool; never in the codex process env). */
-export function codexGateToml(gate: GateOptions, profile: string, browser: boolean, repair?: CredentialRepair, run: GateRun = {}): string {
+export function codexGateToml(gate: GateOptions, profile: string, browser: boolean, run: GateRun = {}): string {
   const set = Object.entries(gateEnv(gate, run.scope)).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join(", ");
   const pw = browser
     ? `\n[mcp_servers.playwright]\ncommand = ${JSON.stringify(gate.bin)}\nargs = ${JSON.stringify(playwrightArgs(gate, profile))}\n\n[mcp_servers.playwright.env]\n${tomlTable(browserMcpEnv(gate, run))}\n`
     : "";
-  const mcpEnv = tomlTable(gateMcpEnv(gate, repair, run));
+  const mcpEnv = tomlTable(gateMcpEnv(gate, run));
   return `[sandbox_workspace_write]\nnetwork_access = true\n\n[shell_environment_policy]\ninherit = "all"\nset = { ${set} }\n\n[mcp_servers.secret-gate]\ncommand = ${JSON.stringify(gate.bin)}\nargs = ["mcp"]\n\n[mcp_servers.secret-gate.env]\n${mcpEnv}\n${pw}`;
 }

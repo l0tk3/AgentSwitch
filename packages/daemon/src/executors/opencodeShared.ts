@@ -5,7 +5,6 @@
 import { detectRefusal, NO_SIDE_EFFECTS, type ExecutionOutcome } from "../core/outcome.js";
 import { opencodeGateConfig, type GateOptions, type GateRun } from "./gate.js";
 import { NO_PROTECTED, rootSpellings, type ProtectedPaths } from "./protected.js";
-import type { CredentialRepair } from "./types.js";
 
 export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly skillsDir?: string | null; readonly protected?: ProtectedPaths };
 
@@ -67,8 +66,8 @@ function appDataTails(path: string, home: string): string[] {
 
 /** No `instructions` key: OpenCode 2.0.8 ignores it (verified for `run` and `serve`); the guidance goes at the head of
  *  the prompt (standalone) or into a session instruction entry (resident server). */
-export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, extras: OpenCodeExtras = {}, repair?: CredentialRepair, run: GateRun = {}): object {
-  const g = gate ? opencodeGateConfig(gate, profile, browser, repair, run) : { mcp: {}, readDeny: {} };
+export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, extras: OpenCodeExtras = {}, run: GateRun = {}): object {
+  const g = gate ? opencodeGateConfig(gate, profile, browser, run) : { mcp: {}, readDeny: {} };
   const deny = protectedDeny(extras.protected ?? NO_PROTECTED, process.env, extras.skillsDir ? [extras.skillsDir] : []);
   return {
     $schema: "https://opencode.ai/config.json",

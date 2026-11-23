@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { composePrompt, executorInstructions, FEEDBACK_GUIDANCE, CREDENTIAL_REPAIR_GUIDANCE } from "../src/executors/instructions.js";
+import { composePrompt, executorInstructions, FEEDBACK_GUIDANCE, CREDENTIAL_USE_GUIDANCE } from "../src/executors/instructions.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import { fakeMinter } from "../src/secrets/minter.js";
 import { LEGEND_HEADER, legend, routerSealer } from "../src/secrets/sealer.js";
@@ -29,7 +29,9 @@ describe("feedback and provenance reach executor prompts", () => {
   it("includes feedback guidance even when optional instruction files are unavailable, alongside independent credential rules", () => {
     const instructions = executorInstructions({ executor: "/missing-feedback-executor", gate: "/missing-feedback-gate" });
     expect(instructions).toContain(FEEDBACK_GUIDANCE);
-    expect(instructions).toContain(CREDENTIAL_REPAIR_GUIDANCE);
+    expect(instructions).toContain(CREDENTIAL_USE_GUIDANCE);
+    expect(CREDENTIAL_USE_GUIDANCE).toContain("secret_exec(argv, env)");
+    expect(instructions).not.toContain("secret_repair");
     expect(composePrompt({ brief: "已明确的一步任务", handoffNote: null, context: null, feedback: "  " })).toBe("已明确的一步任务");
   });
 });
@@ -57,7 +59,6 @@ describe("credential candidates do not become user statements or token grants", 
     const corrected = legend([{ ...entry, field: "recovery code" }], null);
     expect(corrected).toContain(`- recovery code (for panel.example): ${entry.token}`);
     expect(entry).toMatchObject({ field: "session key", kind: "secret", hosts: ["panel.example"], uses: ["http"] });
-    expect(entry.seed_import_hosts).toBeUndefined();
     expect(minter).toHaveBeenCalledTimes(1);
   });
 });

@@ -90,7 +90,7 @@ export type TaskEventType =
   | "approval_resolved"
   | "attempt_failed"
   | "refusal"
-  | "credential_repair"
+  | "credential_repair"   // no longer emitted (gate-simple-v0 §1); kept so older tasks still load
   | "checkpoint"
   | "redispatch"
   | "done"

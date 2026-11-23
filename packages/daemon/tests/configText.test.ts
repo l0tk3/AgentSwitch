@@ -98,22 +98,23 @@ describe("the editor and the gate's key pairs", () => {
     expect(() => editText("x", "a.md", { ...process.env, VISUAL: "false", EDITOR: "" })).toThrow(/false exited 1/);
   });
 
-  it("asks the gate for its key pairs in JSON, and says its refusal in its own words", async () => {
+  it("asks the gate for its one key pair in JSON, makes it with keygen, and says a refusal in the gate's own words", async () => {
     const { GateKeys } = await import("../src/keeper/gateKeys.js");
     const calls: (readonly string[])[] = [];
-    const list = JSON.stringify([{ name: "main", public: "P", current: true }]);
+    let made = false, refuse = false;
     const keys = new GateKeys(async (args) => {
       calls.push(args);
-      if (args.includes("retire") && args.includes("main")) return { code: 1, stdout: "", stderr: "error: 密钥 main 是当前密钥，无法删除。\n" };
-      if (args.includes("retire")) return { code: 0, stdout: "", stderr: "" };
-      return { code: 0, stdout: list, stderr: "" };
+      if (args[0] === "keygen") {
+        if (refuse) return { code: 2, stdout: "", stderr: "error: 已有密钥对\n" };
+        made = true;
+        return { code: 0, stdout: "public key value: P\n", stderr: "" };
+      }
+      return { code: 0, stdout: JSON.stringify(made ? [{ name: "main", public: "P", current: true, legacy: false }] : []), stderr: "" };
     });
-    expect(await keys.list()).toEqual([{ name: "main", public: "P", current: true }]);
-    await keys.create("work", true);
-    await keys.use("work");
-    await expect(keys.retire("main")).rejects.toThrow("密钥 main 是当前密钥，无法删除。");
-    expect(await keys.retire("old")).toHaveLength(1);    // an older gate says nothing on retiring: the list is asked for
-    await expect(keys.create("bad name", false)).rejects.toThrow(/letters, digits/);
-    expect(calls).toEqual([["keys", "--json"], ["keys", "--json", "new", "work", "--use"], ["keys", "--json", "use", "work"], ["keys", "--json", "retire", "main"], ["keys", "--json", "retire", "old"], ["keys", "--json"]]);
+    expect(await keys.list()).toEqual([]);
+    expect(await keys.create()).toEqual([{ name: "main", public: "P", current: true, legacy: false }]);
+    refuse = true;
+    await expect(keys.create()).rejects.toThrow("已有密钥对");
+    expect(calls).toEqual([["keys", "--json"], ["keygen"], ["keys", "--json"], ["keygen"]]);
   });
 });

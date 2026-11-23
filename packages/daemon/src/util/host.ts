@@ -1,4 +1,4 @@
-/** Exact host names for grants: the credential-repair target and the field-transfer endpoints. Pure. */
+/** Exact host names for grants: the field-transfer endpoints. Pure. */
 
 const MAX_PORT = 65_535;
 

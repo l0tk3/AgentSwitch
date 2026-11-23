@@ -12,7 +12,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { Extensions } from "../extensions/index.js";
-import { withoutCredentialRepair, type GateOptions } from "./gate.js";
+import { type GateOptions } from "./gate.js";
 import { stripProxy } from "../util/env.js";
 import { opencodeExecConfig } from "./opencodeShared.js";
 import { basicAuth, startStdioServe, stopStdioServe } from "../harness/opencodeStdio.js";
@@ -39,7 +39,7 @@ export function opencodeServeConfig(gate: GateOptions | null, prot: ProtectedPat
 export const locationQuery = (directory: string): string => `location%5Bdirectory%5D=${encodeURIComponent(directory)}`;
 
 /** A failed API call. The message names method, route and status only: request and response bodies can carry an
- *  execution's scope or repair key and never go into an error. */
+ *  execution's scope and never go into an error. */
 export class OpenCodeApiError extends Error {
   constructor(message: string, readonly status: number | null, readonly tag: string | null) { super(message); }
 }
@@ -112,7 +112,7 @@ export class OpenCodeExecServer {
     mkdirSync(this.skillsDir, { recursive: true, mode: 0o700 });
     const configPath = join(this.opts.home, "opencode.json");
     writeFileSync(configPath, JSON.stringify(this.opts.config), { mode: 0o600 });
-    const env = { ...stripProxy(withoutCredentialRepair(process.env)), OPENCODE_CONFIG: configPath, PWD: this.opts.home };
+    const env = { ...stripProxy(process.env), OPENCODE_CONFIG: configPath, PWD: this.opts.home };
     const { child, url, password, stderrTail } = await startStdioServe({ binary: this.opts.binary, cwd: this.opts.home, env, port: ANY_PORT, startTimeoutMs: this.opts.startTimeoutMs });
     child.on("exit", (code) => {
       if (this.child !== child) return;

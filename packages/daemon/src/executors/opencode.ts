@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import type { ExecutionOutcome } from "../core/outcome.js";
 import { opencodeMcpFromRegistry } from "./extensions.js";
-import { gateEnv, gateRun, mcpServerEnv, reportTransfer, withoutCredentialRepair, type GateOptions } from "./gate.js";
+import { gateEnv, gateRun, mcpServerEnv, reportTransfer, type GateOptions } from "./gate.js";
 import { stripProxy } from "../util/env.js";
 import { composePrompt, withGuidanceHead } from "./instructions.js";
 import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
@@ -40,7 +40,7 @@ export type OpenCodeExecutorOptions = {
   readonly protected?: ProtectedPaths;
   /** The resident executor server; without it, or when it cannot take a run, `opencode run --standalone`. */
   readonly server?: OpenCodeExecServer | null;
-  /** Operator log (stderr by default). Never receives a scope, repair key or grant. */
+  /** Operator log (stderr by default). Never receives a scope or grant. */
   readonly log?: (line: string) => void;
 };
 
@@ -118,10 +118,10 @@ function prepareRun(dir: string, input: ExecutionInput, opts: OpenCodeExecutorOp
   };
   const browser = (opts.browser ?? true) && input.browser;
   const run = gateRun(input, browser);
-  writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, input.browserProfile ?? join(dir, "profile"), browser, extras, input.credentialRepair, run)), { mode: 0o600 });
+  writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, input.browserProfile ?? join(dir, "profile"), browser, extras, run)), { mode: 0o600 });
   reportTransfer(input, run, "opencode", !!opts.gate, browser);
   // The shell tool inherits this env: its proxy URL carries the execution scope.
-  const env = { ...stripProxy(withoutCredentialRepair(process.env)), ...(opts.gate ? gateEnv(opts.gate, run.scope) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
+  const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate, run.scope) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
   return { env, prompt: withGuidanceHead(composePrompt({ ...input, transfer: opts.gate ? run.transfer ?? null : null })) };
 }
 

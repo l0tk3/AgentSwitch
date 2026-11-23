@@ -3,7 +3,7 @@
  *  shell environment of one execution. */
 
 import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../core/questions.js";
-import { gateEnv, withoutCredentialRepair, type GateOptions } from "./gate.js";
+import { gateEnv, type GateOptions } from "./gate.js";
 import { stripProxy } from "../util/env.js";
 import type { RunSummary } from "./opencodeShared.js";
 import { APPROVAL_EVIDENCE_CHARS } from "../core/limits.js";
@@ -49,10 +49,10 @@ export function runtimeMcp(entries: Record<string, unknown>): Record<string, Jso
 }
 
 /** The shell tool's environment for one execution: what `opencode run` handed its shell (the daemon's env without proxy
- *  variables or the repair capability), the gate proxy carrying this execution's scope, PWD and a no-op editor. It
+ *  variables), the gate proxy carrying this execution's scope, PWD and a no-op editor. It
  *  replaces the session's whole shell env (PUT …/environment), so nothing of the server process is inherited. */
 export function shellEnv(gate: GateOptions | null, scope: string | null, cwd: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const { OPENCODE_SERVER_PASSWORD: _a, OPENCODE_PASSWORD: _b, OPENCODE_CONFIG: _c, ...base } = stripProxy(withoutCredentialRepair(env));
+  const { OPENCODE_SERVER_PASSWORD: _a, OPENCODE_PASSWORD: _b, OPENCODE_CONFIG: _c, ...base } = stripProxy(env);
   return { ...base, ...(gate ? gateEnv(gate, scope) : {}), PWD: cwd, GIT_EDITOR: "true" };
 }
 

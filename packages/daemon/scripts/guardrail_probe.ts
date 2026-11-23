@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   const prompt = composePrompt({ brief, task, handoffNote: null, context: loadContext(join(home, "CONTEXT.md")).text });
   const runDir = mkdtempSync(join(tmpdir(), "guardrail-probe-"));
   try {
-    const servers = claudeMcpServers(gate, join(runDir, "profile"), true, undefined, gateRun({ gateScope: null, transfer: null }, true));
+    const servers = claudeMcpServers(gate, join(runDir, "profile"), true, gateRun({ gateScope: null, transfer: null }, true));
     const full: Options = {
       cwd: runDir, permissionMode: "default", settingSources: [], maxTurns: 1, canUseTool: denyAll, pathToClaudeCodeExecutable: claude,
       systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },

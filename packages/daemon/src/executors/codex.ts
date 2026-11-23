@@ -16,7 +16,7 @@ import type { Attachment } from "../files/uploads.js";
 import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../core/outcome.js";
 import { AppServerClient, type Json } from "../harness/appserver.js";
 import { codexMcpToml } from "./extensions.js";
-import { codexGateToml, gateRun, mcpServerEnv, reportTransfer, withoutCredentialRepair, type GateOptions, type GateRun } from "./gate.js";
+import { codexGateToml, gateRun, mcpServerEnv, reportTransfer, type GateOptions, type GateRun } from "./gate.js";
 import { stripProxy } from "../util/env.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { commandTouchesProtected, NO_PROTECTED, PROTECTED_DENIAL, shellWords, type ProtectedPaths } from "./protected.js";
@@ -24,7 +24,7 @@ import { clipInput, clipOutput } from "./toolEvents.js";
 import { watchRunStop, type RunStop } from "./lifecycle.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
 import { spawnOwned, terminateProcess } from "../harness/processes.js";
-import type { CredentialRepair, ExecutionInput, Executor } from "./types.js";
+import type { ExecutionInput, Executor } from "./types.js";
 
 export type CodexExecutorOptions = {
   readonly binary: string;
@@ -48,9 +48,9 @@ const REPLY_QUOTE_CHARS = 200;
 const RESUME_ERROR_CHARS = 120;
 const APPROVAL_METHODS = new Set(["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "execCommandApproval", "applyPatchApproval"]);
 
-export function codexConfigToml(gate: GateOptions | null | undefined, profile: string, browser: boolean, effort: string | null, mcpToml = "", repair?: CredentialRepair, run: GateRun = {}, outDir: string | null = null): string {
+export function codexConfigToml(gate: GateOptions | null | undefined, profile: string, browser: boolean, effort: string | null, mcpToml = "", run: GateRun = {}, outDir: string | null = null): string {
   const head = `approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n${effort ? `model_reasoning_effort = ${JSON.stringify(effort)}\n` : ""}`;
-  const body = head + (gate ? "\n" + codexGateToml(gate, profile, browser, repair, run) : "\n[sandbox_workspace_write]\nnetwork_access = true\n") + mcpToml;
+  const body = head + (gate ? "\n" + codexGateToml(gate, profile, browser, run) : "\n[sandbox_workspace_write]\nnetwork_access = true\n") + mcpToml;
   // The task's files for the user are outside the working directory (files/names.ts): the sandbox, which stops at the
   // cwd, is opened for that one folder too.
   return outDir ? body.replace("[sandbox_workspace_write]\n", `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(outDir)}]\n`) : body;
@@ -246,7 +246,7 @@ export function outcomeFromTurn(state: TurnState, extraError: string | null): Ex
 /** CODEX_HOME for this run: the thread's private <home>/codex when there is a thread (kept across runs so
  *  `thread/resume` finds the rollout + thread_history sqlite), else a temp dir removed afterwards. auth.json is
  *  re-copied and config/AGENTS.md/skills regenerated on every run. */
-function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser: boolean, threadHome: string | null, repair?: CredentialRepair, run: GateRun = {}, slotProfile?: string, outDir: string | null = null): { home: string; profile: string; persistent: boolean; tempProfile: string | null } {
+function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser: boolean, threadHome: string | null, run: GateRun = {}, slotProfile?: string, outDir: string | null = null): { home: string; profile: string; persistent: boolean; tempProfile: string | null } {
   const persistent = threadHome !== null;
   const home = persistent ? join(threadHome, "codex") : mkdtempSync(join(tmpdir(), "agentswitch-codex-"));
   // Kept logins live only in the three session slots (browserSlots.ts): a thread's own profile from before is removed,
@@ -255,7 +255,7 @@ function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser:
   const tempProfile = !slotProfile && persistent && browser ? mkdtempSync(join(tmpdir(), "agentswitch-codex-profile-")) : null;
   const profile = slotProfile ?? tempProfile ?? join(home, "chromium-profile");
   try {
-    fillHome(home, opts, effort, browser, repair, run, profile, outDir);
+    fillHome(home, opts, effort, browser, run, profile, outDir);
     return { home, profile, persistent, tempProfile };
   } catch (err) {
     if (!persistent) rmSync(home, { recursive: true, force: true });   // a failed setup leaves no temp home behind
@@ -265,7 +265,7 @@ function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser:
 }
 
 /** auth.json, config.toml (browser profile `profile`), AGENTS.md and skills into `home`. */
-function fillHome(home: string, opts: CodexExecutorOptions, effort: string | null, browser: boolean, repair: CredentialRepair | undefined, run: GateRun, profile: string, outDir: string | null = null): void {
+function fillHome(home: string, opts: CodexExecutorOptions, effort: string | null, browser: boolean, run: GateRun, profile: string, outDir: string | null = null): void {
   mkdirSync(home, { recursive: true });
   chmodSync(home, 0o700);
   const auth = opts.authPath ?? join(process.env.HOME ?? "", ".codex", "auth.json");
@@ -274,7 +274,7 @@ function fillHome(home: string, opts: CodexExecutorOptions, effort: string | nul
   chmodSync(join(home, "auth.json"), 0o600);
   const ext = opts.extensions ?? NO_EXTENSIONS;
   const mcpToml = codexMcpToml(ext.mcpFor("codex"), mcpServerEnv(opts.gate));
-  writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort, mcpToml, repair, run, outDir), { mode: 0o600 });
+  writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort, mcpToml, run, outDir), { mode: 0o600 });
   writeFileSync(join(home, "AGENTS.md"), `${executorInstructions()}\n\n${CODEX_SANDBOX_GUIDANCE}`);   // Codex's global instructions live in $CODEX_HOME/AGENTS.md
   ext.skillsInto("codex", join(home, "skills"));                     // Codex discovers $CODEX_HOME/skills/*/SKILL.md
 }
@@ -285,9 +285,9 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
       const browser = (opts.browser ?? true) && input.browser;
       const run = gateRun(input, browser);
-      const { home, persistent, tempProfile } = prepareHome(opts, input.effort, browser, input.threadHome, input.credentialRepair, run, input.browserProfile, input.outDir ?? null);
+      const { home, persistent, tempProfile } = prepareHome(opts, input.effort, browser, input.threadHome, run, input.browserProfile, input.outDir ?? null);
       reportTransfer(input, run, "codex", !!opts.gate, browser);
-      const env = { ...stripProxy(withoutCredentialRepair(process.env)), CODEX_HOME: home, GIT_EDITOR: "true" };
+      const env = { ...stripProxy(process.env), CODEX_HOME: home, GIT_EDITOR: "true" };
       let child: ChildProcess | null = null;
       let state: TurnState = EMPTY_TURN;
       let watch: RunStop | null = null;

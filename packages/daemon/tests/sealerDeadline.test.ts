@@ -29,18 +29,14 @@ describe("sealer compact history view", () => {
     expect(message.endsWith(`Task text:\n<<<\n${current}\n>>>`)).toBe(true);
   });
 
-  it("checks import authorization against original evidence, never a compacted placeholder quote", async () => {
+  it("shows the model existing tokens only as placeholders, and never mints them again", async () => {
     const seed = "JBSWY3DPEHPK3PXP"; // Public fixture only.
-    const authorization = `将新种子录入 https://admin.example.test 的种子字段，旧凭据 ${token}`;
+    const environment = `管理平台 https://admin.example.test，旧凭据 ${token}`;
     const current = `新种子 ${seed}`;
-    const imported: FoundSecret = { ...found, value: seed, purpose: "totp_seed_import", seed_import_evidence: authorization };
-    const router = echoRouter([reply([imported]).text]);
-    expect(await routerSealer(router, fakeMinter(), () => authorization)(current)).toMatchObject({ ok: true, sealed: [{ purpose: "totp_seed_import", uses: ["http", "fill"] }] });
+    const code: FoundSecret = { ...found, value: seed, kind: "totp", uses: ["otp"], purpose: "totp_code" };
+    const router = echoRouter([reply([code]).text]);
+    expect(await routerSealer(router, fakeMinter(), () => environment)(current)).toMatchObject({ ok: true, sealed: [{ purpose: "totp_code", uses: ["otp"] }] });
     expect(router.calls[0]!.task).not.toContain(token);
-    const minter = vi.fn(fakeMinter());
-    const synthetic = { ...imported, seed_import_evidence: authorization.replace(token, "[existing-sealed:1]") };
-    expect(await routerSealer(echoRouter([reply([synthetic]).text]), minter, () => authorization)(current)).toMatchObject({ ok: false, code: "unroutable", error: expect.stringContaining("原文授权依据") });
-    expect(minter).not.toHaveBeenCalled();
     expect(planSeal(`Use ${token} or [existing-sealed:1]`, [{ ...found, value: token }, { ...found, value: "[existing-sealed:1]" }]).entries).toEqual([]);
   });
 

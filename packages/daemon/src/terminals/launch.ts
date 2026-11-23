@@ -14,7 +14,6 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { which } from "../util/which.js";
 import { fileURLToPath } from "node:url";
-import { withoutCredentialRepair } from "../executors/gate.js";
 import { CODEX_FILE_STORE } from "./signIn.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
 import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
@@ -303,7 +302,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     // three variables — no proxy and no certificate of the credential gate, none of its tools (docs/profiles-v0.md §8,
     // 2026-10-08: the gate stays in Dispatch). What stays closed is the credentials at rest (`protected`).
     const env: Record<string, string> = {
-      ...profileEnvironment(withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)), req),
+      ...profileEnvironment(withoutParentSession(opts.env ?? process.env), req),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       AGENTSWITCH_TERMINAL_ID: req.id,
