@@ -355,6 +355,13 @@ final class RoomsModel {
         act { try await $0.unseat(seat, close: delete ? "delete" : "end", in: id) }
     }
 
+    /// A member's nickname in this room; its card closes (it is found under the new name).
+    func rename(seat: String, to name: String) {
+        guard let id = selected else { return }
+        card = nil
+        act { try await $0.renameSeat(seat, to: name, in: id) }
+    }
+
     func resumeAll() {
         guard let id = selected else { return }
         act { try await $0.resumeAll(in: id) }

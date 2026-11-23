@@ -703,6 +703,11 @@ public extension DaemonClient {
         _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))" + (close.map { "?close=\($0)" } ?? ""), timeout: 30)
     }
 
+    /// A member's name in the room (its nickname there; its session's own name is another thing).
+    func renameSeat(_ handle: String, to name: String, in room: String) async throws {
+        _ = try await call("PATCH", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", body: try JSONSerialization.data(withJSONObject: ["name": name]), timeout: 10)
+    }
+
     /// Every member whose session has ended is brought back.
     func resumeAll(in room: String) async throws {
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/resume", timeout: 180)

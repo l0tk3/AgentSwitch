@@ -238,7 +238,7 @@ private struct RoomView: View {
                     Color.clear.contentShape(Rectangle()).onTapGesture { model.card = nil }
                     RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
                                    setMuted: { model.setMuted($0, seat: handle) }, resume: { model.resume(seat: handle) },
-                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) })
+                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) }, rename: { model.rename(seat: handle, to: $0) })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
             }

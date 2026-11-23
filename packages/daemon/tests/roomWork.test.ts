@@ -556,11 +556,13 @@ describe("a seat's name", () => {
     store.addTask(room.id, "ui", { title: "Form", owner: "ui" });
     store.setTask(room.id, "ui", 1, { state: "doing" });
     await say("ui", "room_changing", { paths: ["/w/form.ts"] });
+    // The room's nickname and the session's own name are two things, each changed by itself.
     const said = (await say("ui", "room_rename", { name: "Frontend  Form" })).text;
     expect(said).toContain("You are @frontend-form in");
-    // Its own name in AgentSwitch is changed with it: the user's renaming, done by the session itself.
-    expect(said).toContain('Your session is called "Frontend Form" in AgentSwitch now');
-    expect(renamed).toEqual(["ui=Frontend Form"]);
+    expect(said).toContain("your session's own name in AgentSwitch is unchanged");
+    expect(renamed).toEqual([]);
+    expect((await say("ui", "session_rename", { name: "  Login  form work " })).text).toContain('This session is called "Login form work" in AgentSwitch now. Your @name in the room is still @frontend-form');
+    expect(renamed).toEqual(["ui=Login form work"]);
     const now = store.get(room.id);
     expect(now.seats.map((s) => s.handle)).toEqual(["you", "api", "frontend-form"]);
     expect(store.messages(room.id).map((m) => [m.from, m.to])).toEqual([["you", ["api", "frontend-form"]], ["frontend-form", ["api"]]]);
@@ -575,7 +577,11 @@ describe("a seat's name", () => {
     expect((await say("api", "room_rename", { name: "you" })).isError).toBe(true);
     expect(new RoomStore(home).messages(room.id)[1]!.from).toBe("frontend-form");
     // A session renames only itself; the user renames anyone.
-    expect(() => store.rename(room.id, "api", "frontend-form", "x")).toThrow("renames only itself");
+    // Another member's nickname: not a plain member's to change; an admin's, and the user's.
+    expect((await say("api", "room_rename", { name: "x", handle: "frontend-form" })).isError).toBe(true);
+    store.setCanAdd(room.id, "api", true);
+    expect((await say("api", "room_rename", { name: "web", handle: "@ui" })).text).toContain("@frontend-form is @web in");
+    expect(store.post(room.id, { from: "you", text: "@frontend-form @ui hi" }).to).toEqual(["web"]);
     expect((await call("PATCH", `/rooms/${room.id}/seats/api`, { name: "backend" })).body.seat.handle).toBe("backend");
     expect(store.roomsOf("api")[0]!.seat.handle).toBe("backend");
   });

@@ -588,7 +588,9 @@ export class RoomStore {
     const actor = this.seatOf(room, by);
     if (seat.kind === "user") throw new RoomError(400, "用户的名字不能改");
     if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
-    if (actor.kind !== "user" && actor.handle !== seat.handle) throw new RoomError(403, "A session renames only itself; the user may rename anyone.");
+    // Its name in the room is its own to change, the user's, and an admin's (as an admin mutes or kicks: not itself
+    // through another, not another admin).
+    if (actor.kind !== "user" && actor.handle !== seat.handle) this.manager(room, by, seat);
     const name = handleFrom(wanted, "");
     if (!name) throw new RoomError(400, "A name needs letters or digits.");
     if (name === seat.handle) return seat;

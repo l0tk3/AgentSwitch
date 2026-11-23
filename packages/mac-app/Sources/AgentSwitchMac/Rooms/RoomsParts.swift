@@ -384,6 +384,10 @@ struct RoomMemberCard: View {
     let kick: () -> Void
     /// Out of the room and its terminal closed; true: its conversation's record deleted too.
     var end: (Bool) -> Void = { _ in }
+    /// Its nickname in this room.
+    var rename: (String) -> Void = { _ in }
+    @State private var renaming = false
+    @State private var newName = ""
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -465,7 +469,18 @@ struct RoomMemberCard: View {
                         .help("移出房间；会话本身继续运行，之后还能再拉进来。")
                 }
                 .padding(.top, 10)
+                if renaming {
+                    HStack(spacing: 8) {
+                        RoomField(prompt: "New name in this room", text: $newName, submit: { if !newName.trimmingCharacters(in: .whitespaces).isEmpty { rename(newName) } })
+                        Button { rename(newName) } label: { BracketLabel(word: "Save", key: "↩") }
+                            .buttonStyle(BracketButtonStyle(role: .primary)).disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    .padding(.top, 6)
+                    Text("只改它在这个房间里的名字（@ 它时用的）；会话自己的名字不变。旧名字仍然能叫到它。").font(.system(size: 11.5)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                }
                 HStack(spacing: 8) {
+                    Button { renaming.toggle(); newName = seat.handle } label: { BracketLabel(word: "Rename") }.buttonStyle(BracketButtonStyle())
+                        .help("改它在这个房间里的名字。")
                     Spacer()
                     Button { end(false) } label: { BracketLabel(word: "End") }
                         .buttonStyle(BracketButtonStyle(role: .destructive))
