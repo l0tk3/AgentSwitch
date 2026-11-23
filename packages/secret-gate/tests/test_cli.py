@@ -33,7 +33,7 @@ def test_enc_with_explicit_pubkey_and_value(tmp_path, monkeypatch, capsys):
     main(["keygen"]); capsys.readouterr()
     main(["pubkey"]); pub = capsys.readouterr().out.strip()
     # The "=" form: a base64url key may start with "-", which argparse would take for an option.
-    assert main(["enc", "--label", "x/y", f"--pubkey={pub}", "--value", "v", "--use", "exec"]) == 0
+    assert main(["enc", "--label", "x/y", f"--pubkey={pub}", "--value", "v-exec-123", "--use", "exec"]) == 0
     tok = capsys.readouterr().out.strip()
     main(["check", tok])
     assert "uses: ['exec']" in capsys.readouterr().out
@@ -115,6 +115,28 @@ def test_named_keys_and_batch(tmp_path, monkeypatch, capsys):
     # tokens minted for the current keypair (home) resolve; the gate also still holds "work"
     assert main(["check", out[0]["token"]]) == 0
     assert "label: a/pass" in capsys.readouterr().out
+
+
+def test_enc_refuses_short_values(tmp_path, monkeypatch, capsys):
+    """gate-simple-v0 §3.3: the Mac app and the daemon seal through this command, so the floor holds for them too."""
+    import json
+
+    monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
+    main(["keygen"]); capsys.readouterr()
+    assert main(["enc", "--label", "x/y", "--host", "a.example.com", "--value", "1234567"]) == 2
+    assert "值至少需要 8 个字符" in capsys.readouterr().err
+    batch = [
+        {"label": "short", "hosts": ["a.example.com"], "uses": ["http", "fill"], "value": "1234567"},
+        {"label": "ok", "hosts": ["a.example.com"], "uses": ["http", "fill"], "value": "12345678"},
+        {"label": "exec", "uses": ["exec"], "value": "abc"},
+        {"label": "seed", "kind": "totp", "uses": ["otp"], "value": "MZXW6YQ"},
+    ]
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(batch)))
+    assert main(["enc", "--batch"]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert "8 个字符" in out[0]["error"] and "1234567" not in json.dumps(out)
+    assert out[1]["token"].startswith("enc:v1:") and "8 个字符" in out[2]["error"]
+    assert out[3]["token"].startswith("enc:v1:")
 
 
 def test_batch_rejects_non_array(tmp_path, monkeypatch, capsys):

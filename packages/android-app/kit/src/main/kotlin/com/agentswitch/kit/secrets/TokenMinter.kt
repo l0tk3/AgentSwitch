@@ -13,8 +13,9 @@ fun interface BoxSealer {
 }
 
 /**
- * Mints `enc:v1:` tokens on the phone, compatible with `secret-gate enc`: the payload JSON sealed with libsodium
- * `crypto_box_seal` to the gate's X25519 public key, then base64url without padding. The plaintext never leaves the
+ * Mints `enc:v1:` tokens on the phone, compatible with `secret-gate enc`: the payload JSON, padded with spaces to a
+ * multiple of 64 bytes ([SecretPayload.sealedData]), sealed with libsodium `crypto_box_seal` to the gate's X25519 public
+ * key, then base64url without padding. The plaintext never leaves the
  * device; only the Mac's gate can open the result. The sealing itself is the [BoxSealer] the app hands over.
  */
 class TokenMinter(publicKey: ByteArray, private val sealer: BoxSealer) {
@@ -31,7 +32,7 @@ class TokenMinter(publicKey: ByteArray, private val sealer: BoxSealer) {
 
     fun mint(payload: SecretPayload): String {
         val sealed = try {
-            sealer.seal(payload.jsonData, publicKey.copyOf())
+            sealer.seal(payload.sealedData, publicKey.copyOf())
         } catch (e: Exception) {
             throw TokenError.SealFailed
         }

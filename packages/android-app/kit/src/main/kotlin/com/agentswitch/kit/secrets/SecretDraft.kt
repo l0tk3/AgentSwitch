@@ -47,6 +47,7 @@ data class SecretDraft(
             if (uses.isEmpty()) return "请至少选择一种用途"
             if ((SecretUse.Http in uses || SecretUse.Fill in uses) && hostList.isEmpty()) return "http / fill 用途须填写站点"
             if (SecretUse.Otp in uses && kind != SecretKind.Totp) return "otp 用途仅适用于 TOTP"
+            if (GatePolicy.isTooShortToSeal(value, uses)) return GatePolicyError.ValueTooShort.message
             try { payload() } catch (e: GatePolicyError) { return e.message }
             return null
         }

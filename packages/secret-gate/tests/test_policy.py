@@ -81,3 +81,30 @@ def test_hosts_reject_non_ascii_ports(host):  # surrounding whitespace is trimme
 
     with pytest.raises(ValidationError):
         normalize_host(host)
+
+
+# gate-simple-v0 §3.3: values shorter than 8 characters are not sealed for http / fill / exec.
+
+@pytest.mark.parametrize("use", ["http", "fill", "exec"])
+def test_seal_length_floor(use):
+    from secret_gate.constants import VALUE_TOO_SHORT_MESSAGE
+    from secret_gate.policy import check_seal_length
+
+    short = SecretPayload.create(value="1234567", hosts=["a.com"], uses=[use], label="a/pw")
+    with pytest.raises(ValidationError) as exc:
+        check_seal_length(short)
+    assert str(exc.value) == VALUE_TOO_SHORT_MESSAGE and "8 个字符" in str(exc.value)
+    check_seal_length(SecretPayload.create(value="12345678", hosts=["a.com"], uses=[use], label="a/pw"))
+    # characters (code points), not bytes: seven CJK characters are still too short, eight are enough
+    with pytest.raises(ValidationError):
+        check_seal_length(SecretPayload.create(value="密码密码密码密", hosts=["a.com"], uses=[use], label="a/pw"))
+    check_seal_length(SecretPayload.create(value="密码密码密码密码", hosts=["a.com"], uses=[use], label="a/pw"))
+
+
+def test_seal_length_floor_skips_otp_seeds():
+    from secret_gate.policy import check_seal_length
+
+    check_seal_length(SecretPayload.create(value="MZXW6YQ", hosts=[], uses=["otp"], label="a/totp", kind=KIND_TOTP))
+    with pytest.raises(ValidationError):  # the same seed also allowed for fill is held to the floor
+        check_seal_length(SecretPayload.create(value="MZXW6YQ", hosts=["a.com"], uses=["otp", "fill"], label="a/totp",
+                                               kind=KIND_TOTP))

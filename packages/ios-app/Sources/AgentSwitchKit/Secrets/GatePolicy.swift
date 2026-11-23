@@ -34,6 +34,7 @@ public enum GatePolicyError: Error, Equatable, LocalizedError {
     case totpNotBase32
     case seedImportNeedsTotp
     case seedImportNotAllowed(String)
+    case valueTooShort
 
     public var errorDescription: String? {
         switch self {
@@ -44,6 +45,7 @@ public enum GatePolicyError: Error, Equatable, LocalizedError {
         case .totpNotBase32: return "TOTP 密钥须为 base32 格式"
         case .seedImportNeedsTotp: return "种子导入授权仅适用于 TOTP"
         case .seedImportNotAllowed(let h): return "种子导入目标须为 host 已允许的确切地址：\(h)"
+        case .valueTooShort: return "值至少需要 \(GatePolicy.minSealLength) 个字符（过短的值遮不住，也容易被猜到）"
         }
     }
 }
@@ -53,6 +55,17 @@ public enum GatePolicyError: Error, Equatable, LocalizedError {
 /// digits in a port) this rejects.
 public enum GatePolicy {
     public static let labelMaxLength = 64
+    /// constants.MIN_SEAL_LENGTH (gate-simple-v0 §3.3): `enc` refuses a shorter value for these uses. Counted in Unicode
+    /// scalars, as Python's `len` counts code points; a seed sealed only for `otp` keeps its base32 check alone.
+    public static let minSealLength = 8
+    public static let lengthCheckedUses: Set<SecretUse> = [.http, .fill, .exec]
+    /// constants.SEAL_PAD_BLOCK (§3.4): the sealed JSON is padded with trailing spaces to a multiple of this.
+    public static let sealPadBlock = 64
+
+    /// policy.check_seal_length.
+    public static func isTooShortToSeal(_ value: String, uses: Set<SecretUse>) -> Bool {
+        !uses.isDisjoint(with: lengthCheckedUses) && value.unicodeScalars.count < minSealLength
+    }
 
     /// `^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$`
     public static func isValidLabel(_ label: String) -> Bool {

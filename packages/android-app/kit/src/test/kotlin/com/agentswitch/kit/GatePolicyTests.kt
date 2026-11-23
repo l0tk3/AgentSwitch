@@ -135,7 +135,7 @@ class SecretDraftTests {
         val d = SecretDraft(label = "core", sites = "https://user@core.example:8600/login?x, core.example:8600 | *.b.com，c.com", value = "v")
         assertEquals(4, d.siteList.size)
         assertEquals(listOf("core.example:8600", "*.b.com", "c.com"), d.hostList)
-        val clean = SecretDraft(label = "core", sites = "https://core.example:8600/login, *.b.com", value = "v")
+        val clean = SecretDraft(label = "core", sites = "https://core.example:8600/login, *.b.com", value = "v-long-enough")
         assertEquals(listOf("core.example:8600", "*.b.com"), clean.hostList)
         assertNull(clean.problem)
         assertEquals("core → core.example:8600, *.b.com", clean.effectiveNote)
@@ -150,5 +150,28 @@ class SecretDraftTests {
         assertEquals("otp 用途仅适用于 TOTP", SecretDraft(label = "a", sites = "a.com", uses = setOf(SecretUse.Otp), value = "v").problem)
         assertNotNull(SecretDraft(label = "a", sites = "a.com", kind = SecretKind.Totp, uses = setOf(SecretUse.Otp), value = "xyz!").problem)
         assertNull(SecretDraft(label = "a", sites = "", kind = SecretKind.Totp, uses = setOf(SecretUse.Otp), value = "JBSWY3DPEHPK3PXP").problem)
+        assertEquals("值至少需要 8 个字符（过短的值遮不住，也容易被猜到）", SecretDraft(label = "a", sites = "a.com", value = "1234567").problem)
+        assertEquals("值至少需要 8 个字符（过短的值遮不住，也容易被猜到）", SecretDraft(label = "a", uses = setOf(SecretUse.Exec), value = "short").problem)
+        assertNull(SecretDraft(label = "a", sites = "a.com", value = "12345678").problem)
+        assertNull(SecretDraft(label = "a", sites = "", kind = SecretKind.Totp, uses = setOf(SecretUse.Otp), value = "MZXW6YQ").problem)
+    }
+
+    /** gate-simple-v0 §3.3, policy.check_seal_length: under 8 characters is not sealed for http / fill / exec. */
+    @Test
+    fun sealLengthFloor() {
+        for (use in listOf(SecretUse.Http, SecretUse.Fill, SecretUse.Exec)) {
+            val e = assertFailsWith<GatePolicyError> { SecretPayload.make(value = "1234567", hosts = listOf("a.com"), uses = setOf(use), label = "a") }
+            assertEquals(GatePolicyError.ValueTooShort, e)
+            assertEquals("值至少需要 8 个字符（过短的值遮不住，也容易被猜到）", e.message)
+            SecretPayload.make(value = "12345678", hosts = listOf("a.com"), uses = setOf(use), label = "a")
+            // Code points, as Python counts: seven CJK characters (21 bytes) or seven emoji (14 UTF-16 units) are short.
+            assertFailsWith<GatePolicyError> { SecretPayload.make(value = "密码密码密码密", hosts = listOf("a.com"), uses = setOf(use), label = "a") }
+            assertFailsWith<GatePolicyError> { SecretPayload.make(value = "😀".repeat(7), hosts = listOf("a.com"), uses = setOf(use), label = "a") }
+            SecretPayload.make(value = "密码密码密码密码", hosts = listOf("a.com"), uses = setOf(use), label = "a")
+        }
+        SecretPayload.make(value = "MZXW6YQ", hosts = emptyList(), uses = setOf(SecretUse.Otp), label = "t", kind = SecretKind.Totp)   // a seed: base32 only
+        assertFailsWith<GatePolicyError> {
+            SecretPayload.make(value = "MZXW6YQ", hosts = listOf("a.com"), uses = setOf(SecretUse.Otp, SecretUse.Fill), label = "t", kind = SecretKind.Totp)
+        }
     }
 }

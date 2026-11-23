@@ -25,6 +25,18 @@ data class SecretPayload private constructor(
 
     val jsonData: ByteArray get() = jsonText.toByteArray(Charsets.UTF_8)
 
+    /**
+     * What is sealed (tokens.sealed_plaintext, gate-simple-v0 §3.4): [jsonData] padded with trailing ASCII spaces to a
+     * multiple of [GatePolicy.sealPadBlock] bytes, so a ciphertext's length does not follow the value's. JSON allows
+     * trailing whitespace and the gate strips it before parsing.
+     */
+    val sealedData: ByteArray
+        get() {
+            val data = jsonData
+            val pad = (GatePolicy.sealPadBlock - data.size % GatePolicy.sealPadBlock) % GatePolicy.sealPadBlock
+            return data + ByteArray(pad) { 0x20 }
+        }
+
     companion object {
         fun make(
             value: String,
@@ -47,6 +59,8 @@ data class SecretPayload private constructor(
                     throw GatePolicyError.SeedImportNotAllowed(grant)
                 }
             }
+            // Last, as `secret-gate enc` checks it after `create` (policy.check_seal_length): only sealing builds one here.
+            if (GatePolicy.isTooShortToSeal(value, uses)) throw GatePolicyError.ValueTooShort
             return SecretPayload(value, normalized, uses.sortedBy { it.rawValue }, label, kind, grants)
         }
     }

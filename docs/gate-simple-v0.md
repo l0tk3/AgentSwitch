@@ -87,9 +87,13 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 
 值短于 **8** 个字符时，拒绝封装成 `http`/`fill` 用途。太短的值遮不住，片段规则会把整页遮掉，长度本身也容易猜。现在的下限是 4（`MIN_REDACT_LENGTH`、daemon `MIN_VALUE_LENGTH`、手机端），一并改成 8。
 
+已做（2026-11-23）：`secret-gate enc` 对 `http`、`fill`、`exec` 用途拒绝短于 8 个字符（按码位计）的值，报“值至少需要 8 个字符（过短的值遮不住，也容易被猜到）”；Mac 的封装表单、iPhone 与 Android 的 `SecretDraft` 和代理密码用同一句话先拦下。只用于 `otp` 的种子照旧只查 base32。daemon 的 sealer 不把短于 8 的值交给网关（只用于验证码的仍是 4），这样的值原样留在任务里，和以前短于 4 的值一样。脱敏器的 `MIN_REDACT_LENGTH` 另算，不在这一步。
+
 ### 3.4 不泄露长度
 
 现在密文长度随明文长度变化（`crypto.py` 不做填充），模型从密文长短能推出密码位数。改为：封装前把明文补齐到 64 字节的整数倍，解密后去掉填充。Python、Swift（iPhone、Mac）、Kotlin（Android）三处封装代码一起改。用户现在没有密文，不需要兼容旧格式。
+
+已做（2026-11-23）：封装的明文是 JSON，就在末尾补 ASCII 空格到 64 字节的整数倍（JSON 允许尾随空白，JSON 本身不以空格结尾，所以不含糊），格式仍是 `enc:v1:`；网关解密后先去掉尾随空格再解析，不补的旧密文照样能开。Python（`tokens.sealed_plaintext`）、iPhone 与 Android（`SecretPayload.sealedData`）补法相同，Mac 与 daemon 经 `secret-gate enc`。跨语言测试：1–200 个字符的值，密文长度都落在 64 字节的台阶上，且与 Python 自己封的长度相同。
 
 ### 3.5 截图
 

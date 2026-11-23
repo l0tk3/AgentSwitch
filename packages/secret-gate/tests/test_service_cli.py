@@ -120,7 +120,7 @@ def test_pubkey_and_enc_use_keys_json(service, capsys, monkeypatch):
 
 
 def test_refs_register_and_release_over_the_socket(service, capsys, monkeypatch):
-    _, token, _ = _run(capsys, ["enc", "--label", "x/y", "--host", "x.example", "--value", "v-12345"])
+    _, token, _ = _run(capsys, ["enc", "--label", "x/y", "--host", "x.example", "--value", "v-1234567"])
     request = json.dumps({"scope": SCOPE, "tokens": [token.strip(), "enc:v1:" + "A" * 30]})
     code, out, _ = _run(capsys, ["refs", "register"], stdin=request, monkeypatch=monkeypatch)
     result = json.loads(out)

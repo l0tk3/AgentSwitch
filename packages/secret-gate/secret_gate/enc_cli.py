@@ -9,7 +9,7 @@ import sys
 
 from .constants import KIND_SECRET, USE_HTTP
 from .errors import GateError
-from .policy import SecretPayload
+from .policy import SecretPayload, check_seal_length
 from .tokens import make_token
 
 
@@ -22,6 +22,7 @@ def run_enc(args: argparse.Namespace, public: bytes) -> int:
         value=value, hosts=tuple(args.host), uses=set(args.use), label=args.label, kind=args.kind,
         seed_import_hosts=args.seed_import_host,
     )
+    check_seal_length(payload)
     print(make_token(public, payload))
     return 0
 
@@ -53,6 +54,7 @@ def _enc_batch(public: bytes) -> int:
                 kind=entry.get("kind", KIND_SECRET),
                 seed_import_hosts=entry.get("seed_import_hosts", []),
             )
+            check_seal_length(payload)
             results.append({"label": label, "token": make_token(public, payload)})
         except GateError as exc:
             results.append({"label": label, "error": str(exc)})

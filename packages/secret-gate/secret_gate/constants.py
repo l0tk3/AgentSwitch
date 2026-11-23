@@ -54,6 +54,15 @@ TOTP_DIGITS = 6
 REDACTED_FORMAT = "[REDACTED:{label}]"
 MIN_REDACT_LENGTH = 4
 
+# Sealing (gate-simple-v0 §3.3, §3.4). A value for these uses shorter than MIN_SEAL_LENGTH characters (code points) is
+# refused: it cannot be masked in output and its length is easy to guess. `otp` seeds have their own base32 check.
+MIN_SEAL_LENGTH = 8
+LENGTH_CHECKED_USES = frozenset({USE_HTTP, USE_FILL, USE_EXEC})
+VALUE_TOO_SHORT_MESSAGE = f"值至少需要 {MIN_SEAL_LENGTH} 个字符（过短的值遮不住，也容易被猜到）"
+# The sealed payload JSON is padded with trailing ASCII spaces to a multiple of this many bytes, so a ciphertext's
+# length says nothing about the value's (JSON allows trailing whitespace; the reader strips it before parsing).
+SEAL_PAD_BLOCK = 64
+
 DEFAULT_PROXY_PORT = 8080
 EXEC_TIMEOUT_SECONDS = 60
 HTTP_TIMEOUT_SECONDS = 30

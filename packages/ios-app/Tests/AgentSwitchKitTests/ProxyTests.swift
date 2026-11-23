@@ -191,12 +191,15 @@ final class ProxyTests: XCTestCase {
     }
 
     func testThePasswordIsSealedForTheProxyItselfAndNowhereElse() throws {
-        let draft = ProxyDraft(server: "http://Proxy.Example:8080", username: "me", password: "hunter2")
+        let draft = ProxyDraft(server: "http://Proxy.Example:8080", username: "me", password: "hunter2-x")
         let payload = try XCTUnwrap(try draft.sealing(label: ProxyOwner.profile(agent: "claude-code", id: "abc").sealLabel))
         XCTAssertEqual(payload.hosts, ["proxy.example:8080"])
         XCTAssertEqual(payload.uses, [.fill, .http])
         XCTAssertEqual(payload.label, "profile/proxy")
-        XCTAssertEqual(payload.value, "hunter2")
+        XCTAssertEqual(payload.value, "hunter2-x")
+        XCTAssertThrowsError(try ProxyDraft(server: "http://proxy.example:8080", username: "me", password: "hunter2").sealing(label: "browser/proxy")) {
+            XCTAssertEqual($0 as? GatePolicyError, .valueTooShort)
+        }
         XCTAssertEqual(ProxyOwner.browser.sealLabel, "browser/proxy")
         XCTAssertNil(try ProxyDraft(server: "http://proxy.example:8080", username: "me").sealing(label: "browser/proxy"))
         // What it becomes is a ciphertext the gate's own format, and the value is not in it.

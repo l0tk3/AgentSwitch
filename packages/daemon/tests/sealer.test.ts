@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import { fakeMinter, parseMintOutput, type MintEntry } from "../src/secrets/minter.js";
-import { applyTokens, hostOf, isWholeRecord, LEGEND_HEADER, parseSealReply, planSeal, recordDelimiter, routerSealer, splitRecord, type Sealer } from "../src/secrets/sealer.js";
+import { applyTokens, hostOf, isWholeRecord, LEGEND_HEADER, MIN_VALUE_LENGTH, parseSealReply, planSeal, recordDelimiter, routerSealer, splitRecord, tooShort, type Sealer } from "../src/secrets/sealer.js";
 import { composePrompt } from "../src/executors/instructions.js";
 import { decisionJson, TARGETS_PATH, workDir } from "./helpers.js";
 
@@ -27,18 +27,41 @@ describe("seal helpers", () => {
   });
 
   it("planSeal: short, absent or duplicate values are skipped; http without a host is unroutable; labels are cleaned", () => {
-    const text = "账号 lotke 密码 Hunter2! 再来一次 Hunter2!";
+    const text = "账号 lotke@x.io 密码 Hunter2! 再来一次 Hunter2! 用户 lotke";
     const plan = planSeal(text, [
       { value: "Hunter2!", label: "财务 pass", field: "", kind: "secret", hosts: ["http://core:8600/"], uses: ["http"] },
       { value: "Hunter2!", label: "dup", field: "", kind: "secret", hosts: ["core"], uses: ["http"] },
       { value: "abc", label: "short", field: "", kind: "secret", hosts: ["core"], uses: ["http"] },
       { value: "notthere", label: "absent", field: "", kind: "secret", hosts: ["core"], uses: ["http"] },
-      { value: "lotke", label: "finance/account", field: "", kind: "secret", hosts: [], uses: ["http"] },
-      { value: "lotke", label: "x", field: "", kind: "secret", hosts: [], uses: ["exec"] },
+      { value: "lotke@x.io", label: "finance/account", field: "", kind: "secret", hosts: [], uses: ["http"] },
+      { value: "lotke@x.io", label: "x", field: "", kind: "secret", hosts: [], uses: ["exec"] },
+      { value: "lotke", label: "finance/user", field: "", kind: "secret", hosts: ["core"], uses: ["http", "fill"] },
     ]);
     expect(plan.entries.map((e) => [e.label, e.hosts])).toEqual([["pass", ["core:8600"]]]);
-    expect(plan.skipped).toEqual(["dup", "short", "absent", "x"]);
+    expect(plan.skipped).toEqual(["dup", "short", "absent", "x", "finance/user"]);
     expect(plan.unroutable).toEqual(["finance/account"]);
+  });
+
+  it("gate-simple-v0 §3.3: values under 8 characters are never sent to the minter for http, fill or exec; otp codes keep a floor of 4", () => {
+    expect(MIN_VALUE_LENGTH).toBe(8);
+    for (const uses of [["http"], ["fill"], ["exec"], ["http", "fill"], ["otp", "fill"]] as const) {
+      expect(tooShort({ value: "1234567", uses: [...uses] })).toBe(true);
+      expect(tooShort({ value: "12345678", uses: [...uses] })).toBe(false);
+    }
+    expect(tooShort({ value: "密码密码密码密", uses: ["http"] })).toBe(true);       // characters, not UTF-16 units or bytes
+    expect(tooShort({ value: "😀😀😀😀😀😀😀", uses: ["http"] })).toBe(true);
+    expect(tooShort({ value: "密码密码密码密码", uses: ["http"] })).toBe(false);
+    expect(tooShort({ value: "MZXW6YQ", uses: ["otp"] })).toBe(false);
+    expect(tooShort({ value: "MZXW6YQ", uses: ["otp"], purpose: "totp_code" })).toBe(false);
+    expect(tooShort({ value: "MZXW6YQ", uses: ["otp"], purpose: "totp_seed_import" })).toBe(true);  // typed into a page
+    expect(tooShort({ value: "abc", uses: ["otp"] })).toBe(true);
+    const plan = planSeal("pw Pass123 key sk-abcdefgh", [
+      { value: "Pass123", label: "a/pass", field: "", kind: "secret", hosts: ["a.example"], uses: ["http", "fill"] },
+      { value: "sk-abcdefgh", label: "a/key", field: "", kind: "secret", hosts: ["a.example"], uses: ["http"] },
+    ]);
+    expect(plan.entries.map((e) => e.label)).toEqual(["a/key"]);
+    expect(plan.skipped).toEqual(["a/pass"]);
+    expect(splitRecord({ value: "a@x.io|Pass123|Pa55word-1|US", label: "r", field: "", kind: "secret", hosts: ["a.example"], uses: ["http", "fill"] }, 1).map((f) => f.value)).toEqual(["Pa55word-1"]);
   });
 
   it("values typed into a page carry 'fill' so the gate service may type them (gate-service-v0 §1); API keys need not", () => {
@@ -90,9 +113,9 @@ describe("routerSealer", () => {
   });
 
   it("a table of accounts: every cell the model marks is sealed, the rest of the table stays", async () => {
-    const table = "站点 http://core.internal:8600/\n| 用户 | 密码 |\n| alice | Pa55-alice |\n| bob | Pa55-bob |";
+    const table = "站点 http://core.internal:8600/\n| 用户 | 密码 |\n| alice@x.io | Pa55-alice |\n| bob | Pa55-bob |";
     const seal = routerSealer(echoRouter([reply([
-      { value: "Pa55-alice", label: "finance/alice-pass", hosts: ["core.internal:8600"] }, { value: "alice", label: "finance/alice", hosts: ["core.internal:8600"] },
+      { value: "Pa55-alice", label: "finance/alice-pass", hosts: ["core.internal:8600"] }, { value: "alice@x.io", label: "finance/alice", hosts: ["core.internal:8600"] },
       { value: "Pa55-bob", label: "finance/bob-pass", hosts: ["core.internal:8600"] },
     ])]), fakeMinter(), () => "");
     const r = await seal(table);
@@ -174,8 +197,9 @@ describe("records: pasted account lines (email|password|year|country|app passwor
     expect(isWholeRecord(text, "Pw-2024-secret")).toBe(false);
     expect(isWholeRecord("a\nb", "a\nb")).toBe(true);
     const split = splitRecord({ value: line, field: "", label: "x", kind: "secret", hosts: ["h"], uses: ["http"] }, 1);
-    expect(split.map((f) => f.value)).toEqual(["xx@aa.com", "Pw-2024-secret", "2024", "United States", "ggff elhf lchd cpkx", "sessionkey-01-abcdef"]);
-    expect(split[4]).toMatchObject({ label: "record1/field5", field: "field 5 of record 1", hosts: ["h"] });
+    // "2024" is under the gate's floor of 8 characters (gate-simple-v0 §3.3): left in place, never sent to be sealed
+    expect(split.map((f) => f.value)).toEqual(["xx@aa.com", "Pw-2024-secret", "United States", "ggff elhf lchd cpkx", "sessionkey-01-abcdef"]);
+    expect(split[3]).toMatchObject({ label: "record1/field4", field: "field 4 of record 1", hosts: ["h"] });
   });
 
   it("fields are sealed one by one, year and country stay in the clear, the legend names each token and the layout", async () => {
@@ -200,8 +224,9 @@ describe("records: pasted account lines (email|password|year|country|app passwor
     const r2 = await routerSealer(stubborn, fakeMinter(), () => "")(text);
     expect(r2.ok).toBe(true);
     if (!r2.ok) return;
-    expect(r2.sealed).toHaveLength(6);
+    expect(r2.sealed).toHaveLength(5);
     expect(r2.text).not.toContain("xx@aa.com");
+    expect(r2.text).not.toContain("Pw-2024-secret");
     expect(r2.text).not.toContain(line);
   });
 });

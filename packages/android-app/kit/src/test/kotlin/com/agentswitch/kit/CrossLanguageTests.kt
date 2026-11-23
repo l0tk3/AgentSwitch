@@ -95,7 +95,7 @@ class CrossLanguageTests {
     @Test
     fun gateRejectsTamperedAndForeignTokens() {
         val minter = TokenMinter(newKeypair(), TestSodium.sealer)
-        val payload = SecretPayload.make(value = "pw-fake", hosts = listOf("a.example.com"), uses = setOf(SecretUse.Http), label = "a")
+        val payload = SecretPayload.make(value = "pw-fake-1", hosts = listOf("a.example.com"), uses = setOf(SecretUse.Http), label = "a")
         val token = minter.mint(payload).toCharArray()
         token[20] = if (token[20] == 'A') 'B' else 'A'
         assertNull(check(String(token)))
@@ -104,8 +104,73 @@ class CrossLanguageTests {
     }
 
     /**
+     * gate-simple-v0 §3.4: Kotlin-minted tokens for values of 1..200 characters all open in the gate (its own
+     * `open_token`) to the same payload, and their sealed lengths come in 64-byte steps, the same as Python's own
+     * `make_token` for the same payloads. Prints lengths and booleans only.
+     */
+    @Test
+    fun paddedLengthsAgreeWithPython() {
+        val minter = TokenMinter(newKeypair(), TestSodium.sealer)
+        val tokens = (1..200).map { n ->
+            // Short values with `otp` (no floor), the rest as website passwords: the floor is tested below.
+            val value = "p".repeat(n)
+            val uses = if (n < GatePolicy.minSealLength) setOf(SecretUse.Otp) else setOf(SecretUse.Http, SecretUse.Fill)
+            minter.mint(SecretPayload.make(value = value, hosts = listOf("a.example.com"), uses = uses, label = "a/pass"))
+        }
+        val script = """
+            import json, sys
+            from secret_gate.keystore import gate_home, load_private_key
+            from secret_gate.crypto import b64url_decode, generate_keypair
+            from secret_gate.tokens import open_token, make_token
+            key = load_private_key(gate_home())
+            other = generate_keypair()
+            rows = []
+            for n, tok in enumerate(json.load(sys.stdin)["tokens"], start=1):
+                p = open_token(key, tok)
+                mine = len(b64url_decode(make_token(other.public, p)[7:]))
+                rows.append({"ok": p.value == "p" * n, "kotlin": len(b64url_decode(tok[7:])), "python": mine})
+            print(json.dumps(rows))
+        """.trimIndent()
+        val r = Proc.run(python, listOf("-c", script), env = env, stdin = json(mapOf("tokens" to tokens)))
+        assertEquals(0, r.status, r.stderr)
+        val rows = KitJson.decodeFromString(JSONValue.serializer(), r.stdout).array.orEmpty()
+        assertEquals(200, rows.size)
+        for ((i, row) in rows.withIndex()) {
+            assertEquals(true, row["ok"]?.bool, "value of ${i + 1} characters")
+            val kotlin = assertNotNull(row["kotlin"]?.number).toInt()
+            assertEquals(row["python"]?.number?.toInt(), kotlin, "value of ${i + 1} characters")
+            assertEquals(0, (kotlin - 48) % 64, "value of ${i + 1} characters")
+        }
+    }
+
+    /**
+     * The same values through `secret-gate enc` and SecretPayload.make: both refuse under 8 characters for http, fill
+     * and exec, both take an `otp` seed, and both say so in the same words.
+     */
+    @Test
+    fun sealLengthFloorAgreesWithPython() {
+        newKeypair()
+        val cases = listOf(
+            Triple("1234567", setOf(SecretUse.Http, SecretUse.Fill), SecretKind.Secret),
+            Triple("12345678", setOf(SecretUse.Http, SecretUse.Fill), SecretKind.Secret),
+            Triple("密码密码密码密", setOf(SecretUse.Exec), SecretKind.Secret),
+            Triple("MZXW6YQ", setOf(SecretUse.Otp), SecretKind.Totp),
+        )
+        val batch = cases.map { (value, uses, kind) ->
+            mapOf("label" to "a", "hosts" to listOf("a.example.com"), "uses" to uses.map { it.rawValue }, "kind" to kind.rawValue, "value" to value)
+        }
+        val r = Proc.run(gate, listOf("enc", "--batch"), env = env, stdin = json(batch))
+        val rows = KitJson.decodeFromString(JSONValue.serializer(), r.stdout).array.orEmpty()
+        for ((i, c) in cases.withIndex()) {
+            val kotlin = runCatching { SecretPayload.make(value = c.first, hosts = listOf("a.example.com"), uses = c.second, label = "a", kind = c.third) }
+            if (kotlin.isSuccess) assertNotNull(rows[i]["token"]?.string, c.first)
+            else assertEquals(kotlin.exceptionOrNull()?.message, rows[i]["error"]?.string, c.first)
+        }
+    }
+
+    /**
      * Decrypts with the gate's own code and compares SHA-256 of the plaintext with Kotlin's bytes and with Python's
-     * canonical `to_json()`; prints only booleans.
+     * canonical `sealed_plaintext()` (`to_json()` padded); prints only booleans.
      */
     private fun payloadBytesMatch(token: String, payload: SecretPayload): Boolean {
         val script = """
@@ -113,13 +178,14 @@ class CrossLanguageTests {
             from secret_gate.keystore import gate_home, load_private_key
             from secret_gate.crypto import decrypt, b64url_decode
             from secret_gate.policy import SecretPayload
+            from secret_gate.tokens import sealed_plaintext
             req = json.load(sys.stdin)
             plain = decrypt(load_private_key(gate_home()), b64url_decode(req["token"][len("enc:v1:"):]))
-            canon = SecretPayload.from_json(plain).to_json().encode("utf-8")
+            canon = sealed_plaintext(SecretPayload.from_json(plain))
             digest = hashlib.sha256(plain).hexdigest()
             print(json.dumps({"swift": digest == req["sha256"], "canonical": hashlib.sha256(canon).hexdigest() == digest}))
         """.trimIndent()
-        val digest = CertificatePin.fingerprint(payload.jsonData)  // SHA-256 hex
+        val digest = CertificatePin.fingerprint(payload.sealedData)  // SHA-256 hex
         val r = Proc.run(python, listOf("-c", script), env = env, stdin = json(mapOf("token" to token, "sha256" to digest)))
         assertEquals(0, r.status, "python helper failed")
         val verdict = KitJson.decodeFromString(JSONValue.serializer(), r.stdout)

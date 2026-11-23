@@ -73,7 +73,7 @@ final class CrossLanguageTests: XCTestCase {
 
     func testGateRejectsTamperedAndForeignTokens() throws {
         let minter = try TokenMinter(publicKeyBase64URL: try newKeypair())
-        let payload = try SecretPayload.make(value: "pw-fake", hosts: ["a.example.com"], uses: [.http], label: "a")
+        let payload = try SecretPayload.make(value: "pw-fake-1", hosts: ["a.example.com"], uses: [.http], label: "a")
         var token = Array(try minter.mint(payload))
         token[20] = token[20] == "A" ? "B" : "A"
         XCTAssertNil(try check(String(token)))
@@ -81,21 +81,80 @@ final class CrossLanguageTests: XCTestCase {
         XCTAssertNil(try check(try foreign.mint(payload)))
     }
 
+    /// gate-simple-v0 §3.4: Swift-minted tokens for values of 1...200 characters all open in the gate (its own
+    /// `open_token`) to the same payload, and their sealed lengths come in 64-byte steps, the same as Python's own
+    /// `make_token` for the same payloads. Prints lengths and booleans only.
+    func testPaddedLengthsAgreeWithPython() throws {
+        let minter = try TokenMinter(publicKeyBase64URL: try newKeypair())
+        var tokens: [String] = []
+        for n in 1...200 {
+            // Short values with `otp` (no floor), the rest as website passwords: the floor is tested below.
+            let value = String(repeating: "p", count: n)
+            let payload = n < GatePolicy.minSealLength
+                ? try SecretPayload.make(value: value, hosts: ["a.example.com"], uses: [.otp], label: "a/pass")
+                : try SecretPayload.make(value: value, hosts: ["a.example.com"], uses: [.http, .fill], label: "a/pass")
+            tokens.append(try minter.mint(payload))
+        }
+        let script = """
+        import json, sys
+        from secret_gate.keystore import gate_home, load_private_key
+        from secret_gate.crypto import b64url_decode, generate_keypair
+        from secret_gate.tokens import open_token, make_token
+        key = load_private_key(gate_home())
+        other = generate_keypair()
+        rows = []
+        for n, tok in enumerate(json.load(sys.stdin)["tokens"], start=1):
+            p = open_token(key, tok)
+            mine = len(b64url_decode(make_token(other.public, p)[7:]))
+            rows.append({"ok": p.value == "p" * n, "swift": len(b64url_decode(tok[7:])), "python": mine})
+        print(json.dumps(rows))
+        """
+        let r = try Proc.run(python, ["-c", script], env: env, stdin: json(["tokens": tokens]))
+        XCTAssertEqual(r.status, 0, r.stderr)
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(r.stdout.utf8)) as? [[String: Any]])
+        XCTAssertEqual(rows.count, 200)
+        for (i, row) in rows.enumerated() {
+            XCTAssertEqual(row["ok"] as? Bool, true, "value of \(i + 1) characters")
+            let swift = try XCTUnwrap(row["swift"] as? Int)
+            XCTAssertEqual(swift, row["python"] as? Int, "value of \(i + 1) characters")
+            XCTAssertEqual((swift - 48) % 64, 0, "value of \(i + 1) characters")
+        }
+    }
+
+    /// The same values through `secret-gate enc` and SecretPayload.make: both refuse under 8 characters for http, fill
+    /// and exec, both take an `otp` seed, and both say so in the same words.
+    func testSealLengthFloorAgreesWithPython() throws {
+        _ = try newKeypair()
+        let cases: [(String, [SecretUse], SecretKind)] = [("1234567", [.http, .fill], .secret), ("12345678", [.http, .fill], .secret),
+                                                           ("密码密码密码密", [.exec], .secret), ("MZXW6YQ", [.otp], .totp)]
+        let batch = cases.map { ["label": "a", "hosts": ["a.example.com"], "uses": $0.1.map(\.rawValue), "kind": $0.2.rawValue, "value": $0.0] as [String: Any] }
+        let r = try Proc.run(gate, ["enc", "--batch"], env: env, stdin: json(batch))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(r.stdout.utf8)) as? [[String: Any]])
+        for (i, c) in cases.enumerated() {
+            let swift = Result { try SecretPayload.make(value: c.0, hosts: ["a.example.com"], uses: Set(c.1), label: "a", kind: c.2) }
+            switch swift {
+            case .success: XCTAssertNotNil(rows[i]["token"], c.0)
+            case .failure(let error): XCTAssertEqual(rows[i]["error"] as? String, error.localizedDescription, c.0)
+            }
+        }
+    }
+
     /// Decrypts with the gate's own code and compares SHA-256 of the plaintext with Swift's bytes and with Python's
-    /// canonical `to_json()`; prints only booleans.
+    /// canonical `sealed_plaintext()` (`to_json()` padded); prints only booleans.
     private func payloadBytesMatch(token: String, payload: SecretPayload) throws -> Bool {
         let script = """
         import hashlib, json, sys
         from secret_gate.keystore import gate_home, load_private_key
         from secret_gate.crypto import decrypt, b64url_decode
         from secret_gate.policy import SecretPayload
+        from secret_gate.tokens import sealed_plaintext
         req = json.load(sys.stdin)
         plain = decrypt(load_private_key(gate_home()), b64url_decode(req["token"][len("enc:v1:"):]))
-        canon = SecretPayload.from_json(plain).to_json().encode("utf-8")
+        canon = sealed_plaintext(SecretPayload.from_json(plain))
         digest = hashlib.sha256(plain).hexdigest()
         print(json.dumps({"swift": digest == req["sha256"], "canonical": hashlib.sha256(canon).hexdigest() == digest}))
         """
-        let digest = CertificatePin.fingerprint(ofDER: payload.jsonData)  // SHA-256 hex
+        let digest = CertificatePin.fingerprint(ofDER: payload.sealedData)  // SHA-256 hex
         let r = try Proc.run(python, ["-c", script], env: env, stdin: json(["token": token, "sha256": digest]))
         XCTAssertEqual(r.status, 0, "python helper failed")
         let verdict = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(r.stdout.utf8)) as? [String: Bool])

@@ -41,6 +41,7 @@ sealed class GatePolicyError(message: String) : Exception(message) {
     data object TotpNotBase32 : GatePolicyError("TOTP 密钥须为 base32 格式")
     data object SeedImportNeedsTotp : GatePolicyError("种子导入授权仅适用于 TOTP")
     data class SeedImportNotAllowed(val host: String) : GatePolicyError("种子导入目标须为 host 已允许的确切地址：$host")
+    data object ValueTooShort : GatePolicyError("值至少需要 ${GatePolicy.minSealLength} 个字符（过短的值遮不住，也容易被猜到）")
 }
 
 /**
@@ -50,6 +51,18 @@ sealed class GatePolicyError(message: String) : Exception(message) {
  */
 object GatePolicy {
     const val labelMaxLength = 64
+    /**
+     * constants.MIN_SEAL_LENGTH (gate-simple-v0 §3.3): `enc` refuses a shorter value for these uses. Counted in code
+     * points, as Python's `len` does; a seed sealed only for `otp` keeps its base32 check alone.
+     */
+    const val minSealLength = 8
+    val lengthCheckedUses: Set<SecretUse> = setOf(SecretUse.Http, SecretUse.Fill, SecretUse.Exec)
+    /** constants.SEAL_PAD_BLOCK (§3.4): the sealed JSON is padded with trailing spaces to a multiple of this. */
+    const val sealPadBlock = 64
+
+    /** policy.check_seal_length. */
+    fun isTooShortToSeal(value: String, uses: Set<SecretUse>): Boolean =
+        uses.any { it in lengthCheckedUses } && value.codePointCount(0, value.length) < minSealLength
 
     /** `^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$` */
     fun isValidLabel(label: String): Boolean {

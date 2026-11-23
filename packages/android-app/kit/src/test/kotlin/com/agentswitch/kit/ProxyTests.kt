@@ -1,6 +1,7 @@
 package com.agentswitch.kit
 
 import com.agentswitch.kit.api.*
+import com.agentswitch.kit.secrets.GatePolicyError
 import com.agentswitch.kit.secrets.SecretUse
 import com.agentswitch.kit.secrets.TokenMinter
 import com.agentswitch.kit.support.KitJson
@@ -18,6 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -179,12 +181,15 @@ class ProxyTests {
 
     @Test
     fun testThePasswordIsSealedForTheProxyItselfAndNowhereElse() {
-        val draft = ProxyDraft(server = "http://Proxy.Example:8080", username = "me", password = "hunter2")
+        val draft = ProxyDraft(server = "http://Proxy.Example:8080", username = "me", password = "hunter2-x")
         val payload = assertNotNull(draft.sealing(label = ProxyOwner.Profile(agent = "claude-code", id = "abc").sealLabel))
         assertEquals(listOf("proxy.example:8080"), payload.hosts)
         assertEquals(listOf(SecretUse.Fill, SecretUse.Http), payload.uses)
         assertEquals("profile/proxy", payload.label)
-        assertEquals("hunter2", payload.value)
+        assertEquals("hunter2-x", payload.value)
+        assertEquals(GatePolicyError.ValueTooShort, assertFailsWith<GatePolicyError> {
+            ProxyDraft(server = "http://proxy.example:8080", username = "me", password = "hunter2").sealing(label = "browser/proxy")
+        })
         assertEquals("browser/proxy", ProxyOwner.Browser.sealLabel)
         assertNull(ProxyDraft(server = "http://proxy.example:8080", username = "me").sealing(label = "browser/proxy"))
         // What it becomes is a ciphertext the gate's own format, and the value is not in it.

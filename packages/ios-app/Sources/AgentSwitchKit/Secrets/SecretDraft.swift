@@ -53,6 +53,7 @@ public struct SecretDraft: Sendable, Equatable {
         if uses.isEmpty { return "请至少选择一种用途" }
         if (uses.contains(.http) || uses.contains(.fill)) && hostList.isEmpty { return "http / fill 用途须填写站点" }
         if uses.contains(.otp) && kind != .totp { return "otp 用途仅适用于 TOTP" }
+        if GatePolicy.isTooShortToSeal(value, uses: uses) { return GatePolicyError.valueTooShort.errorDescription }
         do { _ = try payload() } catch { return error.localizedDescription }
         return nil
     }

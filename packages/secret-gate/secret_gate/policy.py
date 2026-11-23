@@ -16,8 +16,11 @@ from .constants import (
     KIND_SECRET,
     KIND_TOTP,
     LABEL_PATTERN,
+    LENGTH_CHECKED_USES,
+    MIN_SEAL_LENGTH,
     VALID_KINDS,
     VALID_USES,
+    VALUE_TOO_SHORT_MESSAGE,
 )
 from .errors import ValidationError
 
@@ -163,3 +166,12 @@ class SecretPayload:
             "uses": sorted(self.uses),
             "seed_import_hosts": list(self.seed_import_hosts),
         }
+
+
+def check_seal_length(payload: SecretPayload) -> None:
+    """Refuse to seal a value shorter than MIN_SEAL_LENGTH characters for `http`, `fill` or `exec` (gate-simple-v0
+    §3.3). Called where a user seals a value (`secret-gate enc`, which the Mac app and the daemon run too); opening a
+    token and the gate's own page-transfer references do not go through here. A seed sealed only for `otp` keeps its
+    own base32 check and no length floor."""
+    if payload.uses & LENGTH_CHECKED_USES and len(payload.value) < MIN_SEAL_LENGTH:
+        raise ValidationError(VALUE_TOO_SHORT_MESSAGE)

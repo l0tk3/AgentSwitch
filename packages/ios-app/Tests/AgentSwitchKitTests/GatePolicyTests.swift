@@ -86,6 +86,23 @@ final class SecretPayloadTests: XCTestCase {
         XCTAssertThrowsError(try SecretPayload.make(value: "JBSWY3DP", hosts: ["a.com"], uses: [.otp], label: "t", kind: .totp, seedImportHosts: ["b.com"]))
         XCTAssertThrowsError(try SecretPayload.make(value: "JBSWY3DP", hosts: ["*.a.com"], uses: [.otp], label: "t", kind: .totp, seedImportHosts: ["*.a.com"]))
     }
+
+    /// gate-simple-v0 §3.3, policy.check_seal_length: under 8 characters is not sealed for http / fill / exec.
+    func testSealLengthFloor() throws {
+        for use in [SecretUse.http, .fill, .exec] {
+            XCTAssertThrowsError(try SecretPayload.make(value: "1234567", hosts: ["a.com"], uses: [use], label: "a")) {
+                XCTAssertEqual($0 as? GatePolicyError, .valueTooShort)
+                XCTAssertEqual($0.localizedDescription, "值至少需要 8 个字符（过短的值遮不住，也容易被猜到）")
+            }
+            XCTAssertNoThrow(try SecretPayload.make(value: "12345678", hosts: ["a.com"], uses: [use], label: "a"))
+            // Unicode scalars, as Python counts: seven CJK characters (21 bytes) or seven emoji (14 UTF-16 units) are short.
+            XCTAssertThrowsError(try SecretPayload.make(value: "密码密码密码密", hosts: ["a.com"], uses: [use], label: "a"))
+            XCTAssertThrowsError(try SecretPayload.make(value: "😀😀😀😀😀😀😀", hosts: ["a.com"], uses: [use], label: "a"))
+            XCTAssertNoThrow(try SecretPayload.make(value: "密码密码密码密码", hosts: ["a.com"], uses: [use], label: "a"))
+        }
+        XCTAssertNoThrow(try SecretPayload.make(value: "MZXW6YQ", hosts: [], uses: [.otp], label: "t", kind: .totp))   // a seed: base32 only
+        XCTAssertThrowsError(try SecretPayload.make(value: "MZXW6YQ", hosts: ["a.com"], uses: [.otp, .fill], label: "t", kind: .totp))
+    }
 }
 
 final class SecretDraftTests: XCTestCase {
@@ -93,7 +110,7 @@ final class SecretDraftTests: XCTestCase {
         let d = SecretDraft(label: "core", sites: "https://user@core.example:8600/login?x, core.example:8600 | *.b.com，c.com", value: "v")
         XCTAssertEqual(d.siteList.count, 4)
         XCTAssertEqual(d.hostList, ["core.example:8600", "*.b.com", "c.com"])
-        let clean = SecretDraft(label: "core", sites: "https://core.example:8600/login, *.b.com", value: "v")
+        let clean = SecretDraft(label: "core", sites: "https://core.example:8600/login, *.b.com", value: "v-long-enough")
         XCTAssertEqual(clean.hostList, ["core.example:8600", "*.b.com"])
         XCTAssertNil(clean.problem)
         XCTAssertEqual(clean.effectiveNote, "core → core.example:8600, *.b.com")
@@ -107,5 +124,9 @@ final class SecretDraftTests: XCTestCase {
         XCTAssertEqual(SecretDraft(label: "a", sites: "a.com", uses: [.otp], value: "v").problem, "otp 用途仅适用于 TOTP")
         XCTAssertNotNil(SecretDraft(label: "a", sites: "a.com", kind: .totp, uses: [.otp], value: "xyz!").problem)
         XCTAssertNil(SecretDraft(label: "a", sites: "", kind: .totp, uses: [.otp], value: "JBSWY3DPEHPK3PXP").problem)
+        XCTAssertEqual(SecretDraft(label: "a", sites: "a.com", value: "1234567").problem, "值至少需要 8 个字符（过短的值遮不住，也容易被猜到）")
+        XCTAssertEqual(SecretDraft(label: "a", uses: [.exec], value: "short").problem, "值至少需要 8 个字符（过短的值遮不住，也容易被猜到）")
+        XCTAssertNil(SecretDraft(label: "a", sites: "a.com", value: "12345678").problem)
+        XCTAssertNil(SecretDraft(label: "a", sites: "", kind: .totp, uses: [.otp], value: "MZXW6YQ").problem)
     }
 }

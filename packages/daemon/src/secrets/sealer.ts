@@ -9,7 +9,11 @@ import type { Router } from "../core/modelCall.js";
 import type { MintEntry, Minter } from "./minter.js";
 
 export const SEAL_TIMEOUT_MS = 30_000;
-const MIN_VALUE_LENGTH = 4;
+/** gate-simple-v0 §3.3: `secret-gate enc` refuses a value shorter than this many characters (code points) for `http`,
+ *  `fill` or `exec`, so one never reaches the minter. Too short to mask in output, and its length is easy to guess. */
+export const MIN_VALUE_LENGTH = 8;
+/** A value only ever turned into TOTP codes has no such floor at the gate (its base32 check stands); shorter is noise. */
+const MIN_OTP_VALUE_LENGTH = 4;
 /** The model's quoted grant for a seed import, and a token label. */
 const MAX_SEED_EVIDENCE_CHARS = 4000;
 const MAX_LABEL_CHARS = 64;
@@ -131,19 +135,27 @@ export function isWholeRecord(text: string, value: string): boolean {
 /** Last resort when the model keeps marking whole records: every field of the record is sealed on its own. */
 export function splitRecord(f: FoundSecret, recordNo: number): FoundSecret[] {
   const d = recordDelimiter(f.value.split("\n")[0] ?? f.value) ?? "|";
-  return f.value.split("\n").flatMap((line) => line.split(d)).map((v) => v.trim()).filter((v) => v.length >= MIN_VALUE_LENGTH)
+  return f.value.split("\n").flatMap((line) => line.split(d)).map((v) => v.trim()).filter((v) => !tooShort({ ...f, value: v }))
     .map((value, i) => ({ ...f, value, field: `field ${i + 1} of record ${recordNo}`, label: `record${recordNo}/field${i + 1}` }));
 }
 
-/** What to mint. A value the text does not contain, or shorter than MIN_VALUE_LENGTH, is skipped (nothing to
- *  replace, or too short to replace safely). An http secret without a host is unroutable: the gate would refuse it. */
+/** Shorter than the gate will seal: MIN_VALUE_LENGTH for anything typed, sent or passed to a command, a lower noise
+ *  floor for a value used only for TOTP codes. Characters are counted as code points, as Python's `len` does. */
+export function tooShort(f: Pick<FoundSecret, "value" | "uses" | "purpose">): boolean {
+  const otpOnly = f.purpose === "totp_code" || (f.purpose !== "totp_seed_import" && f.uses.every((u) => u === "otp"));
+  return [...f.value].length < (otpOnly ? MIN_OTP_VALUE_LENGTH : MIN_VALUE_LENGTH);
+}
+
+/** What to mint. A value the text does not contain, or too short for the gate to seal (`tooShort`), is skipped
+ *  (nothing to replace, or nothing the gate would mint; such a value stays as typed, as one under the old floor of 4
+ *  did). An http secret without a host is unroutable: the gate would refuse it. */
 export function planSeal(text: string, found: readonly FoundSecret[], destinationEvidence: string | readonly string[] = text): Plan {
   const sources = typeof destinationEvidence === "string" ? [destinationEvidence] : destinationEvidence;
   const hostEvidence = sources.join("\n");
   const seen = new Set<string>();
   const entries: PlannedEntry[] = [], unroutable: string[] = [], missingImportAuthorization: string[] = [], skipped: string[] = [], records: string[] = [];
   found.forEach((f, i) => {
-    if (f.value.length < MIN_VALUE_LENGTH || !text.includes(f.value) || seen.has(f.value)
+    if (tooShort(f) || !text.includes(f.value) || seen.has(f.value)
       || /^\[existing-sealed:\d+\]$/.test(f.value) || /^enc:v1:[A-Za-z0-9_=-]{16,}$/.test(f.value)) { skipped.push(f.label); return; }
     if (isWholeRecord(text, f.value)) { records.push(f.label); return; }
     seen.add(f.value);

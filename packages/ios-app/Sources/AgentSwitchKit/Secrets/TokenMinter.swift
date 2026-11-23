@@ -13,8 +13,9 @@ public enum TokenError: Error, Equatable, LocalizedError {
     }
 }
 
-/// Mints `enc:v1:` tokens on the phone, compatible with `secret-gate enc`: the payload JSON sealed with libsodium
-/// `crypto_box_seal` to the gate's X25519 public key, then base64url without padding. The plaintext never leaves the
+/// Mints `enc:v1:` tokens on the phone, compatible with `secret-gate enc`: the payload JSON, padded with spaces to a
+/// multiple of 64 bytes (`SecretPayload.sealedData`), sealed with libsodium `crypto_box_seal` to the gate's X25519 public
+/// key, then base64url without padding. The plaintext never leaves the
 /// device; only the Mac's gate can open the result.
 public struct TokenMinter: Sendable {
     public static let prefix = "enc:v1:"
@@ -34,7 +35,7 @@ public struct TokenMinter: Sendable {
     }
 
     public func mint(_ payload: SecretPayload) throws -> String {
-        guard let sealed = Sodium().box.seal(message: [UInt8](payload.jsonData), recipientPublicKey: publicKey) else {
+        guard let sealed = Sodium().box.seal(message: [UInt8](payload.sealedData), recipientPublicKey: publicKey) else {
             throw TokenError.sealFailed
         }
         return Self.prefix + Base64URL.encode(sealed)

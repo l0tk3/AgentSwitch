@@ -23,6 +23,8 @@ public struct SecretPayload: Sendable, Equatable {
         for grant in grants where grant.contains("*") || !normalized.contains(where: { GatePolicy.hostMatches(pattern: $0, host: grant) }) {
             throw GatePolicyError.seedImportNotAllowed(grant)
         }
+        // Last, as `secret-gate enc` checks it after `create` (policy.check_seal_length): only sealing builds one here.
+        if GatePolicy.isTooShortToSeal(value, uses: uses) { throw GatePolicyError.valueTooShort }
         return SecretPayload(value: value, hosts: normalized, uses: uses.sorted(), label: label, kind: kind, seedImportHosts: grants)
     }
 
@@ -35,6 +37,16 @@ public struct SecretPayload: Sendable, Equatable {
     }
 
     public var jsonData: Data { Data(jsonText.utf8) }
+
+    /// What is sealed (tokens.sealed_plaintext, gate-simple-v0 §3.4): `jsonData` padded with trailing ASCII spaces to a
+    /// multiple of `GatePolicy.sealPadBlock` bytes, so a ciphertext's length does not follow the value's. JSON allows
+    /// trailing whitespace and the gate strips it before parsing.
+    public var sealedData: Data {
+        var data = jsonData
+        let pad = (GatePolicy.sealPadBlock - data.count % GatePolicy.sealPadBlock) % GatePolicy.sealPadBlock
+        data.append(contentsOf: [UInt8](repeating: 0x20, count: pad))
+        return data
+    }
 }
 
 /// Python's `json.dumps` string encoding with `ensure_ascii=True`: printable ASCII passes through except `"` and `\`,

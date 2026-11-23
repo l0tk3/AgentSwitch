@@ -18,6 +18,11 @@ public struct GateSealRequest: Sendable, Equatable {
 
     /// A website password: replaced in requests and typed into pages (SecretDraft.websiteUses).
     public static let uses = ["http", "fill"]
+    /// secret_gate.constants.MIN_SEAL_LENGTH (gate-simple-v0 §3.3): `enc` refuses a shorter `http` / `fill` value, so
+    /// the sheet says so before running it. Unicode scalars, as Python's `len` counts code points.
+    public static let minValueLength = 8
+    /// constants.VALUE_TOO_SHORT_MESSAGE, word for word (the phones' GatePolicyError.valueTooShort).
+    public static let valueTooShort = "值至少需要 \(minValueLength) 个字符（过短的值遮不住，也容易被猜到）"
     /// secret_gate.constants.LABEL_PATTERN.
     public static let labelPattern = #"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"#
 
@@ -48,6 +53,7 @@ public struct GateSealRequest: Sendable, Equatable {
         }
         if hostList.isEmpty { return "须填写可使用此密文的站点" }
         if value.isEmpty { return "缺少值" }
+        if value.unicodeScalars.count < Self.minValueLength { return Self.valueTooShort }
         return nil
     }
 
