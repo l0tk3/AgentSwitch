@@ -219,6 +219,22 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     } catch (err) { return refused(c, err); }
   });
 
+  // Some of what was said (2026-11-24): the page above `before`, one task's (`task`), or those whose words contain
+  // `q` (newest first). Each with how many there are about each task since `since`, for the task list's counts.
+  app.get("/rooms/:id/messages", (c) => {
+    try {
+      const room = rooms.get(c.req.param("id"));
+      const int = (name: string): number | undefined => { const v = Number(c.req.query(name)); return Number.isInteger(v) && v >= 0 ? v : undefined; };
+      const limit = Math.min(Math.max(int("limit") ?? PAGE, 1), 200);
+      const q = (c.req.query("q") ?? "").trim().slice(0, 200), task = int("task"), before = int("before");
+      const messages = q ? rooms.search(room.id, q, limit).filter((m) => task === undefined || m.task === task)
+        : task !== undefined ? rooms.messagesOfTask(room.id, task, limit)
+        : before !== undefined ? rooms.messagesBefore(room.id, before, limit)
+        : rooms.messages(room.id, { limit });
+      return c.json({ messages, byTask: Object.fromEntries(rooms.countByTask(room.id, int("since") ?? 0)) });
+    } catch (err) { return refused(c, err); }
+  });
+
   // §9: what is in the room's shared folder.
   app.get("/rooms/:id/files", (c) => {
     try { return c.json(rooms.files(c.req.param("id"))); } catch (err) { return refused(c, err); }
@@ -421,7 +437,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   });
 
   app.patch("/rooms/:id/tasks/:n", async (c) => {
-    const body = await parseBody(c, z.object({ state: z.enum(["todo", "doing", "done"]).optional(), owner: z.string().nullable().optional(), title: z.string().optional(), detail: z.string().optional(), note: z.string().optional() }));
+    const body = await parseBody(c, z.object({ state: z.enum(["todo", "doing", "blocked", "done"]).optional(), owner: z.string().nullable().optional(), title: z.string().optional(), detail: z.string().optional(), note: z.string().optional() }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       const o = body.data, id = c.req.param("id");

@@ -186,6 +186,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/rooms/models"],
   ["PUT", "/rooms/models/:agent/:profile"],
   ["GET", "/rooms/:id"],
+  ["GET", "/rooms/:id/messages"],
   ["GET", "/rooms/:id/files"],
   ["GET", "/rooms/:id/files/content"],
   ["PUT", "/rooms/:id/files/content"],

@@ -802,3 +802,28 @@ describe("the rooms in a database (2026-11-24)", () => {
     expect([...again.countByTask("abc123def0", 0)]).toEqual([[1, 2]]);
   });
 });
+
+describe("a stuck task, a long message, and asking for some of what was said (2026-11-24)", () => {
+  it("says why a task is stuck, refuses a session's long message, and answers by words, task and page", async () => {
+    const { store, room, say, call } = made();
+    store.addTask(room.id, "you", { title: "Interface", owner: "api" });
+    expect(() => store.setTask(room.id, "api", 1, { state: "blocked" })).toThrow(/Say why T1 is blocked/);
+    store.setTask(room.id, "api", 1, { state: "blocked", note: "等 iOS 的字段名" });
+    expect(store.get(room.id).tasks[0]!.state).toBe("blocked");
+    expect(store.last(room.id)).toMatchObject({ from: "api", to: ["you"], task: 1, text: "〔任务表〕@you T1 卡住了：等 iOS 的字段名" });
+    const long = "长".repeat(900);
+    const refused = await say("api", "room_post", { text: long, expects: "none" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/Too long for a message \(900 characters; at most 800\)/);
+    expect((await call("POST", `/rooms/${room.id}/messages`, { text: long })).status).toBe(201);   // the user's is not cut
+    await call("POST", `/rooms/${room.id}/messages`, { text: "接口字段改名了", task: 1 });
+    const found = await call("GET", `/rooms/${room.id}/messages?q=${encodeURIComponent("字段改")}`);
+    expect(found.body.messages.map((m: { text: string }) => m.text)).toEqual(["接口字段改名了"]);
+    const ofTask = await call("GET", `/rooms/${room.id}/messages?task=1`);
+    expect(ofTask.body.messages.every((m: { task: number }) => m.task === 1)).toBe(true);
+    expect(ofTask.body.byTask["1"]).toBeGreaterThanOrEqual(2);
+    const last = store.last(room.id)!.seq;
+    const page = await call("GET", `/rooms/${room.id}/messages?before=${last}&limit=1`);
+    expect(page.body.messages.map((m: { seq: number }) => m.seq)).toEqual([last - 1]);
+  });
+});

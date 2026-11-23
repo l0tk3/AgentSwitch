@@ -14,6 +14,8 @@ import { basename, extname, join, sep } from "node:path";
 import { faceOf, type Face } from "./face.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
+/** The most a session may say in one message: the rest belongs in a file. */
+export const MAX_SESSION_TEXT = 800;
 export const MAX_ROOMS = 100, MAX_SEATS = 16, MAX_NAME = 60, MAX_TOPIC = 300, MAX_TEXT = 16_000;
 /** §9: the pinned notes, one text every member reads and writes; a message carries this many files at most. */
 export const MAX_NOTES = 20_000, MAX_FILES = 10;
@@ -110,7 +112,8 @@ export type Message = {
 export type Notes = { readonly text: string; readonly at: number; readonly by: string };
 
 /** One piece of the room's work (§9 任务表): who does what, and how far it is, where every member sees it. */
-export type TaskState = "todo" | "doing" | "done";
+/** `blocked`: its owner can not go on — waiting on someone or something, said in its note (2026-11-24). */
+export type TaskState = "todo" | "doing" | "blocked" | "done";
 export type Task = {
   /** Its number in this room: `T3`. Never reused. */
   readonly n: number;
@@ -574,7 +577,7 @@ export class RoomStore {
     const room = this.get(id);
     const seat = this.member(room, by);
     const task = this.taskOf(room, n);
-    const held = task.state === "doing" && task.owner !== undefined && task.owner !== seat.handle;
+    const held = (task.state === "doing" || task.state === "blocked") && task.owner !== undefined && task.owner !== seat.handle;
     if (held && seat.kind !== "user" && (o.state !== undefined || o.owner !== undefined)) throw new RoomError(409, `T${n} is being done by @${task.owner}. Take another, or ask @${task.owner} in the room.`);
     let owner: string | undefined = task.owner;
     if (o.owner === null) owner = undefined;
@@ -583,7 +586,7 @@ export class RoomStore {
     // A session that takes a task, or ends one nobody had, is its owner; one that puts it back gives it up. The
     // user changes the state and leaves whose it is alone.
     if (o.owner === undefined && seat.kind !== "user") {
-      if (o.state === "doing" || (o.state === "done" && !owner)) owner = seat.handle;
+      if (o.state === "doing" || o.state === "blocked" || (o.state === "done" && !owner)) owner = seat.handle;
       if (o.state === "todo") owner = undefined;
     }
     if (o.owner === null && state === "doing") state = "todo";
@@ -591,10 +594,17 @@ export class RoomStore {
     if (!title) throw new RoomError(400, "任务要有标题");
     const detail = o.detail === undefined ? task.detail : o.detail.replace(/\r\n?/g, "\n").trim().slice(0, MAX_DETAIL) || undefined;
     const note = o.note === undefined ? task.note : o.note.replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE) || undefined;
+    if (state === "blocked" && task.state !== "blocked" && !note) throw new RoomError(400, `Say why T${n} is blocked: give a note (what it waits for).`);
     const next: Task = { n: task.n, title, ...(detail ? { detail } : {}), state, ...(owner ? { owner } : {}), by: task.by, createdAt: task.createdAt, updatedAt: this.now(), ...(task.after ? { after: task.after } : {}), ...(note ? { note } : {}) };
     const tasks = room.tasks.map((t) => (t === task ? next : t));
     this.save({ ...room, tasks });
     if (next.owner && next.owner !== task.owner) this.tell(id, seat.handle, [next.owner], `T${next.n} 给你：${next.title}`, next.n);
+    // Stuck: the one that asked for it hears why, and so does the user (in the room) — someone has to unblock it.
+    if (next.state === "blocked" && task.state !== "blocked") {
+      const here = new Set(this.get(id).seats.filter((x) => x.left === undefined && x.kind === "session").map((x) => x.handle));
+      const whom = [...new Set([next.by, YOU])].filter((h) => h !== seat.handle && (h === YOU || here.has(h)));
+      try { this.post(id, { from: seat.handle, text: `〔任务表〕${whom.map((h) => `@${h}`).join(" ")} T${next.n} 卡住了：${next.note}`, to: whom, expects: "none", task: next.n }); } catch { /* muted: the list itself says it */ }
+    }
     if (next.state === "done" && task.state !== "done") {
       // Those whose task waited for this one and waits for nothing now, and the member that asked for it.
       const freed = tasks.filter((t) => t.state !== "done" && t.owner && t.after?.includes(next.n) && t.after.every((a) => tasks.find((o) => o.n === a)?.state === "done"));
@@ -729,6 +739,9 @@ export class RoomStore {
     // A picture alone says enough: words are needed only when nothing comes with them.
     if (!text && !(o.files ?? []).some((f) => f.trim())) throw new RoomError(400, "消息是空的");
     if (text.length > MAX_TEXT) throw new RoomError(400, `消息太长（最多 ${MAX_TEXT} 字）`);
+    // A session says what came of it and where the rest is (2026-11-24, user: 臃肿的回复放到文件里): what is long
+    // goes into the shared folder, and the message names the file. The user writes as long as the user likes.
+    if (from.kind === "session" && [...text].length > MAX_SESSION_TEXT) throw new RoomError(400, `Too long for a message (${[...text].length} characters; at most ${MAX_SESSION_TEXT}). Write the full text into a file in the room's shared folder (${this.folder(id)}), then post the conclusion in a few lines and the file's path (\`files\`).`);
     if (o.replyTo !== undefined && !(Number.isInteger(o.replyTo) && o.replyTo >= 1 && o.replyTo <= room.lastSeq)) throw new RoomError(400, `没有 #${o.replyTo} 这条消息`);
     const files = [...new Set((o.files ?? []).map((f) => f.trim()).filter(Boolean))];
     if (files.length > MAX_FILES) throw new RoomError(400, `一条消息最多带 ${MAX_FILES} 个文件`);
@@ -922,7 +935,7 @@ function roomFrom(v: unknown): Room | null {
   const n = o.notes as Record<string, unknown> | null | undefined;
   const tasks = (Array.isArray(o.tasks) ? o.tasks : []).flatMap((v): Task[] => {
     const t = v as Record<string, unknown> | null;
-    if (!t || typeof t !== "object" || !num(t.n) || !str(t.title) || (t.state !== "todo" && t.state !== "doing" && t.state !== "done")) return [];
+    if (!t || typeof t !== "object" || !num(t.n) || !str(t.title) || (t.state !== "todo" && t.state !== "doing" && t.state !== "blocked" && t.state !== "done")) return [];
     const after = Array.isArray(t.after) ? t.after.filter(num) : [];
     return [{ n: t.n, title: t.title, ...(str(t.detail) ? { detail: t.detail } : {}), state: t.state, ...(str(t.owner) ? { owner: t.owner } : {}), by: str(t.by) ? t.by : YOU, createdAt: num(t.createdAt) ? t.createdAt : 0, updatedAt: num(t.updatedAt) ? t.updatedAt : 0, ...(after.length ? { after } : {}), ...(str(t.note) ? { note: t.note } : {}) }];
   });
