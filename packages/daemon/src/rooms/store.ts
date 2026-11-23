@@ -601,7 +601,10 @@ export class RoomStore {
     const files = [...new Set((o.files ?? []).map((f) => f.trim()).filter(Boolean))];
     if (files.length > MAX_FILES) throw new RoomError(400, `一条消息最多带 ${MAX_FILES} 个文件`);
     if (files.some((f) => !f.startsWith("/") || f.length > 4096 || /[\n\r\0]/.test(f))) throw new RoomError(400, "文件要写它在这个节点上的完整路径");
-    const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase())];
+    // An answer is for the one it answers, whether or not it is named again (2026-11-23: the user answered a
+    // session's message and then had to write a second one that was nothing but its name).
+    const answered = o.replyTo === undefined ? undefined : this.messages(id, { after: o.replyTo - 1, limit: 1 })[0];
+    const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase()), ...(answered && answered.seq === o.replyTo ? [answered.from] : [])];
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
     // `@all` is the user's alone (§4). Written by a session it is words and calls nobody: refusing the whole message
     // for it cost a session its report twice (2026-11-23), when it only spoke of the rule.

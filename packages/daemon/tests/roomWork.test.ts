@@ -387,3 +387,14 @@ describe("the task list speaks for itself", () => {
     expect(store.messages(room.id).length).toBe(before);
   });
 });
+
+describe("an answer", () => {
+  it("is for the one it answers, named again or not", () => {
+    const { store, room } = made();
+    store.post(room.id, { from: "api", text: "the plan is in plan.md" });
+    expect(store.post(room.id, { from: "you", text: "我没太明白，再解释一下", replyTo: 1 }).to).toEqual(["api"]);
+    expect(store.post(room.id, { from: "ui", text: "同意", replyTo: 2 }).to).toEqual(["you"]);
+    // Answering oneself calls nobody.
+    expect(store.post(room.id, { from: "api", text: "补一句", replyTo: 1 }).to).toEqual([]);
+  });
+});
