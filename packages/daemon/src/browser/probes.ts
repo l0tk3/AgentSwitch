@@ -2,7 +2,7 @@
  *  `browser_run_code_unsafe` runs its code in a Node `vm` with the real `page`, in the daemon: `page.constructor
  *  .constructor` is the daemon's `Function`, `page.context()` every tab. The gate never offers it to the model and uses it
  *  for its own checks only, with code from fixed templates (`secret_gate/browser_probe.py`): a field's emptiness, the
- *  frame chain of a field, where a form submits, and a masked screenshot. The bridge takes exactly those templates —
+ *  frame chain of a field, where a form submits, a masked screenshot, and its own fill of a token's value (the element, its frame chain checked again and the write in one call). The bridge takes exactly those templates —
  *  the fixed text below, mirrored from the gate, with only the gate's JSON literals in between, checked by type — and
  *  refuses any other code, whoever calls (a process with the session's token can skip the gate). `browser_evaluate`
  *  (code in the page, where it would read what a person typed) is likewise held to the gate's one probe,
@@ -54,6 +54,23 @@ function isMaskSpec(value: unknown): boolean {
     && typeof spec.path === "string" && isMaskFile(spec.path);
 }
 
+const MAX_FRAMES = 16;
+const MAX_URL_CHARS = 8192;
+const MAX_FILL_CHARS = 1 << 16;
+
+/** The gate's fill (`fill_code`): a ref, the frame chain the gate allowed (http(s) URLs, innermost first), the value,
+ *  whether to press Enter after. The template checks that chain again and writes in the element's own document. */
+function isFillSpec(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const spec = value as Record<string, unknown>;
+  if (Object.keys(spec).sort().join(",") !== "submit,target,urls,value") return false;
+  return typeof spec.target === "string" && ARIA_REF.test(spec.target)
+    && Array.isArray(spec.urls) && spec.urls.length >= 1 && spec.urls.length <= MAX_FRAMES
+    && spec.urls.every((u) => typeof u === "string" && u.length <= MAX_URL_CHARS && /^https?:\/\//.test(u))
+    && typeof spec.value === "string" && spec.value.length <= MAX_FILL_CHARS
+    && typeof spec.submit === "boolean";
+}
+
 /** An absolute, plain path to a file the gate names `secret-gate-mask-<16 hex>.png`. */
 function isMaskFile(path: string): boolean {
   return isAbsolute(path) && normalize(path) === path && MASK_FILE.test(basename(path));
@@ -84,6 +101,12 @@ const TEMPLATES: readonly Template[] = [
     before: `${OPEN} const spec = `,
     after: "; const masks = []; for (const ref of spec.refs) { const l = locate(ref); try { await l.count(); masks.push(l); } catch {} } for (const css of spec.selectors) { masks.push(page.locator(css)); for (const frame of page.frames().slice(1)) masks.push(frame.locator(css)); } const element = spec.target ? locate(spec.target) : null; if (element) await element.scrollIntoViewIfNeeded({ timeout: 5000 }); const boxes = []; for (const m of masks) { for (const h of await m.all()) { const b = await h.boundingBox(); if (b && b.width > 0 && b.height > 0) boxes.push(b); } } const options = { path: spec.path, type: 'png', mask: masks, maskColor: spec.color, animations: 'disabled', caret: 'hide', scale: 'css', timeout: 15000 }; let origin = { x: 0, y: 0 }; if (element) { const b = await element.boundingBox(); if (!b) return { error: 'element is not visible' }; origin = b; await element.screenshot(options); } else { if (spec.fullPage) { const r = await page.locator(':root').boundingBox(); if (r) origin = { x: r.x, y: r.y }; } await page.screenshot({ ...options, fullPage: spec.fullPage }); } return { boxes: boxes.map((b) => ({ x: b.x - origin.x, y: b.y - origin.y, width: b.width, height: b.height })) }; }",
     literal: isMaskSpec,
+  },
+  {
+    name: "fill",
+    before: `${OPEN} const spec = `,
+    after: "; const field = locate(spec.target); if (await field.count() !== 1) return { error: 'target is not exactly one element' }; const handle = await field.elementHandle(); try { const frame = await handle.ownerFrame(); if (!frame) return { error: 'target has no frame' }; const urls = []; for (let f = frame; f; f = f.parentFrame()) urls.push(f.url()); if (JSON.stringify(urls) !== JSON.stringify(spec.urls)) return { error: 'the page changed' }; const verdict = await handle.evaluate((el, s) => { if (location.href !== s.url) return 'the page changed'; const types = ['text', 'password', 'email', 'tel', 'url', 'search', 'number']; const input = el instanceof HTMLInputElement && types.includes(el.type); if (!input && !(el instanceof HTMLTextAreaElement)) return 'not a text field'; if (el.disabled || el.readOnly) return 'the field is not editable'; const setter = Object.getOwnPropertyDescriptor(input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype, 'value').set; setter.call(el, ''); el.focus(); if (!document.execCommand('insertText', false, s.value) || !el.value) { setter.call(el, s.value); el.dispatchEvent(new Event('input', { bubbles: true })); } el.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; }, { url: spec.urls[0], value: spec.value }); if (verdict !== 'ok') return { error: verdict }; if (spec.submit) await handle.press('Enter', { timeout: 5000 }); return { ok: true }; } finally { await handle.dispose(); } }",
+    literal: isFillSpec,
   },
 ];
 

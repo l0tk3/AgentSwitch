@@ -2,11 +2,13 @@
 
 Every snippet is generated here from a fixed template; the only variable parts are JSON literals of
 values the gate validated (element refs, CSS selectors it chose, a file path in its private output
-directory). The snippets run in the Playwright server process; locator queries, `inputValue` and
-screenshots run in Playwright's isolated world, so the page never sees what the gate asks for. Only
-the form-target probe reads the form in the page's own world, where a hostile page could at worst
-misreport its own form. The snippets return small verdicts only (a field's emptiness, a form's
-submission URL, mask boxes); no value the gate typed ever travels back through them.
+directory; for the fill, the frame chain it allowed and the value it resolved). The snippets run
+in the Playwright server process; locator queries, `inputValue` and screenshots run in Playwright's
+isolated world, so the page never sees what the gate asks for. The form-target probe reads the form
+in the page's own world, where a hostile page could at worst misreport its own form; the fill
+writes there, into the allowed page that receives the value anyway. The snippets return small
+verdicts only (a field's emptiness, a form's submission URL, mask boxes, whether a fill was done);
+no value the gate typed ever travels back through them.
 """
 
 from __future__ import annotations
@@ -21,8 +23,10 @@ from .errors import PolicyViolation
 RUN_CODE_TOOL = "browser_run_code_unsafe"
 RESULT_HEADER = "### Result"
 _SECTION = re.compile(r"^### ", re.MULTILINE)
-ARIA_REF = re.compile(r"^(?:f\d+)?e\d+$")
+ARIA_REF = re.compile(r"(?:f\d+)?e\d+")  # fullmatch only: `$` would also accept "e12\n"
 MAX_TARGET_CHARS = 500
+MAX_FILL_CHARS = 1 << 16
+MAX_FRAMES = 16
 
 # JS helper shared by the snippets: a snapshot ref -> Playwright's aria-ref engine, else a selector.
 _LOCATE = "const locate = (t) => page.locator(/^(?:f\\d+)?e\\d+$/.test(t) ? 'aria-ref=' + t : t);"
@@ -57,7 +61,47 @@ def field_state_code(target: str) -> str:
     )
 
 
-MAIN_FRAME_REF = re.compile(r"^e\d+$")
+def fill_code(target: str, urls: list[str], value: str, submit: bool = False) -> str:
+    """Write `value` into the field `target` names, only while it is still in the frames the gate checked: the one call
+    that finds the element, checks its frame chain and writes (security review 2026-11-23, M2).
+
+    `urls` is the frame chain the gate allowed (frame_chain_code, innermost first). The element is resolved once into a
+    handle, so a tab switch cannot send the value elsewhere; its chain must be exactly `urls`; then, in the element's
+    own document and in one synchronous step, its `location.href` must still be `urls[0]` before the value is written.
+    A navigation of the frame or of any frame above it destroys the element, so the write fails instead of reaching
+    the next document. Only text inputs and textareas take a value. The write is an editing command (the page sees
+    ordinary input events), with the value setter as the fallback; nothing comes back but a verdict.
+    """
+    if not ARIA_REF.fullmatch(target):
+        raise PolicyViolation("a fill needs the element ref from browser_snapshot")
+    if not 1 <= len(urls) <= MAX_FRAMES or not all(isinstance(u, str) and u.startswith(("http://", "https://")) for u in urls):
+        raise PolicyViolation("a fill needs the frame chain of an http(s) page")
+    if not isinstance(value, str) or len(value) > MAX_FILL_CHARS:
+        raise PolicyViolation("the value to fill is too long")
+    spec = {"target": target, "urls": urls, "value": value, "submit": bool(submit)}
+    return (
+        "async (page) => { " + _LOCATE + f" const spec = {json.dumps(spec)};"
+        " const field = locate(spec.target);"
+        " if (await field.count() !== 1) return { error: 'target is not exactly one element' };"
+        " const handle = await field.elementHandle();"
+        " try { const frame = await handle.ownerFrame(); if (!frame) return { error: 'target has no frame' };"
+        " const urls = []; for (let f = frame; f; f = f.parentFrame()) urls.push(f.url());"
+        " if (JSON.stringify(urls) !== JSON.stringify(spec.urls)) return { error: 'the page changed' };"
+        " const verdict = await handle.evaluate((el, s) => {"
+        " if (location.href !== s.url) return 'the page changed';"
+        " const types = ['text', 'password', 'email', 'tel', 'url', 'search', 'number'];"
+        " const input = el instanceof HTMLInputElement && types.includes(el.type);"
+        " if (!input && !(el instanceof HTMLTextAreaElement)) return 'not a text field';"
+        " if (el.disabled || el.readOnly) return 'the field is not editable';"
+        " const setter = Object.getOwnPropertyDescriptor(input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype, 'value').set;"
+        " setter.call(el, ''); el.focus();"
+        " if (!document.execCommand('insertText', false, s.value) || !el.value) {"
+        " setter.call(el, s.value); el.dispatchEvent(new Event('input', { bubbles: true })); }"
+        " el.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; }, { url: spec.urls[0], value: spec.value });"
+        " if (verdict !== 'ok') return { error: verdict };"
+        " if (spec.submit) await handle.press('Enter', { timeout: 5000 });"
+        " return { ok: true }; } finally { await handle.dispose(); } }"
+    )
 
 
 def frame_chain_code(target: str) -> str:
@@ -98,7 +142,7 @@ class MaskPlan:
     color: str = "#FF00FF"
 
     def spec(self) -> dict[str, Any]:
-        refs = [r for r in self.refs if ARIA_REF.match(r)]
+        refs = [r for r in self.refs if ARIA_REF.fullmatch(r)]
         target = None if self.target is None else check_target(self.target)
         return {"refs": refs, "selectors": list(self.selectors), "path": self.path, "fullPage": self.full_page,
                 "target": target, "color": self.color}

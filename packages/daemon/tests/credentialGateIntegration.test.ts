@@ -38,15 +38,18 @@ class Page:
     async def call_tool(self,name,args):
         if name=='browser_evaluate': return types.CallToolResult(content=[types.TextContent(type='text',text='### Result\n'+json.dumps('https://'+request['host']+'/import'))])
         if name=='browser_run_code_unsafe':
-            # The gate's own Playwright probes: the field's frame chain, where its form submits, whether it is empty.
+            # The gate's own Playwright code: the field's frame chain, its fill, where its form submits, whether it is empty.
             url='https://'+request['host']+'/import'; code=args['code']
-            verdict={'urls':[url]} if 'ownerFrame' in code else {'actions':[url],'action':url,'override':None} if 'form.action' in code else ('nonempty' if self.filled else 'empty')
+            if 'execCommand' in code:
+                start=code.index('const spec = ')+len('const spec = '); spec=json.JSONDecoder().raw_decode(code,start)[0]
+                self.filled=spec['value'] if spec['urls']==[url] else None; verdict={'ok':True} if self.filled else {'error':'the page changed'}
+            else:
+                verdict={'urls':[url]} if 'ownerFrame' in code else {'actions':[url],'action':url,'override':None} if 'form.action' in code else ('nonempty' if self.filled else 'empty')
             return types.CallToolResult(content=[types.TextContent(type='text',text='### Result\n'+json.dumps(verdict))])
-        if name=='browser_type': self.filled=args['text']; return types.CallToolResult(content=[types.TextContent(type='text',text='filled '+args['text'])])
         raise AssertionError(name)
 async def run():
     page=Page()
-    result=await BrowserGate(resolver,page).call_tool('secret_fill',{'target':'seed','token':request['new']})
+    result=await BrowserGate(resolver,page).call_tool('secret_fill',{'target':'e7','token':request['new']})
     visible='\n'.join(block.text for block in result)
     print(json.dumps({'filledSeed':page.filled==request['seed'],'outputRedacted':request['seed'] not in visible,'oldOtpRetained':resolver.resolve(request['old'],use='otp').value==old,'codeDiffersFromSeed':old!=request['seed'],'newKind':resolver.describe(request['new'])['kind']}))
 asyncio.run(run())

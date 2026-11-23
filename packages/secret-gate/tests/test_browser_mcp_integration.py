@@ -113,7 +113,7 @@ def test_wrong_host_never_reaches_fake_browser(gate_home, tmp_path, bank_pass):
         async with stdio_client(_params(gate_home, log)) as (read, write), ClientSession(read, write) as s:
             await asyncio.wait_for(s.initialize(), 30)
             await s.call_tool("browser_navigate", {"url": PAGE})
-            return await s.call_tool("browser_type", {"target": "pw", "text": bank_pass})
+            return await s.call_tool("browser_type", {"target": "e3", "text": bank_pass})
 
     r = asyncio.run(asyncio.wait_for(scenario(), 90))
     assert r.isError

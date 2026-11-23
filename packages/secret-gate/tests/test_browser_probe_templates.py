@@ -18,6 +18,7 @@ from secret_gate.browser_policy import HREF_PROBE_FUNCTION
 from secret_gate.browser_probe import (
     MaskPlan,
     field_state_code,
+    fill_code,
     form_target_code,
     frame_chain_code,
     masked_screenshot_code,
@@ -28,6 +29,7 @@ PINNED = {
     "frame_chain": "6168949d5784cead923f9c1780b93db0de3c0b87b78e8ac45a1fbb9e36a575a7",
     "form_target": "b827e232d8d384cbe26370c9712f055bbedb2bcaccafd3cbcbd80b09d44f58f8",
     "masked_screenshot": "2e6be3372fde78e01dd7c9ef27be91821af25cbd2b84c22b4e89a1c32f417e76",
+    "fill": "a2a61fa5c663719b7c2326ceec937dc9f9969f8b8237536b8589fe1be9e1acdf",
     "href": "e430ed879248eb7d2452bb2a04b85b58c2b2fe6981ff7d66b55645bdd3780afd",
 }
 
@@ -43,6 +45,7 @@ def test_probe_templates_match_the_agent_bridges_copy():
         "frame_chain": frame_chain_code("e12"),
         "form_target": form_target_code("e12"),
         "masked_screenshot": masked_screenshot_code(plan),
+        "fill": fill_code("e12", ["https://a.example.com/login"], "pw"),
         "href": HREF_PROBE_FUNCTION,
     }
     changed = sorted(name for name, code in generated.items() if _digest(code) != PINNED[name])

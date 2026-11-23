@@ -178,7 +178,7 @@ def test_bridge_errors_never_return_response_text_or_plaintext(keypair, resolver
 def test_browser_error_keeps_denial_and_points_to_repair_without_fill(keypair, resolver):
     from secret_gate.browser_gate import BrowserGate
     pw = FakePlaywright(PAGE); gate = BrowserGate(resolver, pw)
-    with pytest.raises(RuntimeError) as exc: asyncio.run(gate.call_tool("secret_fill", {"target": "seed", "token": token(keypair)}))
+    with pytest.raises(RuntimeError) as exc: asyncio.run(gate.call_tool("secret_fill", {"target": "e4", "token": token(keypair)}))
     assert "does not allow use 'http'" in str(exc.value) and "secret_repair" in str(exc.value)
     assert fs.TOTP_SECRET_B32 not in str(exc.value) and not pw.typed
 

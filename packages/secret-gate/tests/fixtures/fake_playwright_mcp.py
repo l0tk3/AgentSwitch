@@ -101,7 +101,16 @@ def browser_take_screenshot(filename: str | None = None) -> list[types.ImageCont
 @mcp.tool()
 def browser_run_code_unsafe(code: str) -> str:
     """Only the gate calls this (the model never sees the tool)."""
-    if "inputValue" in code:
+    if "execCommand" in code:  # the gate's own fill: it writes only into the page it checked
+        start = code.index("const spec = ") + len("const spec = ")
+        spec = json.JSONDecoder().raw_decode(code, start)[0]
+        if spec["urls"] != [_state["url"]]:
+            result = {"error": "the page changed"}
+        else:
+            _state["typed"][spec["target"]] = spec["value"]
+            _record({"tool": "secret_fill", "target": spec["target"], "text": spec["value"], "submit": spec["submit"]})
+            result = {"ok": True}
+    elif "inputValue" in code:
         target = json.loads(re.search(r'locate\(("(?:[^"\\]|\\.)*")\)', code).group(1))
         value = _state["typed"].get(target)
         result = "unknown" if value is None else ("nonempty" if value else "empty")

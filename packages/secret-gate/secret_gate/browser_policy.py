@@ -6,20 +6,27 @@ Threat model: after `secret_fill`, the real value sits in the page DOM. Anything
 model read the DOM other than through our redaction is blocked: JS evaluation, model-authored
 pages (`data:` URLs) that could receive a pasted copy, copy/cut chords, uploading Playwright's own
 unredacted output files, saving results to files, unmasked screenshots of a page holding a value,
-and substring oracles (find / wait_for / text selectors) against filled values. Page values sealed
+and substring oracles (find / wait_for / selectors) against filled values. Page values sealed
 under a transfer grant (transfer.py) are protected exactly like filled values.
+
+A filled field is also protected as an element, not only as a string (security review 2026-11-23, H1):
+the model could otherwise edit it (Backspace, Delete, typing into it, dragging from it) and read the
+remainder, which no longer equals the value. The gate remembers every ref it filled; text output
+shows that field's value as redacted whatever it holds now (`hide_field_values`), and on a page
+holding a fill the tools that could edit a field are refused (`check_filled_page`).
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit
 
-from .constants import USE_FILL
+from .browser_probe import ARIA_REF
+from .constants import REDACTED_FORMAT, USE_FILL
 from .errors import PolicyViolation, ValidationError
 from .resolver import Resolution, Resolver
 from .tokens import find_secrets, is_secret
@@ -35,13 +42,39 @@ KEY_TOOL = "browser_press_key"
 FILE_OUTPUT_ARG = "filename"  # writes an unredacted file: blocked
 FILE_INPUT_ARG = "paths"  # would upload Playwright's unredacted output files: blocked
 ORACLE_ARGS = ("text", "textGone", "regex", "target", "startTarget", "endTarget")
+TARGET_ARGS = ("target", "startTarget", "endTarget")
 REGEX_ARGS = ("regex", "filter")  # browser_find, browser_network_requests
-# Selector engines that match on text or leave CSS: with a protected value on the page they are search oracles.
-TEXT_SELECTOR = re.compile(r"text|internal:|getby|>>|xpath|:has\(|:is\(|/", re.IGNORECASE)
-_ARIA_REF = re.compile(r"^(?:f\d+)?e\d+$")
+# A selector that escapes characters (CSS `\XX`, which Playwright decodes) or matches an attribute holding a value
+# (`[value^=...]`, `[data-value*=...]`; React keeps `value` in sync with what was typed) can test a value bit by bit.
+VALUE_SELECTOR = re.compile(r"\\|\[[^\]=]*value", re.IGNORECASE)
 ORACLE_NGRAM = 4  # a probe sharing this many consecutive chars with a filled value is refused
 COPY_KEYS = frozenset({"c", "x", "insert"})
-CHORD_MODIFIERS = frozenset({"meta", "control", "ctrl", "controlormeta"})
+CHORD_MODIFIERS = frozenset({"meta", "control", "controlormeta"})
+KEY_TOOLS = frozenset({KEY_TOOL, "browser_keydown", "browser_keyup"})
+# Playwright's modifier names, and the spellings a model may use for them.
+_MODIFIERS = {"shift": "shift", "control": "control", "ctrl": "control", "meta": "meta", "cmd": "meta", "command": "meta",
+              "os": "meta", "win": "meta", "super": "meta", "controlormeta": "controlormeta", "alt": "alt",
+              "option": "alt", "opt": "alt", "altgraph": "alt"}
+_KEY_ALIASES = {"del": "delete", "esc": "escape", "return": "enter", "spacebar": "space", " ": "space",
+                "up": "arrowup", "down": "arrowdown", "left": "arrowleft", "right": "arrowright"}
+# On a page holding a fill: keys that cannot change what a field holds. Enter submits (in a textarea it adds a line,
+# which leaves the value whole).
+NAVIGATION_KEYS = frozenset({"enter", "tab", "escape", "arrowup", "arrowdown", "arrowleft", "arrowright", "home", "end",
+                             "pageup", "pagedown", *_MODIFIERS.values()})
+# Tools that type at the focus or press the mouse where the model says: on a page holding a fill they could edit it.
+FOCUS_INPUT_TOOLS = frozenset({"browser_press_sequentially", "browser_mouse_down", "browser_mouse_up",
+                               "browser_mouse_drag_xy"})
+# Tools that write into the element they name (a token fill goes through the gate's own fill instead).
+ELEMENT_WRITE_TOOLS = frozenset({"browser_type", "browser_fill_form", "browser_select_option", "browser_drop"})
+DRAG_TOOLS = frozenset({"browser_drag", "browser_drop"})
+FILLED_PAGE_TOOLS = KEY_TOOLS | FOCUS_INPUT_TOOLS | ELEMENT_WRITE_TOOLS | DRAG_TOOLS
+FILLED_PAGE_REFUSED = ("本页有 secret-gate 填过的字段，{what}不予执行，以免改动其中的值后读出一部分。"
+                       "可以按 Enter、Tab、Shift+Tab、Escape、方向键、Home、End、PageUp、PageDown；"
+                       "要重填这个字段，用 secret_fill")
+# Snapshot lines of elements that show what they hold (Playwright renders an <input>/<textarea>'s value as its text).
+TEXT_ENTRY_ROLES = ("textbox", "searchbox", "combobox", "spinbutton")
+_ENTRY_LINE = re.compile(r"""^(?P<indent> *)- ["']?(?:""" + "|".join(TEXT_ENTRY_ROLES) + r")\b")
+_REF_MARK = re.compile(r"\[ref=((?:f\d+)?e\d+)\]")
 SECRET_FILL_TOOL = "secret_fill"
 FIELD_STATE_TOOL = "secret_field_state"
 HREF_PROBE_TOOL = "browser_evaluate"
@@ -54,7 +87,7 @@ _OUTPUT_LINK = re.compile(r"^\s*- \[[^\]]*\]\((?:\.{0,2}/|/)[^)]*\)\s*$", re.MUL
 SECRET_FILL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "target": {"type": "string", "description": "Element ref from the page snapshot, or a unique selector"},
+        "target": {"type": "string", "description": "Element ref from the page snapshot (e12, f1e3); selectors are not accepted"},
         "token": {"type": "string", "description": "enc:v1: token or enc:ref: reference whose real value should be typed"},
         "element": {"type": "string", "description": "Human-readable element description"},
         "submit": {"type": "boolean", "description": "Press Enter after filling"},
@@ -91,6 +124,7 @@ class FillRecord:
     url: str
     target: str
     status: str  # FILL_ATTEMPTED until the browser call returned without error
+    shown: str = ""  # what the field shows instead of its value ([REDACTED:label], or a sealed reference)
 
 
 @dataclass(frozen=True)
@@ -117,9 +151,9 @@ class GateState:
         fresh = tuple(r for r in resolutions if r.value not in known)
         return replace(self, sealed=self.sealed + fresh, tainted_urls=self.tainted_urls | {url})
 
-    def with_fill_status(self, url: str, targets: tuple[str, ...], status: str) -> GateState:
+    def with_fill_status(self, url: str, targets: tuple[str, ...], status: str, shown: str = "") -> GateState:
         kept = tuple(f for f in self.fills if not (f.url == url and f.target in targets))
-        return replace(self, fills=kept + tuple(FillRecord(url, t, status) for t in targets))
+        return replace(self, fills=kept + tuple(FillRecord(url, t, status, shown) for t in targets))
 
     def fill_history(self, url: str, target: str) -> tuple[bool, bool]:
         """(attempted, filled) for this target on this page."""
@@ -128,6 +162,28 @@ class GateState:
 
     def filled_targets(self, url: str) -> tuple[str, ...]:
         return tuple(f.target for f in self.fills if f.url == url)
+
+    def filled_refs(self) -> dict[str, str]:
+        """ref -> what is shown instead of the value of every field the gate filled (or tried to) in this session, on any page. Not tied to a URL:
+        a page can change its URL without a new document, and the URL check would race a tab switch. Refs restart on
+        a new document, so another page's field with the same ref is redacted too: over-redaction, never a leak."""
+        return {f.target: f.shown or REDACTED_FORMAT.format(label="filled") for f in self.fills}
+
+    def holds_fill(self, url: str) -> bool:
+        """True when a page of this origin got a fill: a single-page app keeps the field across its own URL changes."""
+        host = _host_or_none(url)
+        return host is not None and any(_host_or_none(f.url) == host for f in self.fills)
+
+    def filled_here(self, url: str, target: str) -> bool:
+        """`target` was filled on this page (the URL without its fragment: a #change keeps the document)."""
+        return any(f.target == target and f.url.partition("#")[0] == url.partition("#")[0] for f in self.fills)
+
+
+def _host_or_none(url: str) -> str | None:
+    try:
+        return page_host(url)
+    except PolicyViolation:
+        return None
 
 
 def page_host(url: str) -> str:
@@ -179,9 +235,75 @@ def check_call_allowed(name: str, args: dict[str, Any], state: GateState) -> Non
         raise PolicyViolation(f"{name}: uploading local files is disabled behind secret-gate")
     if name in URL_TOOLS:
         _check_url_scheme(args.get("url"))
+    for key, target in _targets(args):
+        if not ARIA_REF.fullmatch(target) and VALUE_SELECTOR.search(target):
+            raise PolicyViolation(f"{key!r}: selectors with escapes or matching a value attribute are disabled behind "
+                                  "secret-gate; use the element ref from browser_snapshot")
     if state.protected:
         _check_copy_chord(name, args)
         _check_oracle(args, state.protected)
+
+
+def check_filled_page(name: str, args: dict[str, Any], state: GateState, url: str) -> None:
+    """Refusals once the gate filled a field (`url` is the current page): nothing that could edit a filled field, so
+    its value cannot be cut down to a part that string redaction would not recognise (security review 2026-11-23, H1).
+
+    Which element has the focus is not asked (it would be a second call the page could race): a key goes wherever the
+    focus is, so on a page of an origin that got a fill every key that could edit text is refused, whichever field it
+    would reach. Typing into, choosing in, dropping onto or dragging a field the gate filled is refused by its ref; a
+    token fill (secret_fill) replaces the whole value and stays allowed."""
+    if not state.fills or name not in FILLED_PAGE_TOOLS:
+        return
+    filled = state.filled_refs()
+    if name in DRAG_TOOLS:  # a selection dragged out of a field is part of its value: by ref, on any page
+        for _, target in _targets(args):
+            if target in filled:
+                raise PolicyViolation(FILLED_PAGE_REFUSED.format(what=f"拖放 secret-gate 填过的字段（{target}）"))
+    if name in ELEMENT_WRITE_TOOLS:
+        for _, target in _targets(args):
+            if state.filled_here(url, target):
+                raise PolicyViolation(FILLED_PAGE_REFUSED.format(what=f"往 secret-gate 填过的字段（{target}）里输入或选择"))
+    if not state.holds_fill(url):
+        return
+    if name in FOCUS_INPUT_TOOLS:
+        raise PolicyViolation(FILLED_PAGE_REFUSED.format(what=f"{name}（在焦点处输入或按住鼠标）"))
+    if name in KEY_TOOLS and not _navigation_key(str(args.get("key", ""))):
+        raise PolicyViolation(FILLED_PAGE_REFUSED.format(what=f"可能改动输入内容的按键 {str(args.get('key', ''))[:40]!r} "))
+
+
+def parse_key(key: str) -> tuple[frozenset[str], str]:
+    """(modifiers, key) split the way Playwright splits a key string ("Shift++" is Shift and "+"), every spelling folded
+    to one name: "Meta+KeyC", "cmd+c" and "META+C" are all ({"meta"}, "c"); "Digit1" and "Numpad1" are "1"."""
+    parts: list[str] = []
+    building = ""
+    for char in key:
+        if char == "+" and building:
+            parts.append(building)
+            building = ""
+        else:
+            building += char
+    parts.append(building)
+    *mods, base = parts
+    return frozenset(_key_name(m) for m in mods), _key_name(base)
+
+
+def _key_name(key: str) -> str:
+    name = key.casefold()
+    if name.strip():
+        name = name.strip()
+    name = _KEY_ALIASES.get(name, name)
+    if m := re.fullmatch(r"key([a-z])", name):
+        return m.group(1)
+    if m := re.fullmatch(r"(?:digit|numpad)([0-9])", name):
+        return m.group(1)
+    return _MODIFIERS.get(name, name)
+
+
+def _navigation_key(key: str) -> bool:
+    mods, base = parse_key(key)
+    if base not in NAVIGATION_KEYS:
+        return False
+    return not mods or base == "enter" or (mods == {"shift"} and base == "tab")
 
 
 def _check_url_scheme(url: Any) -> None:
@@ -193,20 +315,29 @@ def _check_url_scheme(url: Any) -> None:
 
 
 def _check_copy_chord(name: str, args: dict[str, Any]) -> None:
-    if name != KEY_TOOL:
+    """Copy and cut in every spelling Playwright accepts (Meta+KeyC, ControlOrMeta+c, Control+Insert), and Shift+Delete
+    / Shift+Insert (cut and paste on Windows and Linux)."""
+    if name not in KEY_TOOLS:
         return
-    parts = [p.strip().lower() for p in str(args.get("key", "")).split("+")]
-    if len(parts) > 1 and parts[-1] in COPY_KEYS and set(parts[:-1]) & CHORD_MODIFIERS:
+    mods, base = parse_key(str(args.get("key", "")))
+    if (mods & CHORD_MODIFIERS and base in COPY_KEYS) or base in {"copy", "cut"} or (
+            "shift" in mods and base in {"delete", "insert"}):
         raise PolicyViolation("copy/cut shortcuts are disabled while a filled value is on a page")
 
 
-def _probes(args: dict[str, Any]) -> list[tuple[str, str]]:
-    """(argument, text) pairs that search or select, including every field target of browser_fill_form."""
-    found = [(key, args[key]) for key in ORACLE_ARGS if isinstance(args.get(key), str)]
+def _targets(args: dict[str, Any]) -> list[tuple[str, str]]:
+    """(argument, target) of every element the call names, including every field of browser_fill_form."""
+    found = [(key, args[key]) for key in TARGET_ARGS if isinstance(args.get(key), str)]
     fields = args.get("fields")
     if isinstance(fields, list):
         found += [("target", f["target"]) for f in fields if isinstance(f, dict) and isinstance(f.get("target"), str)]
     return found
+
+
+def _probes(args: dict[str, Any]) -> list[tuple[str, str]]:
+    """(argument, text) pairs that search or select, including every field target of browser_fill_form."""
+    found = [(key, args[key]) for key in ORACLE_ARGS if key not in TARGET_ARGS and isinstance(args.get(key), str)]
+    return found + _targets(args)
 
 
 def _check_oracle(args: dict[str, Any], filled: tuple[Resolution, ...]) -> None:
@@ -214,14 +345,15 @@ def _check_oracle(args: dict[str, Any], filled: tuple[Resolution, ...]) -> None:
         if isinstance(args.get(key), str) and args[key]:
             raise PolicyViolation(f"{key} search is disabled while a filled value is on a page")
     for key, probe in _probes(args):
-        if any(_shares_ngram(probe, r.value) for r in filled):
+        if any(shares_ngram(probe, r.value) for r in filled):
             raise PolicyViolation(f"{key!r} matches part of a filled value; refused")
-        if key.lower().endswith("target") and not _ARIA_REF.match(probe) and TEXT_SELECTOR.search(probe):
-            raise PolicyViolation(f"{key!r}: text or path selectors are disabled while a filled value is on a page; "
+        # Every selector can test the page (text engines, :has(), CSS escapes, attribute values, layout); a ref cannot.
+        if key in TARGET_ARGS and not ARIA_REF.fullmatch(probe):
+            raise PolicyViolation(f"{key!r}: selectors are disabled while a filled value is on a page; "
                                   "use the element ref from browser_snapshot")
 
 
-def _shares_ngram(probe: str, value: str) -> bool:
+def shares_ngram(probe: str, value: str) -> bool:
     """Case-insensitive, like Playwright's text matching."""
     probe, value = probe.casefold(), value.casefold()
     return any(value[i : i + ORACLE_NGRAM] in probe for i in range(len(value) - ORACLE_NGRAM + 1))
@@ -321,3 +453,98 @@ def scrub_result_text(name: str, text: str) -> str:
             remainder = _SECTION.split(rest, maxsplit=1)
             out = head + ("### " + remainder[1] if len(remainder) > 1 else "")
     return _OUTPUT_LINK.sub("", out)
+
+
+def hide_field_values(text: str, filled_refs: Mapping[str, str], filled: tuple[Resolution, ...]) -> str:
+    """Hide the value of every text-entry element in snapshot text (browser_snapshot, browser_find, the page state that
+    follows an action) that is a field the gate filled, by its ref, whatever the field holds now, or that holds
+    ORACLE_NGRAM or more characters of a filled value. The line keeps its role, name and ref; its value, inline or as
+    child lines, becomes what `filled_refs` says, or [REDACTED:label]. String redaction only knows whole values: a field edited down to a part of
+    one would otherwise be shown as it is (security review 2026-11-23, H1)."""
+    if not filled_refs and not filled:
+        return text
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        entry = _ENTRY_LINE.match(line)
+        end = i + 1
+        if entry:
+            depth = len(entry.group("indent"))
+            while end < len(lines) and lines[end].strip() and len(lines[end]) - len(lines[end].lstrip(" ")) > depth:
+                end += 1
+            label = _hidden_as(line, "\n".join(lines[i:end]), filled_refs, filled)
+            if label is not None:
+                marks = list(_REF_MARK.finditer(line))
+                head = line[: marks[-1].end()] if marks else entry.group(0)
+                out.append(f"{head}: {label}")
+                i = end
+                continue
+        out.extend(lines[i:end])
+        i = end
+    return "\n".join(out)
+
+
+FIND_TOOL = "browser_find"
+_FIND_CONTEXT = 3
+_YAML_BLOCK = re.compile(r"^```yaml\n(.*?)^```", re.MULTILINE | re.DOTALL)
+
+
+def find_in_snapshot(snapshot: str, text: str) -> str:
+    """browser_find's answer (case-insensitive substring, three lines of context, each match under its ancestors),
+    computed by the gate on its redacted snapshot. Playwright's own find searches the raw snapshot, where a field's
+    value is shown: whether a probe matched would tell part of the value even with the lines redacted
+    (security review 2026-11-23, L2)."""
+    block = _YAML_BLOCK.search(snapshot)
+    lines = (block.group(1) if block else snapshot).rstrip("\n").split("\n")
+    indents = [len(line) - len(line.lstrip(" ")) for line in lines]
+    needle = text.lower()
+    matched = [i for i, line in enumerate(lines) if needle in line.lower()]
+    query = f'"{text}"'
+    if not matched:
+        return f"### Result\nNo matches found for {query}."
+    windows: list[list[int]] = []
+    for i in matched:
+        start, end = max(0, i - _FIND_CONTEXT), min(len(lines) - 1, i + _FIND_CONTEXT)
+        if windows and start <= windows[-1][1] + 1:
+            windows[-1][1] = max(windows[-1][1], end)
+        else:
+            windows.append([start, end])
+    on_path = set(matched)
+    for i in matched:
+        on_path.update(_ancestors(lines, indents, i))
+    snippets = []
+    for start, end in windows:
+        indices = _ancestors(lines, indents, start) + list(range(start, end + 1))
+        out = []
+        for n, index in enumerate(indices):
+            if n > 0 and index > indices[n - 1] + 1 and index not in on_path and indices[n - 1] not in on_path:
+                out.append(" " * indents[index] + "...")
+            out.append(lines[index])
+        snippets.append("\n".join(out))
+    word = "match" if len(matched) == 1 else "matches"
+    return f"### Result\nFound {len(matched)} {word} for {query}:\n\n" + "\n\n----\n\n".join(snippets)
+
+
+def _ancestors(lines: list[str], indents: list[int], index: int) -> list[int]:
+    found = []
+    indent = indents[index]
+    for i in range(index - 1, -1, -1):
+        if indent <= 0:
+            break
+        if lines[i].strip() and indents[i] < indent:
+            found.append(i)
+            indent = indents[i]
+    return found[::-1]
+
+
+def _hidden_as(line: str, block: str, filled_refs: Mapping[str, str], filled: tuple[Resolution, ...]) -> str | None:
+    for ref in _REF_MARK.findall(line):
+        if ref in filled_refs:
+            return filled_refs[ref]
+    plain = block.replace('\\"', '"').replace("\\\\", "\\")  # Playwright quotes a value YAML-style when it must
+    for r in filled:
+        if len(r.value) >= ORACLE_NGRAM and (shares_ngram(block, r.value) or shares_ngram(plain, r.value)):
+            return REDACTED_FORMAT.format(label=r.label)
+    return None

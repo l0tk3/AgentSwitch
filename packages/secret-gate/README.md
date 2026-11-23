@@ -386,9 +386,17 @@ An MCP stdio server that spawns another MCP server (the unmodified Playwright MC
 - Refused always: any `filename` argument (unredacted file), any `paths` argument (would upload
   Playwright's own output files), non-http(s) URLs in `browser_navigate` / `browser_tabs`
   (`data:` pages are model-authored JavaScript; `--allowed-origins` does not cover them).
-- Refused once a value has been filled: copy/cut chords in `browser_press_key`, `regex` search,
-  and any `text` / `textGone` / selector `target` sharing 4 consecutive characters with a filled
-  value (substring oracles on echoed text).
+- Refused once a value has been filled: copy/cut chords in `browser_press_key` (in any spelling:
+  `Meta+KeyC`, `cmd+c`, `Control+Insert`, `Shift+Delete`), `regex` search, any `text` / `textGone`
+  sharing 4 consecutive characters with a filled value, and every target that is not a snapshot ref.
+  Selectors with CSS escapes or value-attribute matching are refused always; `secret_field_state`
+  goes through the same checks; `browser_find` is answered from the gate's redacted snapshot.
+- A token is typed only into a snapshot ref, by the gate's own fill template: one Playwright call
+  that resolves the element, checks its frame chain again and writes in the element's own document.
+- A field the gate filled is protected as an element: its value shows as `[REDACTED:label]` in every
+  snapshot whatever it holds now, and on a page of that origin keys that could edit text (anything
+  but Enter, Tab, Escape, arrows, Home/End, PageUp/PageDown), typing at the focus, mouse drags, and
+  typing into / dragging the filled ref are refused. Base64 of a filled value is redacted too.
 - `browser_take_screenshot` is **masked**, not refused, once anything needs protecting. Right before
   the capture the gate takes its own (unredacted) snapshot and masks, by snapshot ref, every element
   showing a filled or sealed value or a personal-data pattern (e-mail, phone, ID number, card), plus

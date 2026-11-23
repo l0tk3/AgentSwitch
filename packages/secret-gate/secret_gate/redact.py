@@ -7,8 +7,10 @@ JS single-quoted, or HTML-entity-escaped (server pages). Every form is matched.
 
 from __future__ import annotations
 
+import base64
 import html
 import json
+import re
 from collections.abc import Iterable
 from urllib.parse import quote, quote_plus
 
@@ -51,6 +53,44 @@ def redact(text: str | None, resolutions: Iterable[Resolution]) -> str | None:
     out = text
     for form, label in ordered:
         out = out.replace(form, REDACTED_FORMAT.format(label=label))
+    return out
+
+
+_BASE64_RUN = re.compile(r"[A-Za-z0-9+/_-]{6,}={0,2}")
+
+
+def redact_base64(text: str | None, resolutions: Iterable[Resolution]) -> str | None:
+    """Replace base64 (standard or URL-safe, padded or not) whose decoded bytes hold a value: `btoa(password)` in a
+    request body, `Authorization: Basic base64(user:pass)` a page set itself (security review 2026-11-23, L1).
+
+    Every run of base64 characters is decoded at each of the four offsets, so a value encoded inside a longer payload
+    (`{"p":"..."}`, `user:pass`) or after a `/` that belongs to a path is found too; the whole run is replaced."""
+    if not text:
+        return text
+    values = [(r.value.encode("utf-8"), r.label) for r in resolutions if len(r.value) >= MIN_REDACT_LENGTH]
+    if not values:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        run = match.group(0)
+        decoded = _decodings(run)
+        for value, label in values:
+            if any(value in d for d in decoded):
+                return REDACTED_FORMAT.format(label=label)
+        return run
+
+    return _BASE64_RUN.sub(replace, text)
+
+
+def _decodings(run: str) -> list[bytes]:
+    alphabet = run.rstrip("=").replace("-", "+").replace("_", "/")
+    out = []
+    for offset in range(4):
+        part = alphabet[offset:]
+        if len(part) % 4 == 1:  # a lone trailing character carries no whole byte
+            part = part[:-1]
+        if part:
+            out.append(base64.b64decode(part + "=" * (-len(part) % 4)))  # base64 characters, padded: cannot fail
     return out
 
 

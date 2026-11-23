@@ -6,8 +6,25 @@ import json
 
 import pytest
 
-from secret_gate.browser_mask import MASK_RGB, Box, MaskConfig, decode_png, page_tree, parse_boxes, sensitive_refs, uncovered_boxes
-from secret_gate.browser_probe import MaskPlan, check_target, field_state_code, form_target_code, masked_screenshot_code, result_json
+from secret_gate.browser_mask import (
+    MASK_RGB,
+    Box,
+    MaskConfig,
+    decode_png,
+    page_tree,
+    parse_boxes,
+    sensitive_refs,
+    uncovered_boxes,
+)
+from secret_gate.browser_probe import (
+    MaskPlan,
+    check_target,
+    field_state_code,
+    fill_code,
+    form_target_code,
+    masked_screenshot_code,
+    result_json,
+)
 from secret_gate.errors import PolicyViolation, ValidationError
 from secret_gate.pii import BANK_CARD, EMAIL, ID_NUMBER, PHONE, check_kinds, find_pii
 from tests.fixtures.png import make_png
@@ -142,6 +159,12 @@ def test_probe_snippets_embed_only_json_literals():
     for bad in ("", "  ", None, "x" * 501):
         with pytest.raises(PolicyViolation):
             check_target(bad)
+    fill = fill_code("e12", ["https://a.example.com/"], hostile)
+    assert json.dumps({"target": "e12", "urls": ["https://a.example.com/"], "value": hostile, "submit": False}) in fill
+    for args in (("#pw", ["https://a.example.com/"], "x"), ("e12\n", ["https://a.example.com/"], "x"),
+                 ("e12", ["about:srcdoc"], "x"), ("e12", [], "x"), ("e12", ["https://a.example.com/"], "x" * 70000)):
+        with pytest.raises(PolicyViolation):
+            fill_code(*args)
 
 
 def test_result_json():

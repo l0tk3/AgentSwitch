@@ -18,6 +18,9 @@ const LOCATE = "const locate = (t) => page.locator(/^(?:f\\d+)?e\\d+$/.test(t) ?
 const FIELD_STATE = (literal: string) => `async (page) => { ${LOCATE} const field = locate(${literal}); try { if (await field.count() !== 1) return 'unknown'; const value = await field.inputValue({ timeout: 2000 }); return value.length ? 'nonempty' : 'empty'; } catch { return 'unknown'; } }`;
 const SPEC = { refs: ["e1", "f2e7"], selectors: ["input[type=password]", "canvas"], path: "/g/out/secret-gate-mask-0123456789abcdef.png", fullPage: false, target: null, color: "#FF00FF" };
 const SCREENSHOT_TAIL = "; const masks = []; for (const ref of spec.refs) { const l = locate(ref); try { await l.count(); masks.push(l); } catch {} } for (const css of spec.selectors) { masks.push(page.locator(css)); for (const frame of page.frames().slice(1)) masks.push(frame.locator(css)); } const element = spec.target ? locate(spec.target) : null; if (element) await element.scrollIntoViewIfNeeded({ timeout: 5000 }); const boxes = []; for (const m of masks) { for (const h of await m.all()) { const b = await h.boundingBox(); if (b && b.width > 0 && b.height > 0) boxes.push(b); } } const options = { path: spec.path, type: 'png', mask: masks, maskColor: spec.color, animations: 'disabled', caret: 'hide', scale: 'css', timeout: 15000 }; let origin = { x: 0, y: 0 }; if (element) { const b = await element.boundingBox(); if (!b) return { error: 'element is not visible' }; origin = b; await element.screenshot(options); } else { if (spec.fullPage) { const r = await page.locator(':root').boundingBox(); if (r) origin = { x: r.x, y: r.y }; } await page.screenshot({ ...options, fullPage: spec.fullPage }); } return { boxes: boxes.map((b) => ({ x: b.x - origin.x, y: b.y - origin.y, width: b.width, height: b.height })) }; }";
+const FILL_SPEC = { target: "e12", urls: ["https://a.example.com/login"], value: "Hunter2-Fake's \"pw\"", submit: false };
+const FILL_TAIL = "; const field = locate(spec.target); if (await field.count() !== 1) return { error: 'target is not exactly one element' }; const handle = await field.elementHandle(); try { const frame = await handle.ownerFrame(); if (!frame) return { error: 'target has no frame' }; const urls = []; for (let f = frame; f; f = f.parentFrame()) urls.push(f.url()); if (JSON.stringify(urls) !== JSON.stringify(spec.urls)) return { error: 'the page changed' }; const verdict = await handle.evaluate((el, s) => { if (location.href !== s.url) return 'the page changed'; const types = ['text', 'password', 'email', 'tel', 'url', 'search', 'number']; const input = el instanceof HTMLInputElement && types.includes(el.type); if (!input && !(el instanceof HTMLTextAreaElement)) return 'not a text field'; if (el.disabled || el.readOnly) return 'the field is not editable'; const setter = Object.getOwnPropertyDescriptor(input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype, 'value').set; setter.call(el, ''); el.focus(); if (!document.execCommand('insertText', false, s.value) || !el.value) { setter.call(el, s.value); el.dispatchEvent(new Event('input', { bubbles: true })); } el.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; }, { url: spec.urls[0], value: spec.value }); if (verdict !== 'ok') return { error: verdict }; if (spec.submit) await handle.press('Enter', { timeout: 5000 }); return { ok: true }; } finally { await handle.dispose(); } }";
+const FILL = (spec: unknown) => `async (page) => { ${LOCATE} const spec = ${JSON.stringify(spec)}${FILL_TAIL}`;
 const SCREENSHOT = (spec: unknown) => `async (page) => { ${LOCATE} const spec = ${typeof spec === "string" ? spec : JSON.stringify(spec)}${SCREENSHOT_TAIL}`;
 
 describe("the gate's probe templates", () => {
@@ -27,6 +30,8 @@ describe("the gate's probe templates", () => {
     expect(probeTemplate(FIELD_STATE('"f1e2"'))).toBe("field_state");
     expect(probeTemplate(SCREENSHOT(SPEC))).toBe("masked_screenshot");
     expect(probeTemplate(SCREENSHOT({ ...SPEC, target: "e3", fullPage: true }))).toBe("masked_screenshot");
+    expect(probeTemplate(FILL(FILL_SPEC))).toBe("fill");
+    expect(probeTemplate(FILL({ ...FILL_SPEC, target: "f1e3", urls: ["https://a.example.com/embed", "https://a.example.com/"], submit: true }))).toBe("fill");
     expect(codeRefusal("browser_run_code_unsafe", { code: FIELD_STATE('"e12"') })).toBeNull();
     expect(codeRefusal("browser_evaluate", { function: HREF_PROBE })).toBeNull();
     expect(codeRefusal("browser_click", { target: "e1" })).toBeNull();
@@ -62,6 +67,10 @@ describe("the gate's probe templates", () => {
       expect(probeTemplate(code), code.slice(0, 80)).toBeNull();
       expect(codeRefusal("browser_run_code_unsafe", { code }), code.slice(0, 80)).toBe(CODE_REFUSED);
     }
+    for (const spec of [
+      { ...FILL_SPEC, target: "#password" }, { ...FILL_SPEC, urls: [] }, { ...FILL_SPEC, urls: ["about:srcdoc"] },
+      { ...FILL_SPEC, value: 7 }, { ...FILL_SPEC, value: "x".repeat(70_000) }, { ...FILL_SPEC, submit: "yes" }, { ...FILL_SPEC, extra: 1 },
+    ]) expect(probeTemplate(FILL(spec)), JSON.stringify(spec).slice(0, 80)).toBeNull();
     expect(codeRefusal("browser_run_code_unsafe", {})).toBe(CODE_REFUSED);
     expect(codeRefusal("browser_run_code_unsafe", { code: FIELD_STATE('"e12"'), filename: "x.js" })).toBe(CODE_REFUSED);
     expect(codeRefusal("browser_run_code_unsafe", { code: 7 })).toBe(CODE_REFUSED);
@@ -82,18 +91,20 @@ describe("the gate's probe templates", () => {
   it.skipIf(!existsSync(gatePython))("match what the gate's own browser_probe.py generates", () => {
     const script = [
       "import json",
-      "from secret_gate.browser_probe import MaskPlan, field_state_code, frame_chain_code, form_target_code, masked_screenshot_code",
+      "from secret_gate.browser_probe import MaskPlan, field_state_code, fill_code, frame_chain_code, form_target_code, masked_screenshot_code",
       "from secret_gate.browser_policy import HREF_PROBE_FUNCTION",
       "targets = ['e12', 'f3e45', '#login input[name=\"pw\"]', 'Pässwört ünïcode \\u2028 sep']",
       "codes = [f(t) for t in targets for f in (field_state_code, frame_chain_code, form_target_code)]",
       "codes.append(masked_screenshot_code(MaskPlan(refs=('e1', 'f2e9'), selectors=('input[type=password]', 'canvas', '.admin-region'), path='/Users/me/.secret-gate/out/secret-gate-mask-0123456789abcdef.png')))",
       "codes.append(masked_screenshot_code(MaskPlan(refs=(), selectors=('input[type=password]',), path='/g/secret-gate-mask-fedcba9876543210.png', full_page=True, target='e7')))",
+      "codes.append(fill_code('f1e3', ['https://a.example.com/embed?x=\\u2028', 'https://a.example.com/'], 'Pässwört \\u2028 \"q\" \\\\', True))",
+      "codes.append(fill_code('e12', ['https://a.example.com/login'], 'pw'))",
       "print(json.dumps({'codes': codes, 'href': HREF_PROBE_FUNCTION}))",
     ].join("\n");
     const run = spawnSync(gatePython, ["-c", script], { cwd: resolve(__dirname, "..", "..", "secret-gate"), encoding: "utf8", env: { PATH: process.env.PATH ?? "", HOME: mkdtempSync(join(tmpdir(), "agentswitch-probe-home-")) } });
     expect(run.status, run.stderr).toBe(0);
     const { codes, href } = JSON.parse(run.stdout) as { codes: string[]; href: string };
-    expect(codes).toHaveLength(14);
+    expect(codes).toHaveLength(16);
     for (const code of codes) expect(probeTemplate(code), code.slice(0, 120)).not.toBeNull();
     expect(href).toBe(HREF_PROBE);
   });

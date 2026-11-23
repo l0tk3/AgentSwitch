@@ -53,6 +53,7 @@ class FakePlaywright:
         self.form_action: str | None = None  # None: the form submits to the current page; "": no form
         self.frames: dict[str, list[str]] = {}  # target -> frame URLs, innermost first (default: the page)
         self.run_code_error = False
+        self.submitted = False
 
     async def list_tools(self):
         names = ["browser_navigate", "browser_snapshot", "browser_type", "browser_fill_form", "browser_evaluate",
@@ -93,6 +94,15 @@ class FakePlaywright:
         return _text(f"{name} ok")
 
     def _run_code(self, code: str) -> Any:
+        if "execCommand" in code:  # the gate's fill: writes only while the frame chain is the one it checked
+            spec = _spec(code)
+            if self.fail_type:
+                return {"error": "target is not exactly one element"}
+            if spec["urls"] != self.frames.get(spec["target"], [self.url]):
+                return {"error": "the page changed"}
+            self.typed[spec["target"]] = spec["value"]
+            self.submitted = self.submitted or spec["submit"]
+            return {"ok": True}
         if "inputValue" in code:
             target = _located(code)
             return "unknown" if target not in self.typed else ("nonempty" if self.typed[target] else "empty")
@@ -149,8 +159,8 @@ def test_list_tools_hides_dangerous_ones_adds_secret_fill_keeps_annotations(gate
 
 def test_secret_fill_types_plaintext_and_result_is_clean(gate, pw, portal_pass):
     out = texts(run(gate.call_tool("secret_fill", {"target": "e7", "token": portal_pass, "submit": True})))
-    typed = [a for n, a in pw.calls if n == "browser_type"]
-    assert typed == [{"target": "e7", "text": fs.PORTAL.password, "element": "secret field", "submit": True}]
+    assert "browser_type" not in names(pw)  # the gate's own fill template writes the value (one call, re-checked)
+    assert pw.typed == {"e7": fs.PORTAL.password} and pw.submitted
     assert fs.PORTAL.password not in out and "page-1.yml" not in out and "Ran Playwright code" not in out
     snap = texts(run(gate.call_tool("browser_snapshot", {})))
     assert fs.PORTAL.password not in snap and f"[REDACTED:{fs.PORTAL.label}]" in snap
@@ -171,17 +181,18 @@ def test_value_with_quotes_and_backslash_never_echoes(resolver, keypair, pw):
     pw.fail_type = True
     with pytest.raises(RuntimeError) as exc:
         run(gate.call_tool("browser_type", {"target": "e2", "text": tok}))
-    assert "tricky" not in str(exc.value) and "it" not in str(exc.value).split("Error")[1][:3]
+    assert "tricky" not in str(exc.value) and "no element" in str(exc.value)
 
 
 def test_fill_form_substitutes_every_field(gate, pw, portal_pass, portal_user):
     fields = [
-        {"target": "u", "name": "user", "type": "textbox", "value": portal_user},
-        {"target": "p", "name": "pass", "type": "textbox", "value": portal_pass},
-        {"target": "r", "name": "remember", "type": "checkbox", "value": "true"},
+        {"target": "e1", "name": "user", "type": "textbox", "value": portal_user},
+        {"target": "e2", "name": "pass", "type": "textbox", "value": portal_pass},
+        {"target": "e3", "name": "remember", "type": "checkbox", "value": "true"},
     ]
     out = texts(run(gate.call_tool("browser_fill_form", {"fields": fields})))
-    assert pw.typed == {"u": fs.PORTAL.username, "p": fs.PORTAL.password, "r": "true"}
+    assert pw.typed == {"e1": fs.PORTAL.username, "e2": fs.PORTAL.password, "e3": "true"}
+    assert [a["fields"] for n, a in pw.calls if n == "browser_fill_form"] == [fields[2:]]  # plain fields only
     assert fs.PORTAL.username not in out and fs.PORTAL.password not in out
     snap = texts(run(gate.call_tool("browser_snapshot", {})))
     assert fs.PORTAL.username not in snap and fs.PORTAL.password not in snap
@@ -190,7 +201,7 @@ def test_fill_form_substitutes_every_field(gate, pw, portal_pass, portal_user):
 def test_wrong_host_is_refused_before_anything_is_typed(gate, pw, bank_pass):
     with pytest.raises(RuntimeError, match="secret-gate"):
         run(gate.call_tool("secret_fill", {"target": "e1", "token": bank_pass}))
-    assert names(pw) == ["browser_evaluate"]  # only the URL probe
+    assert names(pw) == ["browser_run_code_unsafe"]  # only the frame-chain probe
     assert pw.typed == {} and gate.state.tainted_urls == frozenset()
 
 
@@ -199,8 +210,8 @@ def test_non_http_page_and_failed_probe_are_refused(resolver, portal_pass):
     gate = BrowserGate(resolver, pw)
     with pytest.raises(RuntimeError, match="non-http"):
         run(gate.call_tool("browser_type", {"target": "e1", "text": portal_pass}))
-    pw.url, pw.probe_error = PAGE, True
-    with pytest.raises(RuntimeError, match="could not determine"):
+    pw.url, pw.run_code_error = PAGE, True
+    with pytest.raises(RuntimeError, match="could not run the gate's check"):
         run(gate.call_tool("browser_type", {"target": "e1", "text": portal_pass}))
     assert pw.typed == {}
 
@@ -443,8 +454,156 @@ def test_frame_fills_fail_closed(gate, pw, portal_pass, portal_user, frames, nee
     assert pw.typed == {}
 
 
-def test_selector_targets_are_located_by_playwright_first(gate, pw, portal_pass, monkeypatch):
+def test_tokens_are_typed_only_into_refs_located_by_playwright_first(gate, pw, portal_pass, monkeypatch):
+    for target in ("#password", "e12\n", "input[type=password]"):
+        with pytest.raises(RuntimeError, match="element ref"):
+            run(gate.call_tool("secret_fill", {"target": target, "token": portal_pass}))
+    assert pw.calls == []
     monkeypatch.setattr(pw, "_run_code", lambda code: {"error": "target is not exactly one element"})
     with pytest.raises(RuntimeError, match="which frame"):
-        run(gate.call_tool("secret_fill", {"target": "#password", "token": portal_pass}))
+        run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
     assert pw.typed == {}
+
+
+# -- security review 2026-11-23 (browser) ------------------------------------------------------------
+
+def test_a_filled_field_edited_down_to_a_part_stays_redacted(gate, pw, portal_pass):
+    """H1: Backspace (or Home+Delete) leaves a part of the value, which string redaction does not know."""
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    for part in (fs.PORTAL.password[:-1], fs.PORTAL.password[1:], fs.PORTAL.password[:3]):
+        pw.typed["e12"] = part  # what the page holds after the edit
+        snap = texts(run(gate.call_tool("browser_snapshot", {})))
+        assert part not in snap and f'[ref=e12]: [REDACTED:{fs.PORTAL.label}]' in snap
+    # The same field under another ref (a new snapshot after its name changed): a part of 4+ chars is still hidden.
+    pw.typed = {}
+    pw.echo = f'- textbox "Password (required)" [ref=e40]:\n  - /placeholder: Password\n  - text: {fs.PORTAL.password[2:9]}'
+    snap = texts(run(gate.call_tool("browser_snapshot", {})))
+    assert fs.PORTAL.password[2:9] not in snap and "/placeholder" not in snap and "[ref=e40]: [REDACTED:" in snap
+    # Other elements and other text are left alone.
+    pw.echo = '- textbox "Search" [ref=e41]: weather\n- link "Home" [ref=e12]:\n  - /url: /home'
+    snap = texts(run(gate.call_tool("browser_snapshot", {})))
+    assert "weather" in snap and "/url: /home" in snap
+
+
+@pytest.mark.parametrize("key", ["Backspace", "Delete", "Home+Delete", "a", "KeyA", "Shift+ArrowLeft", "Meta+a",
+                                 "Control+z", "Alt+Backspace", "Meta+KeyV", "Space", "Digit1", "Control+h"])
+def test_keys_that_could_edit_a_field_are_refused_on_a_page_holding_a_fill(gate, pw, portal_pass, key):
+    run(gate.call_tool("browser_press_key", {"key": key}))  # nothing filled yet
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    before = len(pw.calls)
+    with pytest.raises(RuntimeError, match="本页有 secret-gate 填过的字段"):
+        run(gate.call_tool("browser_press_key", {"key": key}))
+    assert names(pw)[before:] == ["browser_evaluate"]  # the page was asked, the key never sent
+    pw.url = "https://other.example.org/"  # another site: keys are the model's again
+    run(gate.call_tool("browser_press_key", {"key": key}))
+
+
+def test_navigation_keys_and_a_refill_stay_allowed(gate, pw, portal_pass):
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    for key in ("Enter", "Tab", "Shift+Tab", "Escape", "ArrowDown", "Home", "PageDown", "Control+Enter"):
+        run(gate.call_tool("browser_press_key", {"key": key}))
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))  # a token fill replaces the value
+    pw.url = PAGE + "#step2"  # a fragment change keeps the document
+    with pytest.raises(RuntimeError, match="本页有"):
+        run(gate.call_tool("browser_press_key", {"key": "Backspace"}))
+
+
+@pytest.mark.parametrize("name, args", [
+    ("browser_type", {"target": "e12", "text": "x", "slowly": True}),
+    ("browser_type", {"target": "e12", "text": "x"}),
+    ("browser_fill_form", {"fields": [{"target": "e12", "name": "p", "type": "textbox", "value": ""}]}),
+    ("browser_select_option", {"target": "e12", "values": ["x"]}),
+    ("browser_drag", {"startTarget": "e12", "endTarget": "e3"}),
+    ("browser_drag", {"startTarget": "e3", "endTarget": "e12"}),
+    ("browser_drop", {"target": "e12", "data": {"text/plain": "x"}}),
+    ("browser_press_sequentially", {"text": "x"}),
+    ("browser_keydown", {"key": "Backspace"}),
+    ("browser_mouse_drag_xy", {"startX": 1, "startY": 1, "endX": 9, "endY": 9}),
+])
+def test_other_ways_to_edit_a_filled_field_are_refused(gate, pw, portal_pass, name, args):
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    with pytest.raises(RuntimeError, match="本页有"):
+        run(gate.call_tool(name, args))
+    assert name not in names(pw)
+
+
+def test_typing_into_another_field_is_allowed(gate, pw, portal_pass):
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    run(gate.call_tool("browser_type", {"target": "e5", "text": "alice"}))
+    assert pw.typed["e5"] == "alice"
+    with pytest.raises(RuntimeError, match="omit slowly"):
+        run(gate.call_tool("browser_type", {"target": "e12", "text": portal_pass, "slowly": True}))
+
+
+@pytest.mark.parametrize("key", ["Meta+KeyC", "ControlOrMeta+KeyX", "cmd+c", "CTRL+C", " Meta + c ", "Shift+Delete",
+                                 "Control+Insert", "Meta+Shift+KeyC", "Command+x"])
+def test_copy_chords_in_every_spelling_are_refused(gate, pw, portal_pass, key):
+    """H2: Meta+KeyC was not recognised as copy; the value went to the clipboard."""
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    pw.url = "https://other.example.org/"  # even where edit keys are allowed again
+    with pytest.raises(RuntimeError, match="copy/cut|本页有"):
+        run(gate.call_tool("browser_press_key", {"key": key}))
+    assert "browser_press_key" not in names(pw)
+
+
+@pytest.mark.parametrize("target", ["e12\\", ':has-t\\65xt("\\31\\31\\30\\31")', 'input[value^="h"]',
+                                    'input[type=password][VALUE*="x"]', "[data-value='1']", "body >> input#q",
+                                    "internal:text=/^a/", "xpath=//input"])
+def test_field_state_goes_through_the_same_checks(gate, pw, portal_pass, target):
+    """M1: secret_field_state skipped check_call_allowed; any selector was a one-bit oracle."""
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    before = len(pw.calls)
+    with pytest.raises(RuntimeError, match="selector|matches part"):
+        run(gate.call_tool("secret_field_state", {"target": target}))
+    with pytest.raises(RuntimeError, match="selector|matches part"):
+        run(gate.call_tool("browser_hover", {"target": target}))
+    assert len(pw.calls) == before
+
+
+def test_escaped_and_value_selectors_are_refused_even_before_a_fill(gate, pw):
+    for target in (':has-t\\65xt("x")', 'input[value^="h"]'):
+        with pytest.raises(RuntimeError, match="value attribute"):
+            run(gate.call_tool("secret_field_state", {"target": target}))
+    assert pw.calls == []
+
+
+def test_find_is_answered_from_the_redacted_snapshot(gate, pw, portal_pass):
+    """L2: Playwright's find matches the raw snapshot; whether a 3-character probe matched told part of the value."""
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    pw.echo = '- heading "Sign in" [ref=e2]'
+    probe = fs.PORTAL.password[:3]
+    out = texts(run(gate.call_tool("browser_find", {"text": probe})))
+    assert out == f'### Result\nNo matches found for "{probe}".' and "browser_find" not in names(pw)
+    out = texts(run(gate.call_tool("browser_find", {"text": "sign in"})))
+    assert 'Found 1 match for "sign in"' in out and "[ref=e2]" in out
+
+
+def test_the_fill_rechecks_the_frame_in_the_same_call(gate, pw, portal_pass, monkeypatch):
+    """M2: the URL check and the typing were two calls; a tab switch or navigation between them got the value."""
+    probe = pw._run_code
+
+    def switch_after_check(code):
+        result = probe(code)
+        if "ownerFrame" in code and "execCommand" not in code:
+            pw.url = f"https://{fs.EVIL_HOST}/phish"  # the allowed tab closed; the attacker's is current now
+        return result
+
+    monkeypatch.setattr(pw, "_run_code", switch_after_check)
+    with pytest.raises(RuntimeError, match="page changed"):
+        run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    assert pw.typed == {}
+    code = next(a["code"] for n, a in pw.calls if n == "browser_run_code_unsafe" and "execCommand" in a["code"])
+    assert _spec(code)["urls"] == [PAGE] and "location.href !== s.url" in code
+
+
+def test_base64_of_a_filled_value_is_redacted(gate, pw, portal_pass, portal_user):
+    """L1: a page's own Authorization: Basic header or btoa(password) in a request body."""
+    import base64
+
+    run(gate.call_tool("secret_fill", {"target": "e12", "token": portal_pass}))
+    basic = base64.b64encode(f"{fs.PORTAL.username}:{fs.PORTAL.password}".encode()).decode()
+    body = base64.urlsafe_b64encode(json.dumps({"p": fs.PORTAL.password}).encode()).decode().rstrip("=")
+    pw.echo = f"authorization: Basic {basic}\n/api/{body}\nx-other: Basic dXNlcjpvdGhlcg=="
+    snap = texts(run(gate.call_tool("browser_snapshot", {})))
+    assert basic not in snap and body not in snap and snap.count(f"[REDACTED:{fs.PORTAL.label}]") == 3  # the field, the header, the path
+    assert "dXNlcjpvdGhlcg==" in snap

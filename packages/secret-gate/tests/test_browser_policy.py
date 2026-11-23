@@ -216,16 +216,16 @@ def test_oracle_checks_cover_drag_form_targets_case_and_text_selectors():
     state = GateState(filled=(Resolution(token="enc:v1:x", label="t", value="Zq9-Vx7-Pw4k"),))
     for name, args, needle in (
         ("browser_drag", {"startTarget": "e1", "endTarget": "zq9-v"}, "matches part"),
-        ("browser_fill_form", {"fields": [{"target": "input[value^=VX7-]", "value": "x"}]}, "matches part"),
-        ("browser_click", {"target": "text=Welcome back"}, "text or path selectors"),
-        ("browser_click", {"target": "button:has(span)"}, "text or path selectors"),
-        ("browser_click", {"target": "internal:role=button"}, "text or path selectors"),
+        ("browser_fill_form", {"fields": [{"target": "input[value^=VX7-]", "value": "x"}]}, "value attribute"),
+        ("browser_click", {"target": "text=Welcome back"}, "selectors are disabled"),
+        ("browser_click", {"target": "button:has(span)"}, "selectors are disabled"),
+        ("browser_click", {"target": "internal:role=button"}, "selectors are disabled"),
+        ("browser_click", {"target": "#submit"}, "selectors are disabled"),  # once a value is protected: refs only
         ("browser_network_requests", {"filter": "/api/.*"}, "filter search"),
     ):
         with pytest.raises(PolicyViolation, match=needle):
             check_call_allowed(name, args, state)
     check_call_allowed("browser_click", {"target": "f1e7"}, state)
-    check_call_allowed("browser_click", {"target": "#submit"}, state)
     check_call_allowed("browser_click", {"target": "text=Welcome back"}, GateState())  # nothing protected yet
 
 
