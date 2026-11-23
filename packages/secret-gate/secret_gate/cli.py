@@ -269,9 +269,19 @@ def utf8_output(streams: tuple = ()) -> None:
             stream.reconfigure(encoding="utf-8")
 
 
+def utf8_input(stream=None) -> None:  # noqa: ANN001 - a text stream
+    """Windows reads a pipe in the ANSI code page too, so a value piped to `enc` (or a batch, a fill request) would be
+    sealed mis-decoded: piped stdin is UTF-8 there, and a leading byte order mark, which PowerShell writes when its
+    $OutputEncoding is UTF-8, is dropped (utf-8-sig)."""
+    stream = sys.stdin if stream is None else stream
+    if hasattr(stream, "reconfigure") and not stream.isatty():   # None under pythonw; a stand-in under tests
+        stream.reconfigure(encoding="utf-8-sig")
+
+
 def main(argv: list[str] | None = None) -> int:
     if sys.platform == "win32":
         utf8_output()
+        utf8_input()
     args = build_parser().parse_args(argv)
     if args.cmd == "enc" and not args.use:
         args.use = [USE_HTTP]

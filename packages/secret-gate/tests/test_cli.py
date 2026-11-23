@@ -167,6 +167,15 @@ def test_enc_refuses_short_values(tmp_path, monkeypatch, capsys):
     assert out[3]["token"].startswith("enc:v1:")
 
 
+def test_piped_stdin_is_utf8_without_a_byte_order_mark():
+    """Windows (cli.main): what PowerShell pipes, BOM and all, reads as the text it sent."""
+    from secret_gate.cli import utf8_input
+
+    stdin = io.TextIOWrapper(io.BytesIO("\ufeff[{\"value\": \"pä55\"}]\n".encode("utf-8")), encoding="cp1252")
+    utf8_input(stdin)
+    assert stdin.read() == '[{"value": "pä55"}]\n'
+
+
 def test_batch_rejects_non_array(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
     main(["keygen"]); capsys.readouterr()
