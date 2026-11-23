@@ -18,6 +18,7 @@ import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
 
 export type { SeatCard, SeatState } from "../rooms/state.js";
 import type { TerminalHost, TerminalInfo } from "../terminals/host.js";
+import { profileModelLists } from "./profileModels.js";
 import { roomOrg } from "./roomOrg.js";
 import { parseBody, versionedJson, type ApiDeps } from "./shared.js";
 
@@ -181,12 +182,11 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   app.get("/rooms/models", async (c) => {
     if (!deps.callLocal || !deps.roomPolicy) return c.json({ error: "not available" }, 503);
     const [terminals, profiles] = await Promise.all([deps.callLocal("GET", "/terminals"), deps.callLocal("GET", "/profiles")]);
-    const models = ((terminals.body as { models?: Record<string, { id: string; name: string; older?: boolean }[]> }).models) ?? {};
-    const agents = ((profiles.body as { agents?: Record<string, { current?: string; profiles?: { id: string; name: string }[] }> }).agents) ?? {};
-    return c.json({ agents: Object.fromEntries(Object.entries(models).map(([agent, list]) => [agent, {
-      models: list.filter((m) => m.older !== true).map((m) => ({ id: m.id, name: m.name })),
-      current: agents[agent]?.current ?? null,
-      profiles: (agents[agent]?.profiles ?? []).map((p) => ({ id: p.id, name: p.name, off: deps.roomPolicy!.offFor(agent, p.id) })),
+    const all = await profileModelLists.all(deps.callLocal, terminals.body, profiles.body);
+    return c.json({ agents: Object.fromEntries(Object.entries(all).map(([agent, of]) => [agent, {
+      models: of.profiles.find((p) => p.source === "agent")?.models ?? [],
+      current: of.current,
+      profiles: of.profiles.map((p) => ({ ...p, off: deps.roomPolicy!.offFor(agent, p.id) })),
     }])) });
   });
 

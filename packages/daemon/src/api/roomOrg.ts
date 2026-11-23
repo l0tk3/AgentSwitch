@@ -5,6 +5,7 @@
 
 import type { RoomPolicy } from "../rooms/policy.js";
 import type { KitOrg } from "../rooms/kit.js";
+import { profileModelLists } from "./profileModels.js";
 import { RoomError } from "../rooms/store.js";
 
 /** One request to this service's own API. */
@@ -33,13 +34,22 @@ export function roomOrg(ask: Ask, policy?: RoomPolicy): KitOrg {
       }));
     },
     async models() {
+      // Per profile (rooms/profileModels.ts): a profile at another vendor's address offers that address's models.
       const [res, profiles] = await Promise.all([ask("GET", "/terminals"), ask("GET", "/profiles")]);
-      const agents = obj(obj(profiles.body).agents);
-      return Object.fromEntries(Object.entries(obj(obj(res.body).models)).map(([agent, models]) => [agent, list(models).filter((m) => m.older !== true).map((m) => {
-        // Under which profiles the user has turned this model off for sessions a session starts.
-        const off = policy ? list(obj(agents[agent]).profiles).filter((p) => !policy.allows(agent, str(p.id), str(m.id))).map((p) => str(p.name) || str(p.id)) : [];
-        return { id: str(m.id), name: str(m.name), ...(str(m.description) || off.length ? { description: [str(m.description), off.length ? `NOT for you under profile ${off.join(", ")}` : ""].filter(Boolean).join(" · ") } : {}) };
-      })]));
+      const all = await profileModelLists.all(ask, res.body, profiles.body);
+      return Object.fromEntries(Object.entries(all).map(([agent, of]) => {
+        const own = of.profiles.find((p) => p.source === "agent");
+        const rows = (own?.models ?? list(obj(obj(res.body).models)[agent]).map((m) => ({ id: str(m.id), name: str(m.name), description: str(m.description), older: m.older === true }))).filter((m) => m.older !== true).map((m) => {
+          // Under which profiles the user has turned this model off for sessions a session starts.
+          const off = policy ? of.profiles.filter((p) => p.source === "agent" && !policy.allows(agent, p.id, m.id)).map((p) => p.name) : [];
+          return { id: m.id, name: m.name, ...(m.description || off.length ? { description: [m.description ?? "", off.length ? `NOT for you under profile ${off.join(", ")}` : ""].filter(Boolean).join(" · ") } : {}) };
+        });
+        // A profile at another address: only its own models, and only those not turned off.
+        const elsewhere = of.profiles.filter((p) => p.source !== "agent").flatMap((p) => p.models.filter((m) => !policy || policy.allows(agent, p.id, m.id)).map((m) => ({
+          id: m.id, name: m.name, description: `Only under profile ${p.name} (another vendor's address${p.model === m.id ? "; its default" : ""}); the models above do not run there`,
+        })));
+        return [agent, [...rows, ...elsewhere]];
+      }));
     },
     async sessions(limit) {
       const [terminals, sessions] = await Promise.all([ask("GET", "/terminals"), ask("GET", `/sessions?limit=${Math.min(Math.max(limit, 1), 500)}`)]);
@@ -66,10 +76,15 @@ export function roomOrg(ask: Ask, policy?: RoomPolicy): KitOrg {
         const all = obj(obj((await ask("GET", "/profiles")).body).agents);
         const of = obj(all[req.agent]);
         const profile = req.profile ?? (str(of.current) || "default");
+        const offered = (await profileModelLists.all(ask, (await ask("GET", "/terminals")).body, { agents: { [req.agent]: of } }))[req.agent]?.profiles.find((p) => p.id === profile);
+        const name = offered?.name || profile;
+        const allowed = (offered?.models ?? []).filter((m) => m.older !== true && policy.allows(req.agent, profile, m.id)).map((m) => m.id);
+        // A model the profile's address does not serve: the address would put its own default in its place, unsaid.
+        if (offered && offered.source !== "agent" && !offered.models.some((m) => m.id === req.model)) {
+          throw new RoomError(400, `Profile "${name}" reaches another vendor's address, which has no model ${req.model}. There: ${allowed.join(", ") || "none listed"}; or leave \`model\` out for the profile's own (${offered.model ?? "the address's default"}).`);
+        }
         if (!policy.allows(req.agent, profile, req.model)) {
-          const models = list(obj(obj((await ask("GET", "/terminals")).body).models)[req.agent]).filter((m) => m.older !== true).map((m) => str(m.id)).filter((id) => policy.allows(req.agent, profile, id));
-          const name = str(list(of.profiles).find((p) => str(p.id) === profile)?.name) || profile;
-          throw new RoomError(403, `The user has turned the model ${req.model} off for sessions started by a session under profile "${name}". Allowed there: ${models.join(", ") || "none"}; or leave \`model\` out for the profile's own default.`);
+          throw new RoomError(403, `The user has turned the model ${req.model} off for sessions started by a session under profile "${name}". Allowed there: ${allowed.join(", ") || "none"}; or leave \`model\` out for the profile's own default.`);
         }
       }
       const body = { harness: req.agent, cwd: req.cwd, ...(req.profile ? { profile: req.profile } : {}), ...(req.model ? { model: req.model } : {}), ...(req.mode ? { mode: req.mode } : {}), ...(req.resume ? { agentSessionId: req.resume } : {}) };

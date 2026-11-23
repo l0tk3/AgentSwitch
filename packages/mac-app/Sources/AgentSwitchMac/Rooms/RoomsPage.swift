@@ -401,7 +401,7 @@ private struct RoomWriter: View {
                     .buttonStyle(.plain)
                     .help("Attach Files")
                 }
-                ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, label: "Message",
+                ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, insert: model.insert, label: "Message",
                              placeholder: "Message — @ to mention", onKey: { model.key($0) },
                              onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: { model.pasteFromClipboard() }, onFocus: { _ in })
                     .frame(height: min(max(model.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
@@ -582,6 +582,11 @@ private struct RoomSheet: View {
     @State private var name = ""
     @State private var topic = ""
     @State private var picked: [String] = []
+    /// The search over the sessions to pick (2026-11-23, user: 和终端那里的搜索功能一样): by name, agent, model,
+    /// profile and folder at once, and by what was said in them once typing pauses.
+    @State private var query = ""
+    @State private var said: [String: String] = [:]
+    @State private var saidFor = ""
     @Environment(\.interfaceLook) private var look
 
     private var title: String {
@@ -599,7 +604,33 @@ private struct RoomSheet: View {
     /// The sessions that can be seated: running on this node, and not in the room already.
     private var candidates: [TerminalInfo] {
         let seated = kind == .add ? Set(model.room?.sessions.compactMap(\.terminal) ?? []) : []
-        return model.terminals.filter { !seated.contains($0.id) }
+        let all = model.terminals.filter { !seated.contains($0.id) }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return all }
+        return all.filter { t in
+            TerminalSearch.match(q, in: Self.searched(t)) != nil || (saidFor == q.lowercased() && saidOf(t) != nil)
+        }
+    }
+
+    /// What a row is searched by, besides what was said in it.
+    private static func searched(_ t: TerminalInfo) -> String {
+        [t.name, HarnessName.display(t.harness), t.model.map(ModelName.display), t.model, t.profileName, t.workdir].compactMap { $0 }.joined(separator: "  ")
+    }
+
+    private func saidOf(_ t: TerminalInfo) -> String? {
+        guard let session = t.agentSessionId else { return nil }
+        return said["\(t.harness):\(session)"]
+    }
+
+    /// What was said, asked of the service once typing pauses; an answer to an older query is dropped.
+    private func searchSaid(_ q: String) async {
+        let q = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { said = [:]; saidFor = ""; return }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled, let hits = await model.searchSaid(q), !Task.isCancelled,
+              query.trimmingCharacters(in: .whitespacesAndNewlines) == q else { return }
+        said = hits
+        saidFor = q.lowercased()
     }
 
     private var ready: Bool {
@@ -624,8 +655,9 @@ private struct RoomSheet: View {
                 if kind != .edit {
                     if kind == .new { HairRule(color: Look.line) }
                     PartLabel("Running Sessions")
+                    if !model.terminals.isEmpty { searchLine }
                     if candidates.isEmpty {
-                        Text(kind == .add ? "这个节点上正在运行的会话都已经在房间里了。" : "这个节点上没有正在运行的会话。房间可以先建，之后再拉人。")
+                        Text(!query.trimmingCharacters(in: .whitespaces).isEmpty ? "没有找到匹配的会话。" : kind == .add ? "这个节点上正在运行的会话都已经在房间里了。" : "这个节点上没有正在运行的会话。房间可以先建，之后再拉人。")
                             .font(.system(size: 12)).foregroundStyle(Look.faint)
                     } else {
                         ScrollView {
@@ -666,6 +698,26 @@ private struct RoomSheet: View {
         }
     }
 
+    /// `/ Search`, as on the Terminals page.
+    private var searchLine: some View {
+        HStack(spacing: look.isClassic ? 6 : 4) {
+            if look.isClassic {
+                Image(systemName: "magnifyingglass").font(.system(size: 11.5)).foregroundStyle(Look.faint)
+            } else {
+                Text("/").font(.system(size: 12.5, weight: .bold, design: .monospaced)).foregroundStyle(Color.signal)
+            }
+            PlainField(text: $query, placeholder: "Search",
+                       font: look.isClassic ? .systemFont(ofSize: 13) : .monospacedSystemFont(ofSize: 12.5, weight: .regular),
+                       takesFocusAtFirst: kind == .add,
+                       onCancel: { if query.isEmpty { model.sheet = nil } else { query = "" } })
+        }
+        .padding(.horizontal, look.isClassic ? 8 : 6)
+        .frame(height: look.isClassic ? 28 : 26)
+        .background(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).fill(look.isClassic ? Look.ink.opacity(0.07) : Color.clear))
+        .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).strokeBorder(look.isClassic ? Color.clear : Look.line, lineWidth: 1))
+        .task(id: query) { await searchSaid(query) }
+    }
+
     private func pick(_ terminal: TerminalInfo) -> some View {
         let on = picked.contains(terminal.id)
         // The rooms it sits in already are said beside it; it can sit in this one too.
@@ -676,7 +728,12 @@ private struct RoomSheet: View {
             HStack(spacing: 10) {
                 LookChoice(on: on, multi: true, size: 12.5).foregroundStyle(on ? (look.isClassic ? Color.signal : Look.ink) : Look.ink2)
                 SeatStateMark(state: terminal.status == "working" ? .busy : terminal.status == "waiting" ? .waiting : .idle)
-                Text(terminal.name).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ListLook.marked(terminal.name, query: query, classic: look.isClassic)).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
+                    if let words = saidOf(terminal), saidFor == query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), TerminalSearch.match(query, in: terminal.name) == nil {
+                        Text(ListLook.marked(words, query: query, classic: look.isClassic)).font(.system(size: 11)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle)
+                    }
+                }
                 Text([HarnessName.display(terminal.harness), terminal.model.map(ModelName.display)].compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1)
                 Spacer(minLength: 4)

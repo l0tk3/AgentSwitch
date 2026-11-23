@@ -253,4 +253,36 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(full["detail"] as? String, "how")
         XCTAssertEqual(full["owner"] as? String, "ui")
     }
+
+    func testAttachTokensStandForFilesInTheBox() {
+        var t = RoomAttachTokens()
+        XCTAssertEqual(t.add("/a/shot.png"), "[Image #1]")
+        XCTAssertEqual(t.add("/a/two.JPG"), "[Image #2]")
+        XCTAssertEqual(t.add("/a/notes.md"), "[File notes.md]")
+        XCTAssertEqual(t.add("/b/notes.md"), "[File notes.md #2]")
+        XCTAssertEqual(t.add("/a/shot.png"), "[Image #1]")   // the same file: the same token
+        // Not yet in the box: nothing is gone.
+        XCTAssertEqual(t.gone(in: ""), [])
+        XCTAssertEqual(t.gone(in: "看 [Image #1] [Image #2] [File notes.md] [File notes.md #2]"), [])
+        XCTAssertEqual(t.gone(in: "看 [Image #1] [File notes.md] [File notes.md #2]"), ["/a/two.JPG"])
+        XCTAssertEqual(t.forget("/a/notes.md"), "[File notes.md]")
+        // A freed number is used again.
+        XCTAssertEqual(t.add("/a/three.png"), "[Image #2]")
+    }
+
+    func testModelsOfAProfileAtAnotherAddress() throws {
+        let json = """
+        {"agents":{"claude-code":{"current":"default","models":[{"id":"opus","name":"Opus 5.5","description":"Opus 5.5 · Best"},{"id":"claude-opus-4-8","name":"Opus 4.8","older":true}],
+          "profiles":[{"id":"default","name":"Default","off":[]},
+                      {"id":"dpsk","name":"dpsk","off":[],"source":"profile","model":"deepseek-flash","baseUrl":"https://api.deepseek.com/anthropic","models":[{"id":"deepseek-flash","name":"deepseek-flash"}]}]}}}
+        """
+        let m = try JSONDecoder().decode(RoomModels.self, from: Data(json.utf8))
+        let agent = try XCTUnwrap(m.agents["claude-code"])
+        XCTAssertEqual(agent.profiles[0].models(agent).map(\.id), ["opus", "claude-opus-4-8"])
+        XCTAssertEqual(agent.profiles[0].models(agent).filter(\.isOlder).map(\.name), ["Opus 4.8"])
+        XCTAssertFalse(agent.profiles[0].elsewhere)
+        XCTAssertEqual(agent.profiles[1].models(agent).map(\.id), ["deepseek-flash"])
+        XCTAssertTrue(agent.profiles[1].elsewhere)
+        XCTAssertEqual(agent.profiles[1].host, "api.deepseek.com")
+    }
 }

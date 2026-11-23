@@ -439,8 +439,27 @@ public struct RoomFiles: Decodable, Equatable, Sendable {
 /// Which models a session may start a session on, per profile (docs/chatroom-v0.md §6.2): every agent's models and
 /// profiles, and for each profile the models the user has turned off.
 public struct RoomModels: Decodable, Equatable, Sendable {
-    public struct Model: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let name: String }
-    public struct Profile: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let name: String; public let off: [String] }
+    public struct Model: Decodable, Equatable, Sendable, Identifiable {
+        public let id: String; public let name: String
+        public let description: String?
+        /// A newer one of the same family is listed: folded under "Earlier versions".
+        public let older: Bool?
+        public var isOlder: Bool { older == true }
+    }
+    public struct Profile: Decodable, Equatable, Sendable, Identifiable {
+        public let id: String; public let name: String; public let off: [String]
+        /// This profile's own models (another vendor's address lists its own); nil from an older service: the agent's.
+        public let models: [Model]?
+        /// `agent`, `vendor` (the address listed them) or `profile` (only the model the profile was given).
+        public let source: String?
+        /// The model it starts on unless told.
+        public let model: String?
+        public let baseUrl: String?
+        public func models(_ agent: Agent) -> [Model] { models ?? agent.models }
+        public var elsewhere: Bool { source == "vendor" || source == "profile" }
+        /// Where it sends its requests, for the row's label: the address's host.
+        public var host: String? { baseUrl.flatMap { URL(string: $0)?.host } }
+    }
     public struct Agent: Decodable, Equatable, Sendable { public let models: [Model]; public let current: String?; public let profiles: [Profile] }
     public let agents: [String: Agent]
 }

@@ -241,6 +241,19 @@ exit 1
   return { PATH: `${bin}:${path}`, BROWSER: file };
 }
 
+/** A profile that pays by a key at another vendor's address (user 2026-11-23, `dpsk` at DeepSeek): Claude Code's own
+ *  names — Opus, Fable, Sonnet, Haiku, and the small model it uses on its own — are sent there as `claude-…`, which the
+ *  address does not serve and quietly answers with its own default. Each is pointed at the profile's model, under that
+ *  name in Claude Code's `/model` menu. Nothing without a model, or at Anthropic's own address. */
+const originOf = (url: string): string => { try { return new URL(url).origin; } catch { return url; } };
+export function vendorAliases(api: LaunchRequest["api"]): Record<string, string> {
+  const model = api?.model?.trim();
+  if (!model || !api?.baseUrl || originOf(api.baseUrl) === "https://api.anthropic.com") return {};
+  const out: Record<string, string> = { ANTHROPIC_SMALL_FAST_MODEL: model };
+  for (const family of ["OPUS", "FABLE", "SONNET", "HAIKU"]) { out[`ANTHROPIC_DEFAULT_${family}_MODEL`] = model; out[`ANTHROPIC_DEFAULT_${family}_MODEL_NAME`] = model; }
+  return out;
+}
+
 /** The environment that sends a process's traffic through `proxy`, in both spellings tools read; what is on this
  *  Mac goes straight. */
 export function proxyEnv(proxy: string): Record<string, string> {
@@ -334,7 +347,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // which the telemetry one does not cover.
         const quiet = { ...(req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {}), ...(req.configHome ? { DISABLE_ERROR_REPORTING: "1" } : {}) };
         Object.assign(env, quiet);
-        const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}) };
+        const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}), ...vendorAliases(req.api) };
         writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected, opts.roomFiles), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
         const args = ["--settings", settings, ...(req.isolated ? ["--setting-sources", "user"] : [])];
         {

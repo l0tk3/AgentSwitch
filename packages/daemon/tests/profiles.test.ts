@@ -873,7 +873,9 @@ describe("a profile that pays by a key (§3.6)", () => {
     const claude = launch({ id: "k1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", api: { name: "Relay", baseUrl: "https://relay.example/api", model: "claude-made-up" } });
     const settings = JSON.parse(readFileSync(join(stateDir, "k1", "settings.json"), "utf8")) as { apiKeyHelper?: string; env?: Record<string, string> };
     expect(settings.apiKeyHelper).toBe('"/n/node" "/n/hook.js" key');
-    expect(settings.env).toEqual({ ANTHROPIC_BASE_URL: "https://relay.example/api", DISABLE_ERROR_REPORTING: "1" });
+    // Claude Code's own names are pointed at the profile's model there (another vendor's address).
+    expect(settings.env).toMatchObject({ ANTHROPIC_BASE_URL: "https://relay.example/api", DISABLE_ERROR_REPORTING: "1", ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-made-up", ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-made-up", ANTHROPIC_SMALL_FAST_MODEL: "claude-made-up" });
+    expect(JSON.stringify(settings.env)).not.toContain("sk-");
     expect(claude.args.slice(claude.args.indexOf("--model"), claude.args.indexOf("--model") + 2)).toEqual(["--model", "claude-made-up"]);
     // Anthropic's own address is not named; the model chosen for the terminal goes before the profile's.
     const plain = launch({ id: "k2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", model: "opus", api: { name: "Key", model: "claude-made-up" } });

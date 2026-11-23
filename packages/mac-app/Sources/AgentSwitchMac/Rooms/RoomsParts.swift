@@ -297,10 +297,17 @@ enum RoomRich {
     static func text(_ text: String, handles: Set<String>, look: InterfaceLook) -> AttributedString {
         var out = AttributedString()
         let size = Look.scaled(13.5)
+        var lineStart = true
         for piece in RoomText.pieces(text, handles: handles) {
+            defer {
+                switch piece {
+                case .plain(let s), .code(let s): lineStart = s.hasSuffix("\n")
+                case .mention: lineStart = false
+                }
+            }
             switch piece {
             case .plain(let s):
-                out += AttributedString(s)
+                out += markdown(s, lineStart: lineStart, size: size)
             case .code(let s):
                 var run = AttributedString(s)
                 run.font = .system(size: size - 1, design: .monospaced)
@@ -320,6 +327,31 @@ enum RoomRich {
                 }
                 out += run
             }
+        }
+        return out
+    }
+
+    /// The Markdown of a stretch of plain text (2026-11-23, user: md没正确渲染): bold, italic, strikethrough and links
+    /// as they read; a heading's line bold; a list's `-` / `*` a bullet. Lines stay as written (no reflowing), and
+    /// what does not parse is shown as typed.
+    static func markdown(_ s: String, lineStart: Bool, size: CGFloat) -> AttributedString {
+        var out = AttributedString()
+        let lines = s.components(separatedBy: "\n")
+        for (i, raw) in lines.enumerated() {
+            if i > 0 { out += AttributedString("\n") }
+            var line = Substring(raw)
+            var heading = false
+            if i > 0 || lineStart {
+                if let m = line.firstMatch(of: /^#{1,6}\s+/) { line = line[m.range.upperBound...]; heading = true }
+                else if let m = line.firstMatch(of: /^(\s*)[-*+]\s+/) { out += AttributedString(m.output.1 + "• "); line = line[m.range.upperBound...] }
+            }
+            var run = (try? AttributedString(markdown: String(line), options: .init(allowsExtendedAttributes: false, interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(line)
+            for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
+                run[r.range].font = .system(size: size - 1, design: .monospaced)
+                run[r.range].backgroundColor = Look.code
+            }
+            if heading { run.font = .system(size: size, weight: .semibold) }
+            out += run
         }
         return out
     }

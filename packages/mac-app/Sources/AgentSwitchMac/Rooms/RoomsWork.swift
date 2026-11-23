@@ -213,27 +213,10 @@ struct RoomModelsSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if let all = model.adminModels {
                             ForEach(all.agents.keys.sorted(), id: \.self) { agent in
-                                if let of = all.agents[agent], !of.models.isEmpty {
+                                if let of = all.agents[agent], of.profiles.contains(where: { !$0.models(of).isEmpty }) {
                                     Text(HarnessName.display(agent)).mono(12, weight: .semibold).foregroundStyle(Look.ink).padding(.top, 12).padding(.bottom, 4)
                                     ForEach(of.profiles) { profile in
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Text(profile.name + (profile.id == of.current ? " · Current" : "")).mono(12).foregroundStyle(Look.ink2).frame(width: 190, alignment: .leading).lineLimit(1).truncationMode(.middle).help(profile.name)
-                                            FlowLayout(spacing: 6) {
-                                                ForEach(of.models) { one in
-                                                    let on = !profile.off.contains(one.id)
-                                                    Button { model.setAdminModel(one.id, on: !on, agent: agent, profile: profile) } label: {
-                                                        Text((look.isClassic ? "" : (on ? "[x] " : "[ ] ")) + one.name).mono(11.5)
-                                                            .foregroundStyle(on ? Look.ink : Look.faint).strikethrough(!on, color: Look.faint)
-                                                            .padding(.horizontal, 7).padding(.vertical, 3)
-                                                            .grounded(on && look.isClassic ? Look.raised : Color.clear, radius: 6)
-                                                            .framed(Look.line, radius: look.isClassic ? 6 : 0)
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                    .help(on ? "管理员可以用。点一下关掉。" : "已关掉，管理员不能用。点一下打开。")
-                                                }
-                                            }
-                                        }
-                                        .padding(.vertical, 6)
+                                        RoomModelsRow(model: model, agent: agent, of: of, profile: profile)
                                         HairRule(color: Look.line)
                                     }
                                 }
@@ -258,5 +241,73 @@ struct RoomModelsSheet: View {
         }
         .frame(width: 720)
         .roomFloat()
+    }
+}
+
+/// One profile's models: on or off one by one or all at once; the ones a newer version supersedes folded away; a
+/// profile at another vendor's address lists that address's models and says so.
+private struct RoomModelsRow: View {
+    @Bindable var model: RoomsModel
+    let agent: String
+    let of: RoomModels.Agent
+    let profile: RoomModels.Profile
+    @Environment(\.interfaceLook) private var look
+    @State private var earlier = false
+
+    var body: some View {
+        let all = profile.models(of)
+        let current = all.filter { !$0.isOlder }
+        let older = all.filter(\.isOlder)
+        let offCount = all.filter { profile.off.contains($0.id) }.count
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(profile.name + (profile.id == of.current ? " · Current" : "")).mono(12).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle).help(profile.name)
+                if let host = profile.host, profile.elsewhere {
+                    Text(host).mono(10.5).foregroundStyle(Look.faint).lineLimit(1).truncationMode(.middle)
+                        .help(profile.source == "vendor" ? "这个配置连的是 \(host)，列的是那边自己的模型。" : "这个配置连的是 \(host)，那边没有列出模型，只列配置里填的这一个。")
+                }
+                HStack(spacing: 8) {
+                    Button { model.setAllAdminModels(on: true, agent: agent, profile: profile, models: all) } label: { Text("All on").mono(10.5) }
+                        .buttonStyle(.plain).foregroundStyle(offCount == 0 ? Look.faint : Look.ink).disabled(offCount == 0)
+                    Button { model.setAllAdminModels(on: false, agent: agent, profile: profile, models: all) } label: { Text("All off").mono(10.5) }
+                        .buttonStyle(.plain).foregroundStyle(offCount == all.count ? Look.faint : Color.failed).disabled(offCount == all.count || all.isEmpty)
+                }
+                .help("这个配置下的模型一次全部打开或关掉。")
+            }
+            .frame(width: 190, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                if all.isEmpty {
+                    Text("这个配置没有可列的模型。").font(.system(size: 11.5)).foregroundStyle(Look.faint)
+                }
+                FlowLayout(spacing: 6) {
+                    ForEach(current) { one in chip(one) }
+                    if !older.isEmpty {
+                        Button { earlier.toggle() } label: {
+                            Text((earlier ? "▾ " : "▸ ") + "Earlier \(older.count)").mono(11).foregroundStyle(Look.faint).padding(.horizontal, 4).padding(.vertical, 3)
+                        }
+                        .buttonStyle(.plain).help("被同系列新版本取代的旧版本")
+                    }
+                }
+                if earlier, !older.isEmpty {
+                    FlowLayout(spacing: 6) { ForEach(older) { one in chip(one) } }
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func chip(_ one: RoomModels.Model) -> some View {
+        let on = !profile.off.contains(one.id)
+        let isDefault = profile.model == one.id
+        let tip = [one.description, one.id == one.name ? nil : one.id, isDefault ? "这个配置不指定模型时用它" : nil].compactMap { $0 }.joined(separator: "\n")
+        return Button { model.setAdminModel(one.id, on: !on, agent: agent, profile: profile) } label: {
+            Text((look.isClassic ? "" : (on ? "[x] " : "[ ] ")) + one.name + (isDefault ? " · default" : "")).mono(11.5)
+                .foregroundStyle(on ? Look.ink : Look.faint).strikethrough(!on, color: Look.faint)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .grounded(on && look.isClassic ? Look.raised : Color.clear, radius: 6)
+                .framed(Look.line, radius: look.isClassic ? 6 : 0)
+        }
+        .buttonStyle(.plain)
+        .help((tip.isEmpty ? "" : tip + "\n\n") + (on ? "管理员可以用。点一下关掉。" : "已关掉，管理员不能用。点一下打开。"))
     }
 }

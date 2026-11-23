@@ -691,3 +691,56 @@ describe("which models a session may start a session on", () => {
     expect(new RoomPolicy(home).allows("claude-code", "work", "haiku")).toBe(true);
   });
 });
+
+describe("the models of a profile at another vendor's address (2026-11-23)", () => {
+  const terminalsBody = { models: { "claude-code": [{ id: "opus", name: "Opus", description: "Opus 5.5 · Best for everyday" }, { id: "haiku", name: "Haiku", description: "Haiku 5.5 · Fastest" }] }, terminals: [] };
+  const profilesBody = { agents: { "claude-code": { current: "default", profiles: [
+    { id: "default", name: "Default", kind: "subscription" },
+    { id: "own", name: "Own key", kind: "api", api: { model: "claude-made-up" } },
+    { id: "dpsk", name: "dpsk", kind: "api", api: { baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-flash" } },
+  ] } } };
+
+  it("lists what the address lists, or only the profile's model; the agent's own names with their versions", async () => {
+    const { ProfileModelLists } = await import("../src/api/profileModels.js");
+    let listed: unknown = { error: "not found" }; let asked = 0;
+    const ask = async (_m: string, path: string) => { if (path === "/profiles/models") { asked++; return { status: 200, body: listed }; } return { status: 404, body: {} }; };
+    const lists = new ProfileModelLists();
+    const all = (await lists.all(ask, terminalsBody, profilesBody))["claude-code"]!;
+    expect(all.profiles.find((p) => p.id === "default")!.models.map((m) => m.name)).toEqual(["Opus 5.5", "Haiku 5.5"]);
+    expect(all.profiles.find((p) => p.id === "own")!.source).toBe("agent");   // Anthropic's own address
+    expect(all.profiles.find((p) => p.id === "dpsk")).toMatchObject({ source: "profile", models: [{ id: "deepseek-flash" }] });
+    // Asked once in ten minutes.
+    await lists.all(ask, terminalsBody, profilesBody); expect(asked).toBe(1);
+    listed = { models: ["deepseek-chat", "deepseek-reasoner"] };
+    const fresh = (await new ProfileModelLists().all(ask, terminalsBody, profilesBody))["claude-code"]!.profiles.find((p) => p.id === "dpsk")!;
+    expect(fresh).toMatchObject({ source: "vendor" });
+    expect(fresh.models.map((m) => m.id)).toEqual(["deepseek-flash", "deepseek-chat", "deepseek-reasoner"]);
+  });
+
+  it("refuses a Claude model for such a profile, and lists its own model to an admin", async () => {
+    const { RoomPolicy } = await import("../src/rooms/policy.js");
+    const { roomOrg } = await import("../src/api/roomOrg.js");
+    const started: unknown[] = [];
+    const ask = async (method: string, path: string, body?: unknown) => {
+      if (path === "/profiles") return { status: 200, body: profilesBody };
+      if (path === "/terminals" && method === "GET") return { status: 200, body: terminalsBody };
+      if (path === "/terminals" && method === "POST") { started.push(body); return { status: 201, body: { terminal: { id: "t9" } } }; }
+      if (path === "/profiles/models") return { status: 200, body: { unlisted: true } };
+      return { status: 404, body: {} };
+    };
+    const org = roomOrg(ask, new RoomPolicy(mkdtempSync(join(tmpdir(), "as-vendor-"))));
+    await expect(org.start({ agent: "claude-code", cwd: "/w", profile: "dpsk", model: "opus" })).rejects.toThrow(/another vendor's address, which has no model opus\. There: deepseek-flash/);
+    expect(await org.start({ agent: "claude-code", cwd: "/w", profile: "dpsk", model: "deepseek-flash" })).toBe("t9");
+    const models = (await org.models())["claude-code"]!;
+    expect(models.find((m) => m.id === "deepseek-flash")!.description).toMatch(/Only under profile dpsk/);
+    expect(models.find((m) => m.id === "opus")!.name).toBe("Opus 5.5");
+  });
+
+  it("points Claude Code's own names at the profile's model there, and nowhere else", async () => {
+    const { vendorAliases } = await import("../src/terminals/launch.js");
+    expect(vendorAliases({ name: "d", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-flash" })).toMatchObject({ ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-flash", ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "deepseek-flash", ANTHROPIC_SMALL_FAST_MODEL: "deepseek-flash" });
+    expect(vendorAliases({ name: "a", baseUrl: "https://api.anthropic.com", model: "claude-x" })).toEqual({});
+    expect(vendorAliases({ name: "a", model: "claude-x" })).toEqual({});
+    expect(vendorAliases({ name: "d", baseUrl: "https://api.deepseek.com/anthropic" })).toEqual({});
+  });
+});

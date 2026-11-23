@@ -37,7 +37,7 @@ extension RoomsDemo {
          "messages":[
           {"seq":1,"from":"you","to":["daemon"],"text":"@daemon 登录接口的返回里加一个 `expiresAt`，改完告诉另外两边。","at":\(at(42))},
           {"seq":2,"from":"daemon","to":["mac-app","ios-app"],"text":"@mac-app @ios-app 接口我改完了，`/login` 的返回多了一个 `expiresAt` 字段，你们两边的模型要跟着加。","at":\(at(30))},
-          {"seq":3,"from":"daemon","to":[],"text":"测试也补上了，三个用例。","at":\(at(29)),"files":\(RoomsDemo.demoFiles)},
+          {"seq":3,"from":"daemon","to":[],"text":"**测试**也补上了，三个用例：\\n- 正常登录\\n- *过期*的令牌\\n- 错误密码","at":\(at(29)),"files":\(RoomsDemo.demoFiles)},
           {"seq":4,"from":"mac-app","to":["daemon"],"replyTo":2,"text":"@daemon 收到。是毫秒还是秒？","at":\(at(12))},
           {"seq":5,"from":"daemon","to":["mac-app","web"],"text":"@mac-app 毫秒。@web 你那边的类型也要改。","at":\(at(10))},
           {"seq":6,"from":"mac-app","to":["you"],"text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}],
@@ -64,8 +64,9 @@ extension RoomsDemo {
     }()
 
     static let models: RoomModels = try! JSONDecoder().decode(RoomModels.self, from: Data("""
-    {"agents":{"claude-code":{"current":"work","models":[{"id":"opus","name":"Opus 5.5"},{"id":"fable","name":"Fable 5.2"},{"id":"sonnet","name":"Sonnet 5.5"},{"id":"haiku","name":"Haiku 5.5"}],
-       "profiles":[{"id":"default","name":"Default","off":[]},{"id":"work","name":"Work","off":["haiku"]},{"id":"p3","name":"Personal","off":["haiku","sonnet"]}]},
+    {"agents":{"claude-code":{"current":"work","models":[{"id":"opus","name":"Opus 5.5"},{"id":"fable","name":"Fable 5.2"},{"id":"sonnet","name":"Sonnet 5.5"},{"id":"haiku","name":"Haiku 5.5"},{"id":"claude-opus-4-8","name":"Opus 4.8","older":true}],
+       "profiles":[{"id":"default","name":"Default","off":[]},{"id":"work","name":"Work","off":["haiku"]},{"id":"p3","name":"Personal","off":["haiku","sonnet"]},
+         {"id":"dpsk","name":"dpsk","off":[],"source":"profile","model":"deepseek-flash","baseUrl":"https://api.deepseek.com/anthropic","models":[{"id":"deepseek-flash","name":"deepseek-flash"}]}]},
      "codex":{"current":"default","models":[{"id":"gpt-6-sol","name":"GPT-6 Sol"},{"id":"gpt-6-mini","name":"GPT-6 Mini"}],"profiles":[{"id":"default","name":"Default","off":["gpt-6-mini"]}]}}}
     """.utf8))
 

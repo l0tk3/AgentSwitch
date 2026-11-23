@@ -42,7 +42,11 @@ final class RoomsModel {
     }
 
     // writing
-    var draft = "" { didSet { if draft != oldValue { typed() } } }
+    var draft = "" { didSet { if draft != oldValue { typed(); tokensChanged() } } }
+    /// The `[Image #1]` / `[File …]` tokens standing in the box for the files (RoomAttachTokens).
+    private var attachTokens = RoomAttachTokens()
+    /// Put in at the cursor once: a file's token.
+    private(set) var insert: InsertRequest?
     var draftHeight: CGFloat = 0
     var replyTo: Int?
     /// Files the next message comes with, by their paths on this Mac (§3 附件).
@@ -186,11 +190,29 @@ final class RoomsModel {
     /// Files dropped on the box or picked: added once each, ten at most (the service's limit).
     func attach(urls: [URL]) {
         guard onThisMac else { return }
-        for path in urls.filter(\.isFileURL).map(\.path) where !files.contains(path) && files.count < 10 { files.append(path) }
-        focusRequests += 1
+        var put: [String] = []
+        for path in urls.filter(\.isFileURL).map(\.path) where !files.contains(path) && files.count < 10 {
+            files.append(path)
+            put.append(attachTokens.add(path))
+        }
+        if put.isEmpty { focusRequests += 1; return }
+        let lead = draft.isEmpty || draft.hasSuffix(" ") || draft.hasSuffix("\n") ? "" : " "
+        insert = InsertRequest(text: lead + put.joined(separator: " ") + " ")
     }
 
-    func detach(_ path: String) { files.removeAll { $0 == path } }
+    /// A file taken off with its `×`: its token goes from the box too.
+    func detach(_ path: String) {
+        files.removeAll { $0 == path }
+        if let token = attachTokens.forget(path) {
+            draft = draft.replacingOccurrences(of: token + " ", with: "").replacingOccurrences(of: token, with: "")
+        }
+    }
+
+    /// A token deleted from the box takes its file off.
+    private func tokensChanged() {
+        if draft.isEmpty && files.isEmpty { attachTokens.clear(); return }
+        for path in attachTokens.gone(in: draft) { files.removeAll { $0 == path } }
+    }
 
     /// ⌘V with files or a picture on the clipboard: files come along by their paths; a picture (a screenshot, a copy
     /// from Preview) has no path, so it is written into the room's shared folder and comes along from there.
@@ -247,7 +269,7 @@ final class RoomsModel {
             do {
                 try await client().say(text, replyTo: reply, files: sent, in: id)
                 if draft == text { draft = "" }
-                if files == sent { files = [] }
+                if files == sent { files = []; attachTokens.clear() }
                 replyTo = nil
                 problem = nil
             } catch {
@@ -364,6 +386,12 @@ final class RoomsModel {
         act { try await $0.renameSeat(seat, to: name, in: id) }
     }
 
+    /// The sessions whose words matched (`harness:id` → the words around the match); nil when it could not be asked.
+    func searchSaid(_ q: String) async -> [String: String]? {
+        guard !demo, let hits = try? await client().searchSessions(q) else { return nil }
+        return Dictionary(hits.map { ("\($0.harness):\($0.id)", $0.excerpt) }, uniquingKeysWith: { first, _ in first })
+    }
+
     func loadAdminModels() {
         guard !demo else { return }
         Task { do { adminModels = try await client().roomModels() } catch { problem = Self.say(error) } }
@@ -373,6 +401,15 @@ final class RoomsModel {
     func setAdminModel(_ model: String, on: Bool, agent: String, profile: RoomModels.Profile) {
         guard !demo else { return }
         let off = on ? profile.off.filter { $0 != model } : profile.off + [model]
+        Task {
+            do { try await client().setRoomModels(off: off, agent: agent, profile: profile.id); adminModels = try await client().roomModels() } catch { problem = Self.say(error) }
+        }
+    }
+
+    /// Every model of a profile on (`on`) or off at once.
+    func setAllAdminModels(on: Bool, agent: String, profile: RoomModels.Profile, models: [RoomModels.Model]) {
+        guard !demo else { return }
+        let off = on ? [] : models.map(\.id)
         Task {
             do { try await client().setRoomModels(off: off, agent: agent, profile: profile.id); adminModels = try await client().roomModels() } catch { problem = Self.say(error) }
         }
