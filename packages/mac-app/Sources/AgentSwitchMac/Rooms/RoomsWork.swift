@@ -189,3 +189,74 @@ struct RoomFilesSheet: View {
         .roomFloat()
     }
 }
+
+// MARK: - which models admins may use
+
+/// Per profile, the models a session may start a session on (docs/chatroom-v0.md §6.2): the user turns one off, and
+/// an admin that asks for it is refused and told the ones it may use. What the user starts is not bound by it.
+struct RoomModelsSheet: View {
+    @Bindable var model: RoomsModel
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Models for Admins").mono(look.isClassic ? 14 : 12.5, weight: .semibold).foregroundStyle(Look.ink)
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(look.isClassic ? Color.clear : Look.raised)
+            HairRule(color: Look.line)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("管理员会话拉起新会话时，每个配置下哪些模型能用。关掉的模型，管理员指定它会被拒绝，并被告知这个配置下能用哪些。只管由会话拉起来的会话；你自己开的不受影响。").font(.system(size: 12)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let all = model.adminModels {
+                            ForEach(all.agents.keys.sorted(), id: \.self) { agent in
+                                if let of = all.agents[agent], !of.models.isEmpty {
+                                    Text(HarnessName.display(agent)).mono(12, weight: .semibold).foregroundStyle(Look.ink).padding(.top, 12).padding(.bottom, 4)
+                                    ForEach(of.profiles) { profile in
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Text(profile.name + (profile.id == of.current ? " · Current" : "")).mono(12).foregroundStyle(Look.ink2).frame(width: 190, alignment: .leading).lineLimit(1).truncationMode(.middle).help(profile.name)
+                                            FlowLayout(spacing: 6) {
+                                                ForEach(of.models) { one in
+                                                    let on = !profile.off.contains(one.id)
+                                                    Button { model.setAdminModel(one.id, on: !on, agent: agent, profile: profile) } label: {
+                                                        Text((look.isClassic ? "" : (on ? "[x] " : "[ ] ")) + one.name).mono(11.5)
+                                                            .foregroundStyle(on ? Look.ink : Look.faint).strikethrough(!on, color: Look.faint)
+                                                            .padding(.horizontal, 7).padding(.vertical, 3)
+                                                            .grounded(on && look.isClassic ? Look.raised : Color.clear, radius: 6)
+                                                            .framed(Look.line, radius: look.isClassic ? 6 : 0)
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .help(on ? "管理员可以用。点一下关掉。" : "已关掉，管理员不能用。点一下打开。")
+                                                }
+                                            }
+                                        }
+                                        .padding(.vertical, 6)
+                                        HairRule(color: Look.line)
+                                    }
+                                }
+                            }
+                        } else {
+                            BrailleSpinner().padding(.vertical, 24).frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .frame(height: 340)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            HairRule(color: Look.line)
+            HStack(spacing: 10) {
+                if let problem = model.problem { Text(problem).font(.system(size: 12)).foregroundStyle(Color.failed).lineLimit(2) }
+                Spacer()
+                Button { model.sheet = nil } label: { BracketLabel(word: "Close", key: "esc") }.buttonStyle(BracketButtonStyle()).keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .frame(width: 720)
+        .roomFloat()
+    }
+}

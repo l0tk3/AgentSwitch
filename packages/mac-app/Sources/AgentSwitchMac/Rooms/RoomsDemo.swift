@@ -63,6 +63,12 @@ extension RoomsDemo {
         return RoomsDemo(rooms: list, room: room)
     }()
 
+    static let models: RoomModels = try! JSONDecoder().decode(RoomModels.self, from: Data("""
+    {"agents":{"claude-code":{"current":"work","models":[{"id":"opus","name":"Opus 5.5"},{"id":"fable","name":"Fable 5.2"},{"id":"sonnet","name":"Sonnet 5.5"},{"id":"haiku","name":"Haiku 5.5"}],
+       "profiles":[{"id":"default","name":"Default","off":[]},{"id":"work","name":"Work","off":["haiku"]},{"id":"p3","name":"Personal","off":["haiku","sonnet"]}]},
+     "codex":{"current":"default","models":[{"id":"gpt-6-sol","name":"GPT-6 Sol"},{"id":"gpt-6-mini","name":"GPT-6 Mini"}],"profiles":[{"id":"default","name":"Default","off":["gpt-6-mini"]}]}}}
+    """.utf8))
+
     static let files: RoomFiles = {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         return try! JSONDecoder().decode(RoomFiles.self, from: Data("""

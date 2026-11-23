@@ -44,6 +44,8 @@ export type ApiDeps = {
   /** Something a room's seats may be waiting for changed (a message, a seat, a pause): what is to be given is looked
    *  at again. */
   readonly roomsChanged?: (roomId: string) => void;
+  /** Which models a session may start a session on, per profile (rooms/policy.ts). */
+  readonly roomPolicy?: import("../rooms/policy.js").RoomPolicy;
   /** This service's own routes, asked in process like a screen's (used to resume the session behind a room seat,
    *  docs/chatroom-v0.md §6.2). Absent: resuming from a room is not available. */
   readonly callLocal?: import("./roomOrg.js").Ask;

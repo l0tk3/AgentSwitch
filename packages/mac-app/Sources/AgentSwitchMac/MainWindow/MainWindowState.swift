@@ -149,6 +149,8 @@ final class MainWindowState {
     private(set) var railOut = false
     /// Told when the rail is put away or brought back (the window keeps it).
     @ObservationIgnored var onRailHidden: (Bool) -> Void = { _ in }
+    /// A page asks for a terminal of this window's node to be shown (the Chat Room page: a member's own terminal).
+    @ObservationIgnored var onShowTerminal: (String) -> Void = { _ in }
     @ObservationIgnored private var pointerOnStrip = false
     @ObservationIgnored private var pointerOnRail = false
     @ObservationIgnored private var railTimer: Task<Void, Never>?

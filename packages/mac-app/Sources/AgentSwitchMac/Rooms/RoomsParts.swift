@@ -406,6 +406,8 @@ struct RoomMemberCard: View {
     var end: (Bool) -> Void = { _ in }
     /// Its nickname in this room.
     var rename: (String) -> Void = { _ in }
+    /// Its own terminal, on the Terminals page; nil: it has none here.
+    var openTerminal: (() -> Void)? = nil
     @State private var renaming = false
     @State private var newName = ""
     @Environment(\.interfaceLook) private var look
@@ -480,6 +482,10 @@ struct RoomMemberCard: View {
                         .padding(.top, 10)
                 }
                 HStack(spacing: 8) {
+                    if let openTerminal, seat.state != .exited {
+                        Button(action: openTerminal) { BracketLabel(word: "Terminal") }.buttonStyle(BracketButtonStyle(role: .primary))
+                            .help("跳到它自己的终端。")
+                    }
                     Button(action: mention) { BracketLabel(word: "Mention") }.buttonStyle(BracketButtonStyle())
                     Button { setMuted(!seat.muted) } label: { BracketLabel(word: seat.muted ? "Unmute" : "Mute") }
                         .buttonStyle(BracketButtonStyle())

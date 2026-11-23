@@ -662,3 +662,32 @@ describe("reading the room once", () => {
     expect(delivery.atTurnEnd("ui")).toContain("You have read everything else in the room.");
   });
 });
+
+describe("which models a session may start a session on", () => {
+  it("is the user's to say per profile: a model turned off is refused with the ones allowed, and said in the list", async () => {
+    const { RoomPolicy } = await import("../src/rooms/policy.js");
+    const { roomOrg } = await import("../src/api/roomOrg.js");
+    const home = mkdtempSync(join(tmpdir(), "as-policy-"));
+    const policy = new RoomPolicy(home);
+    const started: any[] = [];
+    const ask = async (method: string, path: string, body?: unknown) => {
+      if (path === "/profiles") return { status: 200, body: { agents: { "claude-code": { current: "work", profiles: [{ id: "default", name: "Default" }, { id: "work", name: "Work" }] } } } };
+      if (path === "/terminals" && method === "GET") return { status: 200, body: { models: { "claude-code": [{ id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }, { id: "haiku", name: "Haiku" }] }, terminals: [] } };
+      if (path === "/terminals" && method === "POST") { started.push(body); return { status: 201, body: { terminal: { id: "t1" } } }; }
+      return { status: 404, body: {} };
+    };
+    const org = roomOrg(ask, policy);
+    expect(policy.set("claude-code", "work", ["haiku", "haiku", " "])).toEqual(["haiku"]);
+    // Under the profile it would run on (the current one when none is named): refused, with what is allowed.
+    await expect(org.start({ agent: "claude-code", cwd: "/w", model: "haiku" })).rejects.toThrow('turned the model haiku off for sessions started by a session under profile "Work". Allowed there: opus, sonnet');
+    expect(started).toEqual([]);
+    expect(await org.start({ agent: "claude-code", cwd: "/w", model: "sonnet" })).toBe("t1");
+    expect(await org.start({ agent: "claude-code", cwd: "/w", model: "haiku", profile: "default" })).toBe("t1");   // not turned off there
+    expect(await org.start({ agent: "claude-code", cwd: "/w" })).toBe("t1");                                       // the profile's own default
+    expect((await org.models())["claude-code"]!.find((m) => m.id === "haiku")!.description).toContain("NOT for you under profile Work");
+    // Kept over a restart; turned on again by an empty list.
+    expect(new RoomPolicy(home).offFor("claude-code", "work")).toEqual(["haiku"]);
+    policy.set("claude-code", "work", []);
+    expect(new RoomPolicy(home).allows("claude-code", "work", "haiku")).toBe(true);
+  });
+});

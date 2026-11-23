@@ -35,6 +35,7 @@ import { RoomKit } from "./rooms/kit.js";
 import type { SeatLookup } from "./rooms/state.js";
 import { runningOf, seatLive } from "./api/rooms.js";
 import { follow } from "./rooms/follow.js";
+import { RoomPolicy } from "./rooms/policy.js";
 import { roomOrg, type Ask } from "./api/roomOrg.js";
 
 /** How often what has not arrived in the rooms is looked at again. */
@@ -520,6 +521,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // Chat Room (docs/chatroom-v0.md): the rooms as kept, how their messages reach the sessions they are for, and what
   // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
   const rooms = new RoomStore(cfg.home);
+  const roomPolicy = new RoomPolicy(cfg.home);
   const roomFilesDir = filesRoot(cfg.home);
   mkdirSync(roomFilesDir, { recursive: true, mode: 0o700 });
   rooms.sweep();
@@ -528,7 +530,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // Only a session that has the Kit is given anything: one that could not answer in the room is not spoken to.
   const roomDelivery: RoomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir(), push: (terminal, text) => (roomKit.has(terminal) ? roomSay(terminal, text) : Promise.resolve(false)) });
   let roomAsk: Ask | null = null;
-  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk) : null) });
+  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk, roomPolicy) : null) });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -660,7 +662,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

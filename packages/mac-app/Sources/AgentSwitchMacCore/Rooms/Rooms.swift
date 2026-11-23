@@ -433,6 +433,15 @@ public struct RoomFiles: Decodable, Equatable, Sendable {
     }
 }
 
+/// Which models a session may start a session on, per profile (docs/chatroom-v0.md §6.2): every agent's models and
+/// profiles, and for each profile the models the user has turned off.
+public struct RoomModels: Decodable, Equatable, Sendable {
+    public struct Model: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let name: String }
+    public struct Profile: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let name: String; public let off: [String] }
+    public struct Agent: Decodable, Equatable, Sendable { public let models: [Model]; public let current: String?; public let profiles: [Profile] }
+    public let agents: [String: Agent]
+}
+
 /// A room as it is read: itself, its seats (those that left too: they said things), what was said, and the receipts
 /// still open.
 public struct Room: Decodable, Equatable, Sendable {
@@ -722,6 +731,13 @@ public extension DaemonClient {
     /// A member's name in the room (its nickname there; its session's own name is another thing).
     func renameSeat(_ handle: String, to name: String, in room: String) async throws {
         _ = try await call("PATCH", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", body: try JSONSerialization.data(withJSONObject: ["name": name]), timeout: 10)
+    }
+
+    func roomModels() async throws -> RoomModels { try decode(RoomModels.self, try await call("GET", "/rooms/models", timeout: 15)) }
+
+    /// The models turned off, under one profile of an agent, for sessions a session starts.
+    func setRoomModels(off: [String], agent: String, profile: String) async throws {
+        _ = try await call("PUT", "/rooms/models/\(DaemonClient.segment(agent))/\(DaemonClient.segment(profile))", body: try JSONSerialization.data(withJSONObject: ["off": off]), timeout: 10)
     }
 
     /// Every member whose session has ended is brought back.

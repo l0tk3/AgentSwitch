@@ -94,6 +94,7 @@ final class MainWindowController: NSObject {
         super.init()
         if let node { state.use(node: node) }
         // The rail put away stays put away the next time (docs/dispatch-v0.md §1 图标栏可以收起).
+        state.onShowTerminal = { [weak self] id in self?.show(terminal: id, node: self?.state.nodeId) }
         state.onRailHidden = { hidden in
             #if DEBUG
             if Self.probing { return }   // a probe's rail is not the user's

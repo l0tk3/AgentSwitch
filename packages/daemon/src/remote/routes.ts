@@ -183,6 +183,8 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   // Chat Room (docs/chatroom-v0.md): the rooms on this node, and the user in them.
   ["GET", "/rooms"],
   ["POST", "/rooms"],
+  ["GET", "/rooms/models"],
+  ["PUT", "/rooms/models/:agent/:profile"],
   ["GET", "/rooms/:id"],
   ["GET", "/rooms/:id/files"],
   ["GET", "/rooms/:id/files/content"],

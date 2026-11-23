@@ -11,7 +11,7 @@ import SwiftUI
 final class RoomsModel {
     /// What floats over the page: a room being made, sessions being added to the one on screen, or its name and topic
     /// being changed.
-    enum Sheet: Equatable { case new, add, edit, notes, tasks, files }
+    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models }
 
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// A made-up page for the design preview: shown as it is, the service never asked.
@@ -58,6 +58,8 @@ final class RoomsModel {
     var previewing: URL?
     var card: String?
     var sheet: Sheet?
+    /// Which models admins may use under which profile, read when its sheet opens.
+    private(set) var adminModels: RoomModels?
     /// What is in the room's shared folder, read when its sheet opens; nil: not read yet.
     private(set) var shared: RoomFiles?
     /// The sessions running on the node, for a sheet's list.
@@ -362,6 +364,20 @@ final class RoomsModel {
         act { try await $0.renameSeat(seat, to: name, in: id) }
     }
 
+    func loadAdminModels() {
+        guard !demo else { return }
+        Task { do { adminModels = try await client().roomModels() } catch { problem = Self.say(error) } }
+    }
+
+    /// One model on or off, for sessions a session starts under one profile.
+    func setAdminModel(_ model: String, on: Bool, agent: String, profile: RoomModels.Profile) {
+        guard !demo else { return }
+        let off = on ? profile.off.filter { $0 != model } : profile.off + [model]
+        Task {
+            do { try await client().setRoomModels(off: off, agent: agent, profile: profile.id); adminModels = try await client().roomModels() } catch { problem = Self.say(error) }
+        }
+    }
+
     func resumeAll() {
         guard let id = selected else { return }
         act { try await $0.resumeAll(in: id) }
@@ -385,6 +401,7 @@ final class RoomsModel {
         self.sheet = sheet
         card = nil
         if sheet == .files { shared = demo ? RoomsDemo.files : nil; loadShared() }
+        if sheet == .models { if demo { adminModels = RoomsDemo.models }; loadAdminModels() }
         guard sheet == .new || sheet == .add, !demo else { return }
         Task {
             if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
@@ -412,7 +429,7 @@ final class RoomsModel {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
-                case .notes, .tasks, .files: break
+                case .notes, .tasks, .files, .models: break
                 case .edit:
                     guard let id else { break }
                     try await client().updateRoom(id, name: name, topic: topic)

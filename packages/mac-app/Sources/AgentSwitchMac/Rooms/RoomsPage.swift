@@ -93,7 +93,7 @@ private struct RoomsColumns: View {
     @ViewBuilder
     private var center: some View {
         if let room = model.room {
-            RoomView(model: model, room: room, home: home)
+            RoomView(model: model, room: room, home: home, showTerminal: state.onShowTerminal)
         } else if model.loaded, model.rooms.isEmpty {
             VStack(spacing: 12) {
                 Text(model.error ?? "还没有房间。建一个，把正在运行的会话拉进来，它们就能互相说话。")
@@ -115,6 +115,7 @@ private struct RoomsColumns: View {
             case .notes: RoomNotesSheet(model: model)
             case .tasks: RoomTasksSheet(model: model)
             case .files: RoomFilesSheet(model: model)
+            case .models: RoomModelsSheet(model: model)
             default: RoomSheet(model: model, kind: model.sheet ?? .new)
             }
         }
@@ -132,6 +133,8 @@ private struct RoomsList: View {
             HStack(spacing: 8) {
                 PartLabel("Rooms")
                 Spacer()
+                Button { model.open(.models) } label: { BracketLabel(word: "Models") }.buttonStyle(BracketButtonStyle(size: 12))
+                    .help("管理员会话拉人时，每个配置下哪些模型能用。")
                 Button { model.open(.new) } label: { BracketLabel(word: "New Room") }.buttonStyle(BracketButtonStyle(size: 12))
             }
             .padding(.horizontal, 12)
@@ -204,6 +207,7 @@ private struct RoomView: View {
     @Bindable var model: RoomsModel
     let room: Room
     let home: String
+    var showTerminal: (String) -> Void = { _ in }
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -238,7 +242,8 @@ private struct RoomView: View {
                     Color.clear.contentShape(Rectangle()).onTapGesture { model.card = nil }
                     RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
                                    setMuted: { model.setMuted($0, seat: handle) }, resume: { model.resume(seat: handle) },
-                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) }, rename: { model.rename(seat: handle, to: $0) })
+                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) }, rename: { model.rename(seat: handle, to: $0) },
+                                   openTerminal: seat.terminal.map { id in { model.card = nil; showTerminal(id) } })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
             }
@@ -583,6 +588,7 @@ private struct RoomSheet: View {
         case .notes: "Notes"
         case .tasks: "Tasks"
         case .files: "Files"
+        case .models: "Models"
         }
     }
 
@@ -596,7 +602,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
-        case .notes, .tasks, .files: false
+        case .notes, .tasks, .files, .models: false
         }
     }
 
