@@ -7,7 +7,8 @@
  *  the receipt goes: a room shows only what has not arrived. */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { faceOf, type Face } from "./face.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
@@ -22,6 +23,25 @@ export const MAX_LISTED = 500, MAX_DEPTH = 6;
 /** Where every room's shared folder is, under the home: apart from what the rooms themselves are kept in, so that a
  *  session let into the folders is let into nothing else. */
 export const filesRoot = (home: string): string => join(home, "room-files");
+
+/** Puts a folder in the user's Trash under `name` (macOS: `~/.Trash`; elsewhere the desktop's own, with its note of
+ *  where it was), where it can be taken back from. It stays where it is when that can not be done. */
+export function toTrash(dir: string, name: string, at: number = Date.now()): void {
+  const mac = process.platform === "darwin";
+  const base = mac ? join(homedir(), ".Trash") : join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash");
+  const files = mac ? base : join(base, "files");
+  try {
+    mkdirSync(files, { recursive: true, mode: 0o700 });
+    const safe = name.replace(/[\/:\0\n\r]/g, " ").trim().slice(0, 120) || "AgentSwitch Room";
+    let as = safe;
+    for (let n = 2; existsSync(join(files, as)); n++) as = `${safe} ${n}`;
+    renameSync(dir, join(files, as));
+    if (!mac) {
+      mkdirSync(join(base, "info"), { recursive: true, mode: 0o700 });
+      writeFileSync(join(base, "info", `${as}.trashinfo`), `[Trash Info]\nPath=${encodeURI(dir)}\nDeletionDate=${new Date(at).toISOString().slice(0, 19)}\n`);
+    }
+  } catch { /* another disk, or no Trash: it stays */ }
+}
 
 /** A file in a room's shared folder: its path under the folder. */
 export type RoomFile = { readonly path: string; readonly size: number; readonly modifiedAt: number };
@@ -133,7 +153,7 @@ export class RoomStore {
   private readonly said = new Map<string, Message[]>();
 
   private readonly filesDir: string;
-  constructor(home: string, private readonly now: () => number = Date.now) { this.dir = join(home, "rooms"); this.filesDir = filesRoot(home); }
+  constructor(home: string, private readonly now: () => number = Date.now, private readonly trash: (dir: string, name: string) => void = toTrash) { this.dir = join(home, "rooms"); this.filesDir = filesRoot(home); }
 
   /** A room's shared folder (§9), made when first asked for: what members hand each other as files — a report, a
    *  plan, an interface — is written here and a message only points at it. */
@@ -254,14 +274,30 @@ export class RoomStore {
     return found.size;
   }
 
+  /** A shared folder whose room is gone: away when empty, else into the Trash — what members wrote there may be the
+   *  only copy, and the user can take it back. */
+  private discard(id: string, name: string): void {
+    const dir = join(this.filesDir, id);
+    try { rmdirSync(dir); return; } catch { /* not there, or not empty */ }
+    if (existsSync(dir)) this.trash(dir, `AgentSwitch Room ${name} ${id}`.replace(/\s+/g, " "));
+  }
+
+  /** At the start: shared folders no room has any more (left by a room removed before, or while the service was
+   *  not running) go the same way. */
+  sweep(): void {
+    let names: string[];
+    try { names = readdirSync(this.filesDir); } catch { return; }
+    const rooms = this.all();
+    for (const name of names) if (ID.test(name) && !rooms.has(name)) this.discard(name, "");
+  }
+
   remove(id: string): void {
-    this.get(id);
+    const room = this.get(id);
     this.all().delete(id);
     this.said.delete(id);
     rmSync(join(this.dir, `${id}.json`), { force: true });
     rmSync(join(this.dir, `${id}.jsonl`), { force: true });
-    // Its shared folder goes with it only when nothing is in it: what members wrote there may be the only copy.
-    try { rmdirSync(join(this.filesDir, id)); } catch { /* not there, or not empty: it stays */ }
+    this.discard(id, room.name);
   }
 
   // ---- seats

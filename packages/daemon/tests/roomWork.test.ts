@@ -1,6 +1,6 @@
 /** A room's shared folder, task list, and who is changing which files (docs/chatroom-v0.md §9). */
 
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -15,7 +15,9 @@ import { filesRoot, RoomStore } from "../src/rooms/store.js";
 function made() {
   const home = mkdtempSync(join(tmpdir(), "as-roomw-"));
   let now = new Date(2026, 10, 23, 10, 0).getTime();
-  const store = new RoomStore(home, () => now);
+  const trashed: { name: string; to: string }[] = [];
+  const bin = mkdtempSync(join(tmpdir(), "as-roomw-trash-"));
+  const store = new RoomStore(home, () => now, (dir, name) => { const to = join(bin, name); renameSync(dir, to); trashed.push({ name, to }); });
   const seat = (terminal: string): SeatLive | null => ({ state: "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: "default", node: null } });
   const delivery = new RoomDelivery({ store, seat });
   const changed: string[] = [];
@@ -29,12 +31,12 @@ function made() {
     const res = await app.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
     return { status: res.status, body: await res.json() as any };
   };
-  return { home, store, kit, room, say, call, changed, later: (minutes: number) => { now += minutes * 60_000; } };
+  return { home, store, trashed, kit, room, say, call, changed, later: (minutes: number) => { now += minutes * 60_000; } };
 }
 
 describe("a room's shared folder", () => {
   it("is a folder of its own under the home, listed newest first without links or hidden files, and kept when the room goes if something is in it", async () => {
-    const { home, store, room, say, call } = made();
+    const { home, store, room, say, call, trashed } = made();
     const folder = store.folder(room.id);
     expect(folder).toBe(join(filesRoot(home), room.id));
     expect((await say("api", "room_files")).text).toContain("It is empty");
@@ -52,12 +54,29 @@ describe("a room's shared folder", () => {
     expect(got.body.folder).toBe(folder);
     expect(got.body.files).toHaveLength(2);
     expect((await call("GET", `/rooms/${room.id}`)).body.folder).toBe(folder);
+    // The room goes: its folder goes into the Trash with what is in it; an empty one is just gone.
     store.remove(room.id);
-    expect(existsSync(join(folder, "plan.md"))).toBe(true);
+    expect(existsSync(folder)).toBe(false);
+    expect(trashed).toHaveLength(1);
+    expect(trashed[0]!.name).toBe(`AgentSwitch Room login ${room.id}`);
+    expect(existsSync(join(trashed[0]!.to, "plan.md"))).toBe(true);
     const empty = store.create({ name: "empty" });
     const gone = store.folder(empty.id);
     store.remove(empty.id);
     expect(existsSync(gone)).toBe(false);
+    expect(trashed).toHaveLength(1);
+    // At the start, a folder no room has any more goes the same way; a room's own stays, and so does what is not a room's.
+    const kept = store.create({ name: "kept" });
+    writeFileSync(join(store.folder(kept.id), "a.md"), "a");
+    mkdirSync(join(filesRoot(home), "orphan1"));
+    writeFileSync(join(filesRoot(home), "orphan1", "left.md"), "left");
+    mkdirSync(join(filesRoot(home), "orphan2"));
+    mkdirSync(join(filesRoot(home), "Not A Room"));
+    store.sweep();
+    expect(trashed.map((t) => t.name)).toEqual([`AgentSwitch Room login ${room.id}`, "AgentSwitch Room orphan1"]);
+    expect(existsSync(join(filesRoot(home), "orphan2"))).toBe(false);
+    expect(existsSync(join(store.folder(kept.id), "a.md"))).toBe(true);
+    expect(existsSync(join(filesRoot(home), "Not A Room"))).toBe(true);
   });
 });
 

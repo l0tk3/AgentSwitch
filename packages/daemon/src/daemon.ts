@@ -521,6 +521,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const rooms = new RoomStore(cfg.home);
   const roomFilesDir = filesRoot(cfg.home);
   mkdirSync(roomFilesDir, { recursive: true, mode: 0o700 });
+  rooms.sweep();
   let roomSeat: SeatLookup = () => null;
   let roomSay: (terminal: string, text: string) => Promise<boolean> = async () => false;
   // Only a session that has the Kit is given anything: one that could not answer in the room is not spoken to.
