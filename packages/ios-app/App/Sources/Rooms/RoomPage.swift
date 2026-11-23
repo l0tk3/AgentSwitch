@@ -16,6 +16,10 @@ struct RoomPage: View {
     @State private var editing = false
     @State private var confirmDelete = false
     @State private var notes = false
+    @State private var tasks = false
+    @State private var files = false
+    /// A file picked on the shared folder's sheet: shown on the Files page once the sheet is gone.
+    @State private var fileToShow: String?
     @FocusState private var writing: Bool
 
     struct MembersRequest: Identifiable {
@@ -69,6 +73,8 @@ struct RoomPage: View {
                         Button("Pause", systemImage: "pause") { Task { await model.run(app.api) { try await $0.updateRoom(model.id, paused: true) } } }
                     }
                     Button(detail?.notes == nil ? "Notes" : "Notes ·", systemImage: "pin") { notes = true }
+                    Button(detail.map { $0.openTasks > 0 ? "Tasks · \($0.openTasks)" : "Tasks" } ?? "Tasks", systemImage: "checklist") { tasks = true }
+                    Button("Files", systemImage: "folder") { files = true }
                     Button("Add Sessions…", systemImage: "plus") { adding = true }
                     Button("Rename…", systemImage: "pencil") { editing = true }
                     Section { Button("Delete Room…", systemImage: "trash", role: .destructive) { confirmDelete = true } }
@@ -108,6 +114,12 @@ struct RoomPage: View {
             }
             .followsLook()
         }
+        .sheet(isPresented: $tasks) {
+            RoomTasksSheet(model: model, addingAtOpen: Self.sampleScreen == "roomtaskadd").followsLook()
+        }
+        .sheet(isPresented: $files, onDismiss: { if let path = fileToShow { fileToShow = nil; showFile(path) } }) {
+            RoomFilesSheet(room: model.id, folder: detail?.folder ?? "") { fileToShow = $0 }.followsLook()
+        }
         #if DEBUG
         // The sample screens' sheets, as taps would open them.
         .onAppear {
@@ -118,6 +130,8 @@ struct RoomPage: View {
                 case "roomcard": members = MembersRequest(card: "android")
                 case "roomadd": adding = true
                 case "roomnotes": notes = true
+                case "roomtasks", "roomtaskadd": tasks = true
+                case "roomfiles": files = true
                 default: break
                 }
             }
@@ -184,7 +198,7 @@ struct RoomPage: View {
                                            openCard: { members = MembersRequest(card: $0) },
                                            reply: { model.replyTo = row.message.seq; writing = true },
                                            mention: { mention($0) },
-                                           openFile: { app.showInFiles(MacPath.parent($0) ?? $0) })
+                                           openFile: { showFile($0) })
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 8).id("end")
@@ -211,6 +225,19 @@ struct RoomPage: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 40)
         .padding(.top, 120)
+    }
+
+    /// A file by where it is on the Mac — one a message came with, one of the shared folder: the folder it is in, on
+    /// the Files page.
+    private func showFile(_ path: String) { app.showInFiles(MacPath.parent(path) ?? path) }
+
+    /// The sample screen asked for; nil with a real Mac.
+    private static var sampleScreen: String? {
+        #if DEBUG
+        return DemoRooms.isDemo ? DemoRooms.screen : nil
+        #else
+        return nil
+        #endif
     }
 
     /// `@name` put at the end of what is being written.

@@ -39,7 +39,7 @@ struct RoomMembersSheet: View {
                         SectionLabel(node.isEmpty ? (app.profile?.name ?? "Mac") : node)
                             .padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.l).padding(.bottom, 6)
                         ForEach(seats) { seat in
-                            NavigationLink(value: seat.handle) { RoomMemberRow(seat: seat) }.buttonStyle(.plain)
+                            NavigationLink(value: seat.handle) { RoomMemberRow(seat: seat, claim: model.detail?.claim(of: seat.handle)) }.buttonStyle(.plain)
                         }
                     }
                 }
@@ -68,6 +68,8 @@ struct RoomMembersSheet: View {
 
 private struct RoomMemberRow: View {
     let seat: RoomSeat
+    /// What it says it is changing (§9), while that holds.
+    var claim: RoomClaim?
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -87,6 +89,7 @@ private struct RoomMemberRow: View {
                     if seat.needsResume { Text(" · No Kit").foregroundStyle(Theme.waiting) }
                 }
                 .mono(11.5).lineLimit(1)
+                if let claim { RoomClaimLine(claim: claim) }
             }
             Spacer(minLength: 6)
             if let agent = seat.card?.agent, !agent.isEmpty { RoomAgentMark(agent: agent) }
@@ -142,6 +145,16 @@ private struct SeatCardPage: View {
                     line("Seated By", RoomWords.who(seat.addedBy))
                 } footer: {
                     if seat.left == nil, let says = seat.state?.says { Text(says) }
+                }
+                // Which files it says it is changing (§9): a word to the others, not a lock.
+                if seat.left == nil, let claim = model.detail?.claim(of: handle) {
+                    Section {
+                        ForEach(claim.paths, id: \.self) { path in Text(path).code(13).lineLimit(1).truncationMode(.middle) }
+                    } header: {
+                        SectionLabel("Changing · \(claim.untilWord())")
+                    } footer: {
+                        if let why = claim.why { Text(why) }
+                    }
                 }
                 if seat.needsResume {
                     Section {

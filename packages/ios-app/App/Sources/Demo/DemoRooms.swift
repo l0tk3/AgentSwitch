@@ -2,7 +2,7 @@
 import AgentSwitchKit
 import Foundation
 
-/// The sample screens' rooms (`-uiDemo YES -uiDemoScreen rooms|room|roompaused|roommembers|roomcard|roomnew|roommention`):
+/// The sample screens' rooms (`-uiDemo YES -uiDemoScreen rooms|room|roompaused|roomrounds|roomnotes|roomtasks|roomtaskadd|roomfiles|roommembers|roomcard|roomadd|roomnew`):
 /// made up, as the Mac would give them.
 enum DemoRooms {
     static let roomId = "a1b2c3d4e5"
@@ -15,7 +15,7 @@ enum DemoRooms {
         return decode("""
         {"rooms":[
           {"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":false,"createdAt":1,"members":7,"faces":[],
-           "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true},
+           "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true,"tasks":{"todo":3,"doing":2,"done":2}},
           {"id":"b1b2c3d4e5","name":"DayHub 发布","topic":"","paused":true,"createdAt":2,"members":3,"faces":[],
            "last":{"seq":12,"from":"you","text":"@all 先停一下，等我看完迁移脚本","at":\(now - 3_600_000)},"unread":0,"forYou":false},
           {"id":"c1b2c3d4e5","name":"文档整理","topic":"把 v0 文档里过期的段落标出来","paused":false,"createdAt":3,"members":2,"faces":[],"last":null,"unread":0,"forYou":false,"rounds":7},
@@ -56,7 +56,36 @@ enum DemoRooms {
           {"seq":37,"from":"daemon","to":["android","ios-app"],"text":"@android @ios-app `PROCESS-NAME` 的规则手机上都去掉了，重新拉一次配置。","at":\(now - 300_000)},
           {"seq":38,"from":"daemon","to":["you"],"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)}],
          "receipts":{"36":{"web":"ended","gate":"queued"},"37":{"android":"queued","ios-app":"delivered"}},
-         "notes":{"text":"接口\\n- GET /clash 多一个 phone：on、listening、links、problem\\n- links 里局域网在前，Tailscale 在后\\n\\n待办\\n- [ ] 文档里的地址跟着改（@web）\\n- [x] 手机上去掉 PROCESS-NAME 规则","at":\(now - 1_300_000),"by":"daemon"}}
+         "notes":{"text":"接口\\n- GET /clash 多一个 phone：on、listening、links、problem\\n- links 里局域网在前，Tailscale 在后\\n\\n待办\\n- [ ] 文档里的地址跟着改（@web）\\n- [x] 手机上去掉 PROCESS-NAME 规则","at":\(now - 1_300_000),"by":"daemon"},
+         "folder":"\(folder)",
+         "tasks":[
+          {"n":1,"title":"定下手机订阅的接口","state":"done","owner":"daemon","by":"you","createdAt":\(now - 90_000_000),"updatedAt":\(now - 86_000_000),"note":"GET /clash 多一个 phone，写进置顶笔记了"},
+          {"n":2,"title":"Mac 上的订阅卡片","detail":"局域网和 Tailscale 两个地址，局域网在前","state":"doing","owner":"mac-app","by":"daemon","createdAt":\(now - 86_000_000),"updatedAt":\(now - 1_500_000),"after":[1]},
+          {"n":3,"title":"手机上去掉 PROCESS-NAME 规则","state":"done","owner":"daemon","by":"daemon","createdAt":\(now - 80_000_000),"updatedAt":\(now - 300_000)},
+          {"n":4,"title":"iPhone 的订阅页","state":"doing","owner":"ios-app","by":"you","createdAt":\(now - 70_000_000),"updatedAt":\(now - 900_000),"after":[1],"note":"等你在终端里确认一次权限"},
+          {"n":5,"title":"文档里的地址跟着改","detail":"docs/clash-v0.md 的 §4 和 README","state":"todo","owner":"web","by":"you","createdAt":\(now - 900_000),"updatedAt":\(now - 900_000)},
+          {"n":6,"title":"用真的 Stash 和 Clash 各拉一次配置","state":"todo","by":"daemon","createdAt":\(now - 600_000),"updatedAt":\(now - 600_000),"after":[2,4]},
+          {"n":7,"title":"安卓的订阅页","state":"todo","owner":"android","by":"you","createdAt":\(now - 500_000),"updatedAt":\(now - 500_000),"after":[1,4]}],
+         "claims":[
+          {"handle":"daemon","paths":["packages/daemon/src/clash/phone.ts","packages/daemon/tests/clashPhone.test.ts","docs/clash-v0.md"],"why":"给 phone 加 problem 字段","at":\(now - 600_000),"until":\(now + 1_500_000)},
+          {"handle":"mac-app","paths":["packages/mac-app/Sources/Settings/ClashCard.swift"],"at":\(now - 300_000),"until":\(now + 2_400_000)}]}
+        """)
+    }
+
+    static let folder = "/Users/me/.agentswitch/room-files/\(roomId)"
+
+    /// The room's shared folder (`roomfiles`), as `GET /rooms/:id/files` would give it.
+    static var files: RoomFiles {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return decode("""
+        {"folder":"\(folder)","files":[
+          {"path":"mihomo-check.md","size":4812,"modifiedAt":\(now - 130_000)},
+          {"path":"shots/stash-profile.png","size":1843200,"modifiedAt":\(now - 1_200_000)},
+          {"path":"shots/clash-rules.png","size":962560,"modifiedAt":\(now - 1_260_000)},
+          {"path":"phone-config/stash.yaml","size":18432,"modifiedAt":\(now - 5_400_000)},
+          {"path":"phone-config/clash.yaml","size":17920,"modifiedAt":\(now - 5_460_000)},
+          {"path":"api-notes.md","size":731,"modifiedAt":\(now - 86_400_000 - 500_000)},
+          {"path":"old/process-name-rules.patch","size":212,"modifiedAt":\(now - 4 * 86_400_000)}],"more":false}
         """)
     }
 

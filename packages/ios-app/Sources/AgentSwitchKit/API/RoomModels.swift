@@ -260,6 +260,198 @@ public struct RoomNotes: Decodable, Sendable, Hashable {
     }
 }
 
+/// How a task of the room's list stands (§9).
+public enum RoomTaskState: String, Sendable, Hashable, CaseIterable {
+    case todo, doing, done
+
+    /// The list's heading for the tasks that stand so.
+    public var word: String {
+        switch self {
+        case .todo: return "To Do"
+        case .doing: return "Doing"
+        case .done: return "Done"
+        }
+    }
+}
+
+/// One task of the room's list (§9): every member reads it, adds to it and takes from it.
+public struct RoomTask: Decodable, Sendable, Hashable, Identifiable {
+    /// Its number in the room, written `T<n>`; never used again.
+    public let n: Int
+    public let title: String
+    public let detail: String?
+    /// A state this app does not know reads as to do.
+    public let state: RoomTaskState
+    /// The seat whose it is, by handle.
+    public let owner: String?
+    /// The seat that added it.
+    public let by: String
+    /// Milliseconds since 1970.
+    public let createdAt: Int64
+    public let updatedAt: Int64
+    /// The tasks that come first, by number.
+    public let after: [Int]
+    /// What was last said of it by whoever changed it.
+    public let note: String?
+
+    public var id: Int { n }
+    public var name: String { "T\(n)" }
+
+    private enum CodingKeys: String, CodingKey { case n, title, detail, state, owner, by, createdAt, updatedAt, after, note }
+
+    public init(n: Int, title: String, detail: String? = nil, state: RoomTaskState = .todo, owner: String? = nil, by: String = RoomSeat.you,
+                createdAt: Int64 = 0, updatedAt: Int64 = 0, after: [Int] = [], note: String? = nil) {
+        self.n = n
+        self.title = title
+        self.detail = detail
+        self.state = state
+        self.owner = owner
+        self.by = by
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.after = after
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        n = try c.decode(Int.self, forKey: .n)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        detail = (try? c.decodeIfPresent(String.self, forKey: .detail)).flatMap { $0 }
+        state = (try? c.decode(String.self, forKey: .state)).flatMap(RoomTaskState.init(rawValue:)) ?? .todo
+        owner = (try? c.decodeIfPresent(String.self, forKey: .owner)).flatMap { $0 }
+        by = (try? c.decode(String.self, forKey: .by)) ?? RoomSeat.you
+        createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
+        updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
+        after = (try? c.decode([Int].self, forKey: .after)) ?? []
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)).flatMap { $0 }
+    }
+}
+
+/// How a room's tasks stand, as the list of rooms has it.
+public struct RoomTaskCounts: Decodable, Sendable, Hashable {
+    public let todo: Int
+    public let doing: Int
+    public let done: Int
+
+    private enum CodingKeys: String, CodingKey { case todo, doing, done }
+
+    public init(todo: Int = 0, doing: Int = 0, done: Int = 0) {
+        self.todo = todo
+        self.doing = doing
+        self.done = done
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        todo = (try? c.decode(Int.self, forKey: .todo)) ?? 0
+        doing = (try? c.decode(Int.self, forKey: .doing)) ?? 0
+        done = (try? c.decode(Int.self, forKey: .done)) ?? 0
+    }
+
+    /// Not done yet.
+    public var open: Int { todo + doing }
+}
+
+/// A member saying which files it is changing (§9): a word to the others, not a lock, and gone by itself at `until`.
+public struct RoomClaim: Decodable, Sendable, Hashable, Identifiable {
+    public let handle: String
+    /// Files or folders, as the member wrote them.
+    public let paths: [String]
+    public let why: String?
+    /// Milliseconds since 1970.
+    public let at: Int64
+    public let until: Int64
+
+    public var id: String { handle }
+    public var ends: Date { Date(timeIntervalSince1970: TimeInterval(until) / 1000) }
+
+    private enum CodingKeys: String, CodingKey { case handle, paths, why, at, until }
+
+    public init(handle: String, paths: [String], why: String? = nil, at: Int64 = 0, until: Int64) {
+        self.handle = handle
+        self.paths = paths
+        self.why = why
+        self.at = at
+        self.until = until
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        handle = try c.decode(String.self, forKey: .handle)
+        paths = (try? c.decode([String].self, forKey: .paths)) ?? []
+        why = (try? c.decodeIfPresent(String.self, forKey: .why)).flatMap { $0 }
+        at = (try? c.decode(Int64.self, forKey: .at)) ?? 0
+        until = (try? c.decode(Int64.self, forKey: .until)) ?? 0
+    }
+
+    /// The files by name, the first `limit` of them and how many more: `phone.ts, clash-v0.md +2`.
+    public func names(limit: Int = 2) -> String {
+        let names = paths.map(RoomMessage.fileName)
+        let shown = names.prefix(max(1, limit)).joined(separator: ", ")
+        return names.count > max(1, limit) ? "\(shown) +\(names.count - max(1, limit))" : shown
+    }
+
+    /// When it ends by itself: `until 14:30`.
+    public func untilWord(calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.hour, .minute], from: ends)
+        return String(format: "until %02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+}
+
+/// A file in a room's shared folder (§9).
+public struct RoomFile: Decodable, Sendable, Hashable, Identifiable {
+    /// Where it is under the folder.
+    public let path: String
+    public let size: Int64
+    /// Milliseconds since 1970.
+    public let modifiedAt: Double
+
+    public var id: String { path }
+    public var modified: Date { Date(timeIntervalSince1970: modifiedAt / 1000) }
+
+    private enum CodingKeys: String, CodingKey { case path, size, modifiedAt }
+
+    public init(path: String, size: Int64 = 0, modifiedAt: Double = 0) {
+        self.path = path
+        self.size = size
+        self.modifiedAt = modifiedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        size = (try? c.decode(Int64.self, forKey: .size)) ?? 0
+        modifiedAt = (try? c.decode(Double.self, forKey: .modifiedAt)) ?? 0
+    }
+}
+
+/// What is in a room's shared folder, the newest first; `more`: the folder holds more than was listed.
+public struct RoomFiles: Decodable, Sendable, Hashable {
+    /// Where the folder is on the Mac.
+    public let folder: String
+    public let files: [RoomFile]
+    public let more: Bool
+
+    private enum CodingKeys: String, CodingKey { case folder, files, more }
+
+    public init(folder: String, files: [RoomFile] = [], more: Bool = false) {
+        self.folder = folder
+        self.files = files
+        self.more = more
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folder = (try? c.decode(String.self, forKey: .folder)) ?? ""
+        files = (try? c.decode([RoomFile].self, forKey: .files)) ?? []
+        more = (try? c.decode(Bool.self, forKey: .more)) ?? false
+    }
+
+    /// Where a file of the folder is on the Mac.
+    public static func whole(_ path: String, in folder: String) -> String { folder.hasSuffix("/") ? folder + path : folder + "/" + path }
+}
+
 /// Where a message is on its way to a seat (§5). Dealt with, there is no receipt.
 public enum RoomReceipt: String, Sendable, Hashable {
     case sent, queued, delivered, ended
@@ -337,10 +529,20 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
     /// Why a session named when the room was made could not be seated.
     public let problems: [String]
     public let notes: RoomNotes?
+    /// The room's task list (§9), in the order the tasks were added; none from a Mac that has no list.
+    public let tasks: [RoomTask]
+    /// Where the room's shared folder is on the Mac (§9); empty from a Mac that has none.
+    public let folder: String
+    /// Who has said which files they are changing, as far as it still holds.
+    public let claims: [RoomClaim]
 
-    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, problems, notes }
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, problems, notes, tasks, folder, claims }
 
-    public init(room: RoomInfo, seats: [RoomSeat], messages: [RoomMessage] = [], receipts: [Int: [String: RoomReceipt]] = [:], problems: [String] = [], notes: RoomNotes? = nil) {
+    public init(room: RoomInfo, seats: [RoomSeat], messages: [RoomMessage] = [], receipts: [Int: [String: RoomReceipt]] = [:], problems: [String] = [], notes: RoomNotes? = nil,
+                tasks: [RoomTask] = [], folder: String = "", claims: [RoomClaim] = []) {
+        self.tasks = tasks
+        self.folder = folder
+        self.claims = claims
         self.notes = notes
         self.room = room
         self.seats = seats
@@ -357,6 +559,9 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
         receipts = RoomDetail.receipts((try? c.decode([String: [String: String]].self, forKey: .receipts)) ?? [:])
         problems = (try? c.decode([String].self, forKey: .problems)) ?? []
         notes = (try? c.decodeIfPresent(RoomNotes.self, forKey: .notes)).flatMap { $0 }
+        tasks = (try? c.decode([RoomTask].self, forKey: .tasks)) ?? []
+        folder = (try? c.decode(String.self, forKey: .folder)) ?? ""
+        claims = (try? c.decode([RoomClaim].self, forKey: .claims)) ?? []
     }
 
     static func receipts(_ raw: [String: [String: String]]) -> [Int: [String: RoomReceipt]] {
@@ -373,6 +578,33 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
     /// The sessions sitting now, in the order they sat down.
     public var sessions: [RoomSeat] { seats.filter { !$0.isUser && $0.here } }
     public func message(_ seq: Int) -> RoomMessage? { messages.first { $0.seq == seq } }
+
+    /// The tasks that stand so, as the list shows them: by number, the ones done the last finished first.
+    public func tasks(_ state: RoomTaskState) -> [RoomTask] {
+        let of = tasks.filter { $0.state == state }
+        return state == .done ? of.sorted { ($0.updatedAt, $0.n) > ($1.updatedAt, $1.n) } : of.sorted { $0.n < $1.n }
+    }
+
+    /// The tasks `task` still waits for: the ones that come first and are not done. One taken off the list holds
+    /// nothing up.
+    public func waits(_ task: RoomTask) -> [Int] {
+        guard task.state != .done else { return [] }
+        return task.after.filter { n in tasks.contains { $0.n == n && $0.state != .done } }
+    }
+
+    /// `waits for T1, T3`; nil when it waits for nothing.
+    public func waitsWord(_ task: RoomTask) -> String? {
+        let waits = waits(task)
+        return waits.isEmpty ? nil : "waits for " + waits.map { "T\($0)" }.joined(separator: ", ")
+    }
+
+    /// Tasks not done yet.
+    public var openTasks: Int { tasks.filter { $0.state != .done }.count }
+
+    /// What a seat says it is changing, while that holds.
+    public func claim(of handle: String, now: Date = Date()) -> RoomClaim? {
+        claims.first { $0.handle == handle && !$0.paths.isEmpty && $0.ends > now }
+    }
 }
 
 /// A room as the list has it.
@@ -410,10 +642,14 @@ public struct RoomSummary: Decodable, Sendable, Hashable, Identifiable {
     public let forYou: Bool
     /// Sessions talking among themselves with no word from the user (§7); nil under the room's limit.
     public let rounds: Int?
+    /// How the room's tasks stand (§9); all zero from a Mac that has no list.
+    public let tasks: RoomTaskCounts
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, members, faces, last, unread, forYou, rounds }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, members, faces, last, unread, forYou, rounds, tasks }
 
-    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, members: Int = 1, faces: [Sitter] = [], last: Last? = nil, unread: Int = 0, forYou: Bool = false, rounds: Int? = nil) {
+    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, members: Int = 1, faces: [Sitter] = [], last: Last? = nil, unread: Int = 0, forYou: Bool = false, rounds: Int? = nil,
+                tasks: RoomTaskCounts = RoomTaskCounts()) {
+        self.tasks = tasks
         self.rounds = rounds
         self.id = id
         self.name = name
@@ -440,6 +676,7 @@ public struct RoomSummary: Decodable, Sendable, Hashable, Identifiable {
         unread = (try? c.decode(Int.self, forKey: .unread)) ?? 0
         forYou = (try? c.decode(Bool.self, forKey: .forYou)) ?? false
         rounds = (try? c.decodeIfPresent(Int.self, forKey: .rounds)).flatMap { $0 }
+        tasks = (try? c.decode(RoomTaskCounts.self, forKey: .tasks)) ?? RoomTaskCounts()
     }
 
     /// The list's second line: who said the last thing and what; the topic before anything was said.

@@ -71,7 +71,7 @@ struct AgentSwitchApp: App {
                                                                           MacPick(path: "\(DemoFiles.project)/.env", isFolder: false, sensitive: true)])
             // Chat Room (docs/chatroom-v0.md): the list, a room, its members, a member's card, a new room.
             case "rooms", "roomnew": model.tab = .rooms
-            case "room", "roompaused", "roomrounds", "roomnotes", "roommembers", "roomcard", "roomadd": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
+            case "room", "roompaused", "roomrounds", "roomnotes", "roomtasks", "roomtaskadd", "roomfiles", "roommembers", "roomcard", "roomadd": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)
             // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
             case "linkedpage":

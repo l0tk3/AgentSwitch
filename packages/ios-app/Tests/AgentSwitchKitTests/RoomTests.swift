@@ -289,4 +289,136 @@ final class RoomTests: XCTestCase {
             do { _ = try await api.rooms(etag: nil); XCTFail("read rooms from a Mac that has none") } catch { XCTAssertTrue(error is RoomsUnsupported) }
         }
     }
+
+    /// The room's work (§9; the service's `roomWork.test.ts`): its task list, its shared folder, who is changing which files.
+    func testTasksTheFolderAndClaimsAreRead() throws {
+        let json = #"""
+        {"room":{"id":"a1b2c3d4e5","name":"r","topic":"","paused":false,"createdAt":1,"createdBy":"you","lastSeq":0,"readSeq":0,"rounds":null,"roundsLimit":6},
+         "seats":[{"handle":"you","kind":"user"},{"handle":"daemon","kind":"session","terminal":"t1","state":"busy"},{"handle":"web","kind":"session","terminal":"t2","state":"idle"}],
+         "messages":[],"receipts":{},"notes":null,"folder":"/Users/me/.agentswitch/room-files/a1b2c3d4e5",
+         "tasks":[
+           {"n":1,"title":"定接口","state":"done","owner":"daemon","by":"you","createdAt":10,"updatedAt":40,"note":"见置顶笔记"},
+           {"n":2,"title":"卡片","detail":"局域网在前","state":"doing","owner":"web","by":"daemon","createdAt":20,"updatedAt":30,"after":[1]},
+           {"n":3,"title":"文档","state":"todo","by":"you","createdAt":21,"updatedAt":21,"after":[1,2,9]},
+           {"n":5,"title":"发布","state":"sleeping","by":"you","createdAt":22,"updatedAt":22,"after":[4]},
+           {"n":6,"title":"早先做完的","state":"done","by":"web","createdAt":5,"updatedAt":6,"after":[2]}],
+         "claims":[
+           {"handle":"daemon","paths":["packages/daemon/src/clash/phone.ts","docs/clash-v0.md","packages/daemon/tests/"],"why":"改接口","at":1763800000000,"until":1763801800000},
+           {"handle":"web","paths":["README.md"],"at":1763800000000,"until":1763800060000}]}
+        """#
+        let room = try JSONDecoder().decode(RoomDetail.self, from: Data(json.utf8))
+        XCTAssertEqual(room.folder, "/Users/me/.agentswitch/room-files/a1b2c3d4e5")
+        XCTAssertEqual(room.tasks.map(\.n), [1, 2, 3, 5, 6])
+        XCTAssertEqual(room.tasks[0], RoomTask(n: 1, title: "定接口", state: .done, owner: "daemon", by: "you", createdAt: 10, updatedAt: 40, note: "见置顶笔记"))
+        XCTAssertEqual(room.tasks[1], RoomTask(n: 2, title: "卡片", detail: "局域网在前", state: .doing, owner: "web", by: "daemon", createdAt: 20, updatedAt: 30, after: [1]))
+        XCTAssertEqual(room.tasks[1].name, "T2")
+        XCTAssertNil(room.tasks[2].owner)
+        // A state this app does not know is to do, not a failure to read the room.
+        XCTAssertEqual(room.tasks[3].state, .todo)
+        // The list's three parts: by number; what is done, the last finished first.
+        XCTAssertEqual(room.tasks(.doing).map(\.n), [2])
+        XCTAssertEqual(room.tasks(.todo).map(\.n), [3, 5])
+        XCTAssertEqual(room.tasks(.done).map(\.n), [1, 6])
+        XCTAssertEqual(room.openTasks, 3)
+        XCTAssertEqual(RoomTaskState.allCases.map(\.word), ["To Do", "Doing", "Done"])
+        // It waits for what comes first and is not done: not for one that is done, nor one no longer on the list.
+        XCTAssertEqual(room.waits(room.tasks[1]), [])
+        XCTAssertNil(room.waitsWord(room.tasks[1]))
+        XCTAssertEqual(room.waits(room.tasks[2]), [2])
+        XCTAssertEqual(room.waitsWord(room.tasks[2]), "waits for T2")
+        XCTAssertNil(room.waitsWord(room.tasks[3]))
+        XCTAssertNil(room.waitsWord(room.tasks[4]))   // done: it waits for nothing any more
+        XCTAssertEqual(RoomDetail(room: room.room, seats: [], tasks: [RoomTask(n: 1, title: "a"), RoomTask(n: 2, title: "b", state: .doing), RoomTask(n: 3, title: "c", after: [1, 2])]).waitsWord(RoomTask(n: 3, title: "c", after: [1, 2])), "waits for T1, T2")
+
+        // Who is changing what, by name, and until when; one past its time says nothing any more.
+        let during = Date(timeIntervalSince1970: 1_763_800_030), later = Date(timeIntervalSince1970: 1_763_800_090)
+        let claim = try XCTUnwrap(room.claim(of: "daemon", now: during))
+        XCTAssertEqual(claim.why, "改接口")
+        XCTAssertEqual(claim.names(), "phone.ts, clash-v0.md +1")
+        XCTAssertEqual(claim.names(limit: 5), "phone.ts, clash-v0.md, tests")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        XCTAssertEqual(claim.untilWord(calendar: utc), "until 08:56")
+        XCTAssertEqual(room.claim(of: "web", now: during)?.names(), "README.md")
+        XCTAssertNil(room.claim(of: "web", now: later))
+        XCTAssertNotNil(room.claim(of: "daemon", now: later))
+        XCTAssertNil(room.claim(of: "you", now: during))
+
+        // An older Mac says none of it: no tasks, no folder, nobody changing anything.
+        let before = try JSONDecoder().decode(RoomDetail.self, from: Data(Self.room.utf8))
+        XCTAssertEqual(before.tasks, [])
+        XCTAssertEqual(before.folder, "")
+        XCTAssertEqual(before.claims, [])
+        XCTAssertEqual(before.openTasks, 0)
+
+        // The list of rooms says how each one's tasks stand; an older Mac's rooms have none.
+        let list = try JSONDecoder().decode(RoomList.self, from: Data(#"{"rooms":[{"id":"a","name":"a","members":2,"faces":[],"last":null,"unread":0,"forYou":false,"tasks":{"todo":2,"doing":1,"done":4}}]}"#.utf8))
+        XCTAssertEqual(list.rooms[0].tasks, RoomTaskCounts(todo: 2, doing: 1, done: 4))
+        XCTAssertEqual(list.rooms[0].tasks.open, 3)
+        XCTAssertEqual(try JSONDecoder().decode(RoomList.self, from: Data(Self.list.utf8)).rooms.map(\.tasks), [RoomTaskCounts(), RoomTaskCounts()])
+
+        // The shared folder's files as `GET /rooms/:id/files` gives them.
+        let files = try JSONDecoder().decode(RoomFiles.self, from: Data(#"{"folder":"/h/room-files/a1","files":[{"path":"report.md","size":2150,"modifiedAt":1763800900000},{"path":"shots/主页.png","size":48000000,"modifiedAt":1763800000000.5}],"more":true}"#.utf8))
+        XCTAssertEqual(files.folder, "/h/room-files/a1")
+        XCTAssertEqual(files.files.map(\.path), ["report.md", "shots/主页.png"])
+        XCTAssertEqual(files.files[0], RoomFile(path: "report.md", size: 2150, modifiedAt: 1_763_800_900_000))
+        XCTAssertEqual(files.files[0].modified, Date(timeIntervalSince1970: 1_763_800_900))
+        XCTAssertTrue(files.more)
+        XCTAssertEqual(RoomFiles.whole(files.files[1].path, in: files.folder), "/h/room-files/a1/shots/主页.png")
+        XCTAssertEqual(try JSONDecoder().decode(RoomFiles.self, from: Data(#"{"folder":"/f"}"#.utf8)), RoomFiles(folder: "/f"))
+    }
+
+    func testTaskAndFolderCallsAreAsTheServiceTakesThem() async throws {
+        let transport = FakeTransport { req, _ in
+            let path = req.url?.path ?? "", method = req.httpMethod ?? ""
+            switch (method, path) {
+            case ("POST", "/rooms/a1b2c3d4e5/tasks"):
+                return (Data(#"{"task":{"n":4,"title":"写文档","detail":"接口一节","state":"todo","owner":"web","by":"you","createdAt":7,"updatedAt":7,"after":[1]}}"#.utf8), httpResponse(req.url, status: 201))
+            case ("PATCH", "/rooms/a1b2c3d4e5/tasks/4"):
+                return (Data(#"{"task":{"n":4,"title":"写文档","state":"done","by":"you","createdAt":7,"updatedAt":9}}"#.utf8), httpResponse(req.url, status: 200))
+            case ("PATCH", "/rooms/a1b2c3d4e5/tasks/2"):
+                return (Data(#"{"error":"T2 is being done by @web. Take another, or ask @web in the room."}"#.utf8), httpResponse(req.url, status: 409))
+            case ("DELETE", "/rooms/a1b2c3d4e5/tasks/9"):
+                return (Data(#"{"error":"There is no task T9 in this room."}"#.utf8), httpResponse(req.url, status: 404))
+            case ("GET", "/rooms/a1b2c3d4e5/files"):
+                return (Data(#"{"folder":"/h/room-files/a1b2c3d4e5","files":[{"path":"a.md","size":3,"modifiedAt":5}],"more":false}"#.utf8), httpResponse(req.url, status: 200))
+            default: return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url, status: 200))
+            }
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        func body(_ n: Int) throws -> NSDictionary { try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(transport.requests[n].httpBody)) as? NSDictionary) }
+
+        let made = try await api.addRoomTask("a1b2c3d4e5", title: "写文档", detail: "接口一节", owner: "web", after: [1])
+        XCTAssertEqual(made, RoomTask(n: 4, title: "写文档", detail: "接口一节", state: .todo, owner: "web", by: "you", createdAt: 7, updatedAt: 7, after: [1]))
+        XCTAssertEqual(try body(0), ["title": "写文档", "detail": "接口一节", "owner": "web", "after": [1]])
+        try await api.addRoomTask("a1b2c3d4e5", title: "只有标题", detail: "")
+        XCTAssertEqual(try body(1), ["title": "只有标题"])   // what is not said is not sent
+
+        let done = try await api.setRoomTask(4, in: "a1b2c3d4e5", state: .done)
+        XCTAssertEqual(done.state, .done)
+        XCTAssertEqual(try body(2), ["state": "done"])
+        try await api.setRoomTask(4, in: "a1b2c3d4e5", owner: .seat("daemon"))
+        XCTAssertEqual(try body(3), ["owner": "daemon"])
+        // Nobody's any more: `null`, which is not the same as not saying.
+        try await api.setRoomTask(4, in: "a1b2c3d4e5", owner: .nobody)
+        XCTAssertEqual(try body(4), ["owner": NSNull()])
+        try await api.setRoomTask(4, in: "a1b2c3d4e5", state: .todo, title: "新标题", detail: "", note: "重做")
+        XCTAssertEqual(try body(5), ["state": "todo", "title": "新标题", "detail": "", "note": "重做"])
+        try await api.deleteRoomTask(4, in: "a1b2c3d4e5")
+
+        let files = try await api.roomFiles("a1b2c3d4e5")
+        XCTAssertEqual(files, RoomFiles(folder: "/h/room-files/a1b2c3d4e5", files: [RoomFile(path: "a.md", size: 3, modifiedAt: 5)]))
+
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, [
+            "POST /rooms/a1b2c3d4e5/tasks", "POST /rooms/a1b2c3d4e5/tasks", "PATCH /rooms/a1b2c3d4e5/tasks/4", "PATCH /rooms/a1b2c3d4e5/tasks/4", "PATCH /rooms/a1b2c3d4e5/tasks/4",
+            "PATCH /rooms/a1b2c3d4e5/tasks/4", "DELETE /rooms/a1b2c3d4e5/tasks/4", "GET /rooms/a1b2c3d4e5/files",
+        ])
+        // The service's own words come back as the error.
+        do { try await api.setRoomTask(2, in: "a1b2c3d4e5", state: .done); XCTFail("changed a task the Mac refused") } catch let error as APIError {
+            XCTAssertEqual(error.errorDescription, "T2 is being done by @web. Take another, or ask @web in the room.")
+        }
+        do { try await api.deleteRoomTask(9, in: "a1b2c3d4e5"); XCTFail("deleted a task that is not there") } catch let error as APIError {
+            XCTAssertEqual(error.errorDescription, "There is no task T9 in this room.")
+        }
+    }
 }

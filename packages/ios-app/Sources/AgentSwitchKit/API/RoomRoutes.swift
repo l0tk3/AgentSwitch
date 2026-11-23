@@ -16,11 +16,42 @@ private struct SayBody: Encodable { let text: String; let replyTo: Int? }
 private struct ReadBody: Encodable { let seq: Int }
 private struct NotesBody: Encodable { let text: String }
 private struct NotesReply: Decodable { let notes: RoomNotes? }
+private struct AddTaskBody: Encodable { let title: String; let detail: String?; let owner: String?; let after: [Int]? }
+private struct TaskReply: Decodable { let task: RoomTask }
+/// Only what changes is sent; an owner taken away goes as `null`.
+private struct SetTaskBody: Encodable {
+    let state: RoomTaskState?
+    let owner: RoomTaskOwner?
+    let title: String?
+    let detail: String?
+    let note: String?
+
+    private enum CodingKeys: String, CodingKey { case state, owner, title, detail, note }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(state?.rawValue, forKey: .state)
+        switch owner {
+        case .seat(let handle): try c.encode(handle, forKey: .owner)
+        case .nobody: try c.encodeNil(forKey: .owner)
+        case nil: break
+        }
+        try c.encodeIfPresent(title, forKey: .title)
+        try c.encodeIfPresent(detail, forKey: .detail)
+        try c.encodeIfPresent(note, forKey: .note)
+    }
+}
 private struct Nothing: Encodable {}
 private struct SeatReply: Decodable { let seat: RoomSeat }
 private struct SummaryReply: Decodable { let room: RoomSummary }
 private struct ReadReply: Decodable { let readSeq: Int }
 private struct Done: Decodable { let ok: Bool? }
+
+/// Whose a task is to be: a seat's, by handle, or nobody's any more.
+public enum RoomTaskOwner: Sendable, Hashable {
+    case seat(String)
+    case nobody
+}
 
 /// What the Mac says of a message just taken: the message, and who it still has to reach.
 public struct RoomSaid: Decodable, Sendable, Hashable {
@@ -104,5 +135,28 @@ extension AgentSwitchAPI {
     @discardableResult
     public func setRoomNotes(_ room: String, text: String) async throws -> RoomNotes? {
         (try await send("PUT", ["rooms", room, "notes"], body: NotesBody(text: text)) as NotesReply).notes
+    }
+
+    /// The user adds a task to the room's list (§9); `owner`: whose it is from the start, `after`: the tasks that come first.
+    @discardableResult
+    public func addRoomTask(_ room: String, title: String, detail: String? = nil, owner: String? = nil, after: [Int] = []) async throws -> RoomTask {
+        let detail = detail.flatMap { $0.isEmpty ? nil : $0 }
+        return (try await post(["rooms", room, "tasks"], body: AddTaskBody(title: title, detail: detail, owner: owner, after: after.isEmpty ? nil : after)) as TaskReply).task
+    }
+
+    /// The user changes a task: only what is named. The user's change of state leaves whose it is alone; a task being
+    /// done whose owner is taken away is to do again.
+    @discardableResult
+    public func setRoomTask(_ n: Int, in room: String, state: RoomTaskState? = nil, owner: RoomTaskOwner? = nil, title: String? = nil, detail: String? = nil, note: String? = nil) async throws -> RoomTask {
+        (try await send("PATCH", ["rooms", room, "tasks", String(n)], body: SetTaskBody(state: state, owner: owner, title: title, detail: detail, note: note)) as TaskReply).task
+    }
+
+    public func deleteRoomTask(_ n: Int, in room: String) async throws {
+        let _: Done = try await perform("DELETE", ["rooms", room, "tasks", String(n)], query: [], body: nil)
+    }
+
+    /// What is in the room's shared folder (§9), the newest first.
+    public func roomFiles(_ room: String) async throws -> RoomFiles {
+        try await get(["rooms", room, "files"])
     }
 }
