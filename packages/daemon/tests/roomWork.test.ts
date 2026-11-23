@@ -80,6 +80,28 @@ describe("a room's shared folder", () => {
   });
 });
 
+describe("a file of the shared folder through the service", () => {
+  it("is put there under a free name and read back, and nothing outside the folder is reached", async () => {
+    const { store, room } = made();
+    const app = new Hono();
+    mountRooms(app, { rooms: store, terminals: { host: { get: () => null } } } as unknown as ApiDeps);
+    const put = async (name: string, bytes: Uint8Array) => { const res = await app.request(`/rooms/${room.id}/files/content?name=${encodeURIComponent(name)}`, { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: bytes as unknown as BodyInit }); return { status: res.status, body: await res.json() as any }; };
+    const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const first = await put("../../photo.png", png);
+    expect(first.status).toBe(201);
+    expect(first.body).toEqual({ path: join(store.folder(room.id), "photo.png"), name: "photo.png", size: 7 });
+    expect((await put("photo.png", png)).body.name).toBe("photo-2.png");
+    expect((await put("x.png", new Uint8Array())).status).toBe(400);
+    const got = await app.request(`/rooms/${room.id}/files/content?path=photo.png`);
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await got.arrayBuffer())).toEqual(png);
+    symlinkSync("/etc/hosts", join(store.folder(room.id), "out"));
+    for (const path of ["../x", "/etc/hosts", "out", ".hidden", "a//b", "nope.png"]) expect((await app.request(`/rooms/${room.id}/files/content?path=${encodeURIComponent(path)}`)).status).toBeGreaterThanOrEqual(400);
+    expect((await app.request(`/rooms/nosuchroom/files/content?path=photo.png`)).status).toBe(404);
+  });
+});
+
 describe("a room's task list", () => {
   it("lets a member add, take and finish, keeps two from the same task, and says what is free next", async () => {
     const { store, room, say, changed } = made();

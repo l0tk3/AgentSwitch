@@ -7,9 +7,9 @@
  *  the receipt goes: a room shows only what has not arrived. */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join, sep } from "node:path";
 import { faceOf, type Face } from "./face.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
@@ -20,6 +20,8 @@ export const MAX_NOTES = 20_000, MAX_FILES = 10;
 export const ROUNDS_LIMIT = 6, MAX_STARTED = 4;
 /** §9: a room's shared folder is listed this far (files, and folders deep). */
 export const MAX_LISTED = 500, MAX_DEPTH = 6;
+/** The most one file put into a shared folder through the service (a picture from a phone) may be. */
+export const MAX_PUT = 25 * 1024 * 1024;
 /** Where every room's shared folder is, under the home: apart from what the rooms themselves are kept in, so that a
  *  session let into the folders is let into nothing else. */
 export const filesRoot = (home: string): string => join(home, "room-files");
@@ -161,6 +163,34 @@ export class RoomStore {
     const dir = join(this.filesDir, this.get(id).id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
+  }
+
+  /** A file in a room's shared folder by its path under it, as it is on the disk. Nothing outside the folder is
+   *  reached: not by `..`, and not through a link. */
+  fileAt(id: string, path: string): { readonly real: string; readonly size: number; readonly name: string } {
+    const folder = realpathSync(this.folder(id));
+    if (!path || path.startsWith("/") || path.split("/").some((part) => part === ".." || part === "" || part.startsWith(".")) || /[\0\n\r]/.test(path)) throw new RoomError(400, "bad path");
+    let real: string;
+    try { real = realpathSync(join(folder, path)); } catch { throw new RoomError(404, "这个文件不在共享文件夹里了"); }
+    if (!real.startsWith(folder + sep)) throw new RoomError(403, "bad path");
+    const stat = lstatSync(real);
+    if (!stat.isFile()) throw new RoomError(400, "bad path");
+    return { real, size: stat.size, name: basename(real) };
+  }
+
+  /** A file put into a room's shared folder through the service (a picture picked on a phone): under its name, or
+   *  that name with a number when one is there already. Where it is now. */
+  putFile(id: string, name: string, bytes: Uint8Array): { readonly path: string; readonly name: string; readonly size: number } {
+    const folder = this.folder(id);
+    if (bytes.length > MAX_PUT) throw new RoomError(400, `文件太大（最多 ${MAX_PUT / 1024 / 1024} MB）`);
+    // Its own name only: whatever stands before a slash is not ours to follow.
+    const last = name.normalize("NFC").split(/[\\/]/).pop() ?? "";
+    const clean = last.replace(/[\0\n\r:]/g, " ").replace(/^[.\s]+/, "").trim().slice(0, 120) || "file";
+    const ext = extname(clean), stem = clean.slice(0, clean.length - ext.length);
+    let as = clean;
+    for (let n = 2; existsSync(join(folder, as)); n++) as = `${stem}-${n}${ext}`;
+    writeFileSync(join(folder, as), bytes, { mode: 0o600, flag: "wx" });
+    return { path: join(folder, as), name: as, size: bytes.length };
   }
 
   /** What is in a room's shared folder, the newest first. Links are not followed and names that begin with a dot are

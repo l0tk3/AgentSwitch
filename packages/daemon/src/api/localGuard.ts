@@ -26,7 +26,7 @@ const JSON_TYPE = "application/json";
 /** The one route that takes a multipart body (api/files.ts), and the same route of another node (api/nodes.ts). */
 const UPLOAD = { method: "POST", path: /^(?:\/nodes\/[^/]+)?\/uploads$/, type: "multipart/form-data" } as const;
 /** A file sent into a folder (docs/files-v0.md §12.8), as its bytes; here or on another node. */
-const FILE_IN = { method: "PUT", path: /^(?:\/nodes\/[^/]+)?\/files\/content$/, type: "application/octet-stream" } as const;
+const FILE_IN = { method: "PUT", path: /^(?:\/nodes\/[^/]+)?(?:\/rooms\/[^/]+)?\/files\/content$/, type: "application/octet-stream" } as const;
 
 const mediaType = (value: string | undefined): string => (value ?? "").split(";")[0]!.trim().toLowerCase();
 

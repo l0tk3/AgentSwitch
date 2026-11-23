@@ -6,10 +6,11 @@
  *  The screens ask again and again: every list is under a version of its content (`versionedJson`), so an unchanged
  *  room costs nothing. */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { Hono } from "hono";
 import { z } from "zod";
-import { MAX_NAME, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatWas } from "../rooms/store.js";
+import { contentType } from "../files/names.js";
+import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatWas } from "../rooms/store.js";
 import { YOU } from "../rooms/names.js";
 import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
 
@@ -156,6 +157,32 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   // §9: what is in the room's shared folder.
   app.get("/rooms/:id/files", (c) => {
     try { return c.json(rooms.files(c.req.param("id"))); } catch (err) { return refused(c, err); }
+  });
+
+  // A file of the shared folder itself, for a screen that is not on this Mac (a phone shows a picture a member put
+  // there): the room's own folder only, whatever the phone may see of the Mac's other files.
+  app.get("/rooms/:id/files/content", (c) => {
+    try {
+      const file = rooms.fileAt(c.req.param("id"), c.req.query("path") ?? "");
+      if (file.size > MAX_PUT) return c.json({ error: "too-large", size: file.size, limit: MAX_PUT }, 413);
+      const bytes = readFileSync(file.real);
+      return c.body(new Uint8Array(bytes), 200, { "content-type": contentType(file.name), "content-length": String(bytes.length), "cache-control": "private, no-cache", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox" });
+    } catch (err) { return refused(c, err); }
+  });
+
+  // A file put into the shared folder from such a screen (a picture picked on a phone), as its bytes; where it is
+  // now is what a message then comes with.
+  app.put("/rooms/:id/files/content", async (c) => {
+    try {
+      const id = c.req.param("id");
+      rooms.get(id);
+      const said = Number(c.req.header("content-length") ?? NaN);
+      if (Number.isFinite(said) && said > MAX_PUT) return c.json({ error: "too-large", limit: MAX_PUT }, 413);
+      const bytes = new Uint8Array(await c.req.arrayBuffer());
+      if (bytes.length > MAX_PUT) return c.json({ error: "too-large", limit: MAX_PUT }, 413);
+      if (!bytes.length) return c.json({ error: "empty file" }, 400);
+      return c.json(rooms.putFile(id, c.req.query("name") ?? "", bytes), 201);
+    } catch (err) { return refused(c, err); }
   });
 
   app.patch("/rooms/:id", async (c) => {
