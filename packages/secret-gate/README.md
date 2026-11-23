@@ -128,7 +128,7 @@ followed if they are symlinks, every entry is opened relative to its parent with
 bundle's owner (no hard link to a root-only file) and be a regular file, directory or symlink; links are kept and
 must stay inside the copy; modes are set as the copy is made, nothing outside it is ever chmodded. Stop a gate the Mac app started itself before installing: the service's proxy needs the port.
 `--root <prefix>` moves every system path under a prefix and only lists the privileged commands (tests); with it,
-`--platform macos|linux` picks the layout to simulate (default macos, the layout `--root` always simulated).
+`--platform macos|linux|windows` picks the layout to simulate (default macos, the layout `--root` always simulated).
 
 **Linux** (gate-simple-v0 §5): the same service, plan and runtime copy, with the system user `agentswitch-gate`
 (`useradd --system --user-group --no-create-home --shell nologin`, or Debian's `adduser --system --group`) and two
@@ -148,8 +148,49 @@ systemd units, run once with `sudo` (the Linux node prints the exact command: `a
 `ProtectSystem=strict` (writable: the gate home and the public directory only), `ProtectHome`, `PrivateTmp`,
 `PrivateDevices`, kernel and cgroup protection and no capabilities; `rotate-key` signals the proxy with `systemctl kill
 --signal=SIGHUP`, `uninstall` disables both units and reloads systemd. The per-system parts (account, service
-manager, paths, peer check) are `secret_gate/platform/{macos,linux}.py` behind `platform/base.py`; a Windows layer
-plugs in there.
+manager, paths, peer check) are `secret_gate/platform/{macos,linux,windows}.py` behind `platform/base.py`.
+
+**Windows** (gate-simple-v0 §5; only the gate: the daemon, the terminals and the apps have no Windows version, so
+nothing runs the install for you). One Windows service, `AgentSwitchGate`, under its own virtual account `NT
+SERVICE\AgentSwitchGate` (no password, nothing to create: it comes with the service). A virtual account belongs to
+exactly one service, so the service is a small host (`secret_gate/win_service.py`, pywin32's servicemanager in the
+runtime's own `python.exe -I -X utf8`) that starts `secret-gate rpc` and `secret-gate proxy` as two child processes
+and restarts either 2 s after it exits; `sc failure` restarts the host. Paths come from the shell's known folders,
+never from environment variables:
+
+```
+%ProgramData%\AgentSwitch\           owner Administrators; SYSTEM, Administrators full; Users, the service read
+  gate\            SYSTEM, Administrators, NT SERVICE\AgentSwitchGate only (nothing inherited): as on macOS
+  gate-public\     the service modify, the login user (ownerSid) read: keys.json, ca.pem
+  gate-service.json inherited: only administrators write it   {"ownerSid", "proxyPort", "runtimeVersion", "installedAt"}
+%ProgramFiles%\AgentSwitch\gate-runtime\   the copy the service runs: python\ (Python with secret-gate), VERSIONS
+\\.\pipe\agentswitch-gate            the interface (gate.sock elsewhere): owner the service; the login user and
+                                     SYSTEM may read/write data; the client's token SID is checked after its first line
+```
+
+Install from an elevated terminal ("Run as administrator"; the owner is the user running it, `--owner-sid`
+otherwise). `--runtime` is a directory with `python\` (a complete Python, not a venv, with secret-gate installed in
+it: `pip install` pulls in `pywin32`) and a `VERSIONS` file (`secret-gate=<version>` and `built=<time>`); it is
+copied without following any link or junction:
+
+```powershell
+secret-gate system install --runtime C:\path\runtime --port 8080 [--owner-sid S-1-5-21-…] [--dry-run]
+secret-gate system update --runtime C:\path\runtime [--port N]
+secret-gate system rotate-key         # the proxy notices the new key.priv by itself (no SIGHUP on Windows)
+secret-gate system uninstall [--delete-keys]
+secret-gate system status [--json]    # anyone; the report has "ownerSid"
+```
+
+The service is registered with `sc.exe create … obj= "NT SERVICE\AgentSwitchGate" start= auto` and driven with
+`net stop|start` (both by absolute path below the Windows directory); ACLs are written whole with pywin32, each
+directory's right when it is made. An existing `%ProgramData%\AgentSwitch` that an administrator did not create is
+refused. Administrators keep access to `gate\` (the elevated install and `rotate-key` write the keys, as root does on
+POSIX); under UAC an administrator's non-elevated processes cannot use that entry. Trust the proxy's CA for the
+login user with `certutil -user -addstore Root "%ProgramData%\AgentSwitch\gate-public\ca.pem"`. Without the service
+(`secret-gate keygen`), `%USERPROFILE%\.secret-gate` gets an ACL for you only and a private key anyone else can read
+is refused. Everything here is verified on GitHub's Windows runner (`secret-gate-windows` in
+`.github/workflows/ci.yml`: the suite, then `scripts/windows_service_smoke.ps1` installs the service and drives it),
+not on a machine anyone uses; the CLI writes UTF-8 to pipes on Windows.
 
 `status --json` → `{"installed", "running", "rpcRunning", "proxyRunning", "proxyPort", "runtimeVersion",
 "ownerUid", "publicDir", "bundledRuntimeVersion", "updateAvailable", "error"}` (always exit 0; `running` means
@@ -283,6 +324,7 @@ echo '{"scope":"<same>"}' | secret-gate refs release        # {"released": 1}
 | **real headless Codex as the agent** | `.venv/bin/python scripts/codex_e2e.py` | yes (CLI default model, 4 short runs; S3/S4 XFAIL, see below) |
 | **Codex over `codex app-server` (JSON-RPC)** | `.venv/bin/python scripts/codex_appserver_e2e.py` | yes (3 scenarios: rate limits, MCP describe, MCP OTP) |
 | gated browser: policy, gate, real MCP stdio round trip (fake Playwright) | part of `.venv/bin/pytest` | no |
+| Windows: the same suite (tests marked `posix` skipped, `windows` ones run: ACLs, the named pipe, `secret_exec` with cmd and PowerShell), then the service installed and driven end to end | CI job `secret-gate-windows`: `PYTHONUTF8=1 .venv\Scripts\pytest`, `scripts\windows_service_smoke.ps1 -Venv .venv` (elevated, throw-away machine only) | no |
 | **gated browser with real Chromium** (client-side e-mail validation, redaction, field state, pixel-checked masked screenshots, authorized transfer between two local sites) | `SG_BROWSER_E2E=1 .venv/bin/pytest tests/test_browser_fill_real.py` | no (Playwright MCP + headless Chromium, ~20 s) |
 
 `claude_code_e2e.py` proves the thing unit tests cannot: that Claude Code's Bash tool actually

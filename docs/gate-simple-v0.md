@@ -1,6 +1,6 @@
 # gate-simple-v0：凭据网关简化——最小服务账户、两处出口、一条规矩（草案）
 
-2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），§5 的 Linux 一列已做（§5 末尾），其余未做。
+2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），§5 的 Linux 一列已做（§5 末尾），§5 的 Windows 一列已做（只在 Windows CI 上验证过，§5 末尾），其余未做。
 
 本稿只管网关，路由器的 sealer 不在本稿范围（用户定：先不管）。
 
@@ -120,10 +120,10 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 |---|---|---|---|
 | 服务账户 | `_agentswitchgate`（现有） | 系统用户 `agentswitch-gate`（`useradd --system`） | 服务的虚拟账户 `NT SERVICE\AgentSwitchGate` |
 | 服务管理 | LaunchDaemon（现有） | systemd 单元 | Windows 服务 |
-| 私钥、CA 私钥 | 服务目录，0700 / 0600 | 服务目录，0700 / 0600 | 服务目录，ACL 只给服务账户 |
+| 私钥、CA 私钥 | 服务目录，0700 / 0600 | 服务目录，0700 / 0600 | 服务目录，ACL 只给服务账户（与 SYSTEM、Administrators，见 §5 末尾） |
 | 本机接口 | unix socket `gate.sock`，按对端 uid 放行（现有） | 同左（`SO_PEERCRED`） | 命名管道，ACL 只给登录用户，并核对对端 SID |
 | 公开文件 | 公钥、CA 证书 | 同左 | 同左 |
-| 安装 | 一次管理员授权（现有） | 安装脚本一次 `sudo` | 安装程序一次管理员授权 |
+| 安装 | 一次管理员授权（现有） | 安装脚本一次 `sudo` | 管理员身份的终端里一次 `secret-gate system install`（还没有安装程序） |
 | 运行时来源 | App 包里的副本，复制到 root 拥有的目录（§6） | 包管理器或安装脚本装到 root 拥有的目录，没有 App 包问题 | 装到 `Program Files`，只有管理员可写 |
 
 代码组织：账户、服务管理、接口传输、文件权限按平台各写一层薄的适配；接口方法、脱敏器、代理、浏览器 gate 三个平台共用一份。Windows 是新增。AgentSwitch 的 daemon 与终端还没有 Windows 版本，网关先行，测试在 Windows CI 上跑。
@@ -142,6 +142,21 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 - **daemon（Linux 节点）**：`src/keeper/gateService.ts` 与网关同样只看 `gate-service.json`（读不了也按已装算）。装了时看护进程不起自己的网关、不在用户目录建钥匙，服务无响应时只记日志、不兜底；把服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 和端口交给 daemon。配置出现、消失或服务端口变了（`update --port`），看护进程在下一次探测时交接：停掉或起回自己的网关，带新环境重启 daemon。`agentswitch gate`（新）、`doctor`、`config` 的 Keys 页说明网关在哪个账户下，并打印要用户自己运行的确切命令（本机的路径、uid、端口都填好）；AgentSwitch 从不运行 sudo。没装时三处用五种语言明说“此节点的网关以你的账户运行：只防误看，不防顺手读取”（daemon `src/i18n/`）；装了时 Keys 页不再给“创建密钥对”，改给 `rotate-key` 命令。`install.sh` 结尾运行 `agentswitch gate`（服务的运行时比节点的旧时打印 `system update`）。顺手修了看护进程第一次运行时建钥匙仍用已删除的 `keys new` 的问题（改为 `keygen`）。
 - **实机验证**（OrbStack 里一台随手建的 Ubuntu 24.04 arm64，systemd 255，验证后删除）：`install.sh` 造运行时、起用户服务，`agentswitch gate` 与 doctor 说出同用户一档和安装命令；照打印的命令 `sudo … system install` 14 步全过（4 秒），看护进程下一次探测就停掉自己的网关、让出 8080，daemon 带上服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 重启；两个进程以 `agentswitch-gate` 运行在 `/opt/agentswitch/gate-runtime`；登录用户读 `gate/`、`key.priv`、CA 私钥都是 Permission denied，`keys --json`、`enc --batch`、`system status`、`logs tail` 照常，`keygen` 被拒；经服务的代理对本机回显服务替换了密文、回显被遮成 `[REDACTED:vm/test]`；另一个本机用户进不了 `gate-public`，把它加进登录用户的组后能连到 socket，被 `SO_PEERCRED` 拒绝（rpc 日志 `uid 1000 is not allowed`）；`systemd-analyze verify` 通过；`rotate-key` 后公钥变了、代理日志 `key reloaded`；`update --port 8181` 换了端口（实机发现看护进程仍探测 8080，已修：端口变了也交接）；`uninstall` 停掉并去掉单元，看护进程回到同用户一档、重新起自己的网关。网关的 pytest 在这台机器上 678 项通过（只跳过 macOS 的 `LOCAL_PEERCRED` 一项和两项要 Chromium 的）。
 
+**Windows 已做（2026-11-23，第 4 步；只在 Windows CI 上验证过，见本段末尾）**：
+
+- **平台层**：`secret_gate/platform/windows.py` 是第三个 `GatePlatform`。`base.py` 为它多了几个钩子（`root_owned_ops`、`directory_ops`、`ownership_ops`、`key_access_ops`、`service_definition_ops`、`remove_service_ops`、`preflight`、`is_admin`），默认实现就是原来 POSIX 的 chown/chmod 与写服务定义文件，所以 macOS 和 Linux 的安装、更新、换钥匙、卸载计划与之前逐字节相同（新旧代码各渲染一遍比对过）。`--root <前缀> --platform windows` 在 Mac 上也能跑全套（Windows 路径去掉盘符放到前缀下）。
+- **账户与服务（决定：一个服务、一个账户）**：虚拟账户只属于一个服务（`NT SERVICE\<服务名>`），两个服务就是两个都要读钥匙的账户。所以只有一个 Windows 服务 `AgentSwitchGate`，以 `NT SERVICE\AgentSwitchGate` 运行（SID 是 S-1-5-80 加服务名大写 UTF-16 的 SHA-1，不用查就知道，`fsacl.service_sid`，用 TrustedInstaller 的 SID 核对过算法）。服务本身是个小宿主（`secret_gate/win_service.py`）：pywin32 的 servicemanager 跑在运行时自己的 `python.exe -I -X utf8 -m secret_gate.win_service` 里（不用 pythonservice.exe，不在注册表里登记 Python 类），由它启动 `secret-gate rpc` 和 `secret-gate proxy` 两个子进程，任一退出 2 秒后重启（相当于 KeepAlive / Restart=always），子进程放进“宿主一走就全结束”的作业对象；宿主自己挂了由 `sc failure … restart` 重启。子进程的环境同 LaunchDaemon（`SECRET_GATE_HOME`、`HOME`、`SECRET_GATE_PUBLIC`、由运行时和 Windows 目录组成的 `PATH`），另有 `USERPROFILE`、`TEMP` 指向网关目录，没有代理变量；`-I` 让 `PYTHONPATH` 之类不起作用。注册用 `sc.exe create/config AgentSwitchGate binPath= … obj= "NT SERVICE\AgentSwitchGate" start= auto`，启停用 `net stop|start`（会等到真的停下、起来；`sc stop` 不等），卸载 `sc.exe delete`；都用 Windows 目录（`GetWindowsDirectoryW`）下的绝对路径。
+- **目录与 ACL**：`%ProgramData%\AgentSwitch\`、`%ProgramFiles%\AgentSwitch\gate-runtime\` 取自外壳的已知文件夹，不读环境变量（提权运行的安装命令带着用户的环境）。每个目录一建好就写上受保护的 ACL（pywin32 整个写入，不用 icacls 增删；属主 Administrators；下面的东西只继承）：根目录 SYSTEM、Administrators 完全控制，Users 与服务只读；`gate\` 只有 SYSTEM、Administrators、服务账户，在写进钥匙之前就设好；`gate-public\` 服务修改、`ownerSid` 的登录用户只读，不给 Users（同 Linux 的 0750）；`gate-service.json` 继承根目录，只有管理员能写，是否装了服务只看它，字段是 `ownerSid`（不是 `ownerUid`）。**与原定不同**：`gate\` 的 ACL 留了 Administrators（原定只有 SYSTEM 与服务账户）。安装和 `rotate-key` 由管理员的提权进程写钥匙，同 POSIX 上 root 能读；不留就得每次夺取所有权。UAC 下管理员的非提权进程里这个组只用于拒绝，所以以管理员身份登录、非提权运行的 agent 仍读不到；关了 UAC 或 agent 提权运行就读得到（BOUNDARY“已知缺口”）。普通用户能在 ProgramData 里建文件夹，所以安装前已存在、属主不是 Administrators/SYSTEM/TrustedInstaller 的 `%ProgramData%\AgentSwitch` 直接拒绝（可能藏着别人放的钥匙）。
+- **运行时**：`--runtime` 是一个含 `python\`（装了 secret-gate 的完整 Python，不是 venv；pip 会带上 `pywin32`，pyproject 里 `sys_platform == "win32"` 的依赖）和 `VERSIONS` 的目录。复制到 Program Files 时每一项先 lstat，符号链接、联接点和其他重解析点一律拒绝；打开后须仍是看过的那个文件（卷号、文件号相同）且只有一个硬链接（Windows 上没有目录描述符和 `O_NOFOLLOW`，这是对应的做法）。没有 sh 包装脚本，服务直接运行副本里的 `python.exe`。和 Linux 一样，运行时在用户可写的位置，授权那一刻它若已被改过就防不住。
+- **本机接口：命名管道**：`gate.sock` 在 Windows 上是 `\\.\pipe\agentswitch-gate`（`secret_gate/winpipe.py`；其他公开目录按路径哈希各有自己的名字，测试互不干扰）。代码里仍以 `<public>/gate.sock` 这个路径称呼接口，到传输层才换成管道名，所以 `client_socket`、`RpcClient`、`system status` 的调用处都没变。服务端：每个实例的安全描述符属主是服务账户，服务账户完全控制，`ownerSid` 与 SYSTEM 只能读写数据（不给 `FILE_APPEND_DATA`，它在管道上就是“新建实例”，给了等于让人往服务的管道里加自己的实例）；第一个实例带 `FILE_FLAG_FIRST_PIPE_INSTANCE`，拒绝远程客户端；读到第一行后模拟客户端，取其令牌的用户 SID，不是 SYSTEM 或 `ownerSid` 就不答断开（Windows 只在读过数据后才允许模拟；原计划的 GetNamedPipeClientProcessId → OpenProcessToken 行不通：虚拟账户打不开别的用户的进程）。客户端：只以识别级别连接（服务不能冒用它），发任何东西之前读管道的属主，装了服务时必须是服务账户、否则是自己；抢先建同名管道的程序过不了这一关（只造成服务起不来）。是否走服务与其他平台一样只看 `gate-service.json`，服务账户自己的进程除外，不退回本地网关。
+- **换钥匙**：Windows 没有 SIGHUP。代理每 2 秒看一次 `key.priv` 和 `upstream-insecure.txt`（mtime、大小、文件号），变了就重新加载，加载失败保留原来的（`reload.py`）；所以 `rotate-key` 的“通知代理”一步在 Windows 上没有命令。`upstream-insecure.txt` 的可信与否看 ACL（`fsacl.write_problem`），不看 Windows 没有的 group/other 位；`proxy.pid` 不看属主和权限位，存活用 `OpenProcess`/`GetExitCodeProcess`（Windows 上 `os.kill(pid, 0)` 会结束那个进程）。
+- **没装服务时（登录用户一档）**：`secret-gate keygen` 建的 `%USERPROFILE%\.secret-gate` 有只给本人的受保护 ACL，里面的文件继承它；私钥的 ACL 让本人、SYSTEM、Administrators、服务账户以外的人能读（或能改 ACL）就拒绝加载（`secret_gate/fsacl.py`，POSIX 上照旧是 0700/0600）。`secret-gate proxy` 在 Windows 上在本进程里跑 mitmdump（Windows 的 `os.execv` 会另起进程再退出，看护它的宿主会以为它死了）。CLI 往管道、文件写 UTF-8（Windows 默认用 ANSI 代码页，中文提示会编码失败）。
+- **`secret_exec`**：子进程环境的基础来自系统：`SystemRoot`、`windir`、`SystemDrive`、`ComSpec` 取 Windows 目录，`PATHEXT` 固定为 `.COM;.EXE;.BAT;.CMD`，`PATH` 固定为 `System32`、Windows 目录、`Wbem`、Windows PowerShell、`OpenSSH`，另取本进程的 `TEMP`、`TMP`、`USERPROFILE`、`HOMEDRIVE`、`HOMEPATH`、`APPDATA`、`LOCALAPPDATA`、`USERNAME`、`LANG`、`LC_ALL`、`TZ`。拒绝名单在 Windows 上多了这些名字本身和会让 cmd、PowerShell、.NET 运行时、加载器换个东西跑的变量（`PATHEXT`、`COMSPEC`、`PSModulePath`、`__COMPAT_LAYER`、`_NT_SYMBOL_PATH`、`COR_*`、`CORECLR_*`、`COMPLUS_*`、`DOTNET_*` 等）；macOS、Linux 的名单不变。
+- **命令**：管理员身份的终端里 `secret-gate system install --runtime <目录> [--port N] [--owner-sid S-1-5-21-…]`（不给 `--owner-sid` 取运行命令的用户，UAC 提权不换用户），`update`、`rotate-key`、`uninstall [--delete-keys]`、`status [--json]`（报告多一个 `ownerSid`）同其他平台。拒绝信息：“凭据网关由系统服务管理，请在以管理员身份运行的终端里用 secret-gate system install|update|rotate-key|uninstall 操作。”
+- **没有移植的**：AgentSwitch 的 daemon、看护进程、终端、Mac 与手机应用没有 Windows 版本，本步也不做；所以 Windows 上没有任何东西替用户运行安装、交接端口或配置 agent（`secret-gate bootstrap` 与 harness 配置在 Windows 上未做也未测，它们的测试在 Windows 上不收集）。
+- **在本机（Mac）验证了的**：全套 pytest（Windows 专用的跳过）；Windows 的计划、`--root --platform windows` 的整套 CLI（安装、状态、换钥匙、更新、卸载）、运行时复制拒绝链接与硬链接、宿主的进程看护、ACL 判定、服务 SID、管道命名与客户端该认谁、`secret_exec` 的 Windows 环境与拒绝名单、代理的文件监视，都靠注入在 Mac 上跑（`tests/test_system_windows.py` 等）；把 POSIX 才有的属性（`os.getuid`、`O_NOFOLLOW`、`AF_UNIX`、`SIGHUP`…）删掉后导入每个模块，都能导入；macOS、Linux 的计划逐字节不变。pywin32 的函数名对照 pywin32 312 的 Windows 轮子核对过。
+- **只在 Windows CI 上验证的**（`.github/workflows/ci.yml` 的 `secret-gate-windows`，`windows-latest`）：pytest 在 Windows 上的结果，其中 `windows` 标记的测试只在那里跑（ACL 的设置与读取、`keygen` 的目录 ACL、可读私钥被拒、联接点不跟随、已知文件夹；管道的放行与拒绝、客户端拒绝别人建的管道、管道名只能占一次、协议错误与超大请求、`secret-gate rpc` 进程端到端；`secret_exec` 用 cmd 与 PowerShell 的真实回显、环境、以本人身份运行、经服务取值）；然后 `scripts/windows_service_smoke.ps1` 在运行器上真的安装服务：用 setup-python 的 Python 造运行时、`system install`、核对服务和两个子进程以 `NT SERVICE\AgentSwitchGate` 运行且跑的是 Program Files 的副本、`gate\` 的 ACL 只有三个账户且不继承、`gate-public\` 没有 Users；以本人身份 `system status`、`keys`、`enc`，`keygen` 被拒；经服务的代理用 curl 和发布的 CA 访问本机的 HTTPS 回显站（自签名，写进 `upstream-insecure.txt`，代理自己发现），站点收到真值、curl 看到 `[REDACTED:echo/pass]`；`rotate-key` 后旧密文失效、新密文可用（代理自己发现了新钥匙）；`uninstall --delete-keys` 后服务和目录都没了。**写这段时这个任务还没在 CI 上跑过**；运行器是关了 UAC 的管理员，所以“登录用户读不到 `gate\`”只按 ACL 核对，没有以非管理员账户实际读一次。
+
 ## 6. 安装与更新（macOS）
 
 - 安装：一次管理员授权，建账户、建目录、生成新钥匙、复制运行时、装 LaunchDaemon。不碰用户目录。
@@ -154,7 +169,7 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 1. **脱敏器补齐**（§3.1、§3.2）与**封装下限、长度填充**（§3.3、§3.4）。它直接对应“推不出”，与服务的去留无关，先做。
 2. **精简服务**（§1、§2）：删方法、删多钥匙、删迁移、删 repair；daemon、Mac、iPhone、Android 同步改。
 3. **Linux 服务账户**（§5）：安装脚本、systemd 单元、`SO_PEERCRED`。——已做（2026-11-23，见 §5 末尾，含实机验证）。
-4. **Windows**（§5）：服务、命名管道、ACL，以及 Windows CI。
+4. **Windows**（§5）：服务、命名管道、ACL，以及 Windows CI。——已做（2026-11-23，见 §5 末尾；只在 Windows CI 上验证过）。
 5. 重写 `BOUNDARY.md`：按“出口 × 输出”列表，开头写明 §0 的“不防”。`gate-service-v0.md` 标为“已被本稿收窄”。
 
 每一步都要有测试。“推不出”专门有一组：模拟网站按各种方式回显（整值、截断、分段、大小写、base64、十六进制、超大响应、WebSocket），断言模型能看到的输出里拼不出原值。
