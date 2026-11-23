@@ -461,3 +461,14 @@ describe("what a seat has cost, and what stays out of the room", () => {
     expect(new RoomStore(home).get(room.id).stats.api).toMatchObject({ posts: 2 });
   });
 });
+
+describe("a text that could not be given", () => {
+  it("is not counted as a wake, however often it is tried", async () => {
+    const { store, room } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }), push: async () => false });
+    store.post(room.id, { from: "you", text: "@ui hello" });
+    for (let i = 0; i < 5; i++) { delivery.look(); await new Promise((r) => setTimeout(r, 0)); }
+    expect(store.get(room.id).stats.ui ?? { wakes: 0 }).toMatchObject({ wakes: 0 });
+    expect(store.get(room.id).receipts).toEqual({ 1: { ui: "sent" } });
+  });
+});

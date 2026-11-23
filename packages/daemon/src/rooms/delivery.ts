@@ -140,9 +140,11 @@ export class RoomDelivery {
     const waiting = this.waitingFor(terminal);
     if (!waiting.length) return;
     this.pushing.add(terminal);
-    const text = this.given(terminal, waiting);
+    const text = this.given(terminal, waiting, false);
     void this.o.push(terminal, text).then((given) => {
-      if (given) for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
+      if (!given) return;
+      this.counted(terminal, waiting, text);
+      for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
     }, () => undefined).finally(() => this.pushing.delete(terminal));
   }
 
@@ -156,15 +158,19 @@ export class RoomDelivery {
 
   /** The text a session is given, counted for its seat (§9 花费: how often a seat was woken and with how much), and
    *  with what stays out of the room said the first time it is given anything. */
-  private given(terminal: string, waiting: readonly { room: Room; seat: Seat; message: Message }[]): string {
+  private given(terminal: string, waiting: readonly { room: Room; seat: Seat; message: Message }[], taken = true): string {
     let text = this.textOf(waiting);
-    if (!this.told.has(terminal)) {
-      this.told.add(terminal);
-      text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
-    }
+    if (!this.told.has(terminal)) text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
+    if (taken) this.counted(terminal, waiting, text);
+    return text;
+  }
+
+  /** A text was really given: counted, and the once-only sentence is said. (A text that could not be put in front of
+   *  its session is tried again every little while: counted then, a seat nobody reached read "woken 67 times".) */
+  private counted(terminal: string, waiting: readonly { room: Room; seat: Seat; message: Message }[], text: string): void {
+    this.told.add(terminal);
     const last = waiting[waiting.length - 1]!;
     this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length });
-    return text;
   }
 
   private waitingFor(terminal: string): { room: Room; seat: Seat; message: Message }[] {

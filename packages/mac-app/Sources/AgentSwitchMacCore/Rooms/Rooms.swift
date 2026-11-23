@@ -147,7 +147,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public var id: String { handle }
     /// Seated, running, and without the Kit: it reads nothing and says nothing until it is resumed once.
     public var needsResume: Bool { !isUser && here && kit == false && state != .exited }
-    public static let needsResumeSays = "这个会话是在 Chat Room 上线之前启动的，还没有 Chatroom Kit：恢复一次之后才能在房间里说话、被消息唤醒。"
+    public static let needsResumeSays = "这个会话还没连上房间，消息送不到它。刚启动的会话可能正停在它自己的确认上（比如“是否信任这个文件夹”）：到终端里看一眼。很早以前启动的会话没有 Chatroom Kit：恢复一次。"
     public var isUser: Bool { kind == "user" }
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
