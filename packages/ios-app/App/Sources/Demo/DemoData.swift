@@ -467,7 +467,7 @@ enum DemoData {
         case "proxybrowser": return [.proxy(.browser)]
         case "proxyprofile": return proxies.owned.first.map { [.proxy(.profile(agent: $0.agent, profile: $0.profile))] } ?? []
         case "mac", "offlinemac": return [.mac]
-        case "tasks", "search": return [.tasks]
+        case "tasks", "search": return OldDispatch.off ? [] : [.tasks]
         case "sessions": return [.sessions]
         case "transcript", "transcriptfiles": return sessions.first.map { [.sessions, .session($0)] } ?? [.sessions]
         default: return []

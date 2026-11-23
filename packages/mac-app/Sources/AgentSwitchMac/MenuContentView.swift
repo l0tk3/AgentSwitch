@@ -169,7 +169,9 @@ struct MenuContentView: View {
             // open terminal 了; dispatch-v0 §1); without a Dock icon these are the way in, one per page.
             if !alwaysShowInDock {
                 MenuAction(title: "Open Terminals", rows: PixelArt.railTerminals, enabled: model.daemonReady) { showMainWindow(.terminals) }
+                // The old dispatch is off: greyed out and not clickable (OldDispatch).
                 MenuAction(title: "Open Dispatch", rows: PixelArt.railDispatch, enabled: model.daemonReady) { showMainWindow(.dispatch) }
+                    .oldDispatchOff()
             }
             // No `Open in Browser` (the web console in the system's browser): taken out 2026-10-07, user: open in brower
             // 删掉，把这个功能直接删掉.

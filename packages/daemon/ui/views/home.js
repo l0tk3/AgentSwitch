@@ -11,6 +11,7 @@ import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js"
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
 import { agentMark, spinner, square, topicSquare } from "../lib/sidebar.js";
 import { mdInline, mdTyped } from "../lib/markdown.js";
+import { OLD_DISPATCH_NOTE, offAttrs, offNotice, oldDispatchOff } from "../lib/oldDispatch.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -115,7 +116,7 @@ function feed(s) {
   const shown = new Set(tasks.map((t) => t.id));
   for (const a of s.approvals.filter((x) => !shown.has(x.taskId))) out.push(approvalCard(a, byId.get(a.taskId), s.answerSubmissions?.[a.id]));
   out.push(answerNotices(s));
-  if (!tasks.length && !s.approvals.length) out.push('<div class="empty">发送任务或问题</div>');
+  if (!tasks.length && !s.approvals.length) out.push(`<div class="empty">${oldDispatchOff() ? "暂无旧任务" : "发送任务或问题"}</div>`);
   return out.join("");
 }
 
@@ -127,7 +128,8 @@ function archived(s) {
 }
 
 export function render(s) {
-  return `${strip(s)}<div class="feed" id="feed">${archived(s)}${feed(s)}</div>${composer(s)}`;
+  // The old dispatch off: a notice and the way to the terminals in place of the composer; the old tasks stay readable.
+  return `${strip(s)}<div class="feed" id="feed">${archived(s)}${feed(s)}</div>${oldDispatchOff() ? offNotice() : composer(s)}`;
 }
 
 /** The record opens at its end, as a conversation does. */
@@ -137,6 +139,7 @@ export function afterRender() {
 }
 
 function questionBlock(a, q, i, disabled) {
+  disabled ||= oldDispatchOff();
   const box = `q-${a.id}-${i}`;
   const options = (q.options || []).length ? `<div class="chips">${q.options.map((o) => `<button class="chip" data-opt="${esc(o.label)}" data-for="${box}" data-multi="${!!q.multi}" title="${esc(o.description || "")}" ${disabled ? "disabled" : ""}>${esc(o.label)}</button>`).join("")}</div>` : "";
   return `<div class="qb">${q.header ? `<span class="lbl">// ${esc(q.header)}</span> ` : ""}<div class="qt">${mdInline(q.text)}</div>
@@ -150,20 +153,20 @@ export function approvalCard(a, task, submission = {}) {
   if (a.kind === "question") {
     const { source, questions } = questionsOf(a);
     const fromExecutor = source === "executor";
-    const locked = ["sending", "sent", "uncertain", "resolved"].includes(submission.status);
+    const locked = ["sending", "sent", "uncertain", "resolved"].includes(submission.status) || oldDispatchOff();
     const label = { sending: "提交中…", sent: "已提交", uncertain: "结果待确认", resolved: "问题已结束", error: "重新提交" }[submission.status] || "提交";
     return `<div class="box q" id="ask-${esc(a.id)}" aria-busy="${submission.status === "sending"}">
       <div class="hd"><span>? Question</span><span class="sp"></span><span>${fromExecutor ? "执行器提问（答复直接交给执行器）" : "调度模型提问"}</span></div>
       <div class="bd"><div class="faint about">${about}</div>
       ${["sent", "resolved"].includes(submission.status) ? "" : questions.map((q, i) => questionBlock(a, q, i, locked)).join("")}
       ${submission.message ? `<div class="hint ${submission.status === "error" ? "error" : ""}" role="${submission.status === "error" ? "alert" : "status"}" aria-live="polite">${esc(submission.message)}</div>` : ""}</div>
-      <div class="ft"><span class="hint-l">回答后任务继续</span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny" ${locked ? "disabled" : ""}>暂不回答，停止执行</button>${["sent", "uncertain"].includes(submission.status) ? `<button data-answer-refresh="${a.id}" data-task="${a.taskId}">刷新状态</button>` : ""}<button class="primary" data-answer="${a.id}" data-task="${a.taskId}" ${locked ? "disabled" : ""}>${label}</button></div>
+      <div class="ft"><span class="hint-l">${oldDispatchOff() ? esc(OLD_DISPATCH_NOTE) : "回答后任务继续"}</span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny" ${locked ? "disabled" : ""}>暂不回答，停止执行</button>${["sent", "uncertain"].includes(submission.status) ? `<button data-answer-refresh="${a.id}" data-task="${a.taskId}">刷新状态</button>` : ""}<button class="primary" data-answer="${a.id}" data-task="${a.taskId}" ${locked ? "disabled" : ""}>${label}</button></div>
     </div>`;
   }
   return `<div class="box ask" id="ask-${esc(a.id)}">
     <div class="hd"><span>[!] Approval</span><span class="sp"></span><span>${about}</span></div>
     <div class="bd"><code>${esc(a.action)}</code>${a.evidence ? `<div class="path pre">${esc(a.evidence)}</div>` : ""}</div>
-    <div class="ft"><span class="hint-l"></span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">Deny</button><button class="primary" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">Allow</button></div>
+    <div class="ft"><span class="hint-l">${oldDispatchOff() ? esc(OLD_DISPATCH_NOTE) : ""}</span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny"${offAttrs()}>Deny</button><button class="primary" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow"${offAttrs()}>Allow</button></div>
   </div>`;
 }
 
@@ -176,7 +179,7 @@ export function answerNotices(s, taskId) {
 }
 
 async function send() {
-  if (sendState(get(), "home").locked) return;
+  if (oldDispatchOff() || sendState(get(), "home").locked) return;
   const task = $("#c-task").value.trim();
   if (!task) { set({ hint: "请填写要发送的消息。" }); return; }
   const cwd = $("#c-cwd").value.trim();
@@ -192,7 +195,7 @@ export const bindings = [
   ...sendBindings,
   { sel: "#c-send", run: () => send() },
   ...deleteBindings,
-  { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
+  { sel: "[data-approve]", run: (el) => { if (oldDispatchOff()) return; el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
   ...questionBindings,
   // Anywhere else on a task (its card, its entry) opens it beside.
   { sel: "[data-open]", run: (el) => openTask(el.dataset.open) },

@@ -54,7 +54,7 @@ afterEach(async () => { for (const s of open.splice(0)) { await s.close(); s.d.c
 async function local(): Promise<{ d: Daemon; port: number; send: (method: string, path: string, opts?: { headers?: Record<string, string>; body?: string | Buffer }) => Promise<Reply> }> {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-guard-"));
   const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const d = buildDaemon(cfg, { quota: new QuotaService([]) });
+  const d = buildDaemon(cfg, { quota: new QuotaService([]), oldDispatchOff: false });
   const server = await new Promise<ReturnType<typeof listenLocal>>((ok) => { const s = listenLocal(d, 0, () => ok(s)); });
   const port = (server.address() as AddressInfo).port;
   open.push({ d, close: () => new Promise<void>((ok) => { server.close(() => ok()); (server as import("node:http").Server).closeAllConnections(); }) });

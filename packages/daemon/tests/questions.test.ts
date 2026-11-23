@@ -82,7 +82,7 @@ describe("HTTP: POST /tasks/:id/answer", () => {
   it("takes text or an answers map, 400 on a bad shape, 404 for another task's question", async () => {
     const { engine, store, bus, firstQuestion } = build(10_000);
     const { createApp } = await import("../src/api/app.js");
-    const app = createApp({ engine, store, bus, quota: { snapshot: async () => [], refresh: async () => [] } as never, targets, uploadsDir: "/tmp", policyPath: "/tmp/agentswitch-q-policy.json", extensions: { list: () => [] } as never } as never);
+    const app = createApp({ engine, store, bus, quota: { snapshot: async () => [], refresh: async () => [] } as never, targets, uploadsDir: "/tmp", policyPath: "/tmp/agentswitch-q-policy.json", extensions: { list: () => [] } as never, oldDispatchOff: false } as never);
     const t = engine.submit({ task: 'x @echo {"question":{"id":"which","text":"Which?","options":["a","b"]}}', cwd: "/tmp" });
     const id = await firstQuestion(t.id);
     const post = (path: string, body: unknown) => app.request(path, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });

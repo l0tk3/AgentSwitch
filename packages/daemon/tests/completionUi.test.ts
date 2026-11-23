@@ -4,6 +4,8 @@ import type { AskFailureKind } from "../src/router/ask.js";
 import { LOOP_FAILURE_MESSAGE } from "../src/router/loop.js";
 
 const UI = resolve(import.meta.dirname, "..", "ui");
+// These exercise the old dispatch, which is off by default (ui/lib/oldDispatch.js): turned back on here.
+(await import(join(UI, "lib/oldDispatch.js"))).setOldDispatchOff(false);
 const state = await import(join(UI, "lib/state.js"));
 const actions = await import(join(UI, "lib/actions.js"));
 const home = await import(join(UI, "views/home.js"));

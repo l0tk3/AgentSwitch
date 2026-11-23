@@ -339,6 +339,9 @@ final class AppModel {
     // MARK: - data
 
     func refreshAll() async {
+        // The old dispatch is off: its tasks, questions, topics and conversation are not read (nor sounded, nor put on
+        // the Live Activity, which follows the terminals alone).
+        guard !OldDispatch.off else { return }
         await refreshTasks()
         await refreshApprovals()
         await refreshThreads()
@@ -397,8 +400,9 @@ final class AppModel {
     /// you (assistant-v0 §4).
     func syncLive() {
         let titles = Dictionary(threads.compactMap { t in t.title.map { (t.id, $0) } }, uniquingKeysWith: { a, _ in a })
-        let state = LiveSummary.state(tasks: tasks, approvals: approvals, threadTitles: titles, tails: liveTails,
-                                      terminals: terminals.terminals)
+        let tasks = OldDispatch.off ? [] : self.tasks
+        let state = LiveSummary.state(tasks: tasks, approvals: OldDispatch.off ? [] : approvals, threadTitles: titles,
+                                      tails: OldDispatch.off ? [:] : liveTails, terminals: terminals.terminals)
         let ended = state == nil ? LiveSummary.ended(tasks: tasks, threadTitles: titles) : nil
         let mac = profile?.name ?? "Mac"
         let live = live
@@ -413,6 +417,8 @@ final class AppModel {
     func openTask(_ id: String) {
         sheet = nil
         tab = .tasks
+        // The old dispatch is off: the tab says so, no task page opens.
+        guard !OldDispatch.off else { return }
         openTaskRequest = id
     }
 

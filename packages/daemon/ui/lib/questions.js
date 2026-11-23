@@ -1,6 +1,7 @@
 /** Shared question handling for home and task detail. Both views must submit the same payload. */
 import { answer, refreshAnswer, setAnswerSubmission } from "./actions.js";
 import { get } from "./state.js";
+import { oldDispatchOff } from "./oldDispatch.js";
 
 /** Older question rows used plain text evidence. */
 export function questionsOf(a) {
@@ -24,6 +25,7 @@ export function collectAnswers(approvalId) {
 }
 
 export function submitAnswer(el) {
+  if (oldDispatchOff()) return;
   const { task: taskId, answer: approvalId } = el.dataset;
   if (["sending", "sent", "uncertain", "resolved"].includes(get().answerSubmissions[approvalId]?.status)) return;
   const given = collectAnswers(approvalId);
@@ -36,7 +38,7 @@ export function submitAnswer(el) {
 
 function selectOption(el) {
   const box = document.getElementById(el.dataset.for);
-  if (!box || box.disabled) return;
+  if (!box || box.disabled || oldDispatchOff()) return;
   if (el.dataset.multi !== "true") { box.value = el.dataset.opt; return; }
   const values = box.value.split(/[,，]/).map((v) => v.trim()).filter(Boolean);
   if (!values.includes(el.dataset.opt)) values.push(el.dataset.opt);

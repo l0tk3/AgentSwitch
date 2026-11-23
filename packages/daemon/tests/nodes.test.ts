@@ -48,7 +48,7 @@ async function node(name: string): Promise<TestNode> {
     home, port: await freePort(), name, gate: () => null, tls: ensureTls(join(home, "remote")),
     addresses: async () => ({ lan: ["127.0.0.1"], tailnet: [] }), gateKey: async () => ({ publicKey: KEY, keypair: "default" }),
   });
-  const d = buildDaemon(cfg, { quota, remote: runtime });
+  const d = buildDaemon(cfg, { quota, remote: runtime, oldDispatchOff: false });
   const listener = await startRemote(d, runtime, "127.0.0.1");
   const key = readFileSync(join(home, "nodes", "key"), "utf8").trim();
   const raw = async (method: string, path: string, init: RequestInit = {}): Promise<Response> => d.app.request(path, { method, ...init, headers: { [NODES_KEY_HEADER]: key, ...(init.headers as Record<string, string> | undefined) } });

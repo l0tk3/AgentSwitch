@@ -174,6 +174,11 @@ internal fun rememberOpen(): (SettingsRoute) -> Unit {
 @Composable
 internal fun RouteContent(route: SettingsRoute) {
     val model = com.agentswitch.android.LocalAppModel.current
+    // The old dispatch's pages, while it is off (OldDispatch): the note, whatever opened them.
+    if (com.agentswitch.android.OldDispatch.OFF && (route == SettingsRoute.Tasks || route == SettingsRoute.Context || route == SettingsRoute.Models)) {
+        com.agentswitch.android.DispatchOffPage(onBack = com.agentswitch.android.rememberBack())
+        return
+    }
     when (route) {
         SettingsRoute.Mac -> model.profile?.let { MacDetailsView(it) }
         SettingsRoute.Tasks -> com.agentswitch.android.dispatch.TasksManageView()

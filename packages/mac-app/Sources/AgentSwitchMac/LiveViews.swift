@@ -333,6 +333,8 @@ struct LiveCard: View {
                 .padding(.top, 8)
                 .padding(.bottom, 3)
                 .disabled(pending.contains(row.ask?.id ?? row.id))
+                // A task's of the old dispatch, which is off: its answers are refused (OldDispatch).
+                .oldDispatchOff(row.kind == .task && OldDispatch.off)
             }
         }
     }

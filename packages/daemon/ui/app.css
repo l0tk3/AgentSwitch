@@ -241,6 +241,11 @@ details.note { display: block; }
 .opts input { width: 13ch; }
 .opts input.pin { width: 15ch; }
 .compose.small-c { padding: 0; border: 0; }
+/* the old dispatch off (lib/oldDispatch.js): a notice in place of the composer, its mark a 50% dither (§7.2 rule 8) */
+.off-notice .l1 { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font: 13px/1.6 var(--ui); }
+.off-notice .dz { display: inline-block; width: 10px; height: 10px; align-self: center;
+  background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.off-notice .small { font-size: 12px; margin-top: 2px; }
 [data-dropzone].drop { outline: 1px dashed var(--signal); outline-offset: 4px; }
 .attach-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
 .attach { display: flex; align-items: center; gap: 8px; border: 1px solid var(--ink4); padding: 3px 4px 3px 3px; max-width: 320px; font-size: 12px; }

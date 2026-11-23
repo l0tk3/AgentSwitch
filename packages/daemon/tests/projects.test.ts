@@ -15,7 +15,7 @@ function daemon(assistant?: Router) {
   const repo = join(home, "..", `repo-${Math.random().toString(36).slice(2, 8)}`);
   mkdirSync(repo, { recursive: true });
   const cfg: DaemonConfig = { home: join(home, "as"), targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const d = buildDaemon(cfg, assistant ? { assistant } : {});
+  const d = buildDaemon(cfg, { ...(assistant ? { assistant } : {}), oldDispatchOff: false });
   const call = async (method: string, path: string, body?: unknown, remote = false) => {
     const init = { method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) };
     const res = await d.app.request(path, init, remote ? markRemote({}, { deviceId: "phone" }) : undefined);

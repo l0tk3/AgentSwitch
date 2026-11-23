@@ -13,7 +13,7 @@ type Listing = { root: string | null; files: { path: string }[] };
 
 function daemon(home = mkdtempSync(join(tmpdir(), "agentswitch-tf-"))) {
   const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const d = buildDaemon(cfg, { quota: new QuotaService([]) });
+  const d = buildDaemon(cfg, { quota: new QuotaService([]), oldDispatchOff: false });
   const post = (body: unknown) => d.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return { d, home, post };
 }

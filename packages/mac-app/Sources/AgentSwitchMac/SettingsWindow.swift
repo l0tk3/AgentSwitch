@@ -254,21 +254,23 @@ struct SettingsView: View {
                     Label(tab.title, systemImage: tab.symbol).badge(tab == .agents ? model.agentUpdateCount : 0).tag(tab)
                 }
                 // One row for all of Dispatch's settings: tagged with the part it opens, the one shown last.
-                Label("Dispatch", systemImage: "arrow.triangle.branch").tag(navigation.dispatchPart)
+                // Greyed out and not clickable while the old dispatch is off (OldDispatch).
+                Label("Dispatch", systemImage: "arrow.triangle.branch").oldDispatchOff().tag(navigation.dispatchPart)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             VStack(spacing: 0) {
                 ErrorBanner()
-                if navigation.tab.isDispatch {
+                if navigation.tab.isDispatch, !OldDispatch.off {
                     Picker("Dispatch", selection: selection) {
                         ForEach(SettingsTab.dispatch) { part in Text(part.title).tag(Optional(part)) }
                     }
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                     .padding(.top, 12).padding(.bottom, 4)
                 }
-                page(navigation.tab)
+                // Any of Dispatch's parts while the old dispatch is off (`-openSettings log`, say): `Dispatch Off`.
+                Group { if navigation.tab.isDispatch && OldDispatch.off { OldDispatchPlaceholder() } else { page(navigation.tab) } }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             // The wizard shows it itself while it is up: one sheet at a time.

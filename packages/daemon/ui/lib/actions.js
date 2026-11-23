@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { get, set } from "./state.js";
 import { releasePending, toPending, uploadPending } from "./files.js";
 import { postTask } from "./submission.js";
+import { oldDispatchOff } from "./oldDispatch.js";
 
 export const isDeleted = (kind, id) => get().deletions[`${kind}:${id}`]?.status === "deleted";
 export const loadTasks = async () => {
@@ -181,6 +182,7 @@ export function setTaskSubmission(key, submission) {
 
 /** Upload a snapshot of attachments, then show the accepted task without waiting for list refreshes. */
 export async function submitTask(body, { onAccepted } = {}) {
+  if (oldDispatchOff()) return;   // the old dispatch is off (lib/oldDispatch.js)
   const key = submissionKey(body.parent_id);
   if (["uploading", "sending", "uncertain"].includes(get().taskSubmissions[key]?.status)) return;
   const origin = { navigationId: get().navigationId, view: get().view, taskId: get().task?.id };
@@ -245,6 +247,7 @@ export async function refreshSubmission(key) {
 
 /** `given` = {text} for one question, {answers: {id: [..]}} for several (docs/supervisor-v0.md §1c). */
 export async function answer(taskId, approvalId, given) {
+  if (oldDispatchOff()) return;
   if (["sending", "sent", "uncertain", "resolved"].includes(get().answerSubmissions[approvalId]?.status)) return;
   setAnswerSubmission(approvalId, { taskId, status: "sending", message: "正在提交答复，请稍候…" });
   try {
@@ -284,11 +287,13 @@ export async function refreshAnswer(taskId, approvalId) {
 }
 
 export async function savePolicy(policy) {
+  if (oldDispatchOff()) return;
   const r = await api("PUT", "/approvals/policy", policy);
   set((s) => ({ policy: { ...s.policy, policy: r.policy } }));
 }
 
 export async function approve(taskId, approvalId, decision) {
+  if (oldDispatchOff()) return;
   await api("POST", `/tasks/${taskId}/approve`, { approval_id: approvalId, decision });
   await Promise.all([loadApprovals(), loadTasks()]);
 }
@@ -297,6 +302,7 @@ export const cancelTask = (id) => api("POST", `/tasks/${id}/cancel`);
 
 /** 👍 / 👎 on a finished task; clicking the same one again clears it. */
 export async function rateTask(id, rating) {
+  if (oldDispatchOff()) return;
   await api("POST", `/tasks/${id}/rate`, { rating });
   if (get().view !== "task" || get().task?.id !== id || isDeleted("task", id)) return;
   const task = await api("GET", "/tasks/" + id);
@@ -305,6 +311,7 @@ export async function rateTask(id, rating) {
 
 /** Hand the task to another executor in the same thread; `pin` = "harness/model" or empty for the router. */
 export async function handoffTask(id, pin) {
+  if (oldDispatchOff()) return;
   const body = pin && pin.includes("/") ? { to: { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) } } : {};
   const next = await api("POST", `/tasks/${id}/handoff`, body);
   await loadTasks();
@@ -312,6 +319,7 @@ export async function handoffTask(id, pin) {
 }
 
 export async function archiveThread(id) {
+  if (oldDispatchOff()) return;
   await api("POST", `/threads/${id}/archive`);
   await loadThread(id);
 }

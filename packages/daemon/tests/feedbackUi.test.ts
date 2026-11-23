@@ -2,6 +2,8 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const UI = resolve(import.meta.dirname, "..", "ui");
+// These exercise the old dispatch, which is off by default (ui/lib/oldDispatch.js): turned back on here.
+(await import(join(UI, "lib/oldDispatch.js"))).setOldDispatchOff(false);
 const state = await import(join(UI, "lib/state.js"));
 const detail = await import(join(UI, "views/task.js"));
 const receipt = (over: Record<string, unknown> = {}) => ({

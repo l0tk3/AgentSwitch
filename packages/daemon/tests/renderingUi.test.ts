@@ -25,6 +25,8 @@ beforeEach(async () => {
     : url === "/approvals/policy" ? { policy: { mode: "manual", human: [] }, categories: [] } : [])));
   vi.stubGlobal("fetch", fetcher);
   state = await import(join(UI, "lib/state.js"));
+  // These exercise the old dispatch's composers, off by default (ui/lib/oldDispatch.js): turned back on here.
+  (await import(join(UI, "lib/oldDispatch.js"))).setOldDispatchOff(false);
   await import(join(UI, "app.js"));
   await vi.advanceTimersByTimeAsync(0);
 });

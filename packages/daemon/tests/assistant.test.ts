@@ -27,7 +27,7 @@ function scripted(replies: (string | ((message: string) => string))[]): Router &
 function daemon(assistant: Router | undefined) {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-assistant-"));
   const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const d = buildDaemon(cfg, { ...(assistant ? { assistant } : {}) });
+  const d = buildDaemon(cfg, { ...(assistant ? { assistant } : {}), oldDispatchOff: false });
   const say = async (text: string, extra: Record<string, unknown> = {}) => {
     const res = await d.app.request("/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, client_id: `c-${Math.random().toString(36).slice(2, 12)}`, ...extra }) });
     return { status: res.status, body: await res.json() as Record<string, any> };

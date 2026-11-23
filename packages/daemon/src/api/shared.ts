@@ -105,6 +105,9 @@ export type ApiDeps = {
   readonly recordWatchMs?: number;
   /** The router as the user's assistant (assistant-v0 §1.1). */
   readonly assistant?: Assistant;
+  /** The old dispatch is off (core/oldDispatch.ts): its submitting routes refuse. Default OLD_DISPATCH_OFF; tests of the
+   *  engine set false. */
+  readonly oldDispatchOff?: boolean;
   /** Whether a paired node may send keystrokes as they are (docs/mesh-v0.md §10); absent = no. */
   readonly remoteKeyboard?: () => boolean;
   /** The Files column's reads of this node's disk (docs/files-v0.md §7); absent = no `/files…`, and a reply's `{path}`

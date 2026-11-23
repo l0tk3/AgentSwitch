@@ -195,6 +195,8 @@ final class LiveActivity {
     }
 
     private func answer(_ row: LiveSnapshot.Row, _ send: @escaping @Sendable (DaemonClient) async throws -> Void) {
+        // The old dispatch is off: its tasks are not answered (OldDispatch).
+        guard row.kind != .task || !OldDispatch.off else { return }
         let key = row.ask?.id ?? row.id
         guard !pending.contains(key) else { return }
         pending.insert(key)

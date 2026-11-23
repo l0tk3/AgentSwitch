@@ -60,27 +60,35 @@ struct SettingsView: View {
                 }
                 AppearanceSection()
                 Section {
+                    // What every task of the old dispatch reads: off with it (OldDispatch). The ciphertexts stay, the
+                    // terminals use them too.
                     NavigationLink("Context") { ContextEditorView() }
+                        .disabled(OldDispatch.off)
                     NavigationLink("Ciphertexts") { CiphertextsView() }
                 } header: {
                     SectionLabel("Dispatch")
                 } footer: {
-                    Text("环境说明记录站点、账号和偏好，供每个任务参考。")
+                    Text(OldDispatch.off ? "环境说明供旧调度的任务参考。\(OldDispatch.note)" : "环境说明记录站点、账号和偏好，供每个任务参考。")
                 }
                 .disabled(!connected)
                 if connected, !proxies.isEmpty { ProxiesSection(overview: proxies).id("proxies") }
                 FeedbackSection()
                 if connected { MacAppSection() }
                 Section {
-                    NavigationLink("History", value: SettingsRoute.tasks)
-                    NavigationLink("Models") { ModelsView() }
-                    Button("Clear History", role: .destructive) { cleared = false; clearing = .history }
+                    // The old dispatch's tasks (each opens a task page), the router's model, and clearing that
+                    // history: off with it (OldDispatch).
+                    Group {
+                        NavigationLink("History", value: SettingsRoute.tasks)
+                        NavigationLink("Models") { ModelsView() }
+                        Button("Clear History", role: .destructive) { cleared = false; clearing = .history }
+                    }
+                    .disabled(OldDispatch.off)
                     if let clearError { Text(clearError).font(.footnote).foregroundStyle(Theme.failed) }
                     if cleared { Text("记录已清空。").font(.footnote).foregroundStyle(.secondary) }
                 } header: {
                     SectionLabel("Manage")
                 } footer: {
-                    Text("Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。")
+                    Text((OldDispatch.off ? OldDispatch.note : "") + "Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。")
                 }
                 .disabled(!connected)
                 if let policy {

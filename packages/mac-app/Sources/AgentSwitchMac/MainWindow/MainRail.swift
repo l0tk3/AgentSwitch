@@ -26,8 +26,11 @@ struct MainRail: View {
     var body: some View {
         VStack(spacing: Self.gap) {
             ForEach(state.pages, id: \.self) { page in
-                RailButton(rows: page.railIcon, help: page.railHelp, current: state.page == page,
-                           mark: state.activity(of: page).mark) { switchPage(page) }
+                let open = OldDispatch.reachable(page)
+                // Dispatch while the old dispatch is off: dithered, not clickable, the sentence as its help (OldDispatch).
+                RailButton(rows: page.railIcon, help: open ? page.railHelp : OldDispatch.note, current: state.page == page,
+                           mark: open ? state.activity(of: page).mark : .none) { switchPage(page) }
+                    .oldDispatchOff(!open)
                     .accessibilityLabel(page.title)
             }
             RailEmptyPart(state: state)
@@ -115,7 +118,10 @@ struct RailStrip: View {
     var body: some View {
         VStack(spacing: MainRail.gap) {
             ForEach(state.pages, id: \.self) { page in
-                StripBar(bar: .of(current: state.page == page, activity: state.activity(of: page).mark), help: page.railHelp) { switchPage(page) }
+                let open = OldDispatch.reachable(page)
+                StripBar(bar: open ? .of(current: state.page == page, activity: state.activity(of: page).mark) : nil,
+                         help: open ? page.railHelp : OldDispatch.note) { switchPage(page) }
+                    .disabled(!open)
                     .accessibilityLabel(page.title)
             }
             RailEmptyPart(state: state)

@@ -12,6 +12,7 @@ import { spinner, square, topicSquare } from "../lib/sidebar.js";
 import { md, mdInline, mdTyped } from "../lib/markdown.js";
 import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js";
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
+import { offAttrs, offNote, oldDispatchOff } from "../lib/oldDispatch.js";
 
 const $ = (s) => document.querySelector(s);
 const THREAD_STATUS = { open: "未归档", archived: "已归档" };
@@ -137,16 +138,18 @@ function threadCard(t, th, s) {
       <div class="faint mono small">${esc(th.id)} · ${(th.tasks || []).length} 次执行 · ${th.handoffs || 0} 次交接${th.expiresAt ? " · 将于 " + stamp(th.expiresAt) + " 删除" : ""}</div>
       ${sm ? `<div class="sum"><div class="faint">目标</div><div>${mdInline(sm.goal)}</div><div class="faint">进展</div><div>${mdInline(sm.progress || "—")}</div>${list("文件", sm.files)}${list("未解决", sm.unresolved)}${list("决定", sm.decisions)}</div>` : `<div class="faint">暂无摘要（每次执行结束后由调度模型生成）</div>`}
       <div class="trows">${tasks}</div>
-      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="acts"><button id="t-archive" title="归档后 7 天删除">Archive</button></div>` : ""}
+      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="acts"><button id="t-archive"${oldDispatchOff() ? offAttrs() : ' title="归档后 7 天删除"'}>Archive</button></div>` : ""}
       ${th.status === "archived" ? `<div class="acts">${deleteButton("thread", th.id, s, (th.tasks || []).some((x) => ACTIVE.has(x.status)))}${deleteNotice("thread", th.id, s)}</div>` : ""}
     </div>`;
 }
 
 function handoffBar(t) {
+  if (oldDispatchOff()) return `<div class="handoff"><span class="lbl">// Hand To</span><input id="t-handoff-pin" class="pin" placeholder="Auto，或 codex/gpt-5.5"${offAttrs()}><button id="t-handoff"${offAttrs()}>Hand Off</button></div>`;
   return `<div class="handoff"><span class="lbl">// Hand To</span><input id="t-handoff-pin" data-keep class="pin" placeholder="Auto，或 codex/gpt-5.5" title="交接：在同一话题中改由其他执行器继续，排除当前执行器；填写执行器/模型可直接指定"><button id="t-handoff">Hand Off</button></div>`;
 }
 
 function followUp(s) {
+  if (oldDispatchOff()) return offNote();
   const key = `followup:${s.task.id}`;
   const sub = sendState(s, key);
   const disabled = sub.locked ? "disabled" : "";
@@ -197,6 +200,7 @@ export function render(s) {
   const events = s.events.filter((e) => e.type !== "tool_result").map((e) => `<div class="ev ${e.type}"><span class="ts">${when(e.ts)}</span>${esc(eventLine(e))}</div>`).join("");
   const incomplete = ["partial", "blocked"].includes(t.status);
   const acts = ACTIVE.has(t.status) ? `<button class="warn" id="t-cancel">Cancel</button>`
+    : oldDispatchOff() ? `<button class="${t.rating === 1 ? "on" : ""}" data-rate="1"${offAttrs()}>Useful</button><button class="${t.rating === -1 ? "on" : ""}" data-rate="-1"${offAttrs()}>Not Useful</button>${deleteButton("task", t.id, s, (s.thread?.tasks || []).some((x) => ACTIVE.has(x.status)))}`
     : `<button class="${t.rating === 1 ? "on" : ""}" data-rate="1" title="结果有用，调度模型后续会参考">Useful</button><button class="${t.rating === -1 ? "on" : ""}" data-rate="-1" title="结果无用">Not Useful</button>${deleteButton("task", t.id, s, (s.thread?.tasks || []).some((x) => ACTIVE.has(x.status)))}`;
   return `<div class="head">
       <div class="l1">${statusLine(t)}<span class="sp"></span><button class="x" data-nav="home" title="Close · esc" aria-label="Close">×</button></div>
@@ -235,6 +239,7 @@ export function afterRender() {
 }
 
 async function send(s) {
+  if (oldDispatchOff()) return;
   if (sendState(get(), `followup:${s.task?.id}`).locked) return;
   const task = $("#f-task").value.trim();
   if (!task || !s.task) { set({ hint: "请填写要发送的消息。" }); return; }
@@ -246,12 +251,12 @@ export const bindings = [
   ...deleteBindings,
   { sel: "#f-send", run: (_el, _e, s) => send(s) },
   { sel: "#t-cancel", run: (_el, _e, s) => cancelTask(s.task.id) },
-  { sel: "#t-handoff", run: (el, _e, s) => { el.disabled = true; return handoffTask(s.task.id, $("#t-handoff-pin").value.trim()).finally(() => { el.disabled = false; }); } },
-  { sel: "#t-archive", run: (_el, _e, s) => archiveThread(s.thread.id) },
-  { sel: "[data-rate]", run: (el, _e, s) => rateTask(s.task.id, Number(el.dataset.rate) === s.task.rating ? null : Number(el.dataset.rate)) },
+  { sel: "#t-handoff", run: (el, _e, s) => { if (oldDispatchOff()) return; el.disabled = true; return handoffTask(s.task.id, $("#t-handoff-pin").value.trim()).finally(() => { el.disabled = false; }); } },
+  { sel: "#t-archive", run: (_el, _e, s) => (oldDispatchOff() ? undefined : archiveThread(s.thread.id)) },
+  { sel: "[data-rate]", run: (el, _e, s) => oldDispatchOff() ? undefined : rateTask(s.task.id, Number(el.dataset.rate) === s.task.rating ? null : Number(el.dataset.rate)) },
   { sel: "[data-nav]", run: (el) => goto(el.dataset.nav) },
   { sel: "[data-open]", run: (el) => openTask(el.dataset.open) },
-  { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
+  { sel: "[data-approve]", run: (el) => { if (oldDispatchOff()) return; el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
   ...questionBindings,
 ];
 

@@ -100,7 +100,8 @@ struct MainTabs: View {
                 .tabItem { Label { Text("Terminals") } icon: { look.isClassic ? Image(systemName: "terminal") : Image(uiImage: TabIcons.shaded(.terminals, on: model.tab == .terminals, dark: scheme == .dark)) } }
                 .badge(model.terminals.waiting)
                 .tag(MainTab.terminals)
-            HomeView()
+            // The old dispatch is off (OldDispatch): the tab stays, showing why, so it is not mistaken for a lost page.
+            Group { if OldDispatch.off { DispatchOffView() } else { HomeView() } }
                 .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .tasks, dark: scheme == .dark)) } }
                 .tag(MainTab.tasks)
             // Chat Room (docs/chatroom-v0.md §10; 2026-11-22, user: iPhone/安卓上的file图标放到terminal顶栏，做成弹出式的……
@@ -124,7 +125,7 @@ struct MainTabs: View {
         // Not on the Dispatch page: its reply box sits on the bar, and with the bar made small the box was left above an
         // empty strip with one round button in its corner (2026-10-07, user's screenshot). Apple moves an accessory in
         // line with the small bar; a reply box cannot be one (it grows, and must rise with the keyboard).
-        .minimizesTabBarOnScroll(model.tab != .tasks)
+        .minimizesTabBarOnScroll(OldDispatch.off || model.tab != .tasks)
         // The Mac's files (docs/files-v0.md §5), up from the foot over whatever tab is shown: `Done` or a swipe down
         // puts it away.
         .sheet(isPresented: $model.filesShown) { FilesTab(inSheet: true).followsLook() }
@@ -162,7 +163,7 @@ struct MainTabs: View {
             }
         }
         .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
-            guard model.tab != .tasks else { return }
+            guard model.tab != .tasks, !OldDispatch.off else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: HomeView.pollInterval)
                 guard !Task.isCancelled else { break }

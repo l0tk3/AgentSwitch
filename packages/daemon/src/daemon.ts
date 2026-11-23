@@ -79,6 +79,7 @@ import { Uploads } from "./files/uploads.js";
 import { RoutingLog } from "./router/log.js";
 import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
+import { OLD_DISPATCH_OFF } from "./core/oldDispatch.js";
 import type { Router } from "./core/modelCall.js";
 import { loadTargets, type Targets, modelKey } from "./router/targets.js";
 import { withModelOverlay } from "./router/modelOverlay.js";
@@ -117,6 +118,7 @@ import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type KeptTerminal, type Launcher, type TerminalHarness } from "./terminals/host.js";
 import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S, restoreCompanion } from "./terminals/launch.js";
+import { loadTrustedFolders } from "./terminals/trustedFolders.js";
 import { holding } from "./terminals/held.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
@@ -328,6 +330,8 @@ export type BuildOverrides = {
   readonly browserDriver?: BrowserDriver;
   /** Tests: the agents' MCP engine in the shared browser (default: Playwright MCP in this process). */
   readonly browserEngine?: AgentEngine;
+  /** Tests of the engine: false turns the old dispatch back on whatever OLD_DISPATCH_OFF says (core/oldDispatch.ts). */
+  readonly oldDispatchOff?: boolean;
 };
 
 /** The agent CLIs a terminal can start, as absolute paths; a missing one is left out (docs/terminal-v0.md §2). The user's
@@ -536,6 +540,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
         node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
         codexHooks: (home) => codexTrust(home)?.trusted ?? false, opencodeServer: true,
+        // Folders trusted once in AgentSwitch: read at each start, so a change on the Mac counts from the next one.
+        trustedFolders: () => loadTrustedFolders(cfg.home),
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's
@@ -653,7 +659,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -811,7 +817,9 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   const targets = modelOffers ? mergeLogged(yaml, await modelOffers.refresh()) : yaml;
   const stopOffers = modelOffers?.start();
   let opencode: OpenCodeServer | undefined;
-  if (cfg.router === "opencode") {
+  // The resident router server serves only the old dispatch (router, summarizer, supervisor, planner, assistant); while
+  // that is off (core/oldDispatch.ts) it is not started, and anything that still asks falls back to `opencode run`.
+  if (cfg.router === "opencode" && !OLD_DISPATCH_OFF) {
     const gate = defaultGate();
     const server = new OpenCodeServer({ binary: cfg.opencodeBinary, port: cfg.opencodePort, home: join(cfg.home, "opencode"), gateHome: gate?.home ?? join(process.env.HOME ?? "", ".secret-gate") });
     try { await server.start(); opencode = server; }

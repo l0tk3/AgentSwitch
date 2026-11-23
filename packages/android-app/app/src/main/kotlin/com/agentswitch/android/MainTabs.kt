@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.agentswitch.android.browser.BrowserStore
 import com.agentswitch.android.design.HairRule
+import com.agentswitch.android.design.dithered
 import com.agentswitch.android.browser.BrowserTab
 import com.agentswitch.android.dispatch.HomeView
 import com.agentswitch.android.files.FilesSheet
@@ -127,7 +128,7 @@ fun MainTabs() {
                     KeptTab(shown = tab == model.tab) {
                         when (tab) {
                             MainTab.Terminals -> TerminalsTab()
-                            MainTab.Tasks -> HomeView()
+                            MainTab.Tasks -> if (OldDispatch.OFF) DispatchOffPage() else HomeView()
                             MainTab.Rooms -> RoomsTab()
                             MainTab.Browser -> BrowserTab()
                             MainTab.Settings -> SettingsTab()
@@ -172,7 +173,9 @@ private fun TabBar(current: MainTab, badges: Map<MainTab, Int>, onSelect: (MainT
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Box(Modifier.size(width = 44.dp, height = 28.dp), contentAlignment = Alignment.Center) {
+                    // The old dispatch, off: its tab is dithered and opens only the note (OldDispatch).
+                    val off = OldDispatch.OFF && item.tab == MainTab.Tasks
+                    Box(Modifier.size(width = 44.dp, height = 28.dp).dithered(off), contentAlignment = Alignment.Center) {
                         if (classic) ClassicIcon(item.classic, 24.dp, 22.dp, if (on) Theme.signal else Theme.secondaryInk)
                         else ShadedSpriteView(item.picture, strength = if (on) 1f else 0.55f, shadow = false, cell = 1.6)
                         val count = badges[item.tab] ?: 0
@@ -184,7 +187,7 @@ private fun TabBar(current: MainTab, badges: Map<MainTab, Int>, onSelect: (MainT
                         }
                     }
                     Text(
-                        item.word, Modifier.padding(top = 3.dp),
+                        item.word, Modifier.padding(top = 3.dp).dithered(off),
                         color = if (on) (if (classic) Theme.signal else Theme.ink) else Theme.secondaryInk,
                         style = plain(10, if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1,
                     )

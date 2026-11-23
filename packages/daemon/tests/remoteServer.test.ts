@@ -86,7 +86,7 @@ async function remoteDaemon(opts: { now?: () => number; gateKey?: RemoteRuntime[
     addresses: async () => ({ lan: ["192.168.1.5"], tailnet: ["100.101.102.103", "mac.tail1234.ts.net"] }),
     gateKey: opts.gateKey ?? (async () => ({ publicKey: KEY, keypair: "default" })),
   });
-  const d = buildDaemon(cfg, { quota, remote: runtime });
+  const d = buildDaemon(cfg, { quota, remote: runtime, oldDispatchOff: false });
   const listener = await startRemote(d, runtime, "127.0.0.1");
   const local = async (method: string, path: string, json?: unknown) => {
     const res = await d.app.request(path, { method, ...(json !== undefined ? { body: JSON.stringify(json), headers: { "content-type": "application/json" } } : {}) });
@@ -363,7 +363,7 @@ describe("remote app, in process", () => {
   it("re-checks the source per request: a peer outside the allowed networks gets 403 even past the socket hook", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-rapp-"));
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg, { remote: null });
+    const d = buildDaemon(cfg, { remote: null, oldDispatchOff: false });
     const app = createRemoteApp({ store: d.store, pairing: new PairingDesk(), presence: new Presence(), gateKey: async () => null, local: d.api, log: () => undefined });
     const env = (remoteAddress: string | undefined) => ({ incoming: { socket: { remoteAddress } }, outgoing: undefined }) as never;
     expect((await app.request("/healthz", {}, env("203.0.113.7"))).status).toBe(403);
@@ -376,7 +376,7 @@ describe("remote app, in process", () => {
   it("every write from a phone leaves a log line with the device; reads do not", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-rlog-"));
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg, { remote: null });
+    const d = buildDaemon(cfg, { remote: null, oldDispatchOff: false });
     const lines: string[] = [];
     const app = createRemoteApp({ store: d.store, pairing: new PairingDesk(), presence: new Presence(), gateKey: async () => null, local: d.api, log: (l) => lines.push(l) });
     const { device, token } = registerDevice(d.store, { name: "iPhone", platform: "ios" });
@@ -434,7 +434,7 @@ describe("remote app, in process", () => {
   it("with remote access off the local routes say so and nothing can pair", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-roff-"));
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg);
+    const d = buildDaemon(cfg, { oldDispatchOff: false });
     expect(d.remote).toBeNull();
     expect(await (await d.app.request("/remote/info")).json()).toEqual({ enabled: false, port: null, fingerprint: null, name: null, bonjour: null, lan: [], tailnet: [], onlineDevices: 0 });
     const pairing = await d.app.request("/pairing", { method: "POST" });

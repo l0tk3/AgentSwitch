@@ -1,6 +1,6 @@
 /** Tasks: create, list, show, follow the event stream, approve / answer / cancel, hand off. */
 
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { ApprovalPolicy } from "../engine/approvalPolicy.js";
@@ -17,6 +17,7 @@ import { issues, newWorkDir, limitParam, type ApiDeps } from "./shared.js";
 import { DEFAULT_LIST_LIMIT, SSE_HEARTBEAT_MS } from "../core/limits.js";
 import { mkdirSync } from "node:fs";
 import { newTaskFolder } from "../files/workdir.js";
+import { oldDispatchOff, oldDispatchOffBody, OLD_DISPATCH_OFF_ERROR } from "../core/oldDispatch.js";
 
 const NewTaskBody = z.object({
   task: z.string().min(1),
@@ -52,7 +53,7 @@ const RateBody = z.object({ rating: z.union([z.literal(1), z.literal(-1), z.null
 /** Until 2026-11-23 a "sealing" stage came first (router-v0 §9, removed); only "creating" is sent now. */
 type IntakeStage = "creating";
 type IntakeResult = { ok: true; task: Task; elapsedMs: number }
-  | { ok: false; status: 400 | 404 | 409 | 500; error: string; streamError: string; elapsedMs: number };
+  | { ok: false; status: 400 | 404 | 409 | 410 | 500; error: string; streamError: string; elapsedMs: number };
 
 /** A bounded receipt, not an execution stream. Slow readers and disconnects never repeat or hold up creation. */
 function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promise<IntakeResult>, elapsed: () => number): ReadableStream<Uint8Array> {
@@ -79,7 +80,7 @@ function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promi
 }
 
 export type TaskBody = z.infer<typeof NewTaskBody>;
-export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404 | 409; error: string; streamError?: string };
+export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404 | 409 | 410; error: string; streamError?: string };
 
 /** A new folder for a task that names none: under the default work folder when it is on and allowed, else a
  *  throw-away one in the data directory. */
@@ -100,6 +101,7 @@ const SEARCH_LIMIT = 30;
  *  looked up, the work dir chosen, attachments moved in, the task submitted. The text goes on as typed: the automatic
  *  sealing before this (router-v0 §9) was removed on 2026-11-23. */
 export function admitTask(deps: ApiDeps, body: TaskBody): Admitted {
+  if (oldDispatchOff(deps)) return { ok: false, status: 410, error: OLD_DISPATCH_OFF_ERROR };
   const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body;
   // The assistant's folder comes here unchecked: check it now.
   const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
@@ -126,7 +128,12 @@ export function admitTask(deps: ApiDeps, body: TaskBody): Admitted {
 }
 
 export function mountTasks(app: Hono, deps: ApiDeps): void {
+  // The old dispatch is off (core/oldDispatch.ts): nothing new is started or answered; reading, cancelling, deleting stay.
+  const off = (c: Context) => oldDispatchOff(deps) ? c.json(oldDispatchOffBody, 410) : null;
+
   app.post("/tasks", async (c) => {
+    const refusedOff = off(c);
+    if (refusedOff) return refusedOff;
     const started = Date.now();
     const elapsed = () => Date.now() - started;
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
@@ -169,6 +176,8 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
 
   // "Hand this to someone else": a follow-up in the same thread, excluding the current executor unless `to` pins one.
   app.post("/tasks/:id/handoff", async (c) => {
+    const refusedOff = off(c);
+    if (refusedOff) return refusedOff;
     const body = HandoffBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: issues(body.error) }, 400);
     const task = deps.store.getTask(c.req.param("id"));
@@ -249,11 +258,15 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
   app.post("/tasks/:id/approve", async (c) => {
     const body = ApproveBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "approval_id and decision (allow|deny) required" }, 400);
+    // Denying lets an old task end; allowing would let it go on.
+    if (body.data.decision === "allow") { const refusedOff = off(c); if (refusedOff) return refusedOff; }
     const ok = owned(c, body.data.approval_id) && deps.engine.resolveApproval(body.data.approval_id, body.data.decision);
     return ok ? c.json({ ok: true }) : c.json({ error: "no pending approval with that id" }, 404);
   });
 
   app.post("/tasks/:id/answer", async (c) => {
+    const refusedOff = off(c);
+    if (refusedOff) return refusedOff;
     const body = AnswerBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "approval_id plus text or answers (question id → strings) required" }, 400);
     if (!owned(c, body.data.approval_id)) return c.json({ error: "no pending question with that id" }, 404);

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { TargetRef } from "../core/target.js";
 import { MAX_FILES_PER_UPLOAD } from "../files/names.js";
 import { issues, limitParam, type ApiDeps } from "./shared.js";
+import { oldDispatchOff, oldDispatchOffBody } from "../core/oldDispatch.js";
 
 export const MAX_MESSAGE_CHARS = 8000;
 const MAX_LAST = 500;
@@ -21,6 +22,8 @@ const MessageBody = z.object({
 
 export function mountAssistant(app: Hono, deps: ApiDeps): void {
   app.post("/assistant", async (c) => {
+    // The old dispatch is off (core/oldDispatch.ts): the conversation is read, not continued.
+    if (oldDispatchOff(deps)) return c.json(oldDispatchOffBody, 410);
     if (!deps.assistant) return c.json({ error: "assistant unavailable" }, 503);
     const body = MessageBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: issues(body.error) }, 400);

@@ -286,6 +286,8 @@ class DispatchStore(
     /** From a notification: the home screen opens the task. */
     fun openTask(id: String) {
         model.notifier?.clearTask(id)
+        // The old dispatch is off: a task's link opens nothing (OldDispatch).
+        if (com.agentswitch.android.OldDispatch.OFF) return
         model.tab = MainTab.Tasks
         openTaskRequest = id
     }
@@ -354,6 +356,8 @@ class DispatchStore(
      * app leaves silent): not while the app is in front on the tasks tab, where the log shows it.
      */
     private fun needsAttention(approval: Approval) {
+        // Nothing to answer it with while the old dispatch is off (OldDispatch).
+        if (com.agentswitch.android.OldDispatch.OFF) return
         if (model.inFront && model.tab == MainTab.Tasks) return
         val notifier = model.notifier ?: return
         val task = tasks.firstOrNull { it.id == approval.taskId }

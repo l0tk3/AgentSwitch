@@ -14,7 +14,7 @@ function daemon(replies: string[]) {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-thapi-"));
   const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
   const quota = new QuotaService([]);
-  const d = buildDaemon(cfg, { router: echoRouter(replies), quota });
+  const d = buildDaemon(cfg, { router: echoRouter(replies), quota, oldDispatchOff: false });
   const fetchImpl: typeof fetch = (input, init) => Promise.resolve(d.app.request(input instanceof Request ? input : String(input).replace("http://test", ""), init));
   return { d, client: new Client("http://test", fetchImpl), home };
 }

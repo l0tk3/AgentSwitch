@@ -3,6 +3,8 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const UI = resolve(import.meta.dirname, "..", "ui");
+// These exercise the old dispatch, which is off by default (ui/lib/oldDispatch.js): turned back on here.
+(await import(join(UI, "lib/oldDispatch.js"))).setOldDispatchOff(false);
 const state = await import(join(UI, "lib/state.js"));
 const actions = await import(join(UI, "lib/actions.js"));
 const home = await import(join(UI, "views/home.js"));

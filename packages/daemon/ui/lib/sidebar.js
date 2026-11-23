@@ -5,6 +5,7 @@ import { ACTIVE, HARNESS_NAMES, agoShort, esc } from "./api.js";
 import { SPIN } from "../pixel.js";
 import { SHADED, shaded, shadedMark } from "./shaded.js";
 import { AGENT_ICON, icon, mark, pageLook } from "./look.js";
+import { OLD_DISPATCH_NOTE, oldDispatchOff } from "./oldDispatch.js";
 
 const NAV = [["home", "Tasks"], ["log", "Log"], ["ext", "Extensions"], ["ctx", "Context"]];
 const TOPICS_SHOWN = 8;
@@ -88,7 +89,7 @@ export function sidebar(s) {
   const active = s.view === "task" ? "home" : s.view;   // a task opens beside the tasks
   // The id keys each link for the patcher, so moving `active` patches the links instead of reshuffling them.
   const links = NAV.map(([view, label]) => `<a id="nav-${view}" data-nav="${view}"${view === active ? ' class="on"' : ""}><span class="ar">▸</span><span>${label}</span><span class="n">${view === "home" ? counts(s) : ""}</span></a>`);
-  return `<div class="sec lbl">// Dispatch</div>
+  return `<div class="sec lbl">// Dispatch${oldDispatchOff() ? ` <span class="faint" title="${esc(OLD_DISPATCH_NOTE)}">· Off</span>` : ""}</div>
   <nav>
     ${links.join("\n    ")}
   </nav>

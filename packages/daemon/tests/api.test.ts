@@ -14,7 +14,7 @@ function daemon(replies: string[] = [decisionJson({ harness: "codex", model: "gp
   const home = mkdtempSync(join(tmpdir(), "agentswitch-api-"));
   const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
   const quota = new QuotaService([{ harness: "codex", read: async () => ({ remaining: 0.5, detail: { planType: "pro" }, source: "fake", error: null }) }]);
-  const d = buildDaemon(cfg, { router: echoRouter(replies), quota });
+  const d = buildDaemon(cfg, { router: echoRouter(replies), quota, oldDispatchOff: false });
   const fetchImpl: typeof fetch = (input, init) => Promise.resolve(d.app.request(input instanceof Request ? input : String(input).replace("http://test", ""), init));
   const client = new Client("http://test", fetchImpl);
   return { d, client, home };

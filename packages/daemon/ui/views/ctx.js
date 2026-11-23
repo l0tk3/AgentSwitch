@@ -4,6 +4,7 @@
 import { esc, stamp } from "../lib/api.js";
 import { deletePlatformMemory, loadCtxExample, loadPlatformMemory, openTask, saveCtx, saveMem, savePolicy } from "../lib/actions.js";
 import { get, patch, set } from "../lib/state.js";
+import { offAttrs, offNote, oldDispatchOff } from "../lib/oldDispatch.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -67,15 +68,17 @@ function platformMemory(mem = { records: [], loading: false, loaded: false, dele
 function policyCard(p) {
   if (!p) return "";
   const mode = p.policy.mode;
-  const opt = (v, label, desc, extra = "") => `<div class="way"><label class="opt"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><span class="d">${desc}</span></span></label>${extra}</div>`;
-  const cats = p.categories.map((c) => `<label class="opt cat"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
+  const off = oldDispatchOff();   // the approval policy is the old dispatch's (lib/oldDispatch.js)
+  const opt = (v, label, desc, extra = "") => `<div class="way"><label class="opt"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}${off ? offAttrs() : ""}><span><b>${label}</b><span class="d">${desc}</span></span></label>${extra}</div>`;
+  const cats = p.categories.map((c) => `<label class="opt cat"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" && !off ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
   return `<section class="policy">
     <div class="sh"><span class="lbl">// Approval</span><span class="what">路由器派出的任务要做需要批准的事（删文件、推送、付款……）时，由谁决定</span></div>
     ${opt("manual", "逐项确认", "每一次都问你，调度模型不介入。")}
-    ${opt("scoped", "自动", "调度模型代你批准，但下面勾选的几类仍然问你：", `<div class="cats${mode === "scoped" ? "" : " off"}">${cats}</div>`)}
+    ${opt("scoped", "自动", "调度模型代你批准，但下面勾选的几类仍然问你：", `<div class="cats${mode === "scoped" && !off ? "" : " off"}">${cats}</div>`)}
     ${opt("auto", "全部自动", "调度模型代你批准所有请求，包括删除、推送、支付这类不可逆操作；它判断不了的仍然问你。")}
     <div class="say">AgentSwitch 自身的文件始终禁止修改，不在此列；调度时缺少信息，调度模型会直接问你。终端里的 agent 不受这里影响，按各自终端的权限模式。</div>
-    <div class="sacts"><button class="primary" id="pol-save">保存审批方式</button></div>
+    ${off ? offNote() : ""}
+    <div class="sacts"><button class="primary" id="pol-save"${offAttrs()}>保存审批方式</button></div>
   </section>`;
 }
 
@@ -101,5 +104,5 @@ export const bindings = [
   { sel: "#mem-save", run: () => saveMem($("#mem-text").value) },
   { sel: "#ctx-example", run: () => loadCtxExample() },
   { sel: "#pol-save", run: () => savePolicy({ mode: document.querySelector("input[name=pol-mode]:checked")?.value || "scoped", human: [...document.querySelectorAll(".pol-cat:checked")].map((el) => el.value) }) },
-  { sel: "input[name=pol-mode]", run: (el, e, s) => { if (s.policy) set({ policy: { ...s.policy, policy: { ...s.policy.policy, mode: el.value } } }); } },
+  { sel: "input[name=pol-mode]", run: (el, e, s) => { if (s.policy && !oldDispatchOff()) set({ policy: { ...s.policy, policy: { ...s.policy.policy, mode: el.value } } }); } },
 ];

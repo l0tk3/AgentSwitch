@@ -89,7 +89,8 @@ final class MainWindowController: NSObject {
         self.model = model
         self.frameName = frameName
         self.firstFrame = firstFrame
-        state = MainWindowState(page: MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey)),
+        // A Dispatch kept from before the old dispatch was switched off opens on Terminals (OldDispatch).
+        state = MainWindowState(page: OldDispatch.landing(MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey))),
                                 railHidden: MainRailLayout.hidden(UserDefaults.standard.object(forKey: MainRailLayout.hiddenKey) as? Bool))
         super.init()
         if let node { state.use(node: node) }
@@ -130,6 +131,8 @@ final class MainWindowController: NSObject {
 
     /// One task's page on Dispatch (the Live Activity): the window asks the page to open it (`requestedTask`).
     func show(task id: String, node: String? = nil) {
+        // The old dispatch is off: its tasks' pages are not opened (OldDispatch).
+        guard !OldDispatch.off else { return }
         if let node, model.nodes.node(node) == nil { return }
         let watched = inUse
         use(node: node.flatMap { model.nodes.node($0) })
@@ -521,7 +524,8 @@ final class MainWindowController: NSObject {
     /// Reduce Motion the page goes in and that is all (`ScanRefresh.plays`).
     private func go(to page: MainPage, animated: Bool) {
         // A page the node on screen does not have (Clash on another node): not gone to.
-        guard page != state.page, state.pages.contains(page) else { return }
+        // Nor Dispatch while the old dispatch is off (OldDispatch).
+        guard page != state.page, state.pages.contains(page), OldDispatch.reachable(page) else { return }
         container?.refresh.cancel()
         swap(to: page)
         guard animated, ScanRefresh.playsNow else { return }
@@ -641,13 +645,14 @@ final class MainWindowController: NSObject {
         case .page(let page):
             switchPage(to: page)
         case .nextPage:
-            switchPage(to: state.page.next)
+            switchPage(to: OldDispatch.step(from: state.page, forward: true))
         case .previousPage:
-            switchPage(to: state.page.previous)
+            switchPage(to: OldDispatch.step(from: state.page, forward: false))
         case .terminal(let n):
             switchPage(to: .terminals)
             terminals?.shortcut(String(n))
         case .newTask:
+            guard !OldDispatch.off else { return }
             switchPage(to: .dispatch)
             state.requestFocus()
         case .newTerminal:
@@ -701,6 +706,14 @@ struct DispatchRoot: View {
     let state: MainWindowState
 
     var body: some View {
+        if OldDispatch.off {
+            OldDispatchPlaceholder()
+        } else {
+            page
+        }
+    }
+
+    private var page: some View {
         DispatchPage()
             .environment(model)
             .environment(state)

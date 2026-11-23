@@ -17,7 +17,7 @@ function config(home: string): DaemonConfig {
 }
 
 function daemon(home = join(realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-state-"))), "as")) {
-  const d = buildDaemon(config(home));
+  const d = buildDaemon(config(home), { oldDispatchOff: false });
   const call = async (method: string, path: string, body?: unknown) => {
     const init = { method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) };
     const res = await d.app.request(path, init, markRemote({}, { deviceId: "phone" }));

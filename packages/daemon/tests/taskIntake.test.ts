@@ -26,7 +26,7 @@ function build() {
   const cwd = join(dir, "project");
   mkdirSync(cwd);
   const d = buildDaemon({ home: join(dir, "home"), targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" }, {
-    router: echoRouter([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]), quota: new QuotaService([]),
+    router: echoRouter([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]), quota: new QuotaService([]), oldDispatchOff: false,
   });
   fixtures.push({ d, dir });
   const post = (body: unknown = { task: typed, cwd }, accept = "application/x-ndjson") => d.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json", accept }, body: JSON.stringify(body) });

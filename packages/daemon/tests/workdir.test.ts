@@ -13,7 +13,7 @@ import { TARGETS_PATH } from "./helpers.js";
 function daemon(taskFolders = true) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-workdir-")));
   const cfg: DaemonConfig = { home: join(base, "as"), targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "", taskFolders };
-  const d = buildDaemon(cfg);
+  const d = buildDaemon(cfg, { oldDispatchOff: false });
   const call = async (method: string, path: string, body?: unknown, remote = false) => {
     const init = { method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) };
     const res = await d.app.request(path, init, remote ? markRemote({}, { deviceId: "phone" }) : undefined);

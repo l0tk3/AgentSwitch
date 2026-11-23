@@ -25,6 +25,8 @@ import com.agentswitch.android.LocalAppModel
 import com.agentswitch.android.LocalSettings
 import com.agentswitch.android.demo.DemoData
 import com.agentswitch.android.demo.DemoSettingsRoute
+import com.agentswitch.android.OldDispatch
+import com.agentswitch.android.design.dithered
 import com.agentswitch.android.demo.LocalDemo
 import com.agentswitch.android.demo.LocalDemoScreen
 import com.agentswitch.android.design.FormRow
@@ -132,17 +134,31 @@ fun SettingsTab() {
             dispatch.quota?.let { UsageSection(it) }
         }
         AppearanceSection()
-        FormSection("Dispatch", footer = "环境说明记录站点、账号和偏好，供每个任务参考。") {
-            NavRow("Context", first = true, enabled = connected) { open(SettingsRoute.Context) }
+        // The old dispatch is off (OldDispatch): Context, which only its tasks read, is dithered and opens nothing;
+        // Ciphertexts stay (the proxies' passwords and the browser's pages use them too).
+        FormSection("Dispatch", footer = if (OldDispatch.OFF) OldDispatch.NOTE else "环境说明记录站点、账号和偏好，供每个任务参考。") {
+            if (OldDispatch.OFF) OffRow("Context", first = true)
+            else NavRow("Context", first = true, enabled = connected) { open(SettingsRoute.Context) }
             NavRow("Ciphertexts", enabled = connected) { open(SettingsRoute.Ciphertexts) }
         }
         if (connected) Column(Modifier.onGloballyPositioned { proxiesTop = it.positionInParent().y.toInt() }) { ProxiesSection() }
         FeedbackSection(open)
         if (connected) MacAppSection()
-        FormSection("Manage", footer = "Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。") {
-            NavRow("History", first = true, enabled = connected) { open(SettingsRoute.Tasks) }
-            NavRow("Models", enabled = connected) { open(SettingsRoute.Models) }
-            ActionRow("Clear History", enabled = connected, color = Theme.failed) { cleared = false; clearing = DeleteRequest.History }
+        FormSection(
+            "Manage",
+            footer = (if (OldDispatch.OFF) "History、Models 属于旧调度：${OldDispatch.NOTE}" else "") +
+                "Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。",
+        ) {
+            // The old dispatch's tasks and its model (OldDispatch): dithered and inert while it is off.
+            if (OldDispatch.OFF) {
+                OffRow("History", first = true)
+                OffRow("Models")
+                OffRow("Clear History", color = Theme.failed)
+            } else {
+                NavRow("History", first = true, enabled = connected) { open(SettingsRoute.Tasks) }
+                NavRow("Models", enabled = connected) { open(SettingsRoute.Models) }
+                ActionRow("Clear History", enabled = connected, color = Theme.failed) { cleared = false; clearing = DeleteRequest.History }
+            }
             clearError?.let { NoteRow(it, color = Theme.failed) }
             if (cleared) NoteRow("记录已清空。")
         }
@@ -165,6 +181,12 @@ fun SettingsTab() {
         }
         model.banner?.let { FormSection { FormRow(first = true, onClick = { model.banner = null }) { Text(it, color = Theme.failed, style = plain(14)) } } }
     }
+}
+
+/** A row of the old dispatch while it is off (OldDispatch): half dithered away, nothing on a tap. */
+@Composable
+private fun OffRow(label: String, first: Boolean = false, color: androidx.compose.ui.graphics.Color = Theme.ink) {
+    FormRow(first = first) { Text(label, Modifier.weight(1f).dithered(), color = color, style = plain(16), maxLines = 1) }
 }
 
 /**
