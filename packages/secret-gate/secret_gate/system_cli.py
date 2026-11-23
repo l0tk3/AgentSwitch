@@ -3,8 +3,11 @@
 install/update/rotate-key/uninstall run as root (on macOS the Mac app asks for an administrator once, through
 osascript; on Linux `sudo`, the command printed by `agentswitch doctor`) and print the steps they did; `--dry-run`
 prints the plan and changes nothing; `--root <prefix>` moves every system path under a prefix and only lists the
-privileged commands (tests, inspection), and with it `--platform macos|linux` picks the layout to simulate. `status
---json` needs no root and is what the Mac app and the Linux keeper poll.
+privileged commands (tests, inspection), and with it `--platform macos|linux|windows` picks the layout to simulate.
+`status --json` needs no root and is what the Mac app and the Linux keeper poll.
+
+Windows (gate-simple-v0 §5): run from an elevated terminal ("Run as administrator"); `--owner-sid` names the login
+user allowed on the pipe and defaults to the user running the command (UAC elevation keeps the user).
 """
 
 from __future__ import annotations
@@ -20,15 +23,17 @@ from typing import Any
 
 from .constants import DEFAULT_PROXY_PORT
 from .errors import GateError, ValidationError
+from . import fsacl
 from .platform import MACOS, PLATFORMS, GatePlatform, native
 from .rpc_client import RpcClient
 from .service import Runner, port_arg, run_command
-from .service_paths import ServiceConfig, SystemLayout, read_service_config
+from .service_paths import ServiceConfig, SystemLayout, is_user_sid, read_service_config
 from .system_exec import SystemDeps, execute, local_status, read_runtime_versions
 from .system_plan import (
     InstallFacts,
     InstallOptions,
     install_plan,
+    public_reader,
     render,
     rotate_key_plan,
     runtime_version,
@@ -88,8 +93,27 @@ def _sudo_uid() -> int | None:
 
 
 def _check_root(args: argparse.Namespace) -> None:
-    if not args.root and not args.dry_run and os.geteuid() != 0:
+    if not args.root and not args.dry_run and not native().is_admin():
         raise ValidationError(native().need_root)
+
+
+def _owner(args: argparse.Namespace, platform: GatePlatform) -> tuple[int | None, str | None]:
+    """(owner uid, owner SID) of the login user allowed on the interface: a uid on macOS and Linux, a SID on Windows."""
+    if platform.key == "windows":
+        sid = args.owner_sid or (fsacl.current_user_sid() if not args.root else None)
+        if not sid:
+            raise ValidationError("缺少 --owner-sid（登录用户的 SID）")
+        if not is_user_sid(sid):
+            raise ValidationError("--owner-sid 应为登录用户的 SID（S-1-5-21-… 或 S-1-12-1-…）")
+        return None, sid
+    if args.owner_sid:
+        raise ValidationError("--owner-sid 只用于 Windows；macOS 与 Linux 用 --owner-uid")
+    owner_uid = args.owner_uid if args.owner_uid is not None else _sudo_uid()
+    if owner_uid is None:
+        raise ValidationError("缺少 --owner-uid（登录用户的 uid）")
+    if not 0 < owner_uid < 2**31:
+        raise ValidationError("--owner-uid 应为登录用户的 uid（不可为 root）")
+    return owner_uid, None
 
 
 def _print(lines: list[str] | tuple[str, ...]) -> None:
@@ -100,13 +124,11 @@ def _print(lines: list[str] | tuple[str, ...]) -> None:
 def _cmd_install(args: argparse.Namespace) -> int:
     _check_root(args)
     layout = _layout(args)
-    owner_uid = args.owner_uid if args.owner_uid is not None else _sudo_uid()
-    if owner_uid is None:
-        raise ValidationError("缺少 --owner-uid（登录用户的 uid）")
-    if not 0 < owner_uid < 2**31:
-        raise ValidationError("--owner-uid 应为登录用户的 uid（不可为 root）")
-    options = InstallOptions(owner_uid=owner_uid, port=args.port, runtime=Path(args.runtime).expanduser().resolve())
+    owner_uid, owner_sid = _owner(args, layout.platform)
+    options = InstallOptions(owner_uid=owner_uid, port=args.port, runtime=Path(args.runtime).expanduser().resolve(),
+                             owner_sid=owner_sid)
     deps = _deps(args, layout)
+    layout.platform.preflight(layout, simulate=deps.simulate)
     facts = gather_install_facts(options, deps.runner, simulate=deps.simulate, now=datetime.now(timezone.utc),
                                  platform=layout.platform)
     plan = install_plan(layout, options, facts)
@@ -138,7 +160,8 @@ def _cmd_rotate_key(args: argparse.Namespace) -> int:
     _check_root(args)
     layout = _layout(args)
     config = read_service_config(layout.config)  # only an installed service has a key to replace
-    plan = rotate_key_plan(layout, layout.platform.owner_gid(config.owner_uid, simulate=bool(args.root)))
+    gid = None if config.owner_uid is None else layout.platform.owner_gid(config.owner_uid, simulate=bool(args.root))
+    plan = rotate_key_plan(layout, public_reader(config, gid))
     if args.dry_run:
         _print(render(plan))
         return 0
@@ -160,8 +183,10 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def bundled_runtime_version(runtime: Path | None = None) -> str | None:
-    """The runtime this CLI belongs to (`<runtime>/python/bin/python3.x` → `<runtime>/VERSIONS`), if any."""
-    base = runtime or Path(sys.executable).parents[2]
+    """The runtime this CLI belongs to (`<runtime>/python/bin/python3.x` → `<runtime>/VERSIONS`; Windows:
+    `<runtime>\\python\\python.exe`), if any."""
+    executable = Path(sys.executable)
+    base = runtime or (executable.parents[1] if os.name == "nt" else executable.parents[2])
     try:
         return runtime_version((base / "VERSIONS").read_text(encoding="utf-8"))
     except (OSError, GateError, IndexError):
@@ -180,6 +205,8 @@ def service_status(layout: SystemLayout, call_status: Any, bundled: str | None) 
         return report
     report.update(installed=True, proxyPort=config.proxy_port, runtimeVersion=config.runtime_version,
                   ownerUid=config.owner_uid, updateAvailable=bundled is not None and bundled != config.runtime_version)
+    if config.owner_sid is not None:
+        report["ownerSid"] = config.owner_sid
     try:
         status = call_status(layout.socket)
         proxy = bool(status.get("proxyRunning")) if isinstance(status, dict) else False
@@ -221,11 +248,13 @@ def add_system_parser(sub: argparse._SubParsersAction) -> None:
                                       "(gate-service-v0, gate-simple-v0)")
     ss = s.add_subparsers(dest="system_cmd", required=True)
     i = ss.add_parser("install", help="root: service account, directories, runtime copy, a new keypair, LaunchDaemons "
-                                      "(macOS) or systemd units (Linux)")
+                                      "(macOS), systemd units (Linux) or a Windows service")
     i.add_argument("--owner-uid", type=int, help="the login user allowed on gate.sock (default: $SUDO_UID)")
+    i.add_argument("--owner-sid", help="Windows: the login user allowed on the pipe (default: the user running this)")
     i.add_argument("--port", type=port_arg, default=DEFAULT_PROXY_PORT, help=f"proxy port (default {DEFAULT_PROXY_PORT})")
     i.add_argument("--runtime", required=True, help="the App bundle's Contents/Resources/runtime; on Linux the node's "
-                                                     "~/.local/share/agentswitch/runtime/current")
+                                                     "~/.local/share/agentswitch/runtime/current; on Windows a "
+                                                     "directory with python\\ (Python with secret-gate) and VERSIONS")
     # Accepted and ignored, so an App that still passes them keeps installing: install reads nothing in the user's home.
     i.add_argument("--migrate-from", help=argparse.SUPPRESS)
     i.add_argument("--user-home", help=argparse.SUPPRESS)

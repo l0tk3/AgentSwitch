@@ -7,7 +7,12 @@ rpc server running under it from a root-owned copy of the runtime, and `gate-pub
 * where things are (`system_root`, `runtime_dir`, `services_dir`) and who owns them (`root_owner`, `service_user`);
 * how the account is made and checked (`account_ops`, `gather_account`);
 * how the two services are described and driven (`service_files`, `stop_ops`, `start_ops`, `reload_proxy_ops`);
+* how files are given to root and to the service (`root_owned_ops`, `directory_ops`, `ownership_ops`: chown and
+  modes on POSIX, ACLs on Windows);
 * how the socket learns the peer's uid (`peer_uid`).
+
+The defaults of the file-ownership and service-definition hooks are the POSIX way, so macOS and Linux keep their
+plans byte for byte; Windows (platform/windows.py) overrides them.
 
 Interface methods only build data (`system_ops` operations); nothing here runs a command. The plan (system_plan) is
 written once against this interface, and system_exec carries it out the same way on every system.
@@ -37,7 +42,7 @@ PROCESS_UMASK = 0o077
 class GatePlatform(ABC):
     """One operating system's way of running the gate service. Instances are stateless singletons."""
 
-    key: str                     # "macos" | "linux": `secret-gate system --platform`, tests
+    key: str                     # "macos" | "linux" | "windows": `secret-gate system --platform`, tests
     service_user: str
     service_group: str
     system_root: Path            # `<root>`: gate/, gate-public/, gate-service.json
@@ -98,11 +103,79 @@ class GatePlatform(ABC):
         """What the service manager needs once the definitions are gone."""
         return ()
 
+    # -- file ownership (POSIX: chown/chmod; Windows overrides with ACLs) ------------------------------
+
+    def root_owned_ops(self, layout: SystemLayout, *paths: Path, recursive: bool = False) -> tuple[Op, ...]:
+        """Make `paths` root's (the runtime copy, gate-service.json, the service definitions)."""
+        from ..system_ops import Run
+
+        return (Run((self.chown, *(("-R",) if recursive else ()), self.root_owner, *map(str, paths))),)
+
+    def directory_ops(self, layout: SystemLayout, reader: Any) -> tuple[Op, ...]:
+        """Create `<root>`, the runtime's parent, the gate home (+ logs, mitmproxy) and the public directory.
+        `reader`: who may read gate-public/ besides the service (Linux: the login user's group; Windows: its SID)."""
+        from ..system_ops import EnsureFile, MakeDir
+        from ..system_plan import LOG_FILE_MODE, LOG_NAMES, PRIVATE_DIR_MODE, PUBLIC_DIR_MODE
+
+        runtime_parent = layout.runtime.parent
+        own_parent = runtime_parent != layout.root     # Linux: /opt/agentswitch for gate-runtime/
+        return (
+            MakeDir(layout.root, PUBLIC_DIR_MODE), *self.root_owned_ops(layout, layout.root),
+            *((MakeDir(runtime_parent, PUBLIC_DIR_MODE), *self.root_owned_ops(layout, runtime_parent))
+              if own_parent else ()),
+            *(MakeDir(p, PRIVATE_DIR_MODE) for p in (layout.gate, layout.logs, layout.mitmproxy)),
+            MakeDir(layout.public, self.public_dir_mode),
+            *((EnsureFile(layout.logs / f"{name}.log", LOG_FILE_MODE) for name in LOG_NAMES)
+              if self.precreate_logs else ()),
+        )
+
+    def ownership_ops(self, layout: SystemLayout, reader: Any) -> tuple[Op, ...]:
+        """The gate home to the service account only, gate-public/ to the service account (and `reader`)."""
+        from ..system_ops import Run
+
+        owner = f"{self.service_user}:{self.service_group}"
+        return (Run((self.chmod, "-R", "go-rwx", str(layout.gate))),   # 0700 / 0600 whatever root's umask was
+                Run((self.chown, "-R", owner, str(layout.gate))),
+                Run((self.chown, "-R", self.public_owner(reader), str(layout.public))))
+
+    def key_access_ops(self, layout: SystemLayout) -> tuple[Op, ...]:
+        """What the administrator's process needs before it writes or removes the service's keys (POSIX: root
+        needs nothing)."""
+        return ()
+
+    def service_definition_ops(self, layout: SystemLayout, port: int) -> tuple[Op, ...]:
+        """Write the two service definitions (root-owned) and tell the service manager."""
+        from ..system_ops import MakeDir, WriteFile
+        from ..system_plan import PUBLIC_DIR_MODE, SERVICE_FILE_MODE
+
+        files = self.service_files(layout, port)
+        return (
+            MakeDir(layout.services_dir, PUBLIC_DIR_MODE),
+            *(WriteFile(layout.service_file(label), data, SERVICE_FILE_MODE) for label, data in files.items()),
+            *self.root_owned_ops(layout, *(layout.service_file(label) for label in files)),
+            *self.after_service_files(layout),
+        )
+
+    def remove_service_ops(self, layout: SystemLayout) -> tuple[Op, ...]:
+        """Remove the service definitions (both services are stopped)."""
+        from ..system_ops import RemovePath
+
+        return (*(RemovePath(layout.service_file(label)) for label in self.labels), *self.after_uninstall(layout))
+
     # -- facts -------------------------------------------------------------------------------------
 
     @abstractmethod
     def gather_account(self, runner: Runner, *, simulate: bool) -> Any:
         """A read-only look at the machine: the account to reuse or create (passed back to `account_ops`)."""
+
+    def preflight(self, layout: SystemLayout, *, simulate: bool) -> None:
+        """Refuse to install over something the administrator did not make (Windows: a `<root>` a user created)."""
+
+    def is_admin(self) -> bool:
+        """Whether this process may run `system install` and friends (root)."""
+        import os
+
+        return os.geteuid() == 0
 
     def owner_gid(self, owner_uid: int, *, simulate: bool, getpwuid: Callable[[int], Any] | None = None) -> int | None:
         """The group `gate-public/` is opened to, when this system narrows it to the login user's group."""

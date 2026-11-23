@@ -3,8 +3,9 @@
 A plan is a list of steps; a step is a list of operations. Building a plan reads nothing and changes nothing:
 facts about the machine (free UIDs, the runtime's version, ...) come in as arguments, so the plan can be
 printed (`--dry-run`) and asserted in tests. system_exec.py carries it out; every privileged command (dscl,
-dseditgroup, sysadminctl, launchctl on macOS; useradd, getent, systemctl on Linux; chown) is a `Run` that goes through
-one injectable runner. The plan is written once; what differs per system comes from `layout.platform` (platform/).
+dseditgroup, sysadminctl, launchctl on macOS; useradd, getent, systemctl on Linux; sc.exe, net.exe on Windows; chown)
+is a `Run` that goes through one injectable runner. The plan is written once; what differs per system comes from
+`layout.platform` (platform/), including how files are given to root and to the service (chown/chmod, or ACLs).
 
 Nothing here reads or changes the login user's home (gate-simple-v0 §1, §6): install generates the service's one
 keypair inside the service's own home, and nothing is moved in from `~/.secret-gate`.
@@ -24,7 +25,7 @@ from .service_paths import (
     ServiceConfig,
     SystemLayout,
 )
-from .system_ops import (
+from .system_ops import (  # noqa: F401  (EnsureFile, MakeDir, Run: as before, for the tests that import them here)
     CreateKey,
     EnsureFile,
     GenerateCA,
@@ -79,14 +80,15 @@ def choose_account(users: dict[str, int], groups: dict[str, int]) -> Account:
 
 @dataclass(frozen=True)
 class InstallOptions:
-    owner_uid: int
+    owner_uid: int | None        # macOS, Linux: the login user allowed on gate.sock
     port: int
     runtime: Path
+    owner_sid: str | None = None  # Windows: the login user allowed on the pipe
 
 
 @dataclass(frozen=True)
 class InstallFacts:
-    account: Any                 # macOS: Account; Linux: platform.linux.LinuxAccount
+    account: Any                 # macOS: Account; Linux: platform.linux.LinuxAccount; Windows: WindowsAccount
     runtime_version: str
     installed_at: str
     owner_gid: int | None = None  # Linux: the group gate-public/ is opened to
@@ -104,8 +106,8 @@ def runtime_version(versions_text: str) -> str:
 
 # -- plans ---------------------------------------------------------------------------------------
 
-def _chown(layout: SystemLayout, owner: str, *paths: Path, recursive: bool = False) -> Run:
-    return Run((layout.platform.chown, *(("-R",) if recursive else ()), owner, *map(str, paths)))
+def _root_owned(layout: SystemLayout, *paths: Path, recursive: bool = False) -> tuple:
+    return layout.platform.root_owned_ops(layout, *paths, recursive=recursive)
 
 
 def _stop(layout: SystemLayout, *, disable: bool = False) -> Step:
@@ -117,14 +119,7 @@ def _start(layout: SystemLayout) -> Step:
 
 
 def _write_service_files(layout: SystemLayout, port: int) -> Step:
-    platform = layout.platform
-    files = platform.service_files(layout, port)
-    return Step(platform.services_title, (
-        MakeDir(layout.services_dir, PUBLIC_DIR_MODE),
-        *(WriteFile(layout.service_file(label), data, SERVICE_FILE_MODE) for label, data in files.items()),
-        _chown(layout, platform.root_owner, *(layout.service_file(label) for label in files)),
-        *platform.after_service_files(layout),
-    ))
+    return Step(layout.platform.services_title, layout.platform.service_definition_ops(layout, port))
 
 
 def _config_file(layout: SystemLayout, config: ServiceConfig) -> WriteFile:
@@ -138,35 +133,30 @@ def _account_step(layout: SystemLayout, account: Any) -> Step:
     return Step(title, ops)
 
 
-def _directories(layout: SystemLayout) -> Step:
-    platform = layout.platform
-    runtime_parent = layout.runtime.parent
-    own_parent = runtime_parent != layout.root     # Linux: /opt/agentswitch for gate-runtime/
-    return Step("创建目录", (
-        MakeDir(layout.root, PUBLIC_DIR_MODE), _chown(layout, platform.root_owner, layout.root),
-        *((MakeDir(runtime_parent, PUBLIC_DIR_MODE), _chown(layout, platform.root_owner, runtime_parent))
-          if own_parent else ()),
-        *(MakeDir(p, PRIVATE_DIR_MODE) for p in (layout.gate, layout.logs, layout.mitmproxy)),
-        MakeDir(layout.public, platform.public_dir_mode),
-        *((EnsureFile(layout.logs / f"{name}.log", LOG_FILE_MODE) for name in LOG_NAMES)
-          if platform.precreate_logs else ()),
-    ))
+def _directories(layout: SystemLayout, reader: Any) -> Step:
+    return Step("创建目录", layout.platform.directory_ops(layout, reader))
+
+
+def public_reader(options_or_config: Any, owner_gid: int | None) -> Any:
+    """Who besides the service may read gate-public/: the login user's SID on Windows, its group on Linux."""
+    return getattr(options_or_config, "owner_sid", None) or owner_gid
 
 
 def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFacts) -> Plan:
-    platform = layout.platform
     config = ServiceConfig(owner_uid=options.owner_uid, proxy_port=options.port,
-                           runtime_version=facts.runtime_version, installed_at=facts.installed_at)
+                           runtime_version=facts.runtime_version, installed_at=facts.installed_at,
+                           owner_sid=options.owner_sid)
+    reader = public_reader(options, facts.owner_gid)
     steps = [
         _account_step(layout, facts.account),
-        _directories(layout),
+        _directories(layout, reader),
         Step("复制运行时", (StageRuntime(options.runtime, layout),
-                          _chown(layout, platform.root_owner, layout.runtime_staging, recursive=True))),
-        Step("写入 gate-service.json", (_config_file(layout, config), _chown(layout, platform.root_owner, layout.config))),
-        Step("生成密钥", (CreateKey(layout.gate),)),
+                          *_root_owned(layout, layout.runtime_staging, recursive=True))),
+        Step("写入 gate-service.json", (_config_file(layout, config), *_root_owned(layout, layout.config))),
+        Step("生成密钥", (*layout.platform.key_access_ops(layout), CreateKey(layout.gate))),
         Step("生成 mitmproxy CA", (GenerateCA(layout.mitmproxy),)),
         Step("发布 keys.json 和 ca.pem", (Publish(layout),)),
-        _ownership(layout, facts.owner_gid),
+        _ownership(layout, reader),
         _write_service_files(layout, options.port),
         _stop(layout),
         Step("启用新运行时", (SwapRuntime(layout),)),
@@ -177,20 +167,18 @@ def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFa
     return Plan("安装凭据网关服务", tuple(steps))
 
 
-def _ownership(layout: SystemLayout, owner_gid: int | None) -> Step:
-    platform = layout.platform
-    owner = f"{platform.service_user}:{platform.service_group}"
-    return Step("设置属主和权限", (Run((platform.chmod, "-R", "go-rwx", str(layout.gate))),   # 0700 / 0600 whatever root's umask was
-                               _chown(layout, owner, layout.gate, recursive=True),
-                               _chown(layout, platform.public_owner(owner_gid), layout.public, recursive=True)))
+def _ownership(layout: SystemLayout, reader: Any) -> Step:
+    return Step("设置属主和权限", layout.platform.ownership_ops(layout, reader))
 
 
-def rotate_key_plan(layout: SystemLayout, owner_gid: int | None = None) -> Plan:
+def rotate_key_plan(layout: SystemLayout, owner_gid: Any = None) -> Plan:
     """Replace the service's keypair (gate-simple-v0 §1): every token sealed to the old one stops opening and has to
-    be sealed again. keys.json is republished and the proxy reloads its key on SIGHUP (reload.py); the rpc service
-    reads the key on every call. `owner_gid`: Linux's group of gate-public/ (from gate-service.json's ownerUid)."""
+    be sealed again. keys.json is republished and the proxy reloads its key on SIGHUP (reload.py; on Windows it
+    notices the new key file itself); the rpc service reads the key on every call. `owner_gid`: who may read
+    gate-public/ (Linux: the group of gate-service.json's ownerUid; Windows: its ownerSid)."""
     return Plan("更换凭据网关密钥", (
-        Step("生成新密钥（旧密文全部失效）", (CreateKey(layout.gate, replace=True),)),
+        Step("生成新密钥（旧密文全部失效）", (*layout.platform.key_access_ops(layout),
+                                     CreateKey(layout.gate, replace=True))),
         Step("发布 keys.json 和 ca.pem", (Publish(layout),)),
         _ownership(layout, owner_gid),
         Step("通知代理重新加载密钥", layout.platform.reload_proxy_ops(layout)),
@@ -200,10 +188,9 @@ def rotate_key_plan(layout: SystemLayout, owner_gid: int | None = None) -> Plan:
 
 def update_plan(layout: SystemLayout, runtime: Path, config: ServiceConfig) -> Plan:
     """Swap the runtime and restart both services; keys and data stay. `config` is the new gate-service.json."""
-    root_owner = layout.platform.root_owner
     return Plan("更新凭据网关服务", (
-        Step("复制运行时", (StageRuntime(runtime, layout), _chown(layout, root_owner, layout.runtime_staging, recursive=True))),
-        Step("写入 gate-service.json", (_config_file(layout, config), _chown(layout, root_owner, layout.config))),
+        Step("复制运行时", (StageRuntime(runtime, layout), *_root_owned(layout, layout.runtime_staging, recursive=True))),
+        Step("写入 gate-service.json", (_config_file(layout, config), *_root_owned(layout, layout.config))),
         _write_service_files(layout, config.proxy_port),
         _stop(layout),
         Step("启用新运行时", (SwapRuntime(layout),)),
@@ -219,14 +206,14 @@ def uninstall_plan(layout: SystemLayout, *, delete_keys: bool) -> Plan:
     platform = layout.platform
     steps = [
         _stop(layout, disable=True),
-        Step(f"删除 {platform.services_title.removeprefix('写入 ')}", (
-            *(RemovePath(layout.service_file(label)) for label in platform.labels),
-            *platform.after_uninstall(layout))),
+        Step(f"删除 {platform.services_title.removeprefix('写入 ').removeprefix('注册 ')}",
+             platform.remove_service_ops(layout)),
         Step("删除运行时", tuple(RemovePath(p) for p in (layout.runtime, layout.runtime_staging, layout.runtime_backup))),
         Step("删除公开目录和 gate-service.json", (RemovePath(layout.public), RemovePath(layout.config))),
     ]
     if delete_keys:
-        steps.append(Step("删除密钥和数据（已有密文将全部无法解开）", (RemovePath(layout.gate),)))
+        steps.append(Step("删除密钥和数据（已有密文将全部无法解开）",
+                          (*platform.key_access_ops(layout), RemovePath(layout.gate))))
     return Plan("卸载凭据网关服务", tuple(steps))
 
 

@@ -16,6 +16,9 @@ from .service_paths import SystemLayout
 
 NOT_LOADED_OK = "not-loaded-ok"                  # launchctl: "no such service" counts as done
 SYSTEMD_NOT_LOADED_OK = "systemd-not-loaded-ok"  # systemctl: "not loaded" / "does not exist" counts as done
+WINDOWS_EXISTS_OK = "windows-exists-ok"          # sc.exe create: the service is already registered
+WINDOWS_NOT_RUNNING_OK = "windows-not-running-ok"  # net.exe stop: not started, or not installed
+WINDOWS_NO_SERVICE_OK = "windows-no-service-ok"  # sc.exe delete: not registered
 
 
 # -- operations ----------------------------------------------------------------------------------
@@ -52,6 +55,24 @@ class WriteFile:
 
     def describe(self) -> str:
         return f"write {_q(self.path)} (mode {self.mode:o})"
+
+
+@dataclass(frozen=True)
+class SetAcl:
+    """Windows: `path`'s DACL becomes exactly `grants` ((SID, "full"|"modify"|"read")), protected from inheritance and
+    inherited by everything inside; `owner` its owner. `tree`: everything below drops its own entries (fsacl.set_acl).
+    Like `Run`, only listed under `--root`."""
+
+    path: Path
+    grants: tuple[tuple[str, str], ...]
+    owner: str | None = None
+    tree: bool = False
+
+    def describe(self) -> str:
+        listed = ", ".join(f"{sid}:{rights}" for sid, rights in self.grants)
+        extra = f", owner {self.owner}" if self.owner else ""
+        below = "; everything below inherits only" if self.tree else ""
+        return f"acl {_q(self.path)} = {{{listed}}} (protected{extra}{below})"
 
 
 @dataclass(frozen=True)
@@ -127,7 +148,7 @@ class WaitForService:
         return f"wait for `status` on {self.layout.socket}: proxy running, the key in {self.layout.gate} listed"
 
 
-Op = Run | MakeDir | WriteFile | EnsureFile | StageRuntime | SwapRuntime | RemovePath | CreateKey | GenerateCA | Publish | WaitForService
+Op = Run | MakeDir | SetAcl | WriteFile | EnsureFile | StageRuntime | SwapRuntime | RemovePath | CreateKey | GenerateCA | Publish | WaitForService
 
 
 @dataclass(frozen=True)
