@@ -45,7 +45,9 @@ def build_server(backend: McpBackend | None = None) -> FastMCP:
 
     @mcp.tool()
     def secret_exec(template: str, token: str, args: list[str] | None = None) -> dict:
-        """Run a whitelisted command template with the token's value injected. Output is redacted."""
+        """Run a whitelisted command template; the token's value reaches the command only through the template's
+        environment variables or stdin, never its arguments. `args` fill the template's {ARGn} slots and may not
+        start with "-". Output is redacted."""
         return _guard(lambda: gate.exec(template, token, args))
 
     return mcp

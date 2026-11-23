@@ -11,7 +11,7 @@
 | 用途 | 在哪里用明文 | 明文会不会到登录用户的进程 |
 |---|---|---|
 | http（代理替换、`secret_http`） | 服务内 | 不会 |
-| exec（`secret_exec`） | 服务内以服务账户跑模板命令 | 不会（命令行参数对本机所有用户可见，这一点和现在一样） |
+| exec（`secret_exec`） | 服务内以服务账户跑模板命令 | 不会（2026-11-23 起值只经模板声明的环境变量或标准输入交给子进程，模板的 argv 里不许有 `{SECRET}`；子进程以服务账户运行，登录用户看不到它的环境） |
 | otp（`secret_otp`） | 服务内算出验证码 | 只返回 6 位验证码，和现在一样 |
 | fill（浏览器填表） | 服务把明文交给以用户身份运行的浏览器组件，由它输进页面 | **会**——见下 |
 
@@ -107,7 +107,7 @@ App 包在登录用户可写的位置（现在是 `~/Desktop/…/build/AgentSwit
 1. 建账户和目录（§2），复制 `runtime/`，写 `gate-service.json`。
 2. `~/.secret-gate/keys/<name>/` 和顶层 `key.priv`/`key.pub`（旧的“default”）移到 `<root>/gate/keys/legacy/<name>/`，属主改为服务账户；**只解密，不能再设为当前**。之后删掉用户目录里的私钥文件。它们一直对登录用户可读（`~/.secret-gate` 和 `keys/` 当时是 0755），按已暴露处理。
 3. 在服务里新建密钥对 `main` 并设为当前。之后手机和调度模型加密都用它；旧密文照常能解。「密钥」页标出旧密钥“已停用（仅解密）”，可在确认后删除。
-4. `refs.sqlite3`、`exec_templates.json`、`upstream-insecure.txt`、`screenshot-mask.json`（有就搬）移进 `<root>/gate/`，属主改为服务账户。从此改这些要管理员权限。
+4. `refs.sqlite3`（读出有效行、在新库里重建，不整份复制）、`screenshot-mask.json`（有就搬）移进 `<root>/gate/`，属主改为服务账户。`exec_templates.json`、`upstream-insecure.txt` 在登录用户可写的目录里，可能是别的进程预先放的，默认不搬：计划与安装结果列出它们的内容摘要，只有带 `--import-config` 时才搬（2026-11-23）。从此改这些要管理员权限。
 5. mitmproxy CA：服务账户在 `<root>/gate/mitmproxy/` 生成新 CA，公布 `<root>/gate-public/ca.pem`；删掉 `~/.mitmproxy/` 里的旧 CA 私钥（`mitmproxy-ca.pem` 等）。登录钥匙串里如果信任过旧证书，安装后提示用户移除旧的、信任新的（钥匙串操作留给用户点按钮，不在 root 脚本里做）。
 6. `~/.secret-gate/` 只留一个 `MOVED.txt` 说明搬到了哪里。
 7. 写 LaunchDaemon，`launchctl bootstrap system …` 启动，等 `status` 回应后结束；任何一步失败就停在那一步，打印已做和未做的步骤，不做半截回滚（密钥文件只在确认新位置写好后才删旧的）。
