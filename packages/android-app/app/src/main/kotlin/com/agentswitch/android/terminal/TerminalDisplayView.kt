@@ -17,7 +17,6 @@ import com.termux.terminal.TerminalOutput
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.terminal.TextStyle
-import com.termux.view.TerminalRenderer
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -25,7 +24,7 @@ import kotlin.math.roundToInt
 
 /**
  * A terminal's screen as a display only (docs/terminal-v0.md §1 手机; the iPhone's `DisplayTerminalView` over SwiftTerm):
- * Termux's emulator reads what the Mac's terminal wrote and its renderer draws the cells. It never takes the keyboard
+ * Termux's emulator reads what the Mac's terminal wrote and `CellRenderer` draws the cells. It never takes the keyboard
  * and never sends what it would type or report — the phone has no raw keystroke route; replies go through the box, keys
  * and the wheel by name.
  *
@@ -46,7 +45,7 @@ class TerminalDisplayView(context: Context, fontSizeSp: Float) : View(context) {
     var onPinchEnded: ((Float) -> Unit)? = null
 
     private val typeface: Typeface = ResourcesCompat.getFont(context, R.font.jetbrains_mono) ?: Typeface.MONOSPACE
-    private var renderer = TerminalRenderer(px(fontSizeSp), typeface)
+    private var renderer = CellRenderer(px(fontSizeSp), typeface)
     private var emulator: TerminalEmulator? = null
     /** The top row shown: 0 at the live screen, negative into the history. */
     private var topRow = 0
@@ -78,7 +77,7 @@ class TerminalDisplayView(context: Context, fontSizeSp: Float) : View(context) {
         val clamped = min(max(sp, FONT_MIN), FONT_MAX)
         if (abs(clamped - fontSizeSp) < 0.01f) return
         fontSizeSp = clamped
-        renderer = TerminalRenderer(px(clamped), typeface)
+        renderer = CellRenderer(px(clamped), typeface)
         fit()
         invalidate()
     }
@@ -178,7 +177,7 @@ class TerminalDisplayView(context: Context, fontSizeSp: Float) : View(context) {
         ground.color = background
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), ground)
         val emulator = emulator ?: return
-        renderer.render(emulator, canvas, topRow, -1, -1, -1, -1)
+        renderer.render(emulator, canvas, topRow)
     }
 
     // MARK: touch
