@@ -27,7 +27,7 @@ from .credential_repair import CREDENTIAL_INFO, CREDENTIAL_REISSUE, REPAIR_PURPO
 from .errors import GateError, ValidationError
 from .exec_templates import load_templates
 from .gate_ops import op_describe, op_exec, op_http, op_otp
-from .keyring import create_keypair, retire_keypair, set_current
+from .keyring import create_keypair, restore_keypair, retire_keypair, set_current
 from .keystore import load_public_key
 from .policy import normalize_host, split_host_port
 from .proxy_pid import proxy_running, signal_proxy
@@ -114,6 +114,7 @@ class GateService:
         self._methods: dict[str, Callable[[dict[str, Any]], Reply]] = {
             "status": self._status, "keys.list": self._keys_list, "keys.new": self._keys_new,
             "keys.use": self._keys_use, "keys.retire": self._keys_retire,
+            "keys.restore": self._keys_restore,
             "refs.register": self._refs_register, "refs.release": self._refs_release,
             "credential.info": self._credential_info, "credential.reissue": self._credential_reissue,
             "mcp.describe": self._mcp_describe, "mcp.otp": self._mcp_otp, "mcp.http": self._mcp_http,
@@ -186,6 +187,14 @@ class GateService:
             publish_keys(self._home, self._public)
             self._signal_proxy()
         return Reply({"retired": name}, labels=(name,))
+
+    def _keys_restore(self, params: dict[str, Any]) -> Reply:
+        name = text(fields(params, {"name"}), "name", 64)
+        with self._keys_lock:
+            restore_keypair(self._home, name)
+            publish_keys(self._home, self._public)
+            self._signal_proxy()
+        return Reply({"restored": name}, labels=(name,))
 
     # -- dispatcher: references and credential repair --------------------------------------------
 

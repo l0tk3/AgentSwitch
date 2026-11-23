@@ -16,7 +16,9 @@ from secret_gate.keyring import (
     create_keypair,
     current_name,
     list_keypairs,
+    restore_keypair,
     retire_keypair,
+    retired_keypairs,
     set_current,
 )
 from secret_gate.keystore import load_all_private_keys, load_private_key, save_keypair
@@ -71,6 +73,38 @@ def test_retire_deletes_only_legacy_keys(tmp_path):
     retire_keypair(tmp_path, "old")
     assert [k.name for k in list_keypairs(tmp_path)] == ["main", "spare"]
     assert not (tmp_path / "keys" / "legacy" / "old").exists()
+    assert len(load_all_private_keys(tmp_path)) == 2  # the retired key no longer opens anything
+
+
+def test_a_retired_key_can_be_restored_for_30_days_then_it_is_gone(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    t0 = datetime(2026, 11, 1, tzinfo=UTC)
+    _legacy(tmp_path, "old")
+    create_keypair(tmp_path, "main")
+    before = sorted(p.read_bytes() for p in (tmp_path / "keys" / "legacy" / "old").iterdir())
+    retire_keypair(tmp_path, "old", now=t0)
+    assert retired_keypairs(tmp_path) == (("old", "2026-11-01T00:00:00Z"),)
+    restore_keypair(tmp_path, "old", now=t0 + timedelta(days=29))
+    assert [(k.name, k.legacy) for k in list_keypairs(tmp_path)] == [("main", False), ("old", True)]
+    assert sorted(p.read_bytes() for p in (tmp_path / "keys" / "legacy" / "old").iterdir()) == before
+    with pytest.raises(KeyStoreError, match="无法恢复|没有可恢复"):
+        restore_keypair(tmp_path, "old", now=t0 + timedelta(days=29))
+
+    retire_keypair(tmp_path, "old", now=t0 + timedelta(days=30))
+    with pytest.raises(KeyStoreError, match="没有可恢复"):
+        restore_keypair(tmp_path, "old", now=t0 + timedelta(days=61))
+    assert retired_keypairs(tmp_path) == ()
+    assert not any((tmp_path / "keys" / "retired").iterdir())
+
+
+def test_restore_refuses_a_name_taken_since(tmp_path):
+    _legacy(tmp_path, "old")
+    create_keypair(tmp_path, "main")
+    retire_keypair(tmp_path, "old")
+    create_keypair(tmp_path, "old")
+    with pytest.raises(KeyStoreError, match="已有名为"):
+        restore_keypair(tmp_path, "old")
 
 
 def test_names_are_unique_across_current_and_legacy_and_legacy_is_reserved(tmp_path):

@@ -66,7 +66,8 @@ App 包在登录用户可写的位置（现在是 `~/Desktop/…/build/AgentSwit
 | `keys.list` | → `keys.json` 的内容 | |
 | `keys.new` | `{name, use?}` → 新的一行 | 在服务里生成；名字规则同现在；非 legacy 的密钥最多 32 把（它们删不掉，每次解密都要逐把试） |
 | `keys.use` | `{name}` | `legacy` 的密钥不能设为当前 |
-| `keys.retire` | `{name}` | 删掉一个 legacy 密钥（用它加密的密文从此解不开）；当前密钥不能删 |
+| `keys.retire` | `{name}` | 停用一个 legacy 密钥（用它加密的密文从此解不开）；当前密钥不能删。密钥移到 `gate/keys/retired/`，30 天内可用 `keys.restore` 恢复，过期才删（2026-11-23） |
+| `keys.restore` | `{name}` | 把 30 天内停用的同名密钥恢复为 legacy 密钥；同名已存在时拒绝 |
 | `refs.register` | `{scope, tokens: [{token, label}]}` → 同 `refs register` 现在的输出 | 回的是短引用和描述，不含值 |
 | `refs.release` | `{scope}` → `{released}` | |
 | `credential.info` / `credential.reissue` | 同两条 CLI 现在的输入输出 | reissue 仍受密文里封好的 `seed_import_hosts` 约束 |

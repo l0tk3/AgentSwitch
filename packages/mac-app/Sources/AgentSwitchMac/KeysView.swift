@@ -75,7 +75,7 @@ struct KeysView: View {
                             presenting: retiring) { key in
             Button("Delete", role: .destructive) { model.retireKey(key) }
         } message: { _ in
-            Text("用此密钥加密的密文将无法再解密，此操作无法撤销。")
+            Text("用此密钥加密的密文将无法再解密。30 天内可用 `secret-gate keys restore \(retiring?.name ?? "<名称>")` 恢复，之后彻底删除。")
         }
         .sheet(isPresented: $showingNew) { NewKeySheet { name, makeCurrent in model.createKey(named: name, makeCurrent: makeCurrent) } }
     }

@@ -101,6 +101,8 @@ def test_legacy_keys_over_the_socket():
             svc.client.call("keys.use", {"name": "old"})
         assert svc.client.call("keys.retire", {"name": "old"}) == {"retired": "old"}
         assert [k["name"] for k in svc.client.call("keys.list")] == ["main"]
+        assert svc.client.call("keys.restore", {"name": "old"}) == {"restored": "old"}
+        assert [k["name"] for k in svc.client.call("keys.list")] == ["main", "old"]
 
 
 def test_refs_register_and_release_match_the_cli_contract():

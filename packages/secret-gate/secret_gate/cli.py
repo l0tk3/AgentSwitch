@@ -22,7 +22,7 @@ from .crypto import b64url_encode, generate_keypair
 from .enc_cli import run_enc
 from .errors import GateError
 from .fill_cli import add_fill_parser
-from .keyring import create_keypair, retire_keypair, set_current
+from .keyring import create_keypair, restore_keypair, retire_keypair, set_current
 from .keystore import gate_home, load_private_key, load_public_key, parse_public_key, save_keypair
 from .publish import key_rows
 from .refs_cli import add_refs_parser
@@ -59,6 +59,8 @@ def _cmd_keys(args: argparse.Namespace) -> int:
         set_current(home, args.name)
     elif args.keys_cmd == "retire":
         retire_keypair(home, args.name)
+    elif args.keys_cmd == "restore":
+        restore_keypair(home, args.name)
     print_keys(key_rows(home), args.json)
     return 0
 
@@ -177,8 +179,11 @@ def _add_keys_parser(sub: argparse._SubParsersAction) -> None:
     kn.add_argument("--use", action="store_true", help="also make it current")
     ku = kss.add_parser("use", help="make a keypair current (not a legacy one)")
     ku.add_argument("name")
-    kr = kss.add_parser("retire", help="delete a legacy (decrypt-only) keypair: its tokens stop working")
+    kr = kss.add_parser("retire", help="retire a legacy (decrypt-only) keypair: its tokens stop working; "
+                                       "restorable for 30 days")
     kr.add_argument("name")
+    kb = kss.add_parser("restore", help="bring back a keypair retired in the last 30 days (as legacy)")
+    kb.add_argument("name")
     ks.set_defaults(fn=_cmd_keys, keys_cmd="list")
 
 

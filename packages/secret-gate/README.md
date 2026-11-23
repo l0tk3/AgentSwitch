@@ -112,7 +112,7 @@ secret-gate system status [--json]
 
 `install` creates the account (`dseditgroup`, `sysadminctl -addUser _agentswitchgate … -roleAccount`),
 the directories, the runtime copy and gate-service.json; migrates the old home: every keypair becomes a
-**legacy** keypair (decrypt only, never current again; `keys retire <name>` deletes one), a new keypair `main`
+**legacy** keypair (decrypt only, never current again; `keys retire <name>` takes one out of use; `keys restore <name>` brings it back within 30 days), a new keypair `main`
 becomes current, `refs.sqlite3` (rebuilt from its valid rows, never taken over as a file),
 `screenshot-mask.json` and old logs move in. `exec_templates.json` and `upstream-insecure.txt` were writable by
 every process of the login user, so they move in only with `--import-config`; without it the plan and the report
@@ -137,7 +137,7 @@ rpc answered and the proxy is up; `updateAvailable` compares with the runtime th
 **`gate.sock`** (`secret-gate rpc`): one JSON object per line, `{"id", "method", "params"}` →
 `{"id", "ok": true, "result"}` or `{"id", "ok": false, "error"}`, requests ≤ 1 MiB, one thread per
 connection. Only root and `ownerUid` are let in (the kernel's peer uid). Methods: `status`, `keys.list`,
-`keys.new {name, use?}`, `keys.use {name}`, `keys.retire {name}`, `refs.register {scope, tokens}`,
+`keys.new {name, use?}`, `keys.use {name}`, `keys.retire {name}`, `keys.restore {name}`, `refs.register {scope, tokens}`,
 `refs.release {scope}`, `credential.info {token}`, `credential.reissue {token, host, purpose}`,
 `mcp.describe|otp {scope?, token}`, `mcp.http {scope?, method, url, headers?, body?}`,
 `mcp.exec {scope?, template, token, args?}`, `mcp.repair {scope?, token, host, purpose?, repairUrl?, repairKey?}`,
@@ -148,7 +148,7 @@ and sends SIGHUP to the proxy (pid from `gate/proxy.pid`), which reloads every k
 
 **Service mode of the CLI.** When `$SECRET_GATE_PUBLIC/gate.sock` (default `<root>/gate-public/gate.sock`)
 exists and belongs to another user, the CLI is the service's client, with unchanged output: `keys [--json]`,
-`pubkey` and `enc` read `keys.json`; `keys new|use|retire`, `refs register|release`, `credential-info|reissue`
+`pubkey` and `enc` read `keys.json`; `keys new|use|retire|restore`, `refs register|release`, `credential-info|reissue`
 go over the socket; `mcp` forwards every tool call to `mcp.*` with this process's `SECRET_GATE_SCOPE` and
 repair bridge; `browser` still runs Playwright as you but types values from `browser.resolve`, registers
 sealed page data with `browser.register`, takes the mask config from `browser.config` and keeps the
@@ -190,8 +190,9 @@ The proxy and MCP server decrypt with **every** keypair present, so switching ne
 tokens minted earlier. A native macOS front end for all of this is in `packages/secret-gate-ui`.
 
 Keypairs in `<home>/keys/legacy/<name>/` (what the gate service's install makes of an old home) only
-decrypt: `keys use` refuses them, `keys retire <name>` deletes one (its tokens stop working; the current
-keypair cannot be retired). `keys --json` rows are `{"name", "public", "current", "legacy"}`.
+decrypt: `keys use` refuses them, `keys retire <name>` takes one out of use (its tokens stop working; the current
+keypair cannot be retired). A retired keypair is moved to `keys/retired/` and `keys restore <name>` brings it back
+for 30 days; after that it is deleted. `keys --json` rows are `{"name", "public", "current", "legacy"}`.
 
 ## Encrypt a secret
 

@@ -57,6 +57,8 @@ def _keys(args: argparse.Namespace, *, client: RpcClient, public: Path) -> int:
         client.call("keys.new", {"name": args.name, "use": bool(args.use)})
     elif args.keys_cmd == "use":
         client.call("keys.use", {"name": args.name})
+    elif args.keys_cmd == "restore":
+        client.call("keys.restore", {"name": args.name})
     else:
         client.call("keys.retire", {"name": args.name})
     print_keys(parse_rows(client.call("keys.list")), args.json)
