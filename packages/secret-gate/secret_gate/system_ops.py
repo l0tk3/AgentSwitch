@@ -10,17 +10,12 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+# The macOS tools by absolute path (root never resolves a privileged tool through PATH); each system's are in platform/.
+from .platform.macos import CHMOD, CHOWN, DSCL, DSEDITGROUP, LAUNCHCTL, SYSADMINCTL  # noqa: F401
 from .service_paths import SystemLayout
 
-NOT_LOADED_OK = "not-loaded-ok"
-# Absolute paths: root never resolves a privileged tool through PATH.
-DSCL = "/usr/bin/dscl"
-DSEDITGROUP = "/usr/sbin/dseditgroup"
-SYSADMINCTL = "/usr/sbin/sysadminctl"
-CHOWN = "/usr/sbin/chown"
-CHMOD = "/bin/chmod"
-LAUNCHCTL = "/bin/launchctl"
-
+NOT_LOADED_OK = "not-loaded-ok"                  # launchctl: "no such service" counts as done
+SYSTEMD_NOT_LOADED_OK = "systemd-not-loaded-ok"  # systemctl: "not loaded" / "does not exist" counts as done
 
 
 # -- operations ----------------------------------------------------------------------------------
@@ -32,7 +27,7 @@ def _q(path: Path) -> str:
 @dataclass(frozen=True)
 class Run:
     argv: tuple[str, ...]
-    tolerate: str | None = None       # NOT_LOADED_OK: launchctl's "no such service" counts as done
+    tolerate: str | None = None       # NOT_LOADED_OK / SYSTEMD_NOT_LOADED_OK: a service that is not there is done
     expect: str | None = None         # the output must contain this (sysadminctl exits 0 on some failures)
     retries: int = 1
 
@@ -57,6 +52,17 @@ class WriteFile:
 
     def describe(self) -> str:
         return f"write {_q(self.path)} (mode {self.mode:o})"
+
+
+@dataclass(frozen=True)
+class EnsureFile:
+    """An empty file when there is none (a log the service manager would otherwise create as root); never truncates."""
+
+    path: Path
+    mode: int
+
+    def describe(self) -> str:
+        return f"touch {_q(self.path)} (mode {self.mode:o}, kept if there)"
 
 
 @dataclass(frozen=True)
@@ -121,7 +127,7 @@ class WaitForService:
         return f"wait for `status` on {self.layout.socket}: proxy running, the key in {self.layout.gate} listed"
 
 
-Op = Run | MakeDir | WriteFile | StageRuntime | SwapRuntime | RemovePath | CreateKey | GenerateCA | Publish | WaitForService
+Op = Run | MakeDir | WriteFile | EnsureFile | StageRuntime | SwapRuntime | RemovePath | CreateKey | GenerateCA | Publish | WaitForService
 
 
 @dataclass(frozen=True)

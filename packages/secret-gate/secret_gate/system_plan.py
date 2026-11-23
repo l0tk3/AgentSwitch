@@ -3,7 +3,8 @@
 A plan is a list of steps; a step is a list of operations. Building a plan reads nothing and changes nothing:
 facts about the machine (free UIDs, the runtime's version, ...) come in as arguments, so the plan can be
 printed (`--dry-run`) and asserted in tests. system_exec.py carries it out; every privileged command (dscl,
-dseditgroup, sysadminctl, chown, launchctl) is a `Run` that goes through one injectable runner.
+dseditgroup, sysadminctl, launchctl on macOS; useradd, getent, systemctl on Linux; chown) is a `Run` that goes through
+one injectable runner. The plan is written once; what differs per system comes from `layout.platform` (platform/).
 
 Nothing here reads or changes the login user's home (gate-simple-v0 §1, §6): install generates the service's one
 keypair inside the service's own home, and nothing is moved in from `~/.secret-gate`.
@@ -11,32 +12,23 @@ keypair inside the service's own home, and nothing is moved in from `~/.secret-g
 
 from __future__ import annotations
 
-import plistlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .errors import ValidationError
+from .platform.base import PROCESS_UMASK, SYSTEM_PATH  # noqa: F401
+from .platform.macos import daemon_plist, plists  # noqa: F401  (the macOS service definitions, as before)
 from .service_paths import (
-    PROXY_LABEL,
-    RPC_LABEL,
-    SERVICE_FULL_NAME,
-    SERVICE_LABELS,
     SERVICE_USER,
     ServiceConfig,
     SystemLayout,
 )
 from .system_ops import (
-    CHMOD,
-    CHOWN,
-    DSCL,
-    DSEDITGROUP,
-    LAUNCHCTL,
-    NOT_LOADED_OK,
-    SYSADMINCTL,
     CreateKey,
+    EnsureFile,
     GenerateCA,
     MakeDir,
-    Op,
     Plan,
     Publish,
     RemovePath,
@@ -49,13 +41,13 @@ from .system_ops import (
 )
 
 ROLE_ID_RANGE = range(450, 500)
-SYSTEM_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
-ROOT_OWNER = "root:wheel"
-PLIST_MODE = 0o644
+SERVICE_FILE_MODE = 0o644
+PLIST_MODE = SERVICE_FILE_MODE
 CONFIG_MODE = 0o644
 PRIVATE_DIR_MODE = 0o700
 PUBLIC_DIR_MODE = 0o755
-PROCESS_UMASK = 0o077
+LOG_FILE_MODE = 0o600
+LOG_NAMES = ("proxy", "rpc")
 # -- facts and options ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -94,9 +86,10 @@ class InstallOptions:
 
 @dataclass(frozen=True)
 class InstallFacts:
-    account: Account
+    account: Any                 # macOS: Account; Linux: platform.linux.LinuxAccount
     runtime_version: str
     installed_at: str
+    owner_gid: int | None = None  # Linux: the group gate-public/ is opened to
 
 
 def runtime_version(versions_text: str) -> str:
@@ -109,60 +102,28 @@ def runtime_version(versions_text: str) -> str:
     return f"{gate}+{built}" if built else gate
 
 
-# -- plists --------------------------------------------------------------------------------------
-
-def daemon_plist(layout: SystemLayout, label: str, args: tuple[str, ...], log_name: str) -> dict:
-    log = str(layout.logs / f"{log_name}.log")
-    return {
-        "Label": label,
-        "ProgramArguments": [str(layout.wrapper), *args],
-        "UserName": SERVICE_USER,
-        "GroupName": SERVICE_USER,
-        "EnvironmentVariables": {
-            "SECRET_GATE_HOME": str(layout.gate),
-            "HOME": str(layout.gate),
-            "SECRET_GATE_PUBLIC": str(layout.public),
-            "PATH": ":".join((str(layout.runtime / "python" / "bin"), *SYSTEM_PATH)),
-        },
-        "WorkingDirectory": str(layout.gate),
-        "Umask": PROCESS_UMASK,
-        "RunAtLoad": True,
-        "KeepAlive": True,
-        "ProcessType": "Background",
-        "StandardOutPath": log,
-        "StandardErrorPath": log,
-    }
-
-
-def plists(layout: SystemLayout, port: int) -> dict[str, bytes]:
-    proxy = daemon_plist(layout, PROXY_LABEL, ("proxy", "--port", str(port), "--confdir", str(layout.mitmproxy)), "proxy")
-    rpc = daemon_plist(layout, RPC_LABEL, ("rpc",), "rpc")
-    return {label: plistlib.dumps(data, fmt=plistlib.FMT_XML, sort_keys=True)
-            for label, data in ((RPC_LABEL, rpc), (PROXY_LABEL, proxy))}
-
-
 # -- plans ---------------------------------------------------------------------------------------
 
-def _chown(owner: str, *paths: Path, recursive: bool = False) -> Run:
-    return Run((CHOWN, *(("-R",) if recursive else ()), owner, *map(str, paths)))
+def _chown(layout: SystemLayout, owner: str, *paths: Path, recursive: bool = False) -> Run:
+    return Run((layout.platform.chown, *(("-R",) if recursive else ()), owner, *map(str, paths)))
 
 
-def _stop(layout: SystemLayout) -> Step:
-    return Step("停止服务", tuple(Run((LAUNCHCTL, "bootout", f"system/{label}"), tolerate=NOT_LOADED_OK)
-                              for label in SERVICE_LABELS))
+def _stop(layout: SystemLayout, *, disable: bool = False) -> Step:
+    return Step("停止服务", layout.platform.stop_ops(layout, disable=disable))
 
 
 def _start(layout: SystemLayout) -> Step:
-    return Step("启动服务", tuple(Run((LAUNCHCTL, "bootstrap", "system", str(layout.plist(label))), retries=3)
-                              for label in SERVICE_LABELS))
+    return Step("启动服务", layout.platform.start_ops(layout))
 
 
-def _write_plists(layout: SystemLayout, port: int) -> Step:
-    files = plists(layout, port)
-    return Step("写入 LaunchDaemon", (
-        MakeDir(layout.launch_daemons, PUBLIC_DIR_MODE),
-        *(WriteFile(layout.plist(label), data, PLIST_MODE) for label, data in files.items()),
-        _chown(ROOT_OWNER, *(layout.plist(label) for label in files)),
+def _write_service_files(layout: SystemLayout, port: int) -> Step:
+    platform = layout.platform
+    files = platform.service_files(layout, port)
+    return Step(platform.services_title, (
+        MakeDir(layout.services_dir, PUBLIC_DIR_MODE),
+        *(WriteFile(layout.service_file(label), data, SERVICE_FILE_MODE) for label, data in files.items()),
+        _chown(layout, platform.root_owner, *(layout.service_file(label) for label in files)),
+        *platform.after_service_files(layout),
     ))
 
 
@@ -172,39 +133,41 @@ def _config_file(layout: SystemLayout, config: ServiceConfig) -> WriteFile:
     return WriteFile(layout.config, (json.dumps(config.to_json(), indent=1) + "\n").encode(), CONFIG_MODE)
 
 
-def _account_step(account: Account) -> Step:
-    ops: list[Op] = []
-    if account.create_group:
-        ops.append(Run((DSEDITGROUP, "-o", "create", "-i", str(account.gid), "-r", SERVICE_FULL_NAME, SERVICE_USER)))
-    if account.create_user:
-        # sysadminctl is what may still write user records on current macOS; the UID it gives does not matter below.
-        ops.append(Run((SYSADMINCTL, "-addUser", SERVICE_USER, "-fullName", SERVICE_FULL_NAME, "-UID", str(account.uid),
-                        "-GID", str(account.gid), "-shell", "/usr/bin/false", "-home", "/var/empty", "-roleAccount")))
-    # Whatever made it, the account must be one nobody can log in as.
-    ops.append(Run((DSCL, ".", "-read", f"/Users/{SERVICE_USER}", "UserShell"), expect="UserShell: /usr/bin/false"))
-    verb = "创建" if account.create_user else "确认"
-    return Step(f"{verb}服务账户 {SERVICE_USER}", tuple(ops))
+def _account_step(layout: SystemLayout, account: Any) -> Step:
+    title, ops = layout.platform.account_ops(account)
+    return Step(title, ops)
+
+
+def _directories(layout: SystemLayout) -> Step:
+    platform = layout.platform
+    runtime_parent = layout.runtime.parent
+    own_parent = runtime_parent != layout.root     # Linux: /opt/agentswitch for gate-runtime/
+    return Step("创建目录", (
+        MakeDir(layout.root, PUBLIC_DIR_MODE), _chown(layout, platform.root_owner, layout.root),
+        *((MakeDir(runtime_parent, PUBLIC_DIR_MODE), _chown(layout, platform.root_owner, runtime_parent))
+          if own_parent else ()),
+        *(MakeDir(p, PRIVATE_DIR_MODE) for p in (layout.gate, layout.logs, layout.mitmproxy)),
+        MakeDir(layout.public, platform.public_dir_mode),
+        *((EnsureFile(layout.logs / f"{name}.log", LOG_FILE_MODE) for name in LOG_NAMES)
+          if platform.precreate_logs else ()),
+    ))
 
 
 def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFacts) -> Plan:
-    account = facts.account
+    platform = layout.platform
     config = ServiceConfig(owner_uid=options.owner_uid, proxy_port=options.port,
                            runtime_version=facts.runtime_version, installed_at=facts.installed_at)
     steps = [
-        _account_step(account),
-        Step("创建目录", (
-            MakeDir(layout.root, PUBLIC_DIR_MODE), _chown(ROOT_OWNER, layout.root),
-            *(MakeDir(p, PRIVATE_DIR_MODE) for p in (layout.gate, layout.logs, layout.mitmproxy)),
-            MakeDir(layout.public, PUBLIC_DIR_MODE),
-        )),
+        _account_step(layout, facts.account),
+        _directories(layout),
         Step("复制运行时", (StageRuntime(options.runtime, layout),
-                          _chown(ROOT_OWNER, layout.runtime_staging, recursive=True))),
-        Step("写入 gate-service.json", (_config_file(layout, config), _chown(ROOT_OWNER, layout.config))),
+                          _chown(layout, platform.root_owner, layout.runtime_staging, recursive=True))),
+        Step("写入 gate-service.json", (_config_file(layout, config), _chown(layout, platform.root_owner, layout.config))),
         Step("生成密钥", (CreateKey(layout.gate),)),
         Step("生成 mitmproxy CA", (GenerateCA(layout.mitmproxy),)),
         Step("发布 keys.json 和 ca.pem", (Publish(layout),)),
-        _ownership(layout),
-        _write_plists(layout, options.port),
+        _ownership(layout, facts.owner_gid),
+        _write_service_files(layout, options.port),
         _stop(layout),
         Step("启用新运行时", (SwapRuntime(layout),)),
         _start(layout),
@@ -214,32 +177,34 @@ def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFa
     return Plan("安装凭据网关服务", tuple(steps))
 
 
-def _ownership(layout: SystemLayout) -> Step:
-    owner = f"{SERVICE_USER}:{SERVICE_USER}"
-    return Step("设置属主和权限", (Run((CHMOD, "-R", "go-rwx", str(layout.gate))),   # 0700 / 0600 whatever root's umask was
-                               _chown(owner, layout.gate, recursive=True), _chown(owner, layout.public, recursive=True)))
+def _ownership(layout: SystemLayout, owner_gid: int | None) -> Step:
+    platform = layout.platform
+    owner = f"{platform.service_user}:{platform.service_group}"
+    return Step("设置属主和权限", (Run((platform.chmod, "-R", "go-rwx", str(layout.gate))),   # 0700 / 0600 whatever root's umask was
+                               _chown(layout, owner, layout.gate, recursive=True),
+                               _chown(layout, platform.public_owner(owner_gid), layout.public, recursive=True)))
 
 
-def rotate_key_plan(layout: SystemLayout) -> Plan:
+def rotate_key_plan(layout: SystemLayout, owner_gid: int | None = None) -> Plan:
     """Replace the service's keypair (gate-simple-v0 §1): every token sealed to the old one stops opening and has to
     be sealed again. keys.json is republished and the proxy reloads its key on SIGHUP (reload.py); the rpc service
-    reads the key on every call."""
+    reads the key on every call. `owner_gid`: Linux's group of gate-public/ (from gate-service.json's ownerUid)."""
     return Plan("更换凭据网关密钥", (
         Step("生成新密钥（旧密文全部失效）", (CreateKey(layout.gate, replace=True),)),
         Step("发布 keys.json 和 ca.pem", (Publish(layout),)),
-        _ownership(layout),
-        Step("通知代理重新加载密钥", (Run((LAUNCHCTL, "kill", "SIGHUP", f"system/{PROXY_LABEL}"),
-                                        tolerate=NOT_LOADED_OK),)),
+        _ownership(layout, owner_gid),
+        Step("通知代理重新加载密钥", layout.platform.reload_proxy_ops(layout)),
         Step("等待服务响应", (WaitForService(layout),)),
     ))
 
 
 def update_plan(layout: SystemLayout, runtime: Path, config: ServiceConfig) -> Plan:
     """Swap the runtime and restart both services; keys and data stay. `config` is the new gate-service.json."""
+    root_owner = layout.platform.root_owner
     return Plan("更新凭据网关服务", (
-        Step("复制运行时", (StageRuntime(runtime, layout), _chown(ROOT_OWNER, layout.runtime_staging, recursive=True))),
-        Step("写入 gate-service.json", (_config_file(layout, config), _chown(ROOT_OWNER, layout.config))),
-        _write_plists(layout, config.proxy_port),
+        Step("复制运行时", (StageRuntime(runtime, layout), _chown(layout, root_owner, layout.runtime_staging, recursive=True))),
+        Step("写入 gate-service.json", (_config_file(layout, config), _chown(layout, root_owner, layout.config))),
+        _write_service_files(layout, config.proxy_port),
         _stop(layout),
         Step("启用新运行时", (SwapRuntime(layout),)),
         _start(layout),
@@ -249,11 +214,14 @@ def update_plan(layout: SystemLayout, runtime: Path, config: ServiceConfig) -> P
 
 
 def uninstall_plan(layout: SystemLayout, *, delete_keys: bool) -> Plan:
-    """Services, LaunchDaemons, runtime and public files go; the gate home (keys, data) stays unless asked,
+    """Services, their definitions, runtime and public files go; the gate home (keys, data) stays unless asked,
     the service account always stays."""
+    platform = layout.platform
     steps = [
-        _stop(layout),
-        Step("删除 LaunchDaemon", tuple(RemovePath(layout.plist(label)) for label in SERVICE_LABELS)),
+        _stop(layout, disable=True),
+        Step(f"删除 {platform.services_title.removeprefix('写入 ')}", (
+            *(RemovePath(layout.service_file(label)) for label in platform.labels),
+            *platform.after_uninstall(layout))),
         Step("删除运行时", tuple(RemovePath(p) for p in (layout.runtime, layout.runtime_staging, layout.runtime_backup))),
         Step("删除公开目录和 gate-service.json", (RemovePath(layout.public), RemovePath(layout.config))),
     ]

@@ -1,12 +1,13 @@
-"""Where the gate service lives (gate-service-v0 §2), and whether this process is its client (§4).
+"""Where the gate service lives (gate-service-v0 §2, gate-simple-v0 §5), and whether this process is its client (§4).
 
-The service runs under the role account `_agentswitchgate` from a root-owned copy of the runtime. Everything the
-login user may see is in `<root>/gate-public/`: `keys.json`, `ca.pem` and `gate.sock`. Once `<root>/gate-service.json`
-exists, every process but the service's own is a *client* of the service (`client_socket`), with or without the
-socket; the service's own processes (the proxy and the rpc server, whose account owns `gate-public/`) keep working
-on their gate home directly, exactly like a gate without service.
+The service runs under its own account (macOS `_agentswitchgate`, Linux `agentswitch-gate`) from a root-owned copy of
+the runtime. Everything the login user may see is in `<root>/gate-public/`: `keys.json`, `ca.pem` and `gate.sock`.
+Once `<root>/gate-service.json` exists, every process but the service's own is a *client* of the service
+(`client_socket`), with or without the socket; the service's own processes (the proxy and the rpc server, whose
+account owns `gate-public/`) keep working on their gate home directly, exactly like a gate without service.
 
-`SystemLayout(prefix)` relocates every system path under a prefix (`secret-gate system … --root`), for tests.
+Where `<root>` and the rest are depends on the system (platform/): `SystemLayout(prefix, platform)`; `SystemLayout.native()`
+is this machine's. `prefix` relocates every system path (`secret-gate system … --root`), for tests.
 """
 
 from __future__ import annotations
@@ -19,15 +20,19 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ServiceUnavailable, ValidationError
+from .platform import MACOS, GatePlatform, native
 
-SYSTEM_ROOT = Path("/Library/Application Support/AgentSwitch")
-LAUNCH_DAEMONS = Path("/Library/LaunchDaemons")
+# The macOS names, as they were before the platform layer (platform/macos.py has them now).
+from .platform.macos import (  # noqa: F401
+    LAUNCH_DAEMONS,
+    PROXY_LABEL,
+    RPC_LABEL,
+    SERVICE_FULL_NAME,
+    SERVICE_USER,
+    SYSTEM_ROOT,
+)
+
 PUBLIC_ENV_VAR = "SECRET_GATE_PUBLIC"
-
-SERVICE_USER = "_agentswitchgate"
-SERVICE_FULL_NAME = "AgentSwitch Gate"
-PROXY_LABEL = "com.agentswitch.gate.proxy"
-RPC_LABEL = "com.agentswitch.gate.rpc"
 SERVICE_LABELS = (RPC_LABEL, PROXY_LABEL)
 
 GATE_DIR = "gate"
@@ -40,22 +45,33 @@ CA_PEM = "ca.pem"
 MITMPROXY_DIR = "mitmproxy"
 LOGS_DIR = "logs"
 
-SERVICE_REFUSAL = "凭据网关由系统服务管理，请在 Mac 应用里操作。"
+SERVICE_REFUSAL = "凭据网关由系统服务管理"
 SERVICE_UNAVAILABLE = "凭据网关服务无响应"
+
+
+def service_refusal(platform: GatePlatform | None = None) -> str:
+    """What a command the service owns answers (macOS: "…，请在 Mac 应用里操作。")."""
+    return f"{SERVICE_REFUSAL}，{(platform or native()).admin_hint}。"
 
 
 @dataclass(frozen=True)
 class SystemLayout:
-    """Every path of the installed service; `prefix` is "/" on a real machine."""
+    """Every path of the installed service; `prefix` is "/" on a real machine. The platform defaults to macOS (the
+    layout before there was a choice); product code takes this machine's with `SystemLayout.native()`."""
 
     prefix: Path = Path("/")
+    platform: GatePlatform = MACOS
+
+    @classmethod
+    def native(cls, prefix: Path = Path("/")) -> SystemLayout:
+        return cls(prefix, native())
 
     def system(self, path: Path) -> Path:
         return Path(self.prefix) / path.relative_to("/")
 
     @property
     def root(self) -> Path:
-        return self.system(SYSTEM_ROOT)
+        return self.system(self.platform.system_root)
 
     @property
     def gate(self) -> Path:
@@ -67,19 +83,19 @@ class SystemLayout:
 
     @property
     def runtime(self) -> Path:
-        return self.root / RUNTIME_DIR
+        return self.system(self.platform.runtime_dir)
 
     @property
     def runtime_staging(self) -> Path:
-        return self.root / (RUNTIME_DIR + ".new")
+        return self.runtime.with_name(self.runtime.name + ".new")
 
     @property
     def runtime_backup(self) -> Path:
-        return self.root / (RUNTIME_DIR + ".old")
+        return self.runtime.with_name(self.runtime.name + ".old")
 
     @property
     def wrapper(self) -> Path:
-        """The command both LaunchDaemons run (`<root>/runtime/bin/secret-gate`)."""
+        """The command both services run (`<runtime>/bin/secret-gate`)."""
         return self.runtime / "bin" / "secret-gate"
 
     @property
@@ -87,8 +103,12 @@ class SystemLayout:
         return self.root / SERVICE_CONFIG_FILE
 
     @property
+    def services_dir(self) -> Path:
+        return self.system(self.platform.services_dir)
+
+    @property
     def launch_daemons(self) -> Path:
-        return self.system(LAUNCH_DAEMONS)
+        return self.services_dir
 
     @property
     def mitmproxy(self) -> Path:
@@ -102,14 +122,17 @@ class SystemLayout:
     def socket(self) -> Path:
         return self.public / SOCKET_FILE
 
+    def service_file(self, label: str) -> Path:
+        return self.platform.service_file(self.services_dir, label)
+
     def plist(self, label: str) -> Path:
-        return self.launch_daemons / f"{label}.plist"
+        return self.service_file(label)
 
 
 def public_dir(env: Mapping[str, str] | None = None) -> Path:
     env = os.environ if env is None else env
     override = env.get(PUBLIC_ENV_VAR)
-    return Path(override).expanduser() if override else SystemLayout().public
+    return Path(override).expanduser() if override else SystemLayout.native().public
 
 
 def socket_path(env: Mapping[str, str] | None = None) -> Path:

@@ -73,6 +73,6 @@ and the user does not expect you to.
   the legend; the gate refuses other sites and forms that submit elsewhere. Do not try to read the
   values some other way; the references are how this task is meant to be done.
 - The gate's key directory (`~/.secret-gate/`, or `$SECRET_GATE_HOME`; with the gate running as a system
-  service, `/Library/Application Support/AgentSwitch/gate/`, which belongs to another account) belongs to the
-  gate process; there is no reason for you to read it, to talk to its `gate.sock` yourself, or to run
-  `secret-gate keygen`.
+  service, `/Library/Application Support/AgentSwitch/gate/` on macOS or `/var/lib/agentswitch/gate/` on Linux, which
+  belongs to another account) belongs to the gate process; there is no reason for you to read it, to talk to its
+  `gate.sock` yourself, or to run `secret-gate keygen`.

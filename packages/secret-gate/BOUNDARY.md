@@ -6,7 +6,7 @@
 信任边界：模型只拿密文（`enc:v1:`）或本次执行的短引用（`enc:ref:`）；gate 进程持有私钥、执行范围和它自己填进页面的值；
 网页是不可信的，下游 Playwright MCP 可信但会把未脱敏的快照和日志写盘。
 安装凭据网关服务（`docs/gate-service-v0.md`）后，私钥、mitmproxy CA 私钥、短引用库、审计日志和可信配置归服务账户
-`_agentswitchgate`，登录用户的进程（daemon、执行器、浏览器组件）在文件系统层面读不到；它们经 `gate.sock` 调用服务，见“凭据网关服务”一节。
+`_agentswitchgate`（Linux 上是 `agentswitch-gate`），登录用户的进程（daemon、执行器、浏览器组件）在文件系统层面读不到；它们经 `gate.sock` 调用服务，见“凭据网关服务”一节。
 
 ## 工具与参数
 
@@ -133,7 +133,7 @@
 - 旧 daemon 还连着时新 daemon 接走终端：持有进程给旧连接发一条 `replaced` 再断开；旧 daemon 把它当作放手——不删 `meta.json`、不停 companion 的服务、不记失败的一轮。持有进程被杀的同样处理（下一个 daemon 发现持有进程不在才忘掉）。
 - 持有进程对连着的 daemon 做反压：没发完的输出接近环形缓冲的容量就停读伪终端，程序在写上等，与 node-pty 一样不丢字节（复审时 60 MB 洪水曾丢 22.6 MB）；没有 daemon 时缓冲只留最后一段，这是设计。
 
-## 凭据网关服务（gate-service-v0）
+## 凭据网关服务（gate-service-v0；Linux：gate-simple-v0 §5）
 
 | 入口 | 规则 | 挡什么 | 失败行为 | 测试 |
 |---|---|---|---|---|
@@ -149,6 +149,12 @@
 | 安装：不碰登录用户的目录 | 安装（root）不读也不改登录用户的家目录：不迁移旧密钥、短引用库、配置，不写 `MOVED.txt`，不动 `~/.mitmproxy` 和旧 LaunchAgent；钥匙在服务目录里新生成（已有则保留）。旧参数 `--migrate-from`、`--user-home` 照收但不用，`--import-config` 已删除；任何一步失败即停止并列出已做、未做的步骤，不回滚 | 预置在用户目录里的钥匙、模板、上游例外或符号链接借安装进入服务，或让 root 读写别处的文件 | 停止 | `tests/test_system_install.py::test_install_makes_a_fresh_key_in_the_service_home_and_leaves_the_users_home_alone`、`tests/test_system_plan.py::test_install_never_touches_the_users_home`、`tests/test_system_install.py::test_cli_old_migration_flags_are_accepted_and_ignored_but_import_config_is_gone`、`tests/test_system_install.py::test_a_failing_command_stops_the_install_and_says_what_was_not_done` |
 | 安装：运行时副本 | 服务只运行 root 拥有的 `<root>/runtime/`，从不运行 App 包里的程序；App 包的 `python/`、`secret-gate/`、`VERSIONS` 是符号链接时不跟随、安装失败；逐项经父目录描述符以 O_NOFOLLOW 打开，每项须属于 App 包的属主（挡住指向 root 才能读的文件的硬链接），只认普通文件、目录、符号链接；符号链接原样保留，须是相对的且不出副本；权限在创建时设定（目录 0755、文件 0644/0755），`check_tree` 只核对，从不 chmod 副本之外的东西 | 登录用户改 App 包里的 Python 即拿到服务账户；把包里的目录换成指向网关目录的链接，让 root 把私钥复制进人人可读的副本 | 安装停止 | `tests/test_system_install.py::test_a_runtime_symlink_leaving_the_copy_is_refused`、`tests/test_system_install.py::test_a_top_level_runtime_item_that_is_a_symlink_is_never_followed`、`tests/test_system_install.py::test_a_symlinked_versions_file_is_never_read`、`tests/test_system_install.py::test_runtime_entries_of_another_owner_or_odd_types_are_refused`、`tests/test_system_install.py::test_check_tree_only_verifies`、`tests/test_system_install.py::test_install_makes_a_fresh_key_in_the_service_home_and_leaves_the_users_home_alone` |
 | LaunchDaemon | `UserName`/`GroupName` 为 `_agentswitchgate`；环境只有 `SECRET_GATE_HOME`、`HOME`、`SECRET_GATE_PUBLIC` 和由 root 拥有的目录组成的 `PATH`，没有代理变量；`Umask` 077；网关目录安装时 `chmod -R go-rwx` | 代理变量或用户可写目录里的程序进入服务 | — | `tests/test_system_plan.py::test_launch_daemon_plists`、`tests/test_system_plan.py::test_install_plan_commands_and_paths` |
+| Linux：服务账户（gate-simple-v0 §5） | 系统用户 `agentswitch-gate`：`useradd --system --user-group --no-create-home --home-dir /nonexistent --shell <nologin>`（没有 `useradd` 时用 Debian 的 `adduser --system --group`）；已有同名账户时只在 shell 是 nologin/false 且 uid 不是 0 时沿用，否则拒绝；装完再用 `getent passwd` 核对 shell、`getent group` 核对组；特权命令一律绝对路径 | 预先建好的可登录同名账户被当成服务账户；root 经 PATH 找到被换掉的工具 | 安装停止 | `tests/test_system_linux.py::test_account_is_a_system_user_nobody_logs_in_as`、`tests/test_system_linux.py::test_gather_account` |
+| Linux：目录与公开文件 | `/var/lib/agentswitch/` root 0755；`gate/` 服务账户 0700、文件 0600；`gate-public/` 属服务账户、属组为登录用户的主组、0750（只有登录用户的组进得去，其他本机账户连 `keys.json`、`ca.pem` 都读不到；socket 另按对端 uid 放行）；`gate-service.json` root 0644；日志文件安装时预先建好（0600，再随网关目录交给服务账户），不让 systemd 以 root 建；建日志文件时不跟随符号链接、不截断已有的 | 其他本机账户连到 socket 或读公开文件；root 经预置的链接写别处 | 安装停止 | `tests/test_system_linux.py::test_install_plan_paths_owners_and_order`、`tests/test_system_linux.py::test_install_lays_out_the_service`、`tests/test_system_linux.py::test_a_log_that_is_a_link_is_refused`、`tests/test_system_linux.py::test_reinstall_keeps_the_key_and_the_logs` |
+| Linux：运行时副本 | 节点的运行时在登录用户可写的 `~/.local/share/agentswitch/runtime/<stamp>`（agent 也写得到），服务从不运行它：安装与更新以 root 把其中的 `python/`、`secret-gate/`、`VERSIONS` 用与 macOS 相同的加固复制（不跟随链接、每项须属于运行时的属主、只认普通文件/目录/相对且不出副本的链接）到 root 拥有的 `/opt/agentswitch/gate-runtime/`，`node/`、`daemon/` 不复制；单元只运行这份副本 | 登录用户（或 agent）改自己运行时里的 Python 即拿到服务账户；把运行时里的目录换成链接，让 root 复制别处的文件 | 安装停止 | `tests/test_system_linux.py::test_the_users_runtime_is_copied_with_the_same_hardening`、`tests/test_system_linux.py::test_install_lays_out_the_service`、`tests/test_system_linux.py::test_units_run_the_root_owned_copy_hardened_as_the_service_user` |
+| Linux：systemd 单元 | `agentswitch-gate-rpc.service`、`agentswitch-gate-proxy.service`（root 0644）：`User=`/`Group=agentswitch-gate`；环境只有 `SECRET_GATE_HOME`、`HOME`、`SECRET_GATE_PUBLIC` 和由 root 拥有的目录组成的 `PATH`，没有代理变量；`UMask=0077`、`NoNewPrivileges`、`ProtectSystem=strict`（只 `ReadWritePaths` 网关目录与公开目录）、`ProtectHome`、`PrivateTmp`、`PrivateDevices`、内核与控制组保护、空的 `CapabilityBoundingSet`；换钥匙用 `systemctl kill --signal=SIGHUP`；卸载 `disable --now` 后 `daemon-reload` | 服务进程写到别处、读到用户家目录、拿到特权 | — | `tests/test_system_linux.py::test_units_run_the_root_owned_copy_hardened_as_the_service_user`、`tests/test_system_linux.py::test_rotate_update_uninstall_plans`、`tests/test_system_linux.py::test_rotate_update_uninstall_carried_out` |
+| Linux：`gate.sock` 对端检查 | 与 macOS 同一套放行规则（root 与 `ownerUid`），对端 uid 由内核的 `SO_PEERCRED` 给出（`platform/linux.py`）；macOS 上 `LOCAL_PEERCRED`；没有这两者的系统拒绝 | 本机其他用户调用网关 | 不读请求，直接断开 | `tests/test_system_linux.py::test_so_peercred_gives_the_kernels_uid`、`tests/test_system_linux.py::test_local_peercred_and_no_so_peercred_on_macos`、`tests/test_rpc.py::test_socket_is_0666_and_only_allowed_uids_get_an_answer` |
+| Linux：看护进程与 CLI（daemon `src/keeper/gateService.ts`） | 是否装了服务与网关同样只看 `gate-service.json`（读不了也按已装算）；装了时看护进程不起自己的网关、不在用户目录建钥匙，服务无响应时只报告、从不退回用户身份的网关；安装后（配置出现）停掉自己的网关让出端口、带着服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 和端口重启 daemon；没装时 doctor、`agentswitch gate` 和 Keys 页用五种语言明说“此节点的网关以你的账户运行：只防误看，不防顺手读取”，并打印要用户自己运行的 `sudo … system install …`（AgentSwitch 从不运行 sudo）；`sudo secret-gate system install` 不带 `--owner-uid` 时取 `SUDO_UID` | 服务模式下悄悄在用户侧起网关、撤销隔离；用户以为同账户的网关是隔离 | 报告，不兜底 | daemon `tests/gateService.test.ts`、`tests/configTui.test.tsx`；`tests/test_system_linux.py::test_cli_owner_from_sudo_and_platform_only_with_root` |
 
 ## 已知缺口（不要当成已解决）
 
@@ -214,8 +220,9 @@
 
 ## Linux 节点（`packages/linux`、daemon `src/keeper/`，mesh-v0 §4；2026-10-13）
 
-- **凭据网关与登录用户同一个账户**（mesh-v0 §4.5 的“同用户”一档；独立账户那一档还没做）。私钥在 `~/.secret-gate`（0700），挡住 agent 的只有禁读规则——字符串匹配的底线，同一个用户的进程存心要读是读得到的。这是 Mac 在 2026-09-27 装上网关服务之前的状态。服务器上 agent 更常以自动或跳过权限的方式跑，所以独立账户是要补的下一步，不要把现在的样子当成隔离。
-- 网关服务的公开目录在 Linux 上按 `/var/lib/agentswitch/gate-public` 算进禁读名单（daemon `src/executors/protected.ts`），为以后的独立账户留好；同用户一档下那里没有东西。
+- **凭据网关的两档**（mesh-v0 §4.5，gate-simple-v0 §5）。装了网关服务（`sudo …/secret-gate system install …`，见上面“凭据网关服务”一节的 Linux 各行）后，私钥在系统用户 `agentswitch-gate` 的 `/var/lib/agentswitch/gate/`（0700），登录用户在文件层面读不到，与 Mac 相同。**没装时**（没有 sudo，或用户没运行那条命令）网关与登录用户同一个账户：私钥在 `~/.secret-gate`（0700），挡住 agent 的只有禁读规则——字符串匹配的底线，同一个用户的进程存心要读是读得到的；doctor、`agentswitch gate` 和 Keys 页明说“此节点的网关以你的账户运行：只防误看，不防顺手读取”，不要把这一档当成隔离。
+- 网关服务的公开目录 `/var/lib/agentswitch/gate-public` 在禁读名单里（daemon `src/executors/protected.ts`）；它对登录用户的组开放（0750），对其他本机账户关闭。
+- `sudo` 运行的是登录用户自己的运行时（agent 也写得到）：安装、更新那一刻它若已被改过，装进服务的就是改过的程序。与 Mac 上“授权那一刻 App 包已被篡改”同属 gate-simple-v0 §0、§6 写明不防的一条；装好以后服务只运行 root 拥有的副本，之后再改用户的运行时影响不到服务。
 - 看护进程（`agentswitch node run`）交给网关和 daemon 的环境是一张白名单（daemon `src/keeper/plan.ts`）：不带代理变量、不带任何密钥，`PATH` 取登录 shell 的；和 Mac 应用的 `ChildEnvironment` 同一个原则。
 - 工作目录与浏览器打开文件的禁区补上 Linux 的凭据位置：`~/.local/share/keyrings`（GNOME 钥匙串）、`~/.local/share/opencode`（OpenCode 的登录与库）、`~/.pki`（NSS 的证书和私钥）；工作目录另禁 `~/.mozilla`。Claude Code 在 Linux 上把登录放在 `~/.claude/.credentials.json`（Mac 上在钥匙串），`~/.claude` 本来就在工作目录禁区里、文件名本来就在浏览器的凭据文件名里。
 - 远程口的来源限制不变（私网、链路本地、100.64/10、IPv6 ULA）。配对载荷里的地址去掉了容器与虚拟机的网卡，不改变谁能连进来。

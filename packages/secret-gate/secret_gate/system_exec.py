@@ -25,7 +25,9 @@ from .service import CommandResult, Runner, atomic_write, is_not_loaded
 from .service_paths import SystemLayout
 from .system_ops import (
     NOT_LOADED_OK,
+    SYSTEMD_NOT_LOADED_OK,
     CreateKey,
+    EnsureFile,
     GenerateCA,
     MakeDir,
     Op,
@@ -90,6 +92,20 @@ def run_op(op: Op, deps: SystemDeps) -> list[str]:
 
 # -- privileged commands -------------------------------------------------------------------------
 
+_SYSTEMD_NOT_LOADED_CODES = frozenset({1, 5})    # systemctl: generic failure / "unit not loaded" (LSB 5)
+_SYSTEMD_NOT_LOADED_TEXT = ("not loaded", "does not exist", "not found", "no such file")
+
+
+def systemd_not_loaded(result: CommandResult) -> bool:
+    """systemctl's answer for a unit that is not there (stop, disable --now, kill on a fresh or removed unit)."""
+    text = f"{result.stdout}\n{result.stderr}".lower()
+    return result.returncode in _SYSTEMD_NOT_LOADED_CODES and any(t in text for t in _SYSTEMD_NOT_LOADED_TEXT)
+
+
+_NOT_LOADED: dict[str, Callable[[CommandResult], bool]] = {
+    NOT_LOADED_OK: is_not_loaded, SYSTEMD_NOT_LOADED_OK: systemd_not_loaded,
+}
+
 def _run(op: Run, deps: SystemDeps) -> list[str]:
     if deps.simulate:
         return [f"{op.describe()}（--root：未执行）"]
@@ -98,7 +114,7 @@ def _run(op: Run, deps: SystemDeps) -> list[str]:
         result = deps.runner(op.argv)
         if result.returncode == 0 and (op.expect is None or op.expect in f"{result.stdout}\n{result.stderr}"):
             return [op.describe()]
-        if op.tolerate == NOT_LOADED_OK and is_not_loaded(result):
+        if op.tolerate is not None and _NOT_LOADED[op.tolerate](result):
             return [f"{op.describe()}（未加载，跳过）"]
         if attempt + 1 < op.retries:
             deps.sleep(RETRY_DELAY_SECONDS)
@@ -119,6 +135,19 @@ def _make_dir(op: MakeDir, _deps: SystemDeps) -> None:
 
 def _write_file(op: WriteFile, _deps: SystemDeps) -> None:
     atomic_write(op.path, op.data, op.mode)
+
+
+def _ensure_file(op: EnsureFile, _deps: SystemDeps) -> None:
+    """Create an empty file, never through a link and never truncating one that is there (the chown -R of the gate
+    home that follows gives it to the service account)."""
+    try:
+        fd = os.open(op.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, op.mode)
+    except FileExistsError:
+        if op.path.is_symlink() or not op.path.is_file():
+            raise ValidationError(f"{op.path} 不是普通文件，未处理") from None
+        return
+    os.fchmod(fd, op.mode)
+    os.close(fd)
 
 
 def remove_path(path: Path) -> bool:
@@ -398,7 +427,7 @@ def _wait(op: WaitForService, deps: SystemDeps) -> list[str]:
             rows = status["keys"]
             listed = [row["publicKey"] for row in rows]
             if not status["proxyRunning"]:
-                last = "代理未运行（端口可能被其他进程占用，例如 Mac 应用自行启动的网关进程）"
+                last = "代理未运行（端口可能被其他进程占用，例如 Mac 应用或 Linux 看护进程自行启动的网关进程）"
             elif not expected or listed != expected:
                 last = "服务列出的密钥与文件不一致"
             elif not all(row["current"] for row in rows):
@@ -415,7 +444,7 @@ def _wait(op: WaitForService, deps: SystemDeps) -> list[str]:
 
 
 _HANDLERS: dict[type, Callable[[Any, SystemDeps], list[str] | None]] = {
-    Run: _run, MakeDir: _make_dir, WriteFile: _write_file, StageRuntime: _stage, SwapRuntime: _swap,
+    Run: _run, MakeDir: _make_dir, WriteFile: _write_file, EnsureFile: _ensure_file, StageRuntime: _stage, SwapRuntime: _swap,
     RemovePath: _remove, CreateKey: _create_key, GenerateCA: _generate_ca, Publish: _publish, WaitForService: _wait,
 }
 

@@ -1,9 +1,10 @@
 """`secret-gate rpc`: the gate service's local socket `<public>/gate.sock` (gate-service-v0 §3).
 
-Runs as the service account. The socket is mode 0666 so any local process can connect, and the peer check lets
-only root and the `ownerUid` of gate-service.json stay: the uid comes from the kernel (LOCAL_PEERCRED), every
-other user is disconnected before a byte is read. One thread per connection, so a slow `mcp.http` never holds up
-another client. A service started without a keypair generates one (a fresh install, or a home whose key was
+Runs as the service account. The socket is mode 0666 so any local process can connect (on Linux the directory
+around it, 0750, already keeps out everyone outside the login user's group), and the peer check lets only root and
+the `ownerUid` of gate-service.json stay: the uid comes from the kernel (LOCAL_PEERCRED on macOS, SO_PEERCRED on
+Linux; platform/), every other user is disconnected before a byte is read. One thread per connection, so a slow
+`mcp.http` never holds up another client. A service started without a keypair generates one (a fresh install, or a home whose key was
 deleted); replacing it is `secret-gate system rotate-key` (root), never a call on this socket.
 
 Every call writes one line to `<gate home>/logs/rpc-audit.jsonl` (0600): time, method, peer uid, the scope's

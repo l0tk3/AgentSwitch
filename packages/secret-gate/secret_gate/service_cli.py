@@ -29,7 +29,7 @@ from .keystore import parse_public_key
 from .publish import KeyRow, current_public_key, read_rows
 from .refs_cli import check_tokens, print_register, read_request
 from .rpc_client import RpcClient
-from .service_paths import SERVICE_REFUSAL
+from .service_paths import service_refusal
 
 REFUSED_COMMANDS = frozenset({"keygen", "check", "proxy", "service", "install-ca", "rpc"})
 Command = Callable[[argparse.Namespace], int]
@@ -45,7 +45,7 @@ def print_keys(rows: Sequence[KeyRow], as_json: bool) -> None:
 
 
 def _refuse(_: argparse.Namespace) -> int:
-    print(f"error: {SERVICE_REFUSAL}", file=sys.stderr)
+    print(f"error: {service_refusal()}", file=sys.stderr)
     return 2
 
 

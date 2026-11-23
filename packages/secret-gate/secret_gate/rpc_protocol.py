@@ -8,29 +8,23 @@ gate's own checks keep their existing text, so a model or the daemon reads exact
 gate became a service.
 
 Peer check: the kernel's record of the connecting process's effective uid, `LOCAL_PEERCRED` (struct xucred) on
-macOS, `SO_PEERCRED` on Linux. Nothing the client sends can change it.
+macOS, `SO_PEERCRED` on Linux (platform/). Nothing the client sends can change it.
 """
 
 from __future__ import annotations
 
 import json
 import socket
-import struct
 import sys
 from typing import Any
 
 from .errors import GateError
+from .platform import native
+from .platform.macos import LOCAL_PEERCRED, SOL_LOCAL, XUCRED_SIZE, XUCRED_VERSION  # noqa: F401
 
 MAX_REQUEST_BYTES = 1 << 20
 MAX_RESPONSE_BYTES = 64 << 20
 ENCODING = "utf-8"
-
-# <sys/un.h>, <sys/ucred.h>: SOL_LOCAL 0, LOCAL_PEERCRED 1; struct xucred {u_int cr_version; uid_t cr_uid;
-# short cr_ngroups; gid_t cr_groups[16];} = 76 bytes, XUCRED_VERSION 0.
-SOL_LOCAL = 0
-LOCAL_PEERCRED = 1
-XUCRED_SIZE = 76
-XUCRED_VERSION = 0
 
 ERR_INVALID_JSON = "请求不是有效的 JSON 对象"
 ERR_TOO_LARGE = "请求超过 1 MiB"
@@ -46,18 +40,10 @@ class RemoteError(GateError):
 
 
 def peer_uid(sock: socket.socket, platform: str = sys.platform) -> int:
-    """Effective uid of the process at the other end of a connected AF_UNIX socket."""
-    if platform == "darwin":
-        raw = sock.getsockopt(SOL_LOCAL, LOCAL_PEERCRED, XUCRED_SIZE)
-        version, uid = struct.unpack_from("=II", raw)
-        if version != XUCRED_VERSION:
-            raise OSError(f"unexpected xucred version {version}")
-        return uid
-    peercred = getattr(socket, "SO_PEERCRED", None)
-    if peercred is None:
+    """Effective uid of the process at the other end of a connected AF_UNIX socket (this system's layer)."""
+    if platform != "darwin" and getattr(socket, "SO_PEERCRED", None) is None:
         raise OSError("no peer credentials on this platform")
-    _pid, uid, _gid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, peercred, struct.calcsize("3i")))
-    return uid
+    return native(platform).peer_uid(sock)
 
 
 def encode(message: dict[str, Any]) -> bytes:

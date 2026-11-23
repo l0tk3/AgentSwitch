@@ -127,7 +127,29 @@ is copied the hardened way: the bundle's `python/`, `secret-gate/` and `VERSIONS
 followed if they are symlinks, every entry is opened relative to its parent with `O_NOFOLLOW`, must belong to the
 bundle's owner (no hard link to a root-only file) and be a regular file, directory or symlink; links are kept and
 must stay inside the copy; modes are set as the copy is made, nothing outside it is ever chmodded. Stop a gate the Mac app started itself before installing: the service's proxy needs the port.
-`--root <prefix>` moves every system path under a prefix and only lists the privileged commands (tests).
+`--root <prefix>` moves every system path under a prefix and only lists the privileged commands (tests); with it,
+`--platform macos|linux` picks the layout to simulate (default macos, the layout `--root` always simulated).
+
+**Linux** (gate-simple-v0 §5): the same service, plan and runtime copy, with the system user `agentswitch-gate`
+(`useradd --system --user-group --no-create-home --shell nologin`, or Debian's `adduser --system --group`) and two
+systemd units, run once with `sudo` (the Linux node prints the exact command: `agentswitch gate`):
+
+```
+/var/lib/agentswitch/                         root:root 0755
+  gate/            agentswitch-gate 0700      as on macOS; logs/{proxy,rpc}.log made at install (StandardOutput=append:)
+  gate-public/     agentswitch-gate:<login user's group> 0750   keys.json, ca.pem, gate.sock (peer uid: SO_PEERCRED)
+  gate-service.json root:root 0644
+/opt/agentswitch/gate-runtime/                root:root   the copy of the node's runtime (python/, secret-gate/, VERSIONS)
+/etc/systemd/system/agentswitch-gate-{rpc,proxy}.service   root:root 0644
+```
+
+`sudo secret-gate system install --runtime ~/.local/share/agentswitch/runtime/<stamp>` takes the owner from
+`$SUDO_UID` when `--owner-uid` is not given. The units run as `agentswitch-gate` with `NoNewPrivileges`,
+`ProtectSystem=strict` (writable: the gate home and the public directory only), `ProtectHome`, `PrivateTmp`,
+`PrivateDevices`, kernel and cgroup protection and no capabilities; `rotate-key` signals the proxy with `systemctl kill
+--signal=SIGHUP`, `uninstall` disables both units and reloads systemd. The per-system parts (account, service
+manager, paths, peer check) are `secret_gate/platform/{macos,linux}.py` behind `platform/base.py`; a Windows layer
+plugs in there.
 
 `status --json` → `{"installed", "running", "rpcRunning", "proxyRunning", "proxyPort", "runtimeVersion",
 "ownerUid", "publicDir", "bundledRuntimeVersion", "updateAvailable", "error"}` (always exit 0; `running` means
@@ -460,6 +482,7 @@ secret_gate/
   service_paths.py publish.py   proxy_pid.py   rpc_protocol.py rpc_server.py rpc_methods.py rpc_client.py
   service_cli.py mcp_backend.py remote_resolver.py enc_cli.py
   system_plan.py system_ops.py  system_exec.py system_cli.py   (gate service, docs/gate-service-v0.md)
+  platform/{base,macos,linux}.py   per-system layer of the gate service (gate-simple-v0 §5)
 tests/           unit tests per module + test_scenarios.py (12 end-to-end cases)
 BOUNDARY.md      entry-point checklist (docs/gate-next-v0.md §4), checked by tests/test_boundary_checklist.py
 tests/fixtures/  fabricated credentials / PII used by the suite (nothing real)
