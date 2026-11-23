@@ -16,6 +16,9 @@ R="$(cd "$1" && pwd)"
 port="${SMOKE_PORT:-24711}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/agentswitch-smoke.XXXXXX")"
 export HOME="$work/home" AGENTSWITCH_HOME="$work/home/.agentswitch" SECRET_GATE_HOME="$work/home/.secret-gate"
+# A public directory of its own: the throw-away node runs its own gate even where the gate service is installed
+# (gate-service.json beside the system's public directory would make it a client of that service).
+export SECRET_GATE_PUBLIC="$work/gate-public"
 mkdir -p "$AGENTSWITCH_HOME"
 printf '{"name":"smoke","ports":{"local":%d,"opencode":%d,"remote":%d,"gate":%d}}\n' \
   "$port" $((port + 1)) $((port + 2)) $((port + 3)) > "$AGENTSWITCH_HOME/node.json"

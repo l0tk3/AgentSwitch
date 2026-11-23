@@ -9,10 +9,12 @@ other node.
 ## Install
 
 Needs x86_64 or aarch64, glibc, systemd, and to build: `curl tar rsync sha256sum make`, a C++ compiler and `python3`
-(node-pty is compiled here). Nothing is installed as root.
+(node-pty is compiled here). Nothing is installed as root, except the gate under its own account (below), which takes
+one `sudo` you run yourself.
 
 ```bash
 packages/linux/scripts/install.sh       # build a runtime, switch to it, install or restart the service
+agentswitch gate                        # where the gate runs, and the sudo command that gives it its own account
 agentswitch doctor                      # what this node has and lacks
 agentswitch pair                        # a QR code for the iPhone, a link for a Mac
 ```
@@ -22,8 +24,48 @@ agentswitch pair                        # a QR code for the iPhone, a link for a
 | runtime (Node 24, CPython 3.12 + secret-gate, the daemon) | `~/.local/share/agentswitch/runtime/<stamp>/`, `current` → the one in use |
 | command | `~/.local/bin/agentswitch` |
 | service | `~/.config/systemd/user/agentswitch.service` (runs `agentswitch node run`) |
-| state | `~/.agentswitch` (daemon), `~/.secret-gate` (the gate's keys) |
+| state | `~/.agentswitch` (daemon), `~/.secret-gate` (the gate's keys while the gate runs as you) |
 | this node's settings | `~/.agentswitch/node.json` |
+
+## The gate under its own account
+
+Until you give it one, the gate runs as you (the keeper starts it), its keys in `~/.secret-gate` (0700): an agent of
+yours that sets out to read them can. `agentswitch gate`, `agentswitch doctor` and `agentswitch config`'s Keys page say
+so — "此节点的网关以你的账户运行：只防误看，不防顺手读取" — and print the command that changes it
+(`docs/gate-simple-v0.md` §5). Run it once yourself; AgentSwitch never runs sudo:
+
+```bash
+sudo ~/.local/share/agentswitch/runtime/<stamp>/python/bin/secret-gate system install \
+     --owner-uid $(id -u) --port 8080 --runtime ~/.local/share/agentswitch/runtime/<stamp>
+```
+
+(`agentswitch gate` prints it with this node's paths, uid and gate port filled in.) It makes the system user
+`agentswitch-gate` (`useradd --system`, no home, `nologin`; Debian's `adduser` where there is no `useradd`), copies the
+gate's part of your runtime (`python/`, `secret-gate/`, `VERSIONS`) as root into a root-owned directory — nothing in
+your runtime is followed, every file must be yours, the same hardened copy as the Mac app's — generates a new key pair
+and CA inside the service's home, and starts two systemd units. From then on the keeper starts no gate of its own (not
+even when the service does not answer), hands the daemon the service's public files and port, and `secret-gate` on
+this node is a client of the service.
+
+| what | owner, mode | where |
+|---|---|---|
+| the service's home: key pair, CA and its key, references, logs | `agentswitch-gate`, 0700 / 0600 | `/var/lib/agentswitch/gate/` |
+| public files: `keys.json`, `ca.pem`, `gate.sock` (peer uid checked with `SO_PEERCRED`: root and you) | `agentswitch-gate`, group: your primary group, 0750 | `/var/lib/agentswitch/gate-public/` |
+| `ownerUid`, proxy port, runtime version (its presence is "installed") | root, 0644 | `/var/lib/agentswitch/gate-service.json` |
+| the program the units run | root, 0755 / 0644 | `/opt/agentswitch/gate-runtime/` |
+| units (`User=agentswitch-gate`, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, writes only its home and the public directory) | root, 0644 | `/etc/systemd/system/agentswitch-gate-{rpc,proxy}.service` |
+
+```bash
+sudo …/secret-gate system update --runtime ~/.local/share/agentswitch/runtime/<stamp>   # after install.sh brought a newer gate
+sudo …/secret-gate system rotate-key            # a new key pair: every ciphertext made before stops working
+sudo …/secret-gate system uninstall [--delete-keys]   # the account and, unless asked, the keys stay
+secret-gate system status                       # no root needed
+```
+
+`install.sh` ends with `agentswitch gate`: after an update it prints `system update` when the runtime's gate is newer
+than the service's. What `sudo` runs is your own runtime, which your agents could have changed: run it when you trust
+it, as you trust the Mac app when typing the administrator password there (gate-simple-v0 §6). Without sudo the gate
+stays as it is, as you.
 
 Run `install.sh` again to update (one at a time; an earlier build that was stopped is removed first): the new runtime is built beside the old one, `current` is switched, the service
 restarted; if the daemon does not answer within a minute, `current` goes back. The two newest runtimes are kept, and
@@ -88,7 +130,8 @@ Besides everything the daemon's CLI has (`task`, `tasks`, `watch`, `approve`, `p
 | `agentswitch node restart` | restart the daemon with node.json as it is now |
 | `agentswitch node run` | the keeper in the foreground (what the service runs; for a container or tmux) |
 | `agentswitch service install \| uninstall \| status \| start \| stop \| restart \| logs` | the systemd user service |
-| `agentswitch doctor` | runtime, service, agents and their sign-ins, tools |
+| `agentswitch doctor` | runtime, service, the gate's account, agents and their sign-ins, tools |
+| `agentswitch gate [--json]` | where the gate runs, and the exact `sudo … system install \| update \| rotate-key` to run (never run by it) |
 | `agentswitch profiles` | the agents' profiles, as the Mac's Settings › Agents: `new <agent> "<name>"` (an account; `--api [--base-url u] [--model m]` pays by a key), `api <agent> <profile>` (address, model, `--key` a new key), `color`, `rm`. A key is asked for with nothing echoed (or piped in) and sealed by this node's gate for the address's site; only the ciphertext reaches the service |
 | `agentswitch config [page] [--lang l]` | this node's settings on a full screen, as the Mac's Settings window (docs/tui-v0.md): Agents (profiles; a key-paying one's vendor, address, model chosen from what the address lists, key, connection test; proxy, session key, telemetry, colour), Models (saved, the service restarted), Permissions, Keys (the gate's key pairs), Node (name, pairing, held terminals, ports, language, the work folder), Environment (doctor), Context (CONTEXT.md and MEMORY.md in `$EDITOR`, what dispatch learned), Extensions (MCP servers, skills). English, 简体中文, 繁體中文, 日本語, Español: `--lang`, else `AGENTSWITCH_LANG`, else the one kept in node.json (L on the screen), else the locale. With `--on <node>`, another node's, read only |
 | `agentswitch console [--open]` | a one-time link into the web console on this machine |
@@ -97,6 +140,8 @@ Besides everything the daemon's CLI has (`task`, `tasks`, `watch`, `approve`, `p
 ## Uninstall
 
 ```bash
+sudo …/secret-gate system uninstall --delete-keys   # first, with the gate service: its units, runtime copy and keys
+sudo userdel agentswitch-gate; sudo rm -rf /var/lib/agentswitch /opt/agentswitch   # and its account, if wanted
 agentswitch service uninstall
 rm -rf ~/.local/share/agentswitch ~/.local/bin/agentswitch
 # state, if you want it gone too: ~/.agentswitch ~/.secret-gate
@@ -106,8 +151,7 @@ The agents' own folders (`~/.claude`, `~/.codex`, `~/.local/share/opencode`, `~/
 
 ## Not yet
 
-From `docs/mesh-v0.md` §9 A: `attach` (a service-held terminal in this terminal), the gate under a separate system
-account (§4.5; today it runs as you, its keys protected by the deny lists only), and the iPhone's wording for a node
+From `docs/mesh-v0.md` §9 A: `attach` (a service-held terminal in this terminal), and the iPhone's wording for a node
 that is not a Mac.
 
 ## Build only

@@ -6,6 +6,10 @@
 #   ~/.config/systemd/user/agentswitch.service    the keeper, started at boot (agentswitch service install)
 #
 # State stays where the services keep it: ~/.agentswitch (the daemon) and ~/.secret-gate (the gate's keys).
+#
+# The gate runs as you until it is given an account of its own (docs/gate-simple-v0.md §5): one `sudo …/secret-gate
+# system install …`, which this script never runs. At the end it prints where the gate runs and that exact command
+# (`agentswitch gate`); with the gate service installed, it prints `system update` when this runtime's gate is newer.
 # An update builds the new runtime beside the old one, switches `current`, restarts the service and waits for the
 # daemon to answer; when it does not, `current` goes back and the old one is started again. The two newest runtimes
 # are kept, and any older one a terminal still runs on (its holder).
@@ -112,6 +116,8 @@ finish() {
     if pgrep -f -- "$old/" >/dev/null 2>&1; then echo "kept old runtime $(basename "$old"): a terminal still runs on it"; continue; fi
     rm -rf "$old" && echo "removed old runtime $(basename "$old")"
   done
+  log "the gate"
+  "$BIN/agentswitch" gate || true
   log "done. Next: agentswitch doctor; agentswitch pair"
 }
 
