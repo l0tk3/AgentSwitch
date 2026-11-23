@@ -676,14 +676,14 @@ final class AppModel {
 
     // MARK: keys
 
-    /// First run: a `default` keypair when the gate home has none (the gate preflight would make one too). Never in
-    /// service mode: the service made its own keys at install.
+    /// First run: `keygen` when the gate home has no key (the gate preflight would make one too). Never in service
+    /// mode: the service made its own key at install.
     func ensureKeypair() async {
         guard paths.runtime.missing().isEmpty, !gateMode.isService else { return }
         do {
             let (list, created) = try await gateCLI.ensureKeypair()
             keys = list
-            if created { notices.append("已新建网关密钥对 default（\(shortPath(paths.gateHome))）") }
+            if created { notices.append("已新建网关密钥对（\(shortPath(paths.gateHome))）") }
         } catch {
             errorMessage = "无法准备网关密钥对：\(error.localizedDescription)"
         }
@@ -697,28 +697,18 @@ final class AppModel {
         }
     }
 
-    func createKey(named name: String, makeCurrent: Bool) {
-        guard !isDemo else { return }
+    /// No service: `keygen --force` after the Keys page's confirmation (with the service it is the administrator path,
+    /// GateServiceOperation.rotateKey). Ciphertexts sealed for the old key stop working.
+    func rotateKeyLocally() {
+        guard !isDemo, !gateMode.isService else { return }
         let cli = gateCLI
         Task {
-            do { keys = try await cli.newKey(named: name, makeCurrent: makeCurrent) } catch { errorMessage = error.localizedDescription }
-        }
-    }
-
-    func useKey(_ key: Keypair) {
-        guard !isDemo else { return }
-        let cli = gateCLI
-        Task {
-            do { keys = try await cli.useKey(named: key.name) } catch { errorMessage = error.localizedDescription }
-        }
-    }
-
-    /// Service mode: a legacy key deleted after the page's confirmation; the CLI refuses the current one.
-    func retireKey(_ key: Keypair) {
-        guard !isDemo, key.legacy, !key.current else { return }
-        let cli = gateCLI
-        Task {
-            do { keys = try await cli.retireKey(named: key.name) } catch { errorMessage = error.localizedDescription }
+            do {
+                keys = try await cli.keygen(force: true)
+                notices.append("网关密钥已轮换。已有的密文需要用新公钥重新封装。")
+            } catch {
+                errorMessage = "无法轮换网关密钥：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -778,7 +768,7 @@ final class AppModel {
         loadDemoGate(demoGate ?? (fresh ? .notInstalled : .installed))
         bonjourStatus = StatusLine("Published · Port 4713", .ok)
         // The user-process gate makes `default` on first run; the service makes `main` at install (no notice).
-        notices = fresh || (demoGate ?? .installed).installed ? [] : ["已新建网关密钥对 default"]
+        notices = fresh || (demoGate ?? .installed).installed ? [] : ["已新建网关密钥对"]
         stagedUpdate = fresh ? nil : DemoData.stagedBuild
         quota = DemoData.quota(now: now, fresh: fresh)
     }

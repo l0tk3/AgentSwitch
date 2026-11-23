@@ -6,18 +6,17 @@ import XCTest
 final class GateServiceCommandTests: XCTestCase {
     private let gate = URL(fileURLWithPath: "/Users/u/Desktop/My Apps/AgentSwitch.app/Contents/Resources/runtime/python/bin/secret-gate")
     private let runtime = URL(fileURLWithPath: "/Users/u/Desktop/My Apps/AgentSwitch.app/Contents/Resources/runtime")
-    private let home = URL(fileURLWithPath: "/Users/u/.secret-gate")
-
     private func argv(_ op: GateServiceOperation) -> [String] {
-        GateServiceCommand.argv(op, gate: gate, runtime: runtime, ownerUid: 501, port: 8080, migrateFrom: home)
+        GateServiceCommand.argv(op, gate: gate, runtime: runtime, ownerUid: 501, port: 8080)
     }
 
     func testArgv() {
         XCTAssertEqual(argv(.install), [gate.path, "system", "install", "--owner-uid", "501", "--port", "8080",
-                                        "--runtime", runtime.path, "--migrate-from", "/Users/u/.secret-gate"])
+                                        "--runtime", runtime.path])
         XCTAssertEqual(argv(.update), [gate.path, "system", "update", "--runtime", runtime.path])
         XCTAssertEqual(argv(.repair), argv(.update))
         XCTAssertEqual(argv(.changePort(8181)), [gate.path, "system", "update", "--runtime", runtime.path, "--port", "8181"])
+        XCTAssertEqual(argv(.rotateKey), [gate.path, "system", "rotate-key"])
         XCTAssertEqual(argv(.uninstall(deleteKeys: false)), [gate.path, "system", "uninstall"])
         XCTAssertEqual(argv(.uninstall(deleteKeys: true)), [gate.path, "system", "uninstall", "--delete-keys"])
     }
@@ -28,7 +27,7 @@ final class GateServiceCommandTests: XCTestCase {
                        "/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 "
                        + "'/Users/u/Desktop/My Apps/AgentSwitch.app/Contents/Resources/runtime/python/bin/secret-gate' system install "
                        + "--owner-uid 501 --port 8080 --runtime '/Users/u/Desktop/My Apps/AgentSwitch.app/Contents/Resources/runtime' "
-                       + "--migrate-from /Users/u/.secret-gate 2>&1; echo \"__AGENTSWITCH_EXIT__=$?\"")
+                       + "2>&1; echo \"__AGENTSWITCH_EXIT__=$?\"")
     }
 
     /// A bundle path chosen by an attacker stays one word: sh sees exactly the argv the app built.
@@ -38,7 +37,7 @@ final class GateServiceCommandTests: XCTestCase {
         let pwned = dir.appendingPathComponent("pwned")
         let evil = URL(fileURLWithPath: "\(dir.path)/x'; touch \(pwned.path); echo '$(touch \(pwned.path))`id`/AgentSwitch.app/Contents/Resources/runtime")
         let words = GateServiceCommand.argv(.update, gate: evil.appendingPathComponent("python/bin/secret-gate"), runtime: evil,
-                                            ownerUid: 501, port: 8080, migrateFrom: home)
+                                            ownerUid: 501, port: 8080)
         let line = GateServiceCommand.shellLine(words)
         // Replace the command by printf so sh prints the words it parsed, one per line.
         let probe = line.replacingOccurrences(of: "/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 ",
@@ -131,34 +130,33 @@ final class GateCLIServiceTests: XCTestCase {
         ((try? String(contentsOf: log, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.isEmpty }
     }
 
-    func testKeypairRowsWithLegacy() throws {
-        let rows = #"[{"name":"default","public":"AAA","current":false,"legacy":true},{"name":"main","publicKey":"BBB","current":true,"legacy":false},{"name":"old","public":"CCC","current":false}]"#
+    func testKeypairRow() throws {
+        let rows = #"[{"name":"main","public":"BBB","current":true,"legacy":false}]"#
         let keys = try JSONDecoder().decode([Keypair].self, from: Data(rows.utf8))
-        XCTAssertEqual(keys, [Keypair(name: "default", public: "AAA", current: false, legacy: true),
-                              Keypair(name: "main", public: "BBB", current: true),
-                              Keypair(name: "old", public: "CCC", current: false)])
+        XCTAssertEqual(keys, [Keypair(name: "main", public: "BBB")])
+        XCTAssertNil(keys[0].createdText)
+        let published = #"[{"name":"main","publicKey":"BBB","current":true,"createdAt":"2026-11-23T06:12:00Z"}]"#
+        let withDate = try JSONDecoder().decode([Keypair].self, from: Data(published.utf8))
+        XCTAssertEqual(withDate[0].public, "BBB")
+        XCTAssertEqual(withDate[0].created, "2026-11-23T06:12:00Z")
+        XCTAssertNotNil(withDate[0].createdText)
     }
 
-    func testRetire() async throws {
-        let (cli, log) = try fakeCLI(#"echo '[{"name":"main","public":"BBB","current":true,"legacy":false}]'"#)
-        let keys = try await cli.retireKey(named: "default")
-        XCTAssertEqual(keys.map(\.name), ["main"])
-        XCTAssertEqual(calls(log), ["keys --json retire default"])
-        do {
-            _ = try await cli.retireKey(named: "../x")
-            XCTFail("invalid names never reach the CLI")
-        } catch {}
-        let (quiet, quietLog) = try fakeCLI(#"case "$*" in *retire*) echo "已删除";; *) echo '[]';; esac"#)
-        let after = try await quiet.retireKey(named: "default")
-        XCTAssertEqual(after, [])
-        XCTAssertEqual(calls(quietLog), ["keys --json retire default", "keys --json"], "a plain answer is followed by a fresh list")
-        let (refusing, _) = try fakeCLI("echo '当前密钥无法删除' >&2; exit 1")
-        do {
-            _ = try await refusing.retireKey(named: "main")
-            XCTFail("refused")
-        } catch {
-            XCTAssertEqual(error.localizedDescription, "当前密钥无法删除")
-        }
+    func testKeygen() async throws {
+        let (cli, log) = try fakeCLI(#"case "$1" in keygen) echo "public key value: BBB";; *) echo '[{"name":"main","public":"BBB","current":true,"legacy":false}]';; esac"#)
+        let keys = try await cli.keygen(force: true)
+        XCTAssertEqual(keys.map(\.public), ["BBB"])
+        XCTAssertEqual(calls(log), ["keygen --force", "keys --json"])
+    }
+
+    func testEnsureKeypairRunsKeygenOnlyWithoutAKey() async throws {
+        let (empty, emptyLog) = try fakeCLI(#"case "$1" in keygen) touch "$SECRET_GATE_PUBLIC/made";; *) if [ -e "$SECRET_GATE_PUBLIC/made" ]; then echo '[{"name":"main","public":"BBB","current":true}]'; else echo '[]'; fi;; esac"#)
+        let first = try await empty.ensureKeypair()
+        XCTAssertTrue(first.created)
+        XCTAssertEqual(first.keys.map(\.name), ["main"])
+        XCTAssertEqual(calls(emptyLog), ["keys --json", "keygen", "keys --json"])
+        let second = try await empty.ensureKeypair()
+        XCTAssertFalse(second.created)
     }
 
     func testSystemStatus() async throws {

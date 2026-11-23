@@ -83,7 +83,7 @@ the daemon, and keys added with `ssh-add -c` ask on every use.
   polled every 3 s (gate probe, daemon `/healthz`); a child failing its check for long is restarted; an adopted
   gate that disappears is replaced by our own, except while the gate service is installed: the gate preflight refuses
   to launch `secret-gate proxy` whenever `gate-service.json` or `gate.sock` exists, whatever asked for it. Quit (menu, SIGTERM, logout) stops the daemon then the gate.
-- **First run** (no service installed): a `default` keypair when `~/.secret-gate` has none; `~/.secret-gate/ca.pem`
+- **First run** (no service installed): `secret-gate keygen` when `~/.secret-gate` has none; `~/.secret-gate/ca.pem`
   copied from `~/.mitmproxy/mitmproxy-ca-cert.pem` once the proxy has created it. The login-keychain trust step of
   `secret-gate install-ca` runs only from the 环境 tab's button.
 - **Logs**: `~/Library/Logs/AgentSwitch/{daemon,gate}.log` (0600, rotated at 10 MB on start).
@@ -250,9 +250,10 @@ status words); app: `AppModel+GateService.swift`, `GateServiceViews.swift`.
   administrator prompt runs the bundled CLI as root:
 
   ```text
-  install:   <gate> system install --owner-uid <getuid()> --port <gate port> --runtime <runtime> --migrate-from ~/.secret-gate
+  install:   <gate> system install --owner-uid <getuid()> --port <gate port> --runtime <runtime>
   update:    <gate> system update --runtime <runtime>                (修复 is the same)
   port:      <gate> system update --runtime <runtime> --port <N>
+  rotate:    <gate> system rotate-key                                (密钥 › Rotate Key…)
   uninstall: <gate> system uninstall [--delete-keys]
   ```
 
@@ -263,9 +264,9 @@ status words); app: `AppModel+GateService.swift`, `GateServiceViews.swift`.
   `osascript -e 'on run argv' -e 'do shell script (item 1 of argv) with prompt (item 2 of argv) with administrator
   privileges without altering line endings' -e 'end run' <line> <prompt>`. Error -128 (prompt closed) is a quiet
   已取消; otherwise the sheet shows the result line and the command's output. Install first stops the daemon and the
-  gate child (the keys move, the port changes hands) and refuses when the gate port is still taken by a gate the app
+  gate child (the port changes hands) and refuses when the gate port is still taken by a gate the app
   did not start; uninstall stops the daemon. Afterwards the app detects again and switches mode (install → service,
-  uninstall → own gate with a new `default` keypair), then restarts the daemon.
+  uninstall → own gate with a fresh `keygen` key), then restarts the daemon.
 - **Updates**: `runtimeVersion` is `<secret-gate>+<built>` from the installed runtime's VERSIONS. The status
   command's own `updateAvailable` (it compares with the runtime it runs from, the bundle's) decides; without it (the
   record read directly) the bundle's `built=` must be contained in `runtimeVersion`. Different: 凭据网关有更新 in the
@@ -275,8 +276,10 @@ status words); app: `AppModel+GateService.swift`, `GateServiceViews.swift`.
   移除 (`security remove-trusted-cert <copy>`, then `security delete-certificate -Z <SHA-1> login.keychain-db`) and
   网关证书 › 加入 (the existing `add-trusted-cert` on `gate-public/ca.pem`); both only on click. Once the old one is out
   and the new one in, the copy is deleted.
-- **密钥**: `keys --json` rows carry `legacy`; legacy keys show 已停用（仅解密）, no 设为当前, and 删除 after a
-  confirmation (`keys --json retire <name>`). 新建 / 设为当前 as before (the CLI talks to the socket).
+- **密钥** (gate-simple-v0 §1): one keypair, `keys --json` prints its one row (or `[]`). The install generates a
+  fresh key in the service and takes nothing from `~/.secret-gate`. `Rotate Key…` warns that every existing
+  ciphertext stops working and must be sealed again, then runs `system rotate-key` through the administrator path
+  (service) or `keygen --force` (own gate). There is no new / use / retire.
 - **Logs**: 通用 › gate.log opens a sheet with `secret-gate logs tail --name proxy|rpc --lines 300`.
 - **Development**: `AGENTSWITCH_GATE_SERVICE_ROOT=<prefix>` (Debug builds only) points the app at a service installed
   with `system install --root <prefix>`.
@@ -316,7 +319,7 @@ log), the menu bar's Live Activity (`live-*`) and the main window (MainWindowPre
 `main-dispatch-task`, `main-terminals` in both looks, the terminal page replaced by a stand-in; `main-refresh-2/6/10`
 and `main-refresh-dispatch-2/6/10`, steps of the refresh that draws a page in; `main-browser*` from a made-up browser,
 BrowserDemo.swift, and `main-refresh-browser-6`; `main-rail-hidden`, `main-rail-hidden-dispatch`, `main-rail-quiet` and
-`main-rail-out`, the rail put away — its bars on the window's edge — and out again under the pointer), then quits. The default sample runs the gate as the installed service (密钥 shows the legacy keys). It takes no lock, starts nothing and opens no socket, so it runs next to the installed app;
+`main-rail-out`, the rail put away — its bars on the window's edge — and out again under the pointer), then quits. The default sample runs the gate as the installed service (密钥 shows the service's one key). It takes no lock, starts nothing and opens no socket, so it runs next to the installed app;
 `-designPreviewTall YES` adds each page at 1500 pt to see it whole. `-designPreviewOnly dispatch` renders only the settings window's Dispatch group (about 20 s); `-designPreviewOnly agents` only 设置 › Agents (`settings-agents`, `-fresh`, `-full`, `-jobs`; docs/agents-v0.md); `-designPreviewOnly browser` only the Browser page; `-designPreviewOnly item` only a terminal's own window (`item-plain`, `item-approval`, `item-question`, `item-seal`, `item-away`, `item-notice`, in the look given by `-appearance pixel|classic`); `-designPreviewOnly window` only the main window's pictures and the Live Activity's; `-designPreviewOnly rail` only the rail put away. An off-screen window belongs to an inactive app, so
 
 The Terminals page is native (docs/terminal-v0.md §1 “Terminals 页全原生”, 2026-10-05): `Sources/AgentSwitchMac/Terminals/` — the list, the panes, the new-terminal panel, the questions — over rules without AppKit in `AgentSwitchMacCore/Terminals/` (`TerminalPanes`, `TerminalTree`, `TerminalSearch`, `TerminalsPageRules`; `TerminalPanesTests`, `TerminalTreeTests`, `TerminalsPageRulesTests`). `-designPreviewOnly terminals` draws it from made-up work (the list's filter among it: `terminals-filter`, `-active`, `-recent`, `-none`; `TerminalListFilter`, 2026-10-11); `-terminalProbe <dir> -probeTerminal <id> -probeTerminals <another id>` uses the real page against a throw-away service and writes `probe.txt` and `page-*.png`. `-terminalProbe <dir> -probeTerminal <id> -probeBeside YES` (against a throw-away service with earlier sessions listed) goes on with a session beside what the page shows — the row's action, or with `-probeBesideAt x,y` a ⌘ click at that point of the window's picture — and with `-probePick x,y1,y2` picks sessions by clicks and deletes them together (docs/terminal-v0.md §5 批量删除); `probe.txt`, `beside-*.png`, `pick-*.png`. `-terminalProbe <dir> -probeTerminal <id> -probeKeys YES` types ↩, ⇧↩, ⌃↩ and the keypad's ⌃Enter into the native screen and writes what the program's screen held after each (run it on a stand-in that prints the bytes it gets): ⌃↩ is the program's key, not macOS 15's context-menu shortcut (docs/terminal-v0.md §1 Mac, 2026-10-11). The daemon's page in a web view stays behind `defaults write com.agentswitch.mac terminalsPageWeb -bool YES` for now. `-designPreview <dir> -designPreviewOnly record-turn` plays what a session does to a long record in a pane's simple view — a turn ending, the record read again, the reader scrolled back, `Earlier`, a part opened, a long reply, a reply taken back to one line (`shrinks`, which says `MOVING` when the box keeps changing on its own), the agent's suggestion taken with Tab and the box made again (`tab`, which says `PUT IN AGAIN` when the box puts it in a second time), another session's messages (`peer`), what it is writing at the record's end (`writing`) — and writes `turn.txt` (where the scroller stands, how much of the pane is drawn on, how many items are shown) and `turn-<scene>-<step>.png`; `-probeOnScreen YES` puts the window on screen behind the others (the clicks need it, and the blank pane of 2026-10-13 showed only there), `-probeScene <name>` plays one scene, `-probeReal YES` uses a session with the sizes a real one has, `-probePerf YES` says what a record costs to lay out (`RecordTurnProbe`; docs/simple-view-v0.md §5.2). A simple view lays out the latest 60 items of its record, all of them (no lazy stack: `SessionRecord.shownFrom`, `RecordEnd`; `SessionRecordTests`). An answer's prose — paragraphs, headings, lists, quotes, rules next to each other — is one AppKit text (`ProseText`), so a drag selects across it; code and tables stay views of their own. `-designPreview <dir> -designPreviewOnly prose-select` checks that the pointer meets one text over a paragraph and a list, what a selection between them holds, and that the wheel over the text reaches the column's scroller (`select.txt`, `select.png`); `-proseApart YES` (debug) draws every block as its own view again, for comparing. `-designPreview <dir> -designPreviewOnly room -roomData <dir>` draws a room's two terminals on the Terminals page from what a real trial left (`packages/daemon/scripts/room_trial.ts`): each session's record in a simple view, the list holding those two alone (`RoomPreview`; docs/talk-v0.md §9). A screen fed by a preview has no service to ask for its colours: `TerminalScreenController.probeStyle` gives it the user's.

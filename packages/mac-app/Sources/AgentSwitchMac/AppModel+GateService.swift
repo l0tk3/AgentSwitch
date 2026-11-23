@@ -112,7 +112,7 @@ extension AppModel {
             outcome = refused
         } else {
             let argv = GateServiceCommand.argv(operation, gate: paths.runtime.secretGate, runtime: paths.runtime.root,
-                                               ownerUid: Int(getuid()), port: ports.gate, migrateFrom: paths.gateHome)
+                                               ownerUid: Int(getuid()), port: ports.gate)
             outcome = await GateServiceAdmin().perform(argv, prompt: operation.prompt)
         }
         await detectGateService()
@@ -128,8 +128,8 @@ extension AppModel {
         detectEnvironment()
     }
 
-    /// Install: the old CA noted if trusted, the daemon and the own gate stopped (the keys move, the port changes
-    /// hands), and the port checked free. Uninstall: the daemon stopped (its gate goes away). Nil: go ahead.
+    /// Install: the old CA noted if trusted, the daemon and the own gate stopped (the port changes hands), and the port
+    /// checked free. Uninstall: the daemon stopped (its gate goes away). Nil: go ahead.
     private func pause(for operation: GateServiceOperation) async -> AdminOutcome? {
         switch operation {
         case .install:
@@ -143,7 +143,7 @@ extension AppModel {
             }
         case .uninstall:
             await daemon.stop()
-        case .update, .repair, .changePort:
+        case .update, .repair, .changePort, .rotateKey:
             break
         }
         return nil

@@ -2,22 +2,23 @@ import CryptoKit
 import Foundation
 import Security
 
-/// A keypair as `secret-gate keys --json` reports it. In service mode (gate-service-v0 §3.3) rows also carry `legacy`:
-/// a key migrated from `~/.secret-gate`, kept to decrypt old ciphertext, never current again. `keys.json` names the
-/// public key `publicKey`; both spellings are read.
+/// The gate's one keypair as `secret-gate keys --json` reports it (gate-simple-v0 §1: one key, no legacy keys). The CLI
+/// prints a one-row array, or `[]` before the first `keygen`. `keys.json` names the public key `publicKey`; both
+/// spellings are read. `created` is shown when a CLI reports it; older rows may still carry `legacy`, which is ignored.
 public struct Keypair: Codable, Equatable, Identifiable, Sendable {
     public let name: String
     public let `public`: String
     public let current: Bool
-    public let legacy: Bool
+    /// ISO 8601, when the CLI reports it.
+    public let created: String?
 
     public var id: String { name }
 
-    public init(name: String, public: String, current: Bool, legacy: Bool = false) {
+    public init(name: String, public: String, current: Bool = true, created: String? = nil) {
         self.name = name
         self.public = `public`
         self.current = current
-        self.legacy = legacy
+        self.created = created
     }
 
     public init(from decoder: Decoder) throws {
@@ -25,8 +26,23 @@ public struct Keypair: Codable, Equatable, Identifiable, Sendable {
         name = try c.require(String.self, "name")
         `public` = try c.require(String.self, "public", "publicKey", "public_key")
         current = c.first(Bool.self, "current") ?? false
-        legacy = c.first(Bool.self, "legacy") ?? false
+        created = c.first(String.self, "created", "createdAt", "created_at").flatMap { $0.isEmpty ? nil : $0 }
     }
+
+    /// `created` as `2026-11-23 14:05` in the local time zone; nil when absent or unreadable.
+    public var createdText: String? {
+        guard let created, let date = ISO8601DateFormatter().date(from: created) else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: date)
+    }
+}
+
+/// Key rotation (gate-simple-v0 §1): a new keypair replaces the old one, whose ciphertexts stop working. The same words
+/// before both paths: `system rotate-key` with the service, `keygen --force` without it.
+public enum GateKeyRotation {
+    public static let warning = "轮换后将生成新的密钥对，旧私钥随即删除。已有的密文全部无法再解密，需要用新公钥重新封装；iPhone 与调度模型之后使用新公钥加密。此操作无法撤销。"
 }
 
 /// The two logs of the service (`logs tail --name`), shown by 通用 › gate.log in service mode.
@@ -44,9 +60,10 @@ public enum GateLogName: String, CaseIterable, Sendable, Identifiable {
 }
 
 /// The few calls of the bundled `secret-gate` CLI the app needs (same contract as packages/secret-gate-ui):
-/// `keys --json [list | new <name> [--use] | use <name> | retire <name>]`, and for the system service
+/// `keys --json` (the one keypair), `keygen [--force]` without the service, and for the system service
 /// `system status --json` and `logs tail`. The private key is never read. In service mode the environment carries
-/// `SECRET_GATE_PUBLIC`, and the CLI answers from keys.json and gate.sock.
+/// `SECRET_GATE_PUBLIC`, and the CLI answers from keys.json and gate.sock; rotation there is `system rotate-key` as
+/// root (GateServiceOperation.rotateKey).
 public struct GateCLI: Sendable {
     public let executable: URL
     public let environment: [String: String]
@@ -54,38 +71,20 @@ public struct GateCLI: Sendable {
     public static let statusTimeout: TimeInterval = 15
     /// `logs.tail` serves at most 500 lines (gate-service-v0 §3.2).
     public static let maxLogLines = 500
-    public static let defaultKeypair = "default"
-    /// keyring.NAME_PATTERN in secret-gate, minus the reserved names.
-    public static let namePattern = #"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"#
 
     public init(executable: URL, environment: [String: String]) {
         self.executable = executable
         self.environment = environment
     }
 
-    public static func isValidName(_ name: String) -> Bool {
-        name.range(of: namePattern, options: .regularExpression) != nil && !["keys", "current"].contains(name)
-    }
-
     public func listKeys() async throws -> [Keypair] {
         try decode(try await run(["keys", "--json"]))
     }
 
-    public func newKey(named name: String, makeCurrent: Bool) async throws -> [Keypair] {
-        guard GateCLI.isValidName(name) else { throw CommandError("密钥对名称仅可使用字母、数字和 . _ -，最多 32 个字符") }
-        return try decode(try await run(["keys", "--json", "new", name] + (makeCurrent ? ["--use"] : [])))
-    }
-
-    public func useKey(named name: String) async throws -> [Keypair] {
-        try decode(try await run(["keys", "--json", "use", name]))
-    }
-
-    /// Service mode: deletes a legacy key (ciphertext made with it can no longer be decrypted); the CLI refuses the
-    /// current key. Answers the list like `new` and `use`; an output without it is followed by a fresh list.
-    public func retireKey(named name: String) async throws -> [Keypair] {
-        guard GateCLI.isValidName(name) else { throw CommandError("密钥对名称仅可使用字母、数字和 . _ -，最多 32 个字符") }
-        let data = try await run(["keys", "--json", "retire", name])
-        if let keys = try? JSONDecoder().decode([Keypair].self, from: data) { return keys }
+    /// No service: `keygen`, or `keygen --force` to replace the key (ciphertexts sealed for the old one stop working).
+    /// Answers the fresh list.
+    public func keygen(force: Bool = false) async throws -> [Keypair] {
+        _ = try await run(["keygen"] + (force ? ["--force"] : []))
         return try await listKeys()
     }
 
@@ -116,11 +115,11 @@ public struct GateCLI: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// First run: a keypair named `default`, made current, when the gate home has none.
+    /// First run: `keygen` when the gate home has no key yet.
     public func ensureKeypair() async throws -> (keys: [Keypair], created: Bool) {
         let keys = try await listKeys()
         if !keys.isEmpty { return (keys, false) }
-        return (try await newKey(named: GateCLI.defaultKeypair, makeCurrent: true), true)
+        return (try await keygen(), true)
     }
 
     func run(_ args: [String]) async throws -> Data {

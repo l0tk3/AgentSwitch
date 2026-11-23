@@ -66,7 +66,7 @@ final class GateProbeIntegrationTests: XCTestCase {
         let cli = GateCLI(executable: TestSupport.devGate, environment: env)
         let first = try await cli.ensureKeypair()
         XCTAssertTrue(first.created)
-        XCTAssertEqual(first.keys.map(\.name), ["default"])
+        XCTAssertEqual(first.keys.count, 1)
         XCTAssertTrue(first.keys[0].current)
         let second = try await cli.ensureKeypair()
         XCTAssertFalse(second.created)

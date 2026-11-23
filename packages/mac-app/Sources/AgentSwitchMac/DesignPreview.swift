@@ -341,7 +341,7 @@ enum DesignPreview {
         try await renderSheet(GateServiceSheet(request: GateServiceRequest(operation: .install)), model: model,
                               appearance: appearance, to: file("sheet-gate-installed"))
         model.gateServiceResult = GateServiceResult(operation: .install, outcome: .failed(
-            reason: "无法移动 ~/.secret-gate/keys/work：目标位置已存在同名密钥", output: DemoData.installFailedOutput))
+            reason: "无法创建 /Library/Application Support/AgentSwitch/gate/keys：设备上没有空间", output: DemoData.installFailedOutput))
         try await renderSheet(GateServiceSheet(request: GateServiceRequest(operation: .install)), model: model,
                               appearance: appearance, to: file("sheet-gate-install-failed"))
         model.gateServiceResult = GateServiceResult(operation: .install, outcome: .cancelled)
@@ -352,6 +352,9 @@ enum DesignPreview {
                               appearance: appearance, to: file("sheet-gate-update"))
         try await renderSheet(GateServiceSheet(request: GateServiceRequest(operation: .changePort(8181))), model: model,
                               appearance: appearance, to: file("sheet-gate-port"))
+        try await renderSettings(.keys, model: model, appearance: appearance, to: file("settings-keys-service"))
+        try await renderSheet(GateServiceSheet(request: GateServiceRequest(operation: .rotateKey)), model: model,
+                              appearance: appearance, to: file("sheet-gate-rotate-key"))
         try await renderSheet(GateServiceSheet(request: GateServiceRequest(operation: .uninstall(deleteKeys: false))), model: model,
                               appearance: appearance, to: file("sheet-gate-uninstall"))
         try await renderSheet(GateServiceSheet(request: GateServiceRequest(operation: .uninstall(deleteKeys: false)), deleteKeys: true),

@@ -12,7 +12,7 @@ extension View {
     }
 }
 
-/// 安装 · 更新 · 修复 · 改端口 · 卸载 (docs/gate-service-v0.md §4): what will happen in a few lines, then one administrator
+/// 安装 · 更新 · 修复 · 改端口 · 轮换密钥 · 卸载 (docs/gate-service-v0.md §4, gate-simple-v0 §1): what will happen in a few lines, then one administrator
 /// prompt, then the outcome with the command's output. A cancelled prompt returns here quietly.
 struct GateServiceSheet: View {
     @Environment(AppModel.self) private var model
@@ -72,6 +72,7 @@ struct GateServiceSheet: View {
         case .update: return "更新凭据网关服务？"
         case .repair: return "修复凭据网关服务？"
         case .changePort: return "更改凭据网关端口？"
+        case .rotateKey: return "轮换网关密钥？"
         case .uninstall: return "卸载凭据网关服务？"
         }
     }
@@ -80,8 +81,8 @@ struct GateServiceSheet: View {
         switch operation {
         case .install:
             return ["新建系统账户 \(GateServicePaths.account)。该账户无法登录，凭据网关以该账户运行。",
-                    "已有密钥移入该账户，当前用户无法再读取；用已有密钥生成的密文仍可解密。",
-                    "新建密钥对 main 并设为当前，iPhone 与调度模型之后使用该密钥加密。",
+                    "在该账户中生成新的密钥对，iPhone 与调度模型之后使用新公钥加密。",
+                    "不从当前用户的目录迁移任何内容。此前用当前用户的密钥生成的密文在服务中无法解密，需要重新封装。",
                     "网关证书重新生成。旧证书如已加入登录钥匙串，需重新信任新证书。"]
         case .update:
             return ["以 App 内置的凭据网关程序替换已安装的程序，并重启服务。", "密钥和数据保持不变。"]
@@ -89,6 +90,8 @@ struct GateServiceSheet: View {
             return ["凭据网关服务无响应。以 App 内置的程序重新安装，并重启服务。", "密钥和数据保持不变。"]
         case .changePort(let port):
             return ["凭据网关服务改用端口 \(port)，并重启服务。", "AgentSwitch 服务随后重启，进行中的任务将中断。"]
+        case .rotateKey:
+            return [GateKeyRotation.warning]
         case .uninstall:
             return ["停止并删除凭据网关的系统服务和程序。",
                     "密钥和数据默认保留在 \(model.paths.gateService.privateDir.path)，系统账户保留。",
@@ -100,7 +103,7 @@ struct GateServiceSheet: View {
         switch operation {
         case .install: return "安装期间服务暂停。macOS 将要求输入管理员密码。"
         case .update, .repair: return "更新期间凭据网关暂停，进行中的请求可能失败。macOS 将要求输入管理员密码。"
-        case .changePort, .uninstall: return "macOS 将要求输入管理员密码。"
+        case .changePort, .rotateKey, .uninstall: return "macOS 将要求输入管理员密码。"
         }
     }
 
@@ -110,6 +113,7 @@ struct GateServiceSheet: View {
         case .update: return "Update"
         case .repair: return "Repair"
         case .changePort: return "Change"
+        case .rotateKey: return "Rotate Key"
         case .uninstall: return "Uninstall"
         }
     }

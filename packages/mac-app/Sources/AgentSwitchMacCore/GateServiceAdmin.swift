@@ -1,13 +1,15 @@
 import Foundation
 
-/// The root-only steps of gate-service-v0 §4 (安装 · 程序更新 · 改端口 · 卸载), run by the bundled secret-gate after one
-/// administrator prompt.
+/// The root-only steps of gate-service-v0 §4 (安装 · 程序更新 · 改端口 · 卸载) and gate-simple-v0 §1 (轮换密钥), run by
+/// the bundled secret-gate after one administrator prompt.
 public enum GateServiceOperation: Sendable, Equatable {
     case install
     case update
     /// The service does not answer: the same `system update`, which replaces the program and restarts both services.
     case repair
     case changePort(Int)
+    /// A new keypair in the service; ciphertexts sealed for the old one stop working (gate-simple-v0 §1).
+    case rotateKey
     case uninstall(deleteKeys: Bool)
 
     /// What the row says while it runs.
@@ -15,6 +17,7 @@ public enum GateServiceOperation: Sendable, Equatable {
         switch self {
         case .install: return "Installing"
         case .update, .repair, .changePort: return "Updating"
+        case .rotateKey: return "Rotating Key"
         case .uninstall: return "Uninstalling"
         }
     }
@@ -25,6 +28,7 @@ public enum GateServiceOperation: Sendable, Equatable {
         case .install: return "AgentSwitch 将安装凭据网关服务。"
         case .update, .repair: return "AgentSwitch 将更新凭据网关服务。"
         case .changePort(let port): return "AgentSwitch 将把凭据网关服务的端口改为 \(port)。"
+        case .rotateKey: return "AgentSwitch 将轮换凭据网关的密钥。"
         case .uninstall: return "AgentSwitch 将卸载凭据网关服务。"
         }
     }
@@ -35,6 +39,7 @@ public enum GateServiceOperation: Sendable, Equatable {
         case .install: return "凭据网关服务已安装。"
         case .update, .repair: return "凭据网关服务已更新。"
         case .changePort(let port): return "凭据网关服务已改用端口 \(port)。"
+        case .rotateKey: return "密钥已轮换。已有的密文需要用新公钥重新封装。"
         case .uninstall(let deleteKeys): return deleteKeys ? "凭据网关服务已卸载，密钥已删除。" : "凭据网关服务已卸载。"
         }
     }
@@ -43,6 +48,7 @@ public enum GateServiceOperation: Sendable, Equatable {
         switch self {
         case .install: return "Install Failed"
         case .update, .repair, .changePort: return "Update Failed"
+        case .rotateKey: return "Rotate Failed"
         case .uninstall: return "Uninstall Failed"
         }
     }
@@ -56,18 +62,20 @@ public enum GateServiceCommand {
     public static let exitMarker = "__AGENTSWITCH_EXIT__="
     public static let osascript = URL(fileURLWithPath: "/usr/bin/osascript")
 
-    /// `secret-gate system install --owner-uid <uid> --port <port> --runtime <runtime> --migrate-from <~/.secret-gate>`,
-    /// `system update --runtime <runtime> [--port N]`, `system uninstall [--delete-keys]`.
-    public static func argv(_ operation: GateServiceOperation, gate: URL, runtime: URL, ownerUid: Int, port: Int,
-                            migrateFrom: URL) -> [String] {
+    /// `secret-gate system install --owner-uid <uid> --port <port> --runtime <runtime>` (a fresh key in the service,
+    /// nothing taken from the user's home: gate-simple-v0 §6), `system update --runtime <runtime> [--port N]`,
+    /// `system rotate-key`, `system uninstall [--delete-keys]`.
+    public static func argv(_ operation: GateServiceOperation, gate: URL, runtime: URL, ownerUid: Int, port: Int) -> [String] {
         switch operation {
         case .install:
             return [gate.path, "system", "install", "--owner-uid", String(ownerUid), "--port", String(port),
-                    "--runtime", runtime.path, "--migrate-from", migrateFrom.path]
+                    "--runtime", runtime.path]
         case .update, .repair:
             return [gate.path, "system", "update", "--runtime", runtime.path]
         case .changePort(let newPort):
             return [gate.path, "system", "update", "--runtime", runtime.path, "--port", String(newPort)]
+        case .rotateKey:
+            return [gate.path, "system", "rotate-key"]
         case .uninstall(let deleteKeys):
             return [gate.path, "system", "uninstall"] + (deleteKeys ? ["--delete-keys"] : [])
         }

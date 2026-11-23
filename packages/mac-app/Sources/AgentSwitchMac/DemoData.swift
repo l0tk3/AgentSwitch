@@ -25,16 +25,14 @@ enum DemoData {
     static let tailscaleStopped = TailscaleStatus(state: .stopped, binary: "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
                                                   backendState: "Stopped", dnsName: nil, ipv4: [])
 
+    /// The one keypair (gate-simple-v0 §1) of the user-process gate.
     static let keys = [
-        Keypair(name: "default", public: "_nzdpiOxlAndoW9gDWmE3d85lFS0fU1wnJCM7bqniLQ", current: true),
-        Keypair(name: "work", public: "9KWoi82pap7LTaiAZw4yb04mBDBtT2aJLAj1yN88dCA", current: false),
+        Keypair(name: "default", public: "_nzdpiOxlAndoW9gDWmE3d85lFS0fU1wnJCM7bqniLQ", created: "2026-09-20T03:41:00Z"),
     ]
 
-    /// After the service install (gate-service-v0 §5): `main` new and current, the migrated keys decrypt-only.
+    /// The service's own key, made fresh at install: nothing is taken from the user's home.
     static let serviceKeys = [
-        Keypair(name: "main", public: "Q2x7mV0pT9cWfL3aRk8uN5eYh1sJd6gBzO4iPq7tXwE", current: true),
-        Keypair(name: "default", public: "_nzdpiOxlAndoW9gDWmE3d85lFS0fU1wnJCM7bqniLQ", current: false, legacy: true),
-        Keypair(name: "work", public: "9KWoi82pap7LTaiAZw4yb04mBDBtT2aJLAj1yN88dCA", current: false, legacy: true),
+        Keypair(name: "main", public: "Q2x7mV0pT9cWfL3aRk8uN5eYh1sJd6gBzO4iPq7tXwE", created: "2026-11-23T06:12:00Z"),
     ]
 
     /// The installed gate program (`<secret-gate>+<built>`, as `system install` records it), and an earlier build for
@@ -52,16 +50,15 @@ enum DemoData {
     static let installOutput = """
         创建系统账户 _agentswitchgate（uid 451）
         复制程序到 /Library/Application Support/AgentSwitch/runtime
-        迁移密钥 default、work → gate/keys/legacy/
-        新建密钥对 main 并设为当前
+        生成密钥对 main
         生成网关证书，发布 gate-public/ca.pem
         启动 com.agentswitch.gate.rpc、com.agentswitch.gate.proxy
         """
     static let installFailedOutput = """
         已完成：创建系统账户 _agentswitchgate（uid 451）
         已完成：复制程序
-        未完成：迁移密钥、新建密钥对、生成网关证书、启动服务
-        无法移动 ~/.secret-gate/keys/work：目标位置已存在同名密钥
+        未完成：生成密钥对、生成网关证书、启动服务
+        无法创建 /Library/Application Support/AgentSwitch/gate/keys：设备上没有空间
         """
 
     /// `logs tail` as the service would answer it.
@@ -69,7 +66,7 @@ enum DemoData {
         switch name {
         case .proxy:
             return """
-            2026-09-27 14:02:11 proxy listening on 127.0.0.1:8080 (keys: main + 2 legacy)
+            2026-09-27 14:02:11 proxy listening on 127.0.0.1:8080 (key: main)
             2026-09-27 14:05:37 api.github.com POST /repos/…/issues  enc:ref:3 → header Authorization (task 7f2c)
             2026-09-27 14:05:38 api.github.com 201
             2026-09-27 14:20:02 SIGHUP: reloaded upstream exceptions and keys

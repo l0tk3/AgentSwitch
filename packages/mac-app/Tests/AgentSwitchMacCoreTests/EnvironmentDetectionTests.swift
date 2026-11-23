@@ -193,13 +193,4 @@ final class GateCATests: XCTestCase {
         XCTAssertEqual(exe.path, "/usr/bin/security")
         XCTAssertEqual(args, ["add-trusted-cert", "-r", "trustRoot", "-k", "/Users/u/Library/Keychains/login.keychain-db", "/Users/u/.secret-gate/ca.pem"])
     }
-
-    func testKeypairNames() {
-        XCTAssertTrue(GateCLI.isValidName("default"))
-        XCTAssertTrue(GateCLI.isValidName("work.2026_a-b"))
-        XCTAssertFalse(GateCLI.isValidName(".hidden"))
-        XCTAssertFalse(GateCLI.isValidName("keys"))
-        XCTAssertFalse(GateCLI.isValidName(String(repeating: "a", count: 33)))
-        XCTAssertFalse(GateCLI.isValidName("有中文"))
-    }
 }
