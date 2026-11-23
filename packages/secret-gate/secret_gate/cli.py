@@ -27,7 +27,7 @@ from .keystore import gate_home, load_private_key, load_public_key, parse_public
 from .publish import key_rows
 from .refs_cli import add_refs_parser
 from .resolver import Resolver
-from .rpc_methods import LOG_NAMES, MAX_LOG_LINES, tail
+from .rpc_methods import LOG_NAMES, MAX_LOG_LINES, redacted_log, tail
 from .rpc_server import add_rpc_parser
 from .service import ERR_LOG, add_service_parser
 from .service_cli import print_keys, route
@@ -136,7 +136,7 @@ def _cmd_logs(args: argparse.Namespace) -> int:
     path = logs / f"{args.name}.log"
     if not path.exists() and args.name == "proxy":
         path = logs / ERR_LOG
-    print_log(tail(path, args.lines), args.json or args.json_parent)
+    print_log(redacted_log(tail(path, args.lines), gate_home()), args.json or args.json_parent)
     return 0
 
 

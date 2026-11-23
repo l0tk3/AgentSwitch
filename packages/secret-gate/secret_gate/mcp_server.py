@@ -31,6 +31,8 @@ def build_server(backend: McpBackend | None = None) -> FastMCP:
             return await gate.repair(token, host, purpose)
         except GateError as exc:
             raise RuntimeError(f"secret-gate: {exc}") from None
+        except Exception as exc:  # noqa: BLE001 - see _guard
+            raise RuntimeError(f"secret-gate: {type(exc).__name__}") from None
 
     @mcp.tool()
     def secret_otp(token: str) -> str:
@@ -59,6 +61,9 @@ def _guard(fn):
     except GateError as exc:
         # Surface policy errors as tool errors so the model sees *why*, never the value.
         raise RuntimeError(f"secret-gate: {exc}") from None
+    except Exception as exc:  # noqa: BLE001 - any other error text may quote a value (an httpx error names the
+        # rewritten URL, a decoding error quotes the bytes): only its kind goes back (gate-simple-v0 §3.2)
+        raise RuntimeError(f"secret-gate: {type(exc).__name__}") from None
 
 
 def main() -> None:

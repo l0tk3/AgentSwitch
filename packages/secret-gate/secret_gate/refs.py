@@ -152,6 +152,20 @@ class RefRegistry:
             raise RefError("this reference belongs to a different task; use the reference in the current task context")
         return RefEntry(ref=ref, token=row[1], label=row[2])
 
+    def live_tokens(self, limit: int = 1024) -> tuple[str, ...]:
+        """The distinct ciphertexts of every reference not released or expired, newest first (for redacting the
+        service's own logs: logs.tail). Never handed to a caller."""
+        if not self._path.exists():
+            return ()
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT token FROM refs WHERE created >= ? AND scope NOT IN "
+                "(SELECT scope FROM scopes WHERE released IS NOT NULL) "
+                "GROUP BY token ORDER BY MAX(created) DESC LIMIT ?",
+                (self._clock() - REF_MAX_AGE_SECONDS, limit),
+            ).fetchall()
+        return tuple(row[0] for row in rows)
+
     def release(self, scope: str) -> int:
         """Drop every mapping of `scope` and mark it released, so it can never be reopened."""
         key = _scope_key(scope)

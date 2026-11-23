@@ -207,7 +207,7 @@ def test_response_that_cannot_be_redacted_is_withheld(addon, portal_pass, monkey
     with taddons.context(addon):
         addon.request(f)
     f.response = http.Response.make(200, f"hello {fs.PORTAL.password}".encode(), {"Content-Type": "text/plain"})
-    monkeypatch.setattr("secret_gate.proxy_addon.redact", lambda *a: (_ for _ in ()).throw(ValueError("x")))
+    monkeypatch.setattr("secret_gate.proxy_addon.Redactor", lambda *a: (_ for _ in ()).throw(ValueError("x")))
     with taddons.context(addon):
         addon.response(f)
     assert f.response.status_code == 502 and fs.PORTAL.password not in f.response.text

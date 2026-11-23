@@ -1,9 +1,14 @@
-"""The narrow verb set the gate exposes. Every result passes through `redact` before returning."""
+"""The narrow verb set the gate exposes. Every result passes through the redactor before returning.
+
+What cannot be redacted is withheld (gate-simple-v0 §3.2), whole: a response body or command output over
+MAX_BODY_BYTES (never cut at the limit, so no value is split by a cut the redactor did not see), a body in a
+content-encoding httpx cannot decode, a body whose bytes still hold a value after its text was redacted, and anything
+the redactor fails on."""
 
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import httpx
@@ -11,16 +16,24 @@ import httpx
 from .constants import (
     EXEC_TIMEOUT_SECONDS,
     HTTP_TIMEOUT_SECONDS,
+    MAX_BODY_BYTES,
     USE_EXEC,
     USE_HTTP,
     USE_OTP,
 )
 from .errors import ValidationError
 from .exec_templates import ExecTemplate, get_template
-from .redact import redact
+from .redact import Redactor, withheld
 from .resolver import Resolution, Resolver
 
 _ALLOWED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+try:
+    from httpx._decoders import SUPPORTED_DECODERS as _DECODERS
+
+    _DECODABLE = frozenset(_DECODERS)
+except ImportError:  # pragma: no cover - httpx moved it: accept only what every httpx decodes
+    _DECODABLE = frozenset({"identity", "gzip", "deflate"})
+TOO_LARGE = f"larger than {MAX_BODY_BYTES // (1024 * 1024)} MiB, too large to redact (内容过大，已扣下)"
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,7 @@ class HttpResult:
     status: int
     headers: dict[str, str]
     body: str
+    used: tuple[Resolution, ...] = field(default=(), repr=False, compare=False)  # for logs.tail, never returned
 
 
 @dataclass(frozen=True)
@@ -35,6 +49,7 @@ class ExecResult:
     returncode: int
     stdout: str
     stderr: str
+    used: tuple[Resolution, ...] = field(default=(), repr=False, compare=False)
 
 
 def op_otp(resolver: Resolver, token: str) -> str:
@@ -83,17 +98,43 @@ def op_http(
 
     own_client = client is None
     http_client = client or httpx.Client(timeout=HTTP_TIMEOUT_SECONDS, follow_redirects=False)
+    redactor = Redactor(collected)
     try:
-        resp = http_client.request(method_up, new_url, headers=new_headers, content=new_body)
+        with http_client.stream(method_up, new_url, headers=new_headers, content=new_body) as resp:
+            try:
+                headers = {redactor(k) or "": redactor(v) or "" for k, v in resp.headers.items()}
+                body = _read_body(resp, redactor)
+            except Exception:  # noqa: BLE001 - fail closed: nothing of a response that could not be redacted
+                headers, body = {}, withheld("response", "it could not be redacted")
     finally:
         if own_client:
             http_client.close()
+    return HttpResult(status=resp.status_code, headers=headers, body=body, used=tuple(collected))
 
-    return HttpResult(
-        status=resp.status_code,
-        headers={k: redact(v, collected) or "" for k, v in resp.headers.items()},
-        body=redact(resp.text, collected) or "",
-    )
+
+def _read_body(resp: httpx.Response, redactor: Redactor) -> str:
+    """The whole body, redacted; or why it was withheld. Never a truncated part."""
+    if redactor:
+        codings = [c.strip().lower() for c in resp.headers.get("content-encoding", "").split(",") if c.strip()]
+        if any(c not in _DECODABLE for c in codings):
+            return withheld("body", "its content-encoding could not be decoded, so it could not be redacted")
+    data = bytearray()
+    for chunk in resp.iter_bytes():
+        data += chunk
+        if redactor and len(data) > MAX_BODY_BYTES:
+            return withheld("body", TOO_LARGE)
+    raw = bytes(data)
+    charset = resp.charset_encoding or "utf-8"
+    try:
+        text = raw.decode(charset, errors="replace")
+    except LookupError:
+        charset, text = "utf-8", raw.decode("utf-8", errors="replace")
+    cleaned = redactor(text) or ""
+    # The text was read in the declared charset; the same text as UTF-8 bytes must not hold a value either.
+    if (redactor and charset.lower().replace("_", "-") not in ("utf-8", "utf8")
+            and redactor.finds(cleaned.encode(charset, errors="replace").decode("utf-8", errors="replace"))):
+        return withheld("body", "it could not be redacted in the charset it declares")
+    return cleaned
 
 
 def op_exec(
@@ -116,13 +157,29 @@ def op_exec(
         list(rendered.argv),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=EXEC_TIMEOUT_SECONDS,
         check=False,
         env=rendered.env,
         **stdin,
     )
+    redactor = Redactor((resolution,))
     return ExecResult(
         returncode=proc.returncode,
-        stdout=redact(proc.stdout, (resolution,)) or "",
-        stderr=redact(proc.stderr, (resolution,)) or "",
+        stdout=_redacted_output(proc.stdout, redactor),
+        stderr=_redacted_output(proc.stderr, redactor),
+        used=(resolution,),
     )
+
+
+def _redacted_output(text: str | None, redactor: Redactor) -> str:
+    """A command's whole output stream redacted, or withheld when it is too large or the redactor fails."""
+    if not text:
+        return ""
+    if len(text) > MAX_BODY_BYTES:
+        return withheld("output", TOO_LARGE)
+    try:
+        return redactor(text) or ""
+    except Exception:  # noqa: BLE001 - fail closed
+        return withheld("output", "it could not be redacted")

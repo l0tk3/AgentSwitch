@@ -114,6 +114,18 @@ class Resolver:
         value = self._materialize(payload, use=use)
         return Resolution(token=token, label=payload.label, value=value)
 
+    def values_for_redaction(self, tokens: tuple[str, ...]) -> tuple[Resolution, ...]:
+        """The sealed value (a TOTP seed, not a code) of every token that opens, for redacting text the gate wrote
+        itself (logs.tail). Tokens that do not open are skipped. Never returned to a caller."""
+        out = []
+        for token in tokens:
+            try:
+                payload = self._open(token)
+            except Exception:  # noqa: BLE001 - a token another key sealed, or a corrupt row: nothing to redact
+                continue
+            out.append(Resolution(token=token, label=payload.label, value=payload.value))
+        return tuple(out)
+
     def resolve_exact(self, token: str, *, use: str, host: str | None = None) -> Resolution:
         """Like `resolve`, but the token itself must list `use`: the gate service types a value into the login
         user's browser only for tokens made with use 'fill' (gate-service-v0 §1); 'http' is not enough there —

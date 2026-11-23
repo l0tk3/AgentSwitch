@@ -12,7 +12,8 @@ import asyncio
 import json
 import subprocess
 import threading
-from collections.abc import Callable
+from collections import OrderedDict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,13 @@ import httpx
 from . import __version__
 from .browser_mask import MASK_CONFIG_FILE, MaskConfig
 from .constants import USE_FILL
-from .credential_repair import CREDENTIAL_INFO, CREDENTIAL_REISSUE, REPAIR_PURPOSE, credential_call, repair_scoped
+from .credential_repair import (
+    CREDENTIAL_INFO,
+    CREDENTIAL_REISSUE,
+    REPAIR_PURPOSE,
+    credential_call,
+    repair_scoped,
+)
 from .errors import GateError, ValidationError
 from .exec_templates import load_templates
 from .gate_ops import op_describe, op_exec, op_http, op_otp
@@ -32,9 +39,10 @@ from .keystore import load_public_key
 from .policy import normalize_host, split_host_port
 from .proxy_pid import proxy_running, signal_proxy
 from .publish import key_rows, publish_ca, publish_keys
+from .redact import Redactor, withheld
 from .refs import RefRegistry, check_scope
 from .refs_cli import register_tokens
-from .resolver import Resolver
+from .resolver import Resolution, Resolver
 from .service_paths import MITMPROXY_DIR, ServiceConfig
 from .tokens import find_secrets
 
@@ -43,6 +51,7 @@ MAX_TEXT_CHARS = 900_000
 MAX_LOG_LINES = 500
 MAX_LOG_BYTES = 256 * 1024
 LOG_NAMES = ("proxy", "rpc")
+MAX_USED_VALUES = 256  # values this service used or handed out lately, redacted out of logs.tail
 # Keypairs the service holds besides legacy ones. A keypair that is not legacy can never be deleted, and every
 # decryption tries every key, so any caller of this uid could otherwise slow each one down or fill the disk.
 MAX_KEYPAIRS = 32
@@ -111,6 +120,8 @@ class GateService:
         self._exec_runner = exec_runner
         self._repair_transport = repair_transport
         self._keys_lock = threading.Lock()
+        self._used: OrderedDict[str, Resolution] = OrderedDict()
+        self._used_lock = threading.Lock()
         self._methods: dict[str, Callable[[dict[str, Any]], Reply]] = {
             "status": self._status, "keys.list": self._keys_list, "keys.new": self._keys_new,
             "keys.use": self._keys_use, "keys.retire": self._keys_retire,
@@ -140,6 +151,14 @@ class GateService:
 
     def _resolver(self, scope: str | None) -> Resolver:
         return Resolver.from_home(self._home, scope=scope)
+
+    def _note_used(self, resolutions: Iterable[Resolution]) -> None:
+        with self._used_lock:
+            for r in resolutions:
+                self._used.pop(r.value, None)
+                self._used[r.value] = r
+            while len(self._used) > MAX_USED_VALUES:
+                self._used.popitem(last=False)
 
     # -- status and keys ------------------------------------------------------------------------
 
@@ -252,6 +271,7 @@ class GateService:
                              client=self._http_client())
         except httpx.HTTPError as exc:  # the message may quote the rewritten URL: name the failure only
             raise GateError(f"request failed ({type(exc).__name__})") from None
+        self._note_used(result.used)
         labels = tuple(dict.fromkeys(label for s in secrets for label in self._label(resolver, s)))
         return Reply({"status": result.status, "headers": result.headers, "body": result.body},
                      labels=labels, host=urlsplit(url).hostname)
@@ -267,6 +287,7 @@ class GateService:
                              args=tuple(args), runner=self._exec_runner)
         except (OSError, subprocess.SubprocessError) as exc:
             raise GateError(f"command failed to run ({type(exc).__name__})") from None
+        self._note_used(result.used)
         return Reply({"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
                      labels=self._label(resolver, token))
 
@@ -287,6 +308,7 @@ class GateService:
         fields(params, {"token", "host"}, {"scope"})
         host = page_host(params["host"])
         resolution = self._resolver(scope_of(params)).resolve_exact(text(params, "token"), use=USE_FILL, host=host)
+        self._note_used((resolution,))
         return Reply({"value": resolution.value, "label": resolution.label}, labels=(resolution.label,), host=host)
 
     def _browser_register(self, params: dict[str, Any]) -> Reply:
@@ -308,7 +330,28 @@ class GateService:
             raise ValidationError(f"参数无效：name 应为 {' 或 '.join(LOG_NAMES)}")
         if not isinstance(lines, int) or isinstance(lines, bool) or not 1 <= lines <= MAX_LOG_LINES:
             raise ValidationError(f"参数无效：lines 应为 1–{MAX_LOG_LINES}")
-        return Reply({"text": tail(self._home / "logs" / f"{name}.log", lines)})
+        with self._used_lock:
+            used = tuple(self._used.values())
+        return Reply({"text": redacted_log(tail(self._home / "logs" / f"{name}.log", lines), self._home, used)})
+
+
+def redacted_log(text: str, home: Path, used: tuple[Resolution, ...] = ()) -> str:
+    """A log as the gate shows it (gate-simple-v0 §3): the gate never writes a value to its logs, but a library's
+    error line could quote a rewritten request. Every value this service used lately and every value behind a live
+    reference is redacted out; a log that cannot be redacted is withheld."""
+    if not text:
+        return text
+    try:
+        resolver = Resolver.from_home(home)
+        live = resolver.values_for_redaction(resolver.refs.live_tokens()) if resolver.refs is not None else ()
+    except GateError:
+        live = ()  # no key in this home: nothing could have been substituted with it
+    except Exception:  # noqa: BLE001 - fail closed: the values to redact are unknown
+        return withheld("log", "the values to redact it with could not be read")
+    try:
+        return Redactor((*used, *live))(text) or ""
+    except Exception:  # noqa: BLE001 - fail closed
+        return withheld("log", "it could not be redacted")
 
 
 def tail(path: Path, lines: int) -> str:

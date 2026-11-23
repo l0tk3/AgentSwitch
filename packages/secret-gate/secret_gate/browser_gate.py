@@ -78,7 +78,7 @@ from .credential_repair import (
 from .errors import GateError, PolicyViolation, ValidationError
 from .pii import find_pii
 from .policy import SecretPayload
-from .redact import redact, redact_base64
+from .redact import redact, redact_base64, withheld
 from .remote_resolver import GateResolver
 from .tokens import find_secrets, make_token
 from .transfer import TransferGrant, legend, seal_matches, show_sealed
@@ -383,11 +383,15 @@ class BrowserGate:
 
     def _shown(self, text: str | None) -> str | None:
         """Sealed values become their references; a field the gate filled shows [REDACTED:label] whatever it holds now;
-        filled values, raw, escaped or in base64, become [REDACTED:label]."""
+        filled values in any encoding or case, and every 4-character fragment of one, become [REDACTED:label]
+        (redact.Redactor); a text the redactor fails on is withheld whole."""
         if text is None:
             return None
-        shown = hide_field_values(show_sealed(text, self._state.sealed), self._state.filled_refs(), self._state.filled)
-        return redact_base64(redact(shown, self._state.filled), self._state.protected)
+        try:
+            shown = hide_field_values(show_sealed(text, self._state.sealed), self._state.filled_refs(), self._state.filled)
+            return redact_base64(redact(shown, self._state.filled), self._state.protected)
+        except Exception:  # noqa: BLE001 - fail closed (gate-simple-v0 §3.2): nothing of a text that could not be redacted
+            return withheld("result", "it could not be redacted")
 
     def _shown_for(self, resolutions: Sequence[Any]) -> str:
         """What a filled field shows instead of its value: a sealed value's reference (as the page text it came from
