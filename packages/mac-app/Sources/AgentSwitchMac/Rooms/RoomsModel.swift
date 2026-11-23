@@ -187,6 +187,32 @@ final class RoomsModel {
 
     func detach(_ path: String) { files.removeAll { $0 == path } }
 
+    /// ⌘V with files or a picture on the clipboard: files come along by their paths; a picture (a screenshot, a copy
+    /// from Preview) has no path, so it is written into the room's shared folder and comes along from there.
+    func pasteFromClipboard() {
+        guard onThisMac else { return }
+        let board = NSPasteboard.general
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            attach(urls: urls)
+            return
+        }
+        guard let image = DispatchModel.pastedImage(board) else { return }
+        let folder = room?.folder.map { URL(fileURLWithPath: $0) } ?? FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-attach")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            var url = folder.appendingPathComponent(image.name)
+            var n = 2
+            while FileManager.default.fileExists(atPath: url.path) {
+                url = folder.appendingPathComponent(image.name.replacingOccurrences(of: ".png", with: "-\(n).png"))
+                n += 1
+            }
+            try image.data.write(to: url)
+            attach(urls: [url])
+        } catch {
+            problem = "图片没能存下来：\(error.localizedDescription)"
+        }
+    }
+
     func pickFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true

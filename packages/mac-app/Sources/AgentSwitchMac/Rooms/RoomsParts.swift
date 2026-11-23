@@ -1,4 +1,5 @@
 import AgentSwitchMacCore
+import ImageIO
 import SwiftUI
 
 // The Chat Room page's parts (docs/chatroom-v0.md §10; concept `docs/design/concepts/chatroom.html`): a seat's face, a
@@ -215,6 +216,16 @@ struct RoomMessageRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(path)
+                // A picture on this Mac is shown, small, under its name.
+                if actions.reveal != nil, let image = RoomPictures.thumb(path) {
+                    Button { actions.reveal?(path) } label: {
+                        Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 320, maxHeight: 180, alignment: .leading)
+                            .framed(Look.line, radius: Look.controlRadius)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 3)
+                }
             }
         }
         .padding(.top, 2)
@@ -424,6 +435,23 @@ struct RoomMemberCard: View {
             Text(label).mono(12).foregroundStyle(Look.faint).gridColumnAlignment(.leading)
             Text(value).font(.system(size: 12, design: mono ? .monospaced : .default)).foregroundStyle(color).lineLimit(1).truncationMode(.middle).help(help ?? value)
         }
+    }
+}
+
+/// Pictures a message comes with, read once each and kept small.
+@MainActor
+enum RoomPictures {
+    private static let kept = NSCache<NSString, NSImage>()
+    private static let kinds: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"]
+
+    static func thumb(_ path: String) -> NSImage? {
+        guard kinds.contains((path as NSString).pathExtension.lowercased()) else { return nil }
+        if let image = kept.object(forKey: path as NSString) { return image }
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+              let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 720, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
+        let image = NSImage(cgImage: small, size: NSSize(width: small.width / 2, height: small.height / 2))
+        kept.setObject(image, forKey: path as NSString)
+        return image
     }
 }
 

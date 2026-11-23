@@ -354,7 +354,7 @@ private struct RoomWriter: View {
                 }
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, label: "Message",
                              placeholder: "Message — @ to mention", onKey: { model.key($0) },
-                             onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: {}, onFocus: { _ in })
+                             onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: { model.pasteFromClipboard() }, onFocus: { _ in })
                     .frame(height: min(max(model.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
