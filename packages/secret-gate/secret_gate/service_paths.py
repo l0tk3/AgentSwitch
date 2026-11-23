@@ -1,9 +1,10 @@
 """Where the gate service lives (gate-service-v0 §2), and whether this process is its client (§4).
 
 The service runs under the role account `_agentswitchgate` from a root-owned copy of the runtime. Everything the
-login user may see is in `<root>/gate-public/`: `keys.json`, `ca.pem` and `gate.sock`. A process is a *client* of
-the service when that socket exists and belongs to another user; the service's own processes (the proxy and the
-rpc server, which own the socket) keep working on their gate home directly, exactly like a gate without service.
+login user may see is in `<root>/gate-public/`: `keys.json`, `ca.pem` and `gate.sock`. Once `<root>/gate-service.json`
+exists, every process but the service's own is a *client* of the service (`client_socket`), with or without the
+socket; the service's own processes (the proxy and the rpc server, whose account owns `gate-public/`) keep working
+on their gate home directly, exactly like a gate without service.
 
 `SystemLayout(prefix)` relocates every system path under a prefix (`secret-gate system … --root`), for tests.
 """
@@ -17,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .errors import ValidationError
+from .errors import ServiceUnavailable, ValidationError
 
 SYSTEM_ROOT = Path("/Library/Application Support/AgentSwitch")
 LAUNCH_DAEMONS = Path("/Library/LaunchDaemons")
@@ -116,17 +117,66 @@ def socket_path(env: Mapping[str, str] | None = None) -> Path:
 
 
 def client_socket(env: Mapping[str, str] | None = None, uid: int | None = None) -> Path | None:
-    """The service socket when this process is a client of the gate service, else None.
+    """The service socket when this process is a client of the gate service, else None (a gate without service).
 
-    A socket owned by this very uid means this process *is* the service (its proxy or rpc server)."""
-    path = socket_path(env)
+    Whether the service is installed is decided by `<root>/gate-service.json` (root-owned, written by `system
+    install`, removed by `system uninstall`), never by the socket: the rpc server removes `gate.sock` whenever it
+    stops, and a process that went local in that window would seal to and decrypt with keys in the login user's
+    own, writable gate home, where another process of this uid may have planted its keypair. So once the file exists:
+
+    * the service's own processes (their uid owns the public directory) keep working on their gate home;
+    * every other process is a client. It gets the socket path even when the socket is missing, so calls fail
+      with "凭据网关服务无响应" and the commands that only read the service's `keys.json` keep working; a path
+      that is there but is not a socket, or a socket the service account does not own, raises ServiceUnavailable.
+
+    Without the file the old rule stands: a socket of another user makes this process a client.
+    """
+    uid = os.getuid() if uid is None else uid
+    public = public_dir(env)
+    path = public / SOCKET_FILE
+    if not _exists(config_path_for(public)):
+        return _socket_of_another_user(path, uid)
+    service_uid = _owner(public)
+    if service_uid == uid:
+        return None
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return path
+    except OSError as exc:
+        raise ServiceUnavailable(f"{SERVICE_UNAVAILABLE}（{exc.strerror or exc}）") from None
+    if not stat.S_ISSOCK(info.st_mode):
+        raise ServiceUnavailable(f"{SERVICE_UNAVAILABLE}（{path} 不是 socket）")
+    if info.st_uid != service_uid:
+        raise ServiceUnavailable(f"{SERVICE_UNAVAILABLE}（{path} 不属于网关服务账户）")
+    return path
+
+
+def _exists(path: Path) -> bool:
+    """Whether anything is at `path`; a path that cannot be checked counts as there (fail closed: service mode)."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _owner(path: Path) -> int | None:
+    try:
+        return path.stat().st_uid
+    except OSError:
+        return None  # no public directory: no process is the service, none falls back to a local gate
+
+
+def _socket_of_another_user(path: Path, uid: int) -> Path | None:
+    """No service installed: a socket of this very uid means this process *is* the service (or a test's)."""
     try:
         info = path.stat()
     except OSError:
         return None
-    if not stat.S_ISSOCK(info.st_mode):
-        return None
-    if info.st_uid == (os.getuid() if uid is None else uid):
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid == uid:
         return None
     return path
 

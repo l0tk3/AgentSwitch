@@ -1,6 +1,6 @@
 """The `secret-gate` CLI as a client of the gate service (gate-service-v0 §4).
 
-When `<SECRET_GATE_PUBLIC>/gate.sock` exists and belongs to another user (service_paths.client_socket), `main`
+When the gate service is installed (`gate-service.json`, service_paths.client_socket; its socket need not be up), `main`
 asks `route` for the service-mode version of the parsed command. Outputs and exit codes stay exactly what the
 daemon and the Mac app parse today; only where the answer comes from changes:
 

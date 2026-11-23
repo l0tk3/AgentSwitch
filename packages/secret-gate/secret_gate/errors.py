@@ -27,3 +27,8 @@ class ExecTemplateError(GateError):
 
 class ValidationError(GateError):
     """Caller-supplied input failed validation."""
+
+
+class ServiceUnavailable(GateError):
+    """The gate service is installed but cannot be used: its socket is missing, refused the connection, is not
+    the service's, or the service did not answer in time. Never a reason to fall back to a local gate."""

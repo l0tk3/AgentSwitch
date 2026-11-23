@@ -64,7 +64,7 @@ App 包在登录用户可写的位置（现在是 `~/Desktop/…/build/AgentSwit
 |---|---|---|
 | `status` | → `{version, proxyPort, keys: <keys.json 内容>}` | Mac 应用健康检查 |
 | `keys.list` | → `keys.json` 的内容 | |
-| `keys.new` | `{name, use?}` → 新的一行 | 在服务里生成；名字规则同现在 |
+| `keys.new` | `{name, use?}` → 新的一行 | 在服务里生成；名字规则同现在；非 legacy 的密钥最多 32 把（它们删不掉，每次解密都要逐把试） |
 | `keys.use` | `{name}` | `legacy` 的密钥不能设为当前 |
 | `keys.retire` | `{name}` | 删掉一个 legacy 密钥（用它加密的密文从此解不开）；当前密钥不能删 |
 | `refs.register` | `{scope, tokens: [{token, label}]}` → 同 `refs register` 现在的输出 | 回的是短引用和描述，不含值 |
@@ -83,14 +83,14 @@ App 包在登录用户可写的位置（现在是 `~/Desktop/…/build/AgentSwit
 
 ## 4. 登录用户这边
 
-**secret-gate CLI**：`SECRET_GATE_PUBLIC` 指向的目录（默认 `<root>/gate-public`）里有 `gate.sock` 时进入**服务模式**：
+**secret-gate CLI**：`SECRET_GATE_PUBLIC` 指向的目录（默认 `<root>/gate-public`）旁边有 `gate-service.json`（root 拥有，安装时写、卸载时删）时进入**服务模式**；服务自己的进程（其账户拥有 `gate-public/`）除外。判断不看 `gate.sock` 在不在：rpc 服务每次停下都会删掉它，那时退回本地就会用登录用户可写的网关目录里的密钥（同 uid 的进程可以预先放一对自己的），2026-11-23 起改为按配置文件判断。socket 不在时要走 socket 的调用报“凭据网关服务无响应”（退出码 2），只读 `keys.json` 的照常；那里的东西不是 socket、或不属于服务账户，一律报同样的错：
 
 - `keys [--json]`、`pubkey`、`enc` 读 `keys.json`；`keys new/use` 走 socket。
 - `refs register/release`、`credential-info/reissue` 走 socket，输出格式不变——daemon 调 CLI 的代码不用改。
 - `mcp` 变成转发器：工具定义不变，每次调用带上本进程的 `SECRET_GATE_SCOPE` 转给 `mcp.*`。修复桥（`SECRET_GATE_REPAIR_URL/KEY`）随 `mcp.repair` 一起传给服务，由服务去调 daemon 的回环桥。
 - `browser` 仍在用户侧运行 Playwright MCP 和有界面的 Chrome，解密改用 `browser.resolve`，登记改用 `browser.register`，遮挡配置取 `browser.config`，`browser-out` 放用户侧临时目录，审计由服务记。
 - `keygen`、`check`、`proxy`、`service install|uninstall|reload`、`install-ca` 在服务模式下拒绝，提示“凭据网关由系统服务管理，请在 Mac 应用里操作”。
-- 没有 `gate.sock` 时一切照旧（开发环境、未安装服务的机器）。
+- 没有 `gate-service.json` 时一切照旧（开发环境、未安装服务的机器）：`gate.sock` 属于别的用户才当作客户端。
 
 **daemon**：CA 路径改为 `SECRET_GATE_CA`（Mac 应用在服务模式下给 `<root>/gate-public/ca.pem`，没给时回退到 `$SECRET_GATE_HOME/ca.pem`）；其余经 CLI，行为不变。禁区（`protected.ts`）加上 `<root>/gate-public/gate.sock`，挡住执行器 shell 里最直白的 `nc -U`（只是锦上添花，同 uid 挡不住有意绕过）。
 

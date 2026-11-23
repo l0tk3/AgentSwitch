@@ -43,6 +43,9 @@ MAX_TEXT_CHARS = 900_000
 MAX_LOG_LINES = 500
 MAX_LOG_BYTES = 256 * 1024
 LOG_NAMES = ("proxy", "rpc")
+# Keypairs the service holds besides legacy ones. A keypair that is not legacy can never be deleted, and every
+# decryption tries every key, so any caller of this uid could otherwise slow each one down or fill the disk.
+MAX_KEYPAIRS = 32
 
 
 @dataclass(frozen=True)
@@ -161,8 +164,11 @@ class GateService:
         use = params.get("use", False)
         if not isinstance(use, bool):
             raise ValidationError("参数无效：use 应为 true 或 false")
+        name = text(params, "name", 64)
         with self._keys_lock:
-            info = create_keypair(self._home, text(params, "name", 64))
+            if sum(1 for row in key_rows(self._home) if not row.legacy) >= MAX_KEYPAIRS:
+                raise ValidationError(f"密钥对已达上限（{MAX_KEYPAIRS} 个），无法再新建")
+            info = create_keypair(self._home, name)
             if use:
                 set_current(self._home, info.name)
             return self._changed_keys(info.name)

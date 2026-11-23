@@ -75,6 +75,22 @@ def test_status_and_keys_methods_publish_and_signal_the_proxy():
         assert len(svc.signals) == 2
 
 
+def test_keys_new_stops_at_the_keypair_limit(monkeypatch):
+    from secret_gate.crypto import generate_keypair
+    from secret_gate.keystore import save_keypair
+
+    monkeypatch.setattr("secret_gate.rpc_methods.MAX_KEYPAIRS", 3)
+    with running_service() as svc:
+        save_keypair(svc.home / "keys" / "legacy" / "old", generate_keypair())   # legacy keys do not count
+        svc.client.call("keys.new", {"name": "two"})
+        svc.client.call("keys.new", {"name": "three"})
+        with pytest.raises(RemoteError, match="密钥对已达上限（3 个）"):
+            svc.client.call("keys.new", {"name": "four"})
+        assert not (svc.home / "keys" / "four").exists()
+        assert [k["name"] for k in svc.client.call("keys.list")] == ["main", "three", "two", "old"]
+        assert len(svc.signals) == 2
+
+
 def test_legacy_keys_over_the_socket():
     from secret_gate.crypto import generate_keypair
     from secret_gate.keystore import save_keypair

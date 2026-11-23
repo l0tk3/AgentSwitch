@@ -6,19 +6,23 @@ without the service.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
 import socket
+from functools import partial
 
 import pytest
 
 from secret_gate import bootstrap as bs
 from secret_gate.cli import main
+from secret_gate.errors import GateError, ServiceUnavailable
 from secret_gate.proxy_probe import ProbeResult
+from secret_gate.resolver import Resolver
 from secret_gate.service_paths import SERVICE_REFUSAL, client_socket
 from tests.fixtures import fake_secrets as fs
-from tests.service_fixtures import running_service, short_dir
+from tests.service_fixtures import OWNER_CONFIG, running_service, short_dir
 
 SCOPE = "cli-scope-0123456789abcdefghij"
 
@@ -180,3 +184,104 @@ def test_unavailable_service_is_reported_not_bypassed(monkeypatch, capsys, tmp_p
     code, _, err = _run(capsys, ["keys", "new", "x"])
     assert code == 2 and "凭据网关服务无响应" in err
     assert not (tmp_path / "keys").exists()                               # never a local keypair instead
+
+
+# -- service mode is decided by gate-service.json, never by the socket (no local fallback) ---------------------
+
+def _installed(svc) -> None:
+    """gate-service.json next to the public directory, as `system install` leaves it."""
+    (svc.public.parent / "gate-service.json").write_text(json.dumps(OWNER_CONFIG.to_json()))
+
+
+@pytest.fixture
+def stopped_service(monkeypatch, tmp_path):
+    """An installed service whose rpc server stopped (and so removed gate.sock), seen from a login user's process;
+    the user's gate home holds a keypair another process of this uid planted there."""
+    from secret_gate.keyring import create_keypair
+
+    planted = tmp_path / "user-home"
+    create_keypair(planted, "planted")
+    monkeypatch.setenv("SECRET_GATE_HOME", str(planted))
+    with running_service() as svc:
+        _installed(svc)
+        svc.server.shutdown()
+        svc.server.server_close()
+        assert not svc.socket.exists()
+        monkeypatch.setenv("SECRET_GATE_PUBLIC", str(svc.public))
+        monkeypatch.setattr("secret_gate.cli.client_socket", partial(client_socket, uid=os.getuid() + 1))
+        yield svc, planted
+
+
+def test_installed_service_without_its_socket_is_unavailable_never_local(stopped_service, capsys, monkeypatch):
+    svc, planted = stopped_service
+    keys_before = sorted(p.name for p in (planted / "keys").iterdir())
+    for argv in (["keys", "new", "x"], ["keys", "retire", "x"], ["keygen"], ["check", "enc:v1:" + "A" * 30]):
+        code, out, err = _run(capsys, argv)
+        assert code == 2 and out == ""
+        assert "凭据网关服务无响应" in err or SERVICE_REFUSAL in err
+    code, _, err = _run(capsys, ["credential-info"], stdin=json.dumps({"token": "enc:v1:" + "A" * 30}),
+                        monkeypatch=monkeypatch)
+    assert code == 2 and "凭据网关服务无响应" in err
+    assert sorted(p.name for p in (planted / "keys").iterdir()) == keys_before        # nothing made user-side
+    # What only needs the service's keys.json keeps working, and seals to the service's key, not the planted one.
+    service_key = json.loads((svc.public / "keys.json").read_text())[0]["publicKey"]
+    code, out, _ = _run(capsys, ["pubkey"])
+    assert code == 0 and out.strip() == service_key
+    code, out, _ = _run(capsys, ["enc", "--batch"], monkeypatch=monkeypatch,
+                        stdin=json.dumps([{"label": "a/pass", "hosts": ["a.example.com"], "value": "pw-a-1234"}]))
+    token = json.loads(out)[0]["token"]
+    assert code == 0 and Resolver.from_home(svc.home).describe(token)["label"] == "a/pass"
+    with pytest.raises(GateError):
+        Resolver.from_home(planted).describe(token)
+
+
+def test_mcp_and_browser_components_never_go_local_once_installed(stopped_service, monkeypatch):
+    from secret_gate import browser_mcp
+    from secret_gate.mcp_backend import RemoteMcpBackend, default_backend
+
+    monkeypatch.setattr("secret_gate.mcp_backend.client_socket", partial(client_socket, uid=os.getuid() + 1))
+    backend = default_backend()
+    assert isinstance(backend, RemoteMcpBackend)
+    with pytest.raises(ServiceUnavailable, match="凭据网关服务无响应"):
+        backend.describe("enc:v1:" + "A" * 30)
+    monkeypatch.setattr(browser_mcp, "client_socket", partial(client_socket, uid=os.getuid() + 1))
+    monkeypatch.setattr(browser_mcp, "local_setup", lambda *_a: pytest.fail("a local browser gate was set up"))
+    with pytest.raises(ServiceUnavailable, match="凭据网关服务无响应"):
+        asyncio.run(browser_mcp.serve(["true"]))
+
+
+def test_installed_service_refuses_a_socket_that_is_not_the_services(monkeypatch):
+    with short_dir() as root:
+        public = root / "gate-public"
+        public.mkdir()
+        (root / "gate-service.json").write_text("{}")                        # its presence decides, not its content
+        env = {"SECRET_GATE_PUBLIC": str(public)}
+        other = os.getuid() + 1
+        assert client_socket(env, uid=other) == public / "gate.sock"          # missing: calls fail, nothing local
+        assert client_socket(env) is None                                     # the public directory's owner is the service
+        (public / "gate.sock").write_text("")
+        with pytest.raises(ServiceUnavailable, match="不是 socket"):
+            client_socket(env, uid=other)
+        (public / "gate.sock").unlink()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(str(public / "gate.sock"))
+        try:
+            assert client_socket(env, uid=other) == public / "gate.sock"      # the service's socket
+            # A socket this very process made, in a public directory the service account owns.
+            monkeypatch.setattr("secret_gate.service_paths._owner", lambda _p: other)
+            with pytest.raises(ServiceUnavailable, match="不属于网关服务账户"):
+                client_socket(env)
+            with pytest.raises(ServiceUnavailable, match="不属于网关服务账户"):
+                client_socket(env, uid=other + 1)
+        finally:
+            sock.close()
+
+
+def test_without_gate_service_json_the_cli_is_a_local_gate(monkeypatch, capsys, tmp_path):
+    with short_dir() as root:
+        monkeypatch.setenv("SECRET_GATE_PUBLIC", str(root / "gate-public"))
+        monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path / "home"))
+        assert client_socket() is None
+        code, out, _ = _run(capsys, ["keys", "--json", "new", "mine", "--use"])
+        assert code == 0 and [r["name"] for r in json.loads(out)] == ["mine"]
+        assert (tmp_path / "home" / "keys" / "mine").is_dir()

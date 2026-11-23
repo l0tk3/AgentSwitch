@@ -11,18 +11,16 @@ import socket
 from pathlib import Path
 from typing import Any
 
-from .errors import GateError
+from .errors import ServiceUnavailable
 from .rpc_protocol import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, ProtocolError, decode_response, encode
 from .service_paths import SERVICE_UNAVAILABLE
+
+__all__ = ["RpcClient", "ServiceUnavailable"]
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
 # Calls that wait for a site, a command or the dispatcher: the service's own limits (30 s HTTP, 60 s exec,
 # 65 s repair) plus margin.
 SLOW_METHOD_TIMEOUTS = {"mcp.http": 60.0, "mcp.exec": 90.0, "mcp.repair": 90.0}
-
-
-class ServiceUnavailable(GateError):
-    """The socket is missing, refused the connection, or the service did not answer in time."""
 
 
 class RpcClient:
