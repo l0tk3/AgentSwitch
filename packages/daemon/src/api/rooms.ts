@@ -10,18 +10,23 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Hono } from "hono";
 import { z } from "zod";
 import { contentType } from "../files/names.js";
-import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatWas } from "../rooms/store.js";
+import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatSession, type SeatWas } from "../rooms/store.js";
+import type { Running } from "../rooms/follow.js";
+import { resumeOf } from "../rooms/kit.js";
 import { YOU } from "../rooms/names.js";
 import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
 
 export type { SeatCard, SeatState } from "../rooms/state.js";
 import type { TerminalHost, TerminalInfo } from "../terminals/host.js";
+import { roomOrg } from "./roomOrg.js";
 import { parseBody, versionedJson, type ApiDeps } from "./shared.js";
 
 export type SeatView = {
   readonly handle: string; readonly kind: "user" | "session"; readonly terminal: string | null;
   readonly face: Seat["face"]; readonly joinedAt: number; readonly addedBy: string;
   readonly canAdd: boolean; readonly byAgent: boolean; readonly left: number | null;
+  /** Muted by an admin or the user (§6.2): it reads and works but may not post or write the notes. */
+  readonly muted: boolean; readonly mutedBy: string | null;
   readonly state: SeatState | null; readonly card: SeatCard | null;
   /** Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
    *  there was a Kit, until it is resumed; null for the user. */
@@ -44,6 +49,18 @@ function wasOf(info: TerminalInfo): SeatWas {
   return { agent: info.harness, name: info.name, cwd: info.workdir, model: info.modelNow ?? info.model, profile: info.profile?.name ?? null, ...(info.profile?.color ? { color: info.profile.color } : {}) };
 }
 
+/** The agent's session behind a terminal, as a seat keeps it (§6.2); null until the agent has said its id. */
+export function sessionOf(info: TerminalInfo): SeatSession | null {
+  if (!info.agentSessionId) return null;
+  return { id: info.agentSessionId, cwd: info.cwd, mode: info.mode, ...(info.model ? { model: info.model } : {}), ...(info.effort ? { effort: info.effort } : {}), ...(info.profile?.id ? { profile: info.profile.id } : {}) };
+}
+
+/** A terminal as the rooms follow it (rooms/follow.ts). */
+export function runningOf(info: TerminalInfo): Running {
+  const session = sessionOf(info);
+  return { id: info.id, exited: info.status === "exited", session: info.agentSessionId, resumedFrom: info.resumedFrom, forked: info.forked, cwd: info.cwd, was: wasOf(info), ...(session?.mode ? { mode: session.mode } : {}), ...(session?.model ? { model: session.model } : {}), ...(session?.effort ? { effort: session.effort } : {}), ...(session?.profile ? { profile: session.profile } : {}) };
+}
+
 /** A terminal as a seat is now, for the rooms' own work (delivery, the Kit). */
 export function seatLive(info: TerminalInfo | null): SeatLive | null {
   return info ? { state: seatState(info), card: { ...wasOf(info), mode: info.modeNow ?? info.mode, node: null } } : null;
@@ -51,7 +68,7 @@ export function seatLive(info: TerminalInfo | null): SeatLive | null {
 
 export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean): SeatView {
   const info = seat.terminal ? host?.get(seat.terminal) ?? null : null;
-  const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null };
+  const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null, muted: seat.muted !== undefined, mutedBy: seat.muted?.by ?? null };
   if (seat.kind === "user") return { ...base, state: null, card: null, kit: null };
   const was = info ? wasOf(info) : seat.was ?? null;
   return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false };
@@ -60,7 +77,8 @@ export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (term
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
 const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: z.string().max(MAX_TOPIC * 4).optional(), paused: z.boolean().optional(), roundsLimit: z.number().int().min(2).max(100).optional() }).strict();
 const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boolean().optional() }).strict();
-const SetSeat = z.object({ canAdd: z.boolean() }).strict();
+const SetSeat = z.object({ canAdd: z.boolean().optional(), muted: z.boolean().optional() }).strict()
+  .refine((o) => o.canAdd !== undefined || o.muted !== undefined, "nothing to change");
 const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(4096)).max(10).optional() }).strict();
 const WriteNotes = z.object({ text: z.string().max(100_000) }).strict();
 const Read = z.object({ seq: z.number().int().nonnegative() }).strict();
@@ -83,7 +101,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   const host = (): TerminalHost | undefined => deps.terminals?.host;
   const hasKit = (terminal: string): boolean => deps.roomKit?.has(terminal) ?? false;
 
-  const refused = (c: { json: (body: unknown, status: 400 | 403 | 404 | 409) => Response }, err: unknown): Response => {
+  const refused = (c: { json: (body: unknown, status: 400 | 403 | 404 | 409 | 503) => Response }, err: unknown): Response => {
     if (err instanceof RoomError) return c.json({ error: err.message }, err.status);
     throw err;
   };
@@ -213,7 +231,39 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   app.patch("/rooms/:id/seats/:handle", async (c) => {
     const body = await parseBody(c, SetSeat);
     if (!body.ok) return c.json({ error: body.error }, 400);
-    try { return c.json({ seat: seatView(rooms.setCanAdd(c.req.param("id"), c.req.param("handle"), body.data.canAdd), host(), hasKit) }); } catch (err) { return refused(c, err); }
+    try {
+      const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase();
+      if (body.data.canAdd !== undefined) rooms.setCanAdd(id, handle, body.data.canAdd);
+      if (body.data.muted !== undefined) rooms.setMuted(id, YOU, handle, body.data.muted);
+      const seat = rooms.get(id).seats.find((s) => s.handle === handle);
+      if (!seat) throw new RoomError(404, `房间里没有 @${handle}`);
+      return c.json({ seat: seatView(seat, host(), hasKit) });
+    } catch (err) { return refused(c, err); }
+  });
+
+  // Resume the session behind an ended seat (§6.2): the same conversation goes on in a new terminal, and the seat keeps
+  // its name, face and admin switch. Only the user's screens and admins bring one back; an admin does it with room_manage.
+  app.post("/rooms/:id/seats/:handle/resume", async (c) => {
+    try {
+      const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase();
+      const room = rooms.get(id);
+      const seat = room.seats.find((s) => s.handle === handle);
+      if (!seat) throw new RoomError(404, `房间里没有 @${handle}`);
+      if (seat.kind === "user") throw new RoomError(400, "用户没有会话");
+      if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+      const info = seat.terminal ? host()?.get(seat.terminal) ?? null : null;
+      if (info && info.status !== "exited") throw new RoomError(409, "这个会话还在运行。");
+      if (!deps.callLocal) throw new RoomError(503, "这个服务不能恢复会话。");
+      // What its terminal says while its record is still here, else what the seat kept: the record is gone once the
+      // service has started again, and a seat must be resumable all the same.
+      const kept = info?.agentSessionId ? { ...seat, session: sessionOf(info)! } : seat;
+      if (!kept.session) throw new RoomError(409, "这个席位是在记下会话 id 之前入座的，找不回它的对话。把它移出房间，再从 Add 把会话重新拉进来。");
+      const started = await roomOrg(deps.callLocal).resume(resumeOf(kept));
+      const after = host()?.get(started.id) ?? null;
+      const back = rooms.rebind(id, handle, started.id, after ? wasOf(after) : seat.was!);
+      deps.roomsChanged?.(id);
+      return c.json({ seat: seatView(back, host(), hasKit), terminal: after ? { id: after.id, status: after.status } : { id: started.id } }, 201);
+    } catch (err) { return refused(c, err); }
   });
 
   app.delete("/rooms/:id/seats/:handle", (c) => {

@@ -196,6 +196,7 @@ describe("bringing sessions in (Can Add Sessions)", () => {
         sessions: async () => ({ running: [{ terminal: "t1", agent: "claude-code", name: "daemon", cwd: "/w/d", state: "idle", profile: null }, { terminal: "t8", agent: "codex", name: "spare", cwd: "/w/s", state: "idle", profile: "Work" }], resumable: [{ agent: "codex", id: "sess-1", title: "fix login", cwd: "/w/l", updatedAt: 9 * 3_600_000, profile: null }] }),
         check: async (agent, profile) => ({ status: "unhealthy", checkedAt: 1, message: `${agent}/${profile} signed out` }),
         start: async (req) => { started.push(req); const id = `new${started.length}`; states.set(id, "idle"); return id; },
+        resume: async (terminal) => { const id = `back-${terminal}`; states.set(id, "idle"); return { id }; },
       }),
     });
     return { kit, store, room, states, started };
@@ -206,7 +207,7 @@ describe("bringing sessions in (Can Add Sessions)", () => {
     expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
     expect(await kit.call("t1", "profiles", {})).toMatchObject({ isError: true, text: expect.stringContaining("may not add sessions") });
     store.setCanAdd(room.id, "daemon", true);
-    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing", "rooms", "room_create", "room_add", "profiles", "models", "sessions", "profile_check"]);
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing", "rooms", "room_create", "room_add", "room_manage", "profiles", "models", "sessions", "profile_check"]);
     expect((await kit.call("t1", "profiles", {})).text).toBe("2 profiles:\nclaude-code · default · \"Default\" · subscription · healthy, checked 2 h ago\ncodex · abc123 · \"Work\" · API key · not checked yet");
     expect((await kit.call("t1", "models", { agent: "claude-code" })).text).toBe("claude-code:\n  opus — Opus · Opus 5.5");
     const sessions = (await kit.call("t1", "sessions", {})).text;

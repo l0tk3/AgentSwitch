@@ -367,7 +367,7 @@ struct RoomMemberRow: View {
         .onHover { hovering = $0 }
     }
 
-    private var sub: String { [seat.state?.word, seat.canAdd ? "Can Add" : nil].compactMap { $0 }.joined(separator: " · ") }
+    private var sub: String { [seat.state?.word, seat.canAdd ? "Admin" : nil, seat.muted ? "Muted" : nil].compactMap { $0 }.joined(separator: " · ") }
 }
 
 /// A member's card (§1 名片): who it is, where, in what state, who seated it; the Kit's one switch (§6); and what the
@@ -378,8 +378,10 @@ struct RoomMemberCard: View {
     /// What it says it is changing now (§9).
     var claim: RoomClaim? = nil
     let setCanAdd: (Bool) -> Void
+    let setMuted: (Bool) -> Void
+    let resume: () -> Void
     let mention: () -> Void
-    let remove: () -> Void
+    let kick: () -> Void
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -402,8 +404,10 @@ struct RoomMemberCard: View {
                 }
                 if let state = seat.state { line("State", ClassicWords.word(state.word, in: look), color: state.wordColor) }
                 if seat.needsResume { line("Kit", "No Kit", color: .waiting) }
+                if seat.canAdd { line("Role", "Admin") }
+                if seat.muted { line("Muted", "by @" + (seat.mutedBy ?? "?"), color: .waiting) }
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
-                if let claim { line("Changing", "\(claim.names) · until \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }
+                if let claim { line("Changing", "\(claim.names) → \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }
             }
             .padding(.top, 10)
             .padding(.bottom, 12)
@@ -425,6 +429,7 @@ struct RoomMemberCard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(seat.byAgent)
+                .help("管理员：可以拉人、恢复已结束的会话、禁言和踢人。")
                 HairRule(color: Look.line)
                 if seat.needsResume {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -433,13 +438,27 @@ struct RoomMemberCard: View {
                     }
                     .padding(.top, 8)
                 }
+                if seat.muted {
+                    Text("已禁言（@\(seat.mutedBy ?? "?")）。还能读、还能干活，但不能发消息、不能写置顶笔记。").font(.system(size: 12)).foregroundStyle(Look.faint).lineSpacing(3).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+                }
                 if let says = seat.byAgent ? "由别的会话拉起来的会话不能再拉人。" : seat.state?.says {
                     Text(says).font(.system(size: 12)).foregroundStyle(Look.faint).lineSpacing(3).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                 }
+                if seat.state == .exited {
+                    Button(action: resume) { BracketLabel(word: "Resume", key: "↩") }
+                        .buttonStyle(BracketButtonStyle(role: .primary))
+                        .help("用同一个会话、同一个配置恢复这个成员；席位名字和颜色不变。")
+                        .padding(.top, 10)
+                }
                 HStack(spacing: 8) {
                     Button(action: mention) { BracketLabel(word: "Mention") }.buttonStyle(BracketButtonStyle())
+                    Button { setMuted(!seat.muted) } label: { BracketLabel(word: seat.muted ? "Unmute" : "Mute") }
+                        .buttonStyle(BracketButtonStyle())
+                        .help("禁言：还能读、还能干活，但不能发消息、不能写置顶笔记。")
                     Spacer()
-                    Button(action: remove) { BracketLabel(word: "Remove") }.buttonStyle(BracketButtonStyle(role: .destructive))
+                    Button(action: kick) { BracketLabel(word: "Kick") }
+                        .buttonStyle(BracketButtonStyle(role: .destructive))
+                        .help("移出房间；会话本身继续运行，之后还能再拉进来。")
                 }
                 .padding(.top, 10)
             } else {

@@ -60,5 +60,13 @@ export function roomOrg(ask: Ask): KitOrg {
       if (res.status >= 300 || !id) refuse(res, "The session was not started");
       return id;
     },
+    async resume(req) {
+      const mode = req.mode === "manual" || req.mode === "auto" || req.mode === "bypass" ? req.mode : undefined;
+      const body = { harness: req.agent, cwd: req.cwd, agentSessionId: req.session, ...(req.profile ? { profile: req.profile } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(mode ? { mode } : {}) };
+      const res = await ask("POST", "/terminals/resume", body);
+      const id = str(obj(obj(res.body).terminal).id);
+      if (res.status >= 300 || !id) refuse(res, "The session was not resumed");
+      return { id };
+    },
   };
 }

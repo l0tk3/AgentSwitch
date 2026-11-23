@@ -22,6 +22,8 @@ export type KitOrg = {
   /** Starts a session in a terminal (`resume`: an existing one goes on); the terminal's id. Throws a RoomError that
    *  says why not. */
   start(req: { readonly agent: string; readonly cwd: string; readonly profile?: string; readonly model?: string; readonly mode?: string; readonly resume?: string }): Promise<string>;
+  /** The session behind an ended terminal goes on in a new one (§6.2). Throws a RoomError that says why not. */
+  resume(req: { readonly agent: string; readonly cwd: string; readonly session: string; readonly profile?: string; readonly model?: string; readonly effort?: string; readonly mode?: string }): Promise<{ readonly id: string }>;
 };
 
 export type KitTool = { readonly name: string; readonly description: string; readonly inputSchema: Record<string, unknown> };
@@ -131,6 +133,19 @@ const ORG_TOOLS: readonly KitTool[] = [
       },
     },
   },
+  {
+    name: "room_manage",
+    description: "Admin actions in a Chat Room you sit in, if your Can Add Sessions is on (that switch makes you an admin): `resume` a member whose session has ended, bringing the same conversation back; `mute` a member that floods the room or does not do its work (it can still read and work, but not post or write the notes); `unmute` it; `kick` it out of the room (its session keeps running). Only the user can mute or kick another admin, and nobody can manage themselves or the user.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["resume", "mute", "unmute", "kick"] },
+        handle: { type: "string", description: "The member's @name." },
+        room: ROOM_ARG,
+      },
+      required: ["action", "handle"],
+    },
+  },
   { name: "profiles", description: "AgentSwitch's profiles per agent: id, name, whether it is a subscription or pays by an API key, and the result and time of its last health check. No accounts, no keys.", inputSchema: { type: "object", properties: {} } },
   { name: "models", description: "The models each agent offers now, for room_add's `model`.", inputSchema: { type: "object", properties: { agent: { type: "string", description: "Only this agent's." } } } },
   { name: "sessions", description: "Sessions that can be brought into a room: the ones running in AgentSwitch's terminals (with their terminal id and state), and recent ones that can be resumed (with their id, title, folder, time). Truncated: ask with `search` to narrow.", inputSchema: { type: "object", properties: { search: { type: "string", description: "Only sessions whose title or folder contains this." }, limit: { type: "integer", description: "How many resumable ones at most (default 20, up to 50)." } } } },
@@ -143,6 +158,14 @@ const ago = (at: number, now: number): string => { const m = Math.round((now - a
 const hm = (at: number): string => { const t = new Date(at); return `${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
 const int = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) ? v : typeof v === "string" && /^\d+$/.test(v) ? Number(v) : undefined);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+/** What it takes to bring the conversation behind an ended seat back (§6.2): the session the seat kept while its
+ *  terminal lived. Throws a RoomError when it kept none. */
+export function resumeOf(seat: Seat): { agent: string; cwd: string; session: string; profile?: string; model?: string; effort?: string; mode?: string } {
+  const s = seat.session;
+  if (!s || !seat.was) throw new RoomError(409, `@${seat.handle} took its seat before session ids were kept, so its conversation can not be found again from here. Remove it from the room and add the session again (room_add with agent, resume, cwd — see \`sessions\`).`);
+  return { agent: seat.was.agent, cwd: s.cwd, session: s.id, ...(s.profile ? { profile: s.profile } : {}), ...(s.model ? { model: s.model } : {}), ...(s.effort ? { effort: s.effort } : {}), ...(s.mode ? { mode: s.mode } : {}) };
+}
 
 export class RoomKit {
   constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number }) {}
@@ -214,6 +237,7 @@ export class RoomKit {
         return `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you). Bring sessions in with room_add (room: "${room.id}").`;
       }
       case "room_add": return this.add(org, terminal, args);
+      case "room_manage": return this.manage(org, terminal, args);
       case "profiles": {
         const all = await org.profiles();
         return [`${all.length} profiles:`, ...all.map((p) => `${p.agent} · ${p.id} · "${p.name}" · ${p.kind === "api" ? "API key" : "subscription"} · ${p.health ? `${p.health.status}, checked ${ago(p.health.checkedAt, now)}${p.health.message ? ` (${p.health.message})` : ""}` : "not checked yet"}`)].join("\n");
@@ -271,6 +295,50 @@ export class RoomKit {
     const profile = str(args.profile), model = str(args.model);
     const started = await org.start({ agent, cwd, ...(profile ? { profile } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}), ...(resume ? { resume } : {}) });
     return sit(started, true);
+  }
+
+  /** An admin's work on one member (§6.2): resume an ended session, mute or unmute it, or kick it out. */
+  private async manage(org: KitOrg, terminal: string, args: Record<string, unknown>): Promise<string> {
+    const { room, seat: me } = this.where(terminal, str(args.room));
+    if (!me.canAdd) throw new RoomError(403, NOT_ALLOWED);
+    if (me.muted) throw new RoomError(403, `@${me.handle} is muted by @${me.muted.by}: it can not manage the room until it is unmuted.`);
+    const action = str(args.action), name = str(args.handle)?.replace(/^@/, "").toLowerCase();
+    if (!action || !name) throw new RoomError(400, "room_manage needs `action` and `handle`.");
+    const target = room.seats.find((s) => s.handle === name);
+    if (!target) throw new RoomError(404, `There is no @${name} in this room.`);
+    if (target.kind === "user") throw new RoomError(403, "You can not manage the user.");
+    if (target.handle === me.handle) throw new RoomError(403, "You can not manage yourself; ask the user or another admin.");
+    switch (action) {
+      case "mute":
+      case "unmute": {
+        const seat = this.o.store.setMuted(room.id, me.handle, target.handle, action === "mute");
+        this.o.changed?.(room.id);
+        return action === "mute"
+          ? `@${target.handle} is muted by you (@${me.handle}). It still reads, is woken and works, but can not post or write the notes until you or the user unmute it.`
+          : `@${target.handle} can speak again${seat.muted ? " (it is still muted by someone else)" : ""}.`;
+      }
+      case "kick": {
+        this.o.store.unseat(room.id, target.handle, me.handle);
+        this.o.changed?.(room.id);
+        this.o.delivery.look();
+        return `@${target.handle} is out of "${room.name}". Its session keeps running outside the room; the user or an admin can bring it back with room_add.`;
+      }
+      case "resume": {
+        if (target.left !== undefined) throw new RoomError(403, `@${target.handle} has left the room.`);
+        const live = target.terminal ? this.o.seat(target.terminal) : null;
+        if (live && live.state !== "exited") throw new RoomError(409, `@${target.handle} has not ended (${live.state}).`);
+        const started = await org.resume(resumeOf(target));
+        const card = this.o.seat(started.id)?.card;
+        const was = card
+          ? { agent: card.agent, name: card.name, cwd: card.cwd, model: card.model, profile: card.profile, ...(card.color ? { color: card.color } : {}) }
+          : target.was;
+        if (!was) throw new RoomError(409, "The session was started, but the room does not know what it is; add it again with room_add.");
+        const back = this.o.store.rebind(room.id, target.handle, started.id, was);
+        this.o.changed?.(room.id);
+        return `@${back.handle} is back in "${room.name}" with the same conversation (${[agentName(was.agent), was.model, was.cwd].filter(Boolean).join(" · ")}). It knows nothing new of your task: room_post an @${back.handle} message if it should go on.`;
+      }
+      default: throw new RoomError(400, "room_manage: action is resume, mute, unmute or kick.");
+    }
   }
 
   private where(terminal: string, named: string | undefined): { room: Room; seat: Seat } {
@@ -374,7 +442,7 @@ export class RoomKit {
       if (handle === YOU) return "@you: the user sees it in the room";
       const target = now.seats.find((s) => s.handle === handle);
       const live = target?.terminal ? this.o.seat(target.terminal) : null;
-      return `@${handle}: ${STATE_MEETS[live?.state ?? "exited"]}`;
+      return `@${handle}: ${STATE_MEETS[live?.state ?? "exited"]}${target?.muted ? ` (muted by @${target.muted.by}: it can read, but can not answer until unmuted)` : ""}`;
     });
     return [`#${message.seq} sent in "${room.name}"${now.paused ? " (the user has paused this room: nothing is given until they resume it)" : ""}.`, ...lines, "Do not wait for a reply: one arrives as a room message when it is written."].join("\n");
   }
@@ -408,7 +476,7 @@ export class RoomKit {
       const live = s.terminal ? this.o.seat(s.terminal) : null;
       const card = live?.card ?? s.was;
       const about = card ? [agentName(card.agent), card.model, card.profile ? `profile ${card.profile}` : null, card.cwd, live?.card.mode ? `mode ${live.card.mode}` : null].filter(Boolean).join(" · ") : "";
-      return `@${s.handle}${s.handle === me.handle ? " (you)" : ""} — ${about}\n  ${STATE_MEETS[live?.state ?? "exited"]}${s.canAdd ? "; may add sessions" : ""}; brought in by @${s.addedBy}`;
+      return `@${s.handle}${s.handle === me.handle ? " (you)" : ""} — ${about}\n  ${STATE_MEETS[live?.state ?? "exited"]}${s.canAdd ? "; admin (may add sessions, resume, mute, kick)" : ""}${s.muted ? `; muted by @${s.muted.by}` : ""}; brought in by @${s.addedBy}`;
     });
     return [`Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}${room.paused ? " (paused by the user)" : ""}. ${here.length} members:`, ...lines].join("\n");
   }

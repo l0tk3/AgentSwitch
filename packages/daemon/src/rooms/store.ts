@@ -56,6 +56,12 @@ export type SeatWas = {
   readonly profile: string | null; readonly color?: string;
 };
 
+/** The agent's own session behind a seat, kept while its terminal lives (§6.2): what it takes to bring the same
+ *  conversation back in a new terminal, and to know it again when it runs in another. The terminal's own record is
+ *  gone when the service starts again; this is not. `cwd` is the folder it was started in — a session is resumed
+ *  there, not where the agent has since gone. */
+export type SeatSession = { readonly id: string; readonly cwd: string; readonly mode?: string; readonly model?: string; readonly effort?: string; readonly profile?: string };
+
 export type Seat = {
   /** What others write after `@`; never changes, never reused in this room. */
   readonly handle: string;
@@ -75,6 +81,10 @@ export type Seat = {
   /** When it left; its handle and face stay with what it said. */
   readonly left?: number;
   readonly was?: SeatWas;
+  readonly session?: SeatSession;
+  /** Muted by an admin or the user (docs/chatroom-v0.md §6.2): it still reads, is woken and works, but may not post
+   *  or write the pinned notes. */
+  readonly muted?: { readonly by: string; readonly at: number };
 };
 
 export type Message = {
@@ -144,7 +154,7 @@ export type Room = {
 };
 
 export class RoomError extends Error {
-  constructor(readonly status: 400 | 403 | 404 | 409, message: string) { super(message); }
+  constructor(readonly status: 400 | 403 | 404 | 409 | 503, message: string) { super(message); }
 }
 
 const ID = /^[a-z0-9]{6,24}$/;
@@ -352,14 +362,71 @@ export class RoomStore {
     return seat;
   }
 
-  /** A seat leaves. What was on its way to it is dropped: nobody is there to take it. */
-  unseat(id: string, handle: string): void {
+  /** A seat leaves (the user, or an admin kicking it). What was on its way to it is dropped: nobody is there to take
+   *  it. Muting goes with it: one brought back into the room afresh is not still muted. */
+  unseat(id: string, handle: string, by: string = YOU): void {
     const room = this.get(id);
     const seat = this.seatOf(room, handle);
     if (seat.kind === "user") throw new RoomError(400, "你自己的席位不能移出");
+    this.manager(room, by, seat);
     // What it was doing is free again, and it changes no files any more.
-    const tasks = room.tasks.map((t) => (t.owner === handle && t.state === "doing" ? (({ owner: _owner, ...rest }) => ({ ...rest, state: "todo" as const, updatedAt: this.now() }))(t) : t));
-    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? { ...s, left: this.now() } : s)), receipts: without(room.receipts, handle), tasks, claims: room.claims.filter((c) => c.handle !== handle) });
+    const tasks = room.tasks.map((t) => (t.owner === seat.handle && t.state === "doing" ? (({ owner: _owner, ...rest }) => ({ ...rest, state: "todo" as const, updatedAt: this.now() }))(t) : t));
+    this.save({ ...room, seats: room.seats.map((s) => {
+      if (s !== seat) return s;
+      const { muted: _was, ...rest } = s;
+      return { ...rest, left: this.now() };
+    }), receipts: without(room.receipts, seat.handle), tasks, claims: room.claims.filter((c) => c.handle !== seat.handle) });
+  }
+
+  /** Muted or unmuted by the user or an admin (`by`): it reads and works all the same, but may not post or write the
+   *  notes (§6.2). The user cannot be muted; a session cannot mute itself; only the user mutes or unmutes an admin. */
+  setMuted(id: string, by: string, handle: string, muted: boolean): Seat {
+    const room = this.get(id);
+    const seat = this.seatOf(room, handle);
+    if (seat.kind === "user") throw new RoomError(400, "用户不能被禁言");
+    if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    this.manager(room, by, seat);
+    if (muted) {
+      const next = { ...seat, muted: { by: this.seatOf(room, by).handle, at: this.now() } };
+      this.save({ ...room, seats: room.seats.map((s) => (s === seat ? next : s)) });
+      return next;
+    }
+    const { muted: _was, ...rest } = seat;
+    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? rest : s)) });
+    return rest;
+  }
+
+  /** The agent's session behind a seat, as its terminal says it now: kept for when the terminal is gone. */
+  note(id: string, handle: string, session: SeatSession): void {
+    const room = this.all().get(id);
+    const seat = room?.seats.find((s) => s.handle === handle);
+    if (!room || !seat || JSON.stringify(seat.session) === JSON.stringify(session)) return;
+    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? { ...s, session } : s)) });
+  }
+
+  /** A seat's terminal goes on under a new one (a resume, §6.2): its name, face, admin switch and mute stay. */
+  rebind(id: string, handle: string, terminal: string, was: SeatWas): Seat {
+    const room = this.get(id);
+    const seat = this.seatOf(room, handle);
+    if (seat.kind === "user") throw new RoomError(400, "用户没有会话");
+    if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    if (room.seats.some((s) => s !== seat && s.left === undefined && s.terminal === terminal)) throw new RoomError(409, "这个会话已经在房间里了");
+    const next: Seat = { ...seat, terminal, was };
+    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? next : s)) });
+    return next;
+  }
+
+  /** Who may manage `target` (mute, unmute, kick) — the user, or an admin: a seated session with Can Add Sessions
+   *  that is not itself muted. A session may not manage itself, nor another admin; only the user may. */
+  private manager(room: Room, by: string, target: Seat): Seat {
+    const actor = this.seatOf(room, by);
+    if (actor.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    if (actor.kind === "user") return actor;
+    if (!actor.canAdd) throw new RoomError(403, "Only the user or an admin (Can Add Sessions) may do that.");
+    if (actor.muted) throw new RoomError(403, `@${actor.handle} is muted: it can not manage the room until the user or an admin unmutes it.`);
+    if (actor.handle === target.handle) throw new RoomError(403, "A session can not manage itself; ask the user or another admin.");
+    if (target.canAdd) throw new RoomError(403, "Only the user may mute, unmute or kick an admin.");
+    return actor;
   }
 
   // ---- tasks
@@ -482,6 +549,7 @@ export class RoomStore {
     const room = this.get(id);
     const seat = this.seatOf(room, by);
     if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    if (seat.muted) throw new RoomError(403, `@${seat.handle} is muted by @${seat.muted.by}: it can not write the notes until it is unmuted.`);
     const clean = text.replace(/\r\n?/g, "\n").trimEnd();
     if (clean.length > MAX_NOTES) throw new RoomError(400, `置顶笔记太长（最多 ${MAX_NOTES} 字）`);
     return this.save({ ...room, notes: clean ? { text: clean, at: this.now(), by: seat.handle } : null });
@@ -491,6 +559,7 @@ export class RoomStore {
     const room = this.get(id);
     const from = this.seatOf(room, o.from);
     if (from.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    if (from.muted) throw new RoomError(403, `@${from.handle} is muted by @${from.muted.by}: it can not post until it is unmuted.`);
     const text = o.text.replace(/\r\n?/g, "\n").trim();
     // A picture alone says enough: words are needed only when nothing comes with them.
     if (!text && !(o.files ?? []).some((f) => f.trim())) throw new RoomError(400, "消息是空的");
@@ -611,10 +680,15 @@ function seatFrom(v: unknown): Seat | null {
   const w = o.was as Record<string, unknown> | undefined;
   const was = w && str(w.agent) && str(w.name) && str(w.cwd)
     ? { agent: w.agent, name: w.name, cwd: w.cwd, model: str(w.model) ? w.model : null, profile: str(w.profile) ? w.profile : null, ...(str(w.color) ? { color: w.color } : {}) } : null;
+  const e = o.session as Record<string, unknown> | undefined;
+  const session = e && str(e.id) && str(e.cwd) ? { id: e.id, cwd: e.cwd, ...(str(e.mode) ? { mode: e.mode } : {}), ...(str(e.model) ? { model: e.model } : {}), ...(str(e.effort) ? { effort: e.effort } : {}), ...(str(e.profile) ? { profile: e.profile } : {}) } : undefined;
+  const m = o.muted as Record<string, unknown> | undefined;
+  const muted = m && str(m.by) && num(m.at) ? { by: m.by, at: m.at } : undefined;
   return {
     handle: o.handle, kind: o.kind, ...(str(o.terminal) ? { terminal: o.terminal } : {}), face, joinedAt: o.joinedAt,
     addedBy: str(o.addedBy) ? o.addedBy : YOU, canAdd: o.canAdd === true, byAgent: o.byAgent === true,
     ...(num(o.left) ? { left: o.left } : {}), ...(was ? { was } : {}), ...(str(o.starter) ? { starter: o.starter } : {}),
+    ...(muted ? { muted } : {}), ...(session ? { session } : {}),
   };
 }
 

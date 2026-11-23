@@ -236,7 +236,8 @@ private struct RoomView: View {
                 ZStack(alignment: .topTrailing) {
                     Color.clear.contentShape(Rectangle()).onTapGesture { model.card = nil }
                     RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
-                                   mention: { model.mention(handle) }, remove: { model.remove(seat: handle) })
+                                   setMuted: { model.setMuted($0, seat: handle) }, resume: { model.resume(seat: handle) },
+                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
             }

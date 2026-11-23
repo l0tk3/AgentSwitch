@@ -119,6 +119,9 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public let canAdd: Bool
     public let byAgent: Bool
     public let left: Int64?
+    /// Muted by an admin or the user (docs/chatroom-v0.md §6.2): it reads and works but may not post or write the notes.
+    public let muted: Bool
+    public let mutedBy: String?
     /// The state as the service wrote it; one this app does not know reads as `error`.
     public let stateWord: String?
     public let card: SeatCard?
@@ -134,10 +137,11 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, stateWord = "state" }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stateWord = "state" }
 
     public init(handle: String, kind: String = "session", terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = Room.you,
-                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil) {
+                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, muted: Bool = false, mutedBy: String? = nil,
+                state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil) {
         self.kit = kit
         self.handle = handle
         self.kind = kind
@@ -148,6 +152,8 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         self.canAdd = canAdd
         self.byAgent = byAgent
         self.left = left
+        self.muted = muted
+        self.mutedBy = mutedBy
         self.stateWord = state?.rawValue
         self.card = card
     }
@@ -163,6 +169,8 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         canAdd = (try? c.decodeIfPresent(Bool.self, forKey: .canAdd)) ?? false
         byAgent = (try? c.decodeIfPresent(Bool.self, forKey: .byAgent)) ?? false
         left = RoomJSON.int(c, .left)
+        muted = (try? c.decodeIfPresent(Bool.self, forKey: .muted)) ?? false
+        mutedBy = try? c.decodeIfPresent(String.self, forKey: .mutedBy)
         stateWord = try? c.decodeIfPresent(String.self, forKey: .stateWord)
         card = try? c.decodeIfPresent(SeatCard.self, forKey: .card)
         kit = try? c.decodeIfPresent(Bool.self, forKey: .kit)
@@ -650,6 +658,16 @@ public extension DaemonClient {
 
     func setCanAdd(_ on: Bool, seat handle: String, in room: String) async throws {
         _ = try await call("PATCH", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", body: try JSONSerialization.data(withJSONObject: ["canAdd": on]), timeout: 10)
+    }
+
+    /// Muted or unmuted by the user (docs/chatroom-v0.md §6.2): it reads and works, but may not post.
+    func setMuted(_ on: Bool, seat handle: String, in room: String) async throws {
+        _ = try await call("PATCH", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", body: try JSONSerialization.data(withJSONObject: ["muted": on]), timeout: 10)
+    }
+
+    /// The same conversation behind an ended seat goes on in a new terminal; the seat keeps its name.
+    func resumeSeat(_ handle: String, in room: String) async throws {
+        _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))/resume", timeout: 60)
     }
 
     func unseat(_ handle: String, in room: String) async throws {

@@ -329,7 +329,20 @@ final class RoomsModel {
         act { try await $0.setCanAdd(on, seat: seat, in: id) }
     }
 
-    func remove(seat: String) {
+    /// Muted or unmuted: it reads and works, but may not post in the room.
+    func setMuted(_ on: Bool, seat: String) {
+        guard let id = selected else { return }
+        act { try await $0.setMuted(on, seat: seat, in: id) }
+    }
+
+    /// The same conversation behind an ended seat goes on in a new terminal; the card stays open to show it back.
+    func resume(seat: String) {
+        guard let id = selected else { return }
+        act { try await $0.resumeSeat(seat, in: id) }
+    }
+
+    /// Out of the room (docs/chatroom-v0.md §6.2): the session itself keeps running.
+    func kick(seat: String) {
         guard let id = selected else { return }
         card = nil
         act { try await $0.unseat(seat, in: id) }

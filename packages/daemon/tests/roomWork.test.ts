@@ -8,8 +8,9 @@ import { describe, expect, it } from "vitest";
 import { mountRooms } from "../src/api/rooms.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RoomDelivery } from "../src/rooms/delivery.js";
+import { follow, type Running } from "../src/rooms/follow.js";
 import { RoomKit } from "../src/rooms/kit.js";
-import type { SeatLive } from "../src/rooms/state.js";
+import type { SeatLive, SeatState } from "../src/rooms/state.js";
 import { filesRoot, RoomStore } from "../src/rooms/store.js";
 
 function made() {
@@ -18,10 +19,18 @@ function made() {
   const trashed: { name: string; to: string }[] = [];
   const bin = mkdtempSync(join(tmpdir(), "as-roomw-trash-"));
   const store = new RoomStore(home, () => now, (dir, name) => { const to = join(bin, name); renameSync(dir, to); trashed.push({ name, to }); });
-  const seat = (terminal: string): SeatLive | null => ({ state: "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: "default", node: null } });
+  const states = new Map<string, SeatState>([["api", "idle"], ["ui", "idle"]]);
+  const seat = (terminal: string): SeatLive | null => ({ state: states.get(terminal) ?? "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: "default", node: null } });
   const delivery = new RoomDelivery({ store, seat });
   const changed: string[] = [];
-  const kit = new RoomKit({ store, seat, delivery, now: () => now, changed: (id) => { changed.push(id); } });
+  const resumed: string[] = [];
+  const org = {
+    profiles: async () => [], models: async () => ({}), check: async () => ({ status: "healthy", checkedAt: 0, message: "" }),
+    sessions: async () => ({ running: [], resumable: [] }),
+    start: async () => "started",
+    resume: async (req: { session: string; cwd: string }) => { resumed.push(`${req.session}@${req.cwd}`); states.set("t9", "idle"); return { id: "t9" }; },
+  };
+  const kit = new RoomKit({ store, seat, delivery, now: () => now, changed: (id) => { changed.push(id); }, org: () => org });
   const room = store.create({ name: "login" });
   for (const t of ["api", "ui"]) store.seat(room.id, { terminal: t, was: seat(t)!.card });
   const say = async (terminal: string, name: string, args: Record<string, unknown> = {}) => kit.call(terminal, name, args);
@@ -31,7 +40,7 @@ function made() {
     const res = await app.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
     return { status: res.status, body: await res.json() as any };
   };
-  return { home, store, trashed, kit, room, say, call, changed, later: (minutes: number) => { now += minutes * 60_000; } };
+  return { home, store, trashed, kit, room, say, call, changed, states, resumed, later: (minutes: number) => { now += minutes * 60_000; } };
 }
 
 describe("a room's shared folder", () => {
@@ -206,5 +215,81 @@ describe("a message of files alone", () => {
     const { store, room } = made();
     expect(store.post(room.id, { from: "you", text: "  ", files: ["/w/a.png"], to: ["api"] })).toMatchObject({ text: "", files: ["/w/a.png"], to: ["api"] });
     expect(() => store.post(room.id, { from: "you", text: "  ", files: [" "] })).toThrow();
+  });
+});
+
+describe("an admin's room_manage (§6.2)", () => {
+  it("resumes, mutes, unmutes and kicks — but not itself, another admin or the user", async () => {
+    const { store, room, say, states, resumed } = made();
+    store.setCanAdd(room.id, "api", true);
+    // A plain member can not.
+    expect((await say("ui", "room_manage", { action: "mute", handle: "api" })).isError).toBe(true);
+    // Mute stops speech, not work.
+    expect((await say("api", "room_manage", { action: "mute", handle: "ui" })).text).toContain("is muted by you");
+    expect((await say("ui", "room_post", { text: "spam" })).isError).toBe(true);
+    expect((await say("ui", "room_tasks", { action: "add", title: "still works" })).isError).toBeFalsy();
+    expect((await say("api", "room_manage", { action: "unmute", handle: "ui" })).text).toContain("can speak again");
+    // Resume the ended one: the same seat and handle.
+    states.set("ui", "exited");
+    // A seat that kept no session can not be found again; one that did is resumed where it was started.
+    expect((await say("api", "room_manage", { action: "resume", handle: "ui" }))).toMatchObject({ isError: true, text: expect.stringContaining("before session ids were kept") });
+    store.note(room.id, "ui", { id: "sess-ui", cwd: "/start/ui", mode: "auto" });
+    const back = await say("api", "room_manage", { action: "resume", handle: "ui" });
+    expect(back.isError).toBeFalsy();
+    expect(back.text).toContain("is back");
+    expect(resumed).toEqual(["sess-ui@/start/ui"]);
+    expect(store.roomsOf("t9")[0]?.seat.handle).toBe("ui");
+    // Kick: out of the room; the session keeps running.
+    expect((await say("api", "room_manage", { action: "kick", handle: "ui" })).text).toContain("out of");
+    expect(store.roomsOf("t9")).toEqual([]);
+    // Another admin, itself and the user are not an admin's to manage.
+    store.seat(room.id, { terminal: "t3", was: { agent: "claude-code", name: "other", cwd: "/w/t3", model: null, profile: null }, canAdd: true });
+    expect((await say("api", "room_manage", { action: "mute", handle: "other" })).isError).toBe(true);
+    expect((await say("api", "room_manage", { action: "mute", handle: "api" })).isError).toBe(true);
+    expect((await say("api", "room_manage", { action: "kick", handle: "you" })).isError).toBe(true);
+  });
+
+  it("a muted admin can not manage the room until unmuted", async () => {
+    const { store, room, say } = made();
+    store.setCanAdd(room.id, "api", true);
+    store.setMuted(room.id, "you", "api", true);
+    expect((await say("api", "room_manage", { action: "mute", handle: "ui" })).isError).toBe(true);
+  });
+});
+
+describe("seats follow their sessions", () => {
+  const was = (name: string, agent = "claude-code") => ({ agent, name, cwd: `/now/${name}`, model: null, profile: null });
+  const run = (id: string, name: string, over: Partial<Running> = {}): Running => ({ id, exited: false, session: `s-${name}`, resumedFrom: null, forked: false, cwd: `/start/${name}`, mode: "auto", was: was(name), ...over });
+
+  it("keep the session while the terminal lives, and go to the terminal it runs in after the service started again", () => {
+    const home = mkdtempSync(join(tmpdir(), "as-follow-"));
+    const store = new RoomStore(home);
+    const room = store.create({ name: "r" });
+    for (const name of ["api", "ui"]) store.seat(room.id, { terminal: `old-${name}`, was: was(name) });
+    expect(follow(store, [run("old-api", "api"), run("old-ui", "ui")])).toEqual([]);
+    expect(store.get(room.id).seats.find((s) => s.handle === "api")!.session).toEqual({ id: "s-api", cwd: "/start/api", mode: "auto" });
+    // The service started again: the old terminals are not known; the same sessions run in new ones. A fork is not it.
+    const after = new RoomStore(home);
+    const moved = follow(after, [run("new-api", "api"), run("new-ui", "x", { session: "other", resumedFrom: "s-ui" }), run("fork", "y", { session: "f", resumedFrom: "s-api", forked: true })]);
+    expect(moved).toEqual([room.id]);
+    expect(after.roomsOf("new-api")[0]?.seat.handle).toBe("api");
+    expect(after.roomsOf("new-ui")[0]?.seat.handle).toBe("ui");
+    expect(after.roomsOf("fork")).toEqual([]);
+    // Ended, and running nowhere: it stays where it was, to be resumed.
+    expect(follow(after, [run("new-api", "api", { exited: true })])).toEqual([]);
+    expect(after.roomsOf("new-api")[0]?.seat.handle).toBe("api");
+  });
+
+  it("find a seat taken before sessions were kept by its agent and name, when exactly one fits", () => {
+    const store = new RoomStore(mkdtempSync(join(tmpdir(), "as-follow-")));
+    const room = store.create({ name: "r" });
+    store.seat(room.id, { terminal: "gone-1", was: was("hello", "codex") });
+    store.seat(room.id, { terminal: "gone-2", was: was("hello") });
+    store.seat(room.id, { terminal: "gone-3", was: was("twin") });
+    follow(store, [run("a", "hello", { was: was("hello", "codex") }), run("b", "hello"), run("c", "twin"), run("d", "twin")]);
+    expect(store.roomsOf("a")[0]?.seat.handle).toBe("hello");
+    expect(store.roomsOf("b")[0]?.seat.handle).toBe("hello-2");
+    expect(store.roomsOf("c")).toEqual([]);
+    expect(store.roomsOf("d")).toEqual([]);
   });
 });

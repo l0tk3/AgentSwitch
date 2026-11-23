@@ -33,7 +33,8 @@ import { filesRoot, RoomStore } from "./rooms/store.js";
 import { RoomDelivery } from "./rooms/delivery.js";
 import { RoomKit } from "./rooms/kit.js";
 import type { SeatLookup } from "./rooms/state.js";
-import { seatLive } from "./api/rooms.js";
+import { runningOf, seatLive } from "./api/rooms.js";
+import { follow } from "./rooms/follow.js";
 import { roomOrg, type Ask } from "./api/roomOrg.js";
 
 /** How often what has not arrived in the rooms is looked at again. */
@@ -603,7 +604,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   if (terminalHost) { roomSeat = (terminal) => seatLive(terminalHost.get(terminal)); roomSay = (terminal, text) => terminalHost.say(terminal, text); }
   // A session's state changes without the rooms being told (it comes to rest, it ends): what has not arrived is
   // looked at again every little while.
-  const roomLooks = setInterval(() => roomDelivery.look(), ROOM_LOOK_MS);
+  // Each time, seats first follow their sessions (rooms/follow.ts): a session that runs in another terminal now — the
+  // service started again, or it was resumed elsewhere — has its seat there.
+  const roomFollows = (): void => { if (terminalHost) { try { follow(rooms, terminalHost.list().map(runningOf)); } catch (err) { console.error("rooms: follow", err); } } };
+  roomFollows();
+  const roomLooks = setInterval(() => { roomFollows(); roomDelivery.look(); }, ROOM_LOOK_MS);
   roomLooks.unref();
   const terminals = terminalHost ? {
     host: terminalHost,
@@ -654,7 +659,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomsChanged: () => roomDelivery.look(), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

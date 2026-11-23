@@ -79,6 +79,57 @@ describe("rooms as kept", () => {
     expect(store.setCanAdd(room.id, "lead", false).canAdd).toBe(false);
   });
 
+  it("lets the user or an admin mute a spammer, and stops its posts and notes — but not its work", () => {
+    const dir = home(), store = new RoomStore(dir);
+    const room = store.create({ name: "r" });
+    store.seat(room.id, { terminal: "t1", was: was("lead"), canAdd: true });
+    store.seat(room.id, { terminal: "t2", was: was("bot") });
+    store.seat(room.id, { terminal: "t3", was: was("other"), canAdd: true });
+    const muted = store.setMuted(room.id, "lead", "bot", true);
+    expect(muted.muted?.by).toBe("lead");
+    expect(() => store.post(room.id, { from: "bot", text: "spam" })).toThrow(/muted/);
+    expect(() => store.setNotes(room.id, "bot", "x")).toThrow(/muted/);
+    // It still takes and finishes tasks: a mute is about speaking, not about working.
+    expect(() => store.addTask(room.id, "bot", { title: "still works" })).not.toThrow();
+    expect(store.setMuted(room.id, "lead", "bot", false).muted).toBeUndefined();
+    // An admin may not mute another admin or itself; the user may.
+    expect(() => store.setMuted(room.id, "lead", "other", true)).toThrow(/Only the user/);
+    expect(() => store.setMuted(room.id, "lead", "lead", true)).toThrow(/itself/);
+    expect(store.setMuted(room.id, "you", "other", true).muted?.by).toBe("you");
+    expect(() => store.setMuted(room.id, "you", "you", true)).toThrow(/用户/);
+    // A muted admin loses its admin actions until unmuted; a plain member never had them.
+    store.setMuted(room.id, "you", "lead", true);
+    expect(() => store.setMuted(room.id, "lead", "bot", true)).toThrow(/muted/);
+    store.setMuted(room.id, "you", "lead", false);
+    expect(() => store.setMuted(room.id, "bot", "lead", true)).toThrow(/admin/);
+    // It survives a restart as it was.
+    expect(new RoomStore(dir).get(room.id).seats.find((s) => s.handle === "other")?.muted?.by).toBe("you");
+    // A kick drops it from the room and the mute goes with it; brought back, it is not still muted.
+    store.setMuted(room.id, "you", "bot", true);
+    store.unseat(room.id, "bot", "lead");
+    expect(store.roomsOf("t2")).toEqual([]);
+    expect(() => store.post(room.id, { from: "bot", text: "x" })).toThrow(/离开/);
+    const back = store.seat(room.id, { terminal: "t2", was: was("bot") });
+    expect(back.handle).toBe("bot");
+    expect(back.muted).toBeUndefined();
+  });
+
+  it("gives a resumed session its old seat, name and switch", () => {
+    const store = new RoomStore(home());
+    const room = store.create({ name: "r" });
+    const before = store.seat(room.id, { terminal: "t1", was: was("daemon"), canAdd: true });
+    store.setMuted(room.id, "you", "daemon", true);
+    const back = store.rebind(room.id, before.handle, "t2", was("daemon"));
+    expect(back.handle).toBe("daemon");
+    expect(back.face).toEqual(before.face);
+    expect(back.canAdd).toBe(true);
+    expect(back.muted?.by).toBe("you");
+    expect(store.roomsOf("t2")[0]?.seat.handle).toBe("daemon");
+    expect(store.roomsOf("t1")).toEqual([]);
+    expect(() => store.rebind(room.id, "daemon", "t2", was("daemon"))).not.toThrow();
+    expect(() => store.rebind(room.id, "you", "t3", was("you"))).toThrow(/用户/);
+  });
+
   it("addresses a message by its @names, keeps a receipt per seat until it is dealt with, and survives a restart", () => {
     const dir = home();
     let at = 1000;
@@ -119,21 +170,78 @@ describe("rooms as kept", () => {
   });
 });
 
+describe("bringing a seat back and keeping it quiet (§6.2)", () => {
+  it("resumes an ended seat under the same name, and refuses one still running", async () => {
+    const { call, store, resumed, terminals } = made();
+    const t3 = terminals.get("t3")!;
+    terminals.set("t3", { ...t3, status: "idle" });   // it sat down while running
+    const id = (await call("POST", "/rooms", { name: "r", terminals: ["t1", "t3"] })).body.room.id as string;
+    terminals.set("t3", { ...t3, status: "exited" });  // then its program ended
+    expect((await call("POST", `/rooms/${id}/seats/daemon/resume`)).status).toBe(409);
+    const back = await call("POST", `/rooms/${id}/seats/old/resume`);
+    expect(back.status).toBe(201);
+    expect(back.body.seat).toMatchObject({ handle: "old", terminal: "t9", state: "idle" });
+    expect(store.roomsOf("t9")[0]?.seat.handle).toBe("old");
+    // Where it was started (not where the agent has gone since), under its profile and its mode.
+    expect(resumed[0]?.body).toMatchObject({ harness: "claude-code", cwd: "/w", agentSessionId: "sess-1", profile: "p" });
+  });
+
+  it("resumes a seat whose terminal's record is gone (the service started again) from what the seat kept", async () => {
+    const { call, store, resumed, terminals } = made();
+    terminals.set("t3", { ...terminals.get("t3")!, status: "idle" });
+    const id = (await call("POST", "/rooms", { name: "r", terminals: ["t3"] })).body.room.id as string;
+    terminals.delete("t3");
+    // Nothing kept: it says so, and what to do.
+    expect(await call("POST", `/rooms/${id}/seats/old/resume`)).toMatchObject({ status: 409, body: { error: expect.stringContaining("重新拉进来") } });
+    store.note(id, "old", { id: "sess-7", cwd: "/start/old", mode: "bypass", profile: "work" });
+    const back = await call("POST", `/rooms/${id}/seats/old/resume`);
+    expect(back.status).toBe(201);
+    expect(back.body.seat).toMatchObject({ handle: "old", terminal: "t9" });
+    expect(resumed[0]?.body).toEqual({ harness: "claude-code", cwd: "/start/old", agentSessionId: "sess-7", profile: "work", mode: "bypass" });
+  });
+
+  it("mutes and unmutes from a card, and says who did it", async () => {
+    const { call, store } = made();
+    const id = (await call("POST", "/rooms", { name: "r", terminals: ["t1", "t2"] })).body.room.id as string;
+    const on = await call("PATCH", `/rooms/${id}/seats/daemon`, { muted: true });
+    expect(on.status).toBe(200);
+    expect(on.body.seat).toMatchObject({ handle: "daemon", muted: true, mutedBy: "you" });
+    expect(() => store.post(id, { from: "daemon", text: "x" })).toThrow(/muted/);
+    const off = await call("PATCH", `/rooms/${id}/seats/daemon`, { muted: false });
+    expect(off.body.seat).toMatchObject({ muted: false, mutedBy: null });
+    expect((await call("PATCH", `/rooms/${id}/seats/daemon`, {})).status).toBe(400);
+  });
+});
+
 function terminal(id: string, name: string, over: Partial<TerminalInfo> = {}): TerminalInfo {
-  return { id, harness: "claude-code", cwd: "/w", workdir: `/w/${name}`, model: "fable", modelNow: null, modeNow: null, mode: "default", name, status: "idle", notices: [], profile: { id: "p", name: "Work", color: "teal" }, ...over } as unknown as TerminalInfo;
+  return { id, harness: "claude-code", cwd: "/w", workdir: `/w/${name}`, model: "fable", modelNow: null, modeNow: null, mode: "default", name, status: "idle", notices: [], agentSessionId: "sess-1", profile: { id: "p", name: "Work", color: "teal" }, ...over } as unknown as TerminalInfo;
 }
 
 function made() {
   const terminals = new Map<string, TerminalInfo>([["t1", terminal("t1", "daemon")], ["t2", terminal("t2", "Mac App", { status: "working", modelNow: "opus" })], ["t3", terminal("t3", "old", { status: "exited" })]]);
   const store = new RoomStore(home());
   const changed: string[] = [];
+  const resumed: { terminal: string; body: unknown }[] = [];
+  const callLocal = async (method: string, path: string, body?: unknown) => {
+    if (method === "GET" && path.startsWith("/terminals/")) {
+      const t = terminals.get(path.slice("/terminals/".length));
+      return t ? { status: 200, body: { terminal: t } } : { status: 404, body: { error: "not found" } };
+    }
+    if (method === "POST" && path === "/terminals/resume") {
+      const id = "t9";
+      terminals.set(id, terminal(id, "old", { status: "idle", agentSessionId: (body as { agentSessionId?: string } | undefined)?.agentSessionId ?? "sess-1" }));
+      resumed.push({ terminal: id, body });
+      return { status: 201, body: { terminal: terminals.get(id) } };
+    }
+    return { status: 404, body: { error: "no such route" } };
+  };
   const app = new Hono();
-  mountRooms(app, { rooms: store, roomsChanged: (id: string) => { changed.push(id); }, terminals: { host: { get: (id: string) => terminals.get(id) ?? null } } } as unknown as ApiDeps);
+  mountRooms(app, { rooms: store, roomsChanged: (id: string) => { changed.push(id); }, callLocal, terminals: { host: { get: (id: string) => terminals.get(id) ?? null } } } as unknown as ApiDeps);
   const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const res = await app.request(path, { method, headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: res.status, etag: res.headers.get("etag"), body: res.status === 304 ? null : await res.json() as any };
   };
-  return { call, terminals, store, changed };
+  return { call, terminals, store, changed, resumed };
 }
 
 describe("sessions talking among themselves", () => {

@@ -44,6 +44,9 @@ export type ApiDeps = {
   /** Something a room's seats may be waiting for changed (a message, a seat, a pause): what is to be given is looked
    *  at again. */
   readonly roomsChanged?: (roomId: string) => void;
+  /** This service's own routes, asked in process like a screen's (used to resume the session behind a room seat,
+   *  docs/chatroom-v0.md §6.2). Absent: resuming from a room is not available. */
+  readonly callLocal?: import("./roomOrg.js").Ask;
   /** Clash Integration (docs/clash-v0.md). */
   readonly clash?: import("../clash/integration.js").ClashIntegration;
   /** The browsers of profiles that have a proxy of their own (docs/profiles-v0.md §5.1). */
