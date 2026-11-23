@@ -446,6 +446,19 @@ final class RoomsModel {
         act { try await $0.trustAll(in: id) }
     }
 
+    /// `Always Trust`: the folders go on this Mac's list of trusted folders (agents started in them, or below them,
+    /// no longer ask), then the members asking now are answered as by `Trust`. A folder the service refuses (the home
+    /// folder, `/`) is said so, and nobody is answered.
+    func trustAll(always folders: [String]) {
+        guard let id = selected else { return }
+        act { client in
+            var list = try await client.trustedFolders()
+            for folder in folders { list = list.adding(folder) }
+            try await client.saveTrustedFolders(list)
+            try await client.trustAll(in: id)
+        }
+    }
+
     func delete() {
         guard let id = selected else { return }
         sheet = nil

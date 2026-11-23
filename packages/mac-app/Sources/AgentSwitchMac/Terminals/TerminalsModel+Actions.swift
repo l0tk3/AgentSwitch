@@ -477,6 +477,15 @@ extension TerminalsModel {
         }
     }
 
+    /// The folder on this Mac's list of trusted folders: agents started in it, or below it, no longer ask whether to
+    /// trust it. The service refuses the home folder and `/`, and says so.
+    func trustFolder(_ folder: String) {
+        let c = client()
+        Task {
+            do { try await c.trustFolder(folder) } catch { say((error as? DaemonError)?.reason ?? error.localizedDescription) }
+        }
+    }
+
     func deletePicked() { delete(pickedSessions) }
     func deleteAll(in cwd: String) { delete(ownSessions(in: cwd)) }
 

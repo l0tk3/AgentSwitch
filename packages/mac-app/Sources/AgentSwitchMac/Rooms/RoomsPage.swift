@@ -291,8 +291,12 @@ private struct RoomView: View {
         let asking = room.sessions.filter { $0.asks?.trust == true }
         let ended = room.sessions.filter { $0.state == .exited }
         if !asking.isEmpty {
+            // `Always Trust`: the folders on this Mac's list of trusted folders as well, so the next session started
+            // in one (or below one) does not ask.
+            let folders = Array(Set(asking.compactMap { $0.card?.cwd })).sorted()
             notice("\(asking.map { "@" + $0.handle }.joined(separator: " ")) 在等你确认是否信任它的文件夹，确认之前收不到消息。",
-                   help: asking.compactMap { $0.card?.cwd }.joined(separator: "\n"), word: asking.count > 1 ? "Trust All" : "Trust") { model.trustAll() }
+                   help: folders.joined(separator: "\n"), word: asking.count > 1 ? "Trust All" : "Trust",
+                   also: folders.isEmpty ? nil : ("Always Trust", { model.trustAll(always: folders) })) { model.trustAll() }
         }
         if !ended.isEmpty {
             notice("\(ended.map { "@" + $0.handle }.joined(separator: " ")) 的会话已经结束。", help: "用同一个会话、同一个目录恢复，席位不变。",
@@ -300,11 +304,15 @@ private struct RoomView: View {
         }
     }
 
-    private func notice(_ text: String, help: String, word: String, action: @escaping () -> Void) -> some View {
+    private func notice(_ text: String, help: String, word: String, also: (String, () -> Void)? = nil, action: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             BlinkingSquare()
             Text(text).font(.system(size: 12.5)).foregroundStyle(Look.ink).lineLimit(2).help(help)
             Spacer()
+            if let also {
+                Button(action: also.1) { BracketLabel(word: also.0) }.buttonStyle(BracketButtonStyle(size: 12))
+                    .help("以后在这些文件夹及其子文件夹中启动的会话不再询问：\n\(help)")
+            }
             Button(action: action) { BracketLabel(word: word) }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
         }
         .padding(.horizontal, 14)

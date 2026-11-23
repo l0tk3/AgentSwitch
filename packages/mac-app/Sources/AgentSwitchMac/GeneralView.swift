@@ -76,6 +76,8 @@ struct GeneralView: View {
 
             WorkDirSection()
 
+            TrustedFoldersSection()
+
             Section {
                 portField("Local", $local, help: "供网页控制台和本应用使用")
                 portField("Remote", $remote, help: "供已配对的 iPhone 使用（HTTPS）")
@@ -267,6 +269,67 @@ private struct WorkDirSection: View {
         case .known(let s): return model.shortPath(s.path)
         case .unsupported: return "内置服务版本较旧，不支持此设置"
         case .unknown: return model.daemonReady ? "Loading" : "Service Not Ready"
+        }
+    }
+}
+
+/// Folders trusted once in AgentSwitch: `GET|PUT /settings/trusted-folders`. An agent started in one, or below one,
+/// does not ask whether to trust it. The service refuses the home folder, one above it and `/`, and says so.
+private struct TrustedFoldersSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var list: TrustedFolders?
+    @State private var problem: String?
+    @State private var saving = false
+
+    var body: some View {
+        Section {
+            if let list {
+                if list.folders.isEmpty {
+                    Text("None").foregroundStyle(.secondary)
+                }
+                ForEach(list.folders, id: \.self) { folder in
+                    LabeledContent {
+                        Button("Remove") { save(list.removing(folder)) }.disabled(saving)
+                    } label: {
+                        Text(model.shortPath(folder)).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(folder)
+                    }
+                }
+            } else {
+                Text(model.daemonReady ? "Loading" : "Service Not Ready").foregroundStyle(.secondary)
+            }
+            if let problem {
+                Text(problem).foregroundStyle(.red).textSelection(.enabled)
+            }
+        } header: {
+            SectionLabel("Trusted Folders")
+        } footer: {
+            HStack(alignment: .top, spacing: 8) {
+                Footer("在这些文件夹及其子文件夹中启动的 Claude Code 与 Codex 不再询问是否信任该文件夹。不能添加主目录或根目录。")
+                Button("Add…") {
+                    guard let list, let url = FolderPanel.choose(message: "在此文件夹及其子文件夹中启动的 agent 不再询问是否信任它。", startingAt: list.folders.last) else { return }
+                    save(list.adding(url.path))
+                }
+                .disabled(list == nil || saving)
+            }
+        }
+        .task(id: model.daemonReady) { await load() }
+    }
+
+    private func load() async {
+        guard model.daemonReady else { return }
+        do { list = try await model.client.trustedFolders() } catch { problem = (error as? DaemonError)?.reason ?? error.localizedDescription }
+    }
+
+    private func save(_ next: TrustedFolders) {
+        saving = true
+        Task {
+            defer { saving = false }
+            do {
+                list = try await model.client.saveTrustedFolders(next)
+                problem = nil
+            } catch {
+                problem = (error as? DaemonError)?.reason ?? error.localizedDescription
+            }
         }
     }
 }

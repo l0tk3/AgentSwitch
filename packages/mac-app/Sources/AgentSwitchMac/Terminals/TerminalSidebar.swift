@@ -330,6 +330,11 @@ private struct FolderLine: View {
             Button("Show in Files") { model.files?.show(folder: folder.cwd) }
             // Out of the list with everything under it; nothing is deleted, and the `+` beside the search has it back.
             Button("Hide Folder") { model.sessionFolder("hide", folder.cwd) }
+            // Trusted once in AgentSwitch: an agent started here, or below, does not ask whether to trust the folder.
+            // This Mac's own list (Settings › General › Trusted Folders); not offered for another node's folders.
+            if !model.client().isRemote {
+                Button("Trust in AgentSwitch") { model.trustFolder(folder.cwd) }
+            }
             let own = model.ownSessions(in: folder.cwd).count
             if own > 0 {
                 Divider()
