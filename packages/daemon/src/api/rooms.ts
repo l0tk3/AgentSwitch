@@ -82,7 +82,7 @@ const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: 
 const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boolean().optional() }).strict();
 const SetSeat = z.object({ canAdd: z.boolean().optional(), muted: z.boolean().optional() }).strict()
   .refine((o) => o.canAdd !== undefined || o.muted !== undefined, "nothing to change");
-const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(4096)).max(10).optional() }).strict();
+const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(4096)).max(10).optional(), expects: z.enum(["none", "answer"]).optional() }).strict();
 const WriteNotes = z.object({ text: z.string().max(100_000) }).strict();
 const Read = z.object({ seq: z.number().int().nonnegative() }).strict();
 /** What a terminal's own programs ask (the Kit's tool server, the agent's waiting program). */
@@ -281,7 +281,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       // A file is named by where it is on this node; one that is not there is not sent.
       const gone = (body.data.files ?? []).find((f) => !existsSync(f));
       if (gone) return c.json({ error: `文件不存在：${gone}` }, 400);
-      const message = rooms.post(id, { from: YOU, text: body.data.text, ...(body.data.files ? { files: body.data.files } : {}), ...(body.data.replyTo === undefined ? {} : { replyTo: body.data.replyTo }) });
+      const message = rooms.post(id, { from: YOU, text: body.data.text, ...(body.data.files ? { files: body.data.files } : {}), ...(body.data.replyTo === undefined ? {} : { replyTo: body.data.replyTo }), ...(body.data.expects ? { expects: body.data.expects } : {}) });
       deps.roomsChanged?.(id);
       return c.json({ message, receipts: rooms.get(id).receipts[message.seq] ?? {} }, 201);
     } catch (err) { return refused(c, err); }

@@ -398,3 +398,23 @@ describe("an answer", () => {
     expect(store.post(room.id, { from: "api", text: "补一句", replyTo: 1 }).to).toEqual([]);
   });
 });
+
+describe("whether a message expects a reply", () => {
+  it("is said by its sender, written in its envelope, and what the reader is told follows it", async () => {
+    const { store, room, say } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
+    await say("api", "room_post", { text: "@ui T1 done, see plan.md", expects: "none" });
+    const report = delivery.atTurnEnd("ui")!;
+    expect(report).toContain("Reply: not expected");
+    expect(report).toContain("expects no reply: do not answer it unless");
+    await say("api", "room_post", { text: "@ui which port?", expects: "answer" });
+    const question = delivery.atTurnEnd("ui")!;
+    expect(question).toContain("Reply: expected");
+    expect(question).toContain("waits for an answer");
+    store.post(room.id, { from: "you", text: "@ui hi" });
+    expect(delivery.atTurnEnd("ui")).toContain("If an answer is needed");
+    // The task list's own notices expect none.
+    store.addTask(room.id, "you", { title: "x", owner: "ui" });
+    expect(store.last(room.id)!.expects).toBe("none");
+  });
+});

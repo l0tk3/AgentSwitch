@@ -97,6 +97,9 @@ export type Message = {
   readonly at: number;
   /** Files it comes with, by where they are on this node (§3 附件). */
   readonly files?: readonly string[];
+  /** Whether its sender waits for an answer: `none` — it is told for its knowledge, and answering only adds noise
+   *  (a report, a notice); `answer` — it is a question or a request. Absent: the reader judges. */
+  readonly expects?: "none" | "answer";
 };
 
 /** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
@@ -479,7 +482,7 @@ export class RoomStore {
     const here = new Set(this.get(id).seats.filter((s) => s.left === undefined && s.kind === "session").map((s) => s.handle));
     const whom = [...new Set(to)].filter((h) => h !== from && here.has(h));
     if (!whom.length) return;
-    try { this.post(id, { from, text: `〔任务表〕${whom.map((h) => `@${h}`).join(" ")} ${text}`, to: whom }); } catch { /* muted, or the room is full of words: the list itself still says it */ }
+    try { this.post(id, { from, text: `〔任务表〕${whom.map((h) => `@${h}`).join(" ")} ${text}`, to: whom, expects: "none" }); } catch { /* muted, or the room is full of words: the list itself still says it */ }
   }
 
   /** A member changes a task. Taking it (`state: "doing"`) makes it that member's; one another member is doing is not
@@ -588,7 +591,7 @@ export class RoomStore {
     return this.save({ ...room, notes: clean ? { text: clean, at: this.now(), by: seat.handle } : null });
   }
 
-  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[] }): Message {
+  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[]; readonly expects?: "none" | "answer" }): Message {
     const room = this.get(id);
     const from = this.seatOf(room, o.from);
     if (from.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
@@ -612,7 +615,7 @@ export class RoomStore {
       ? here.filter((s) => s.kind === "session").map((s) => s.handle)
       : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
-    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}) };
+    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}) };
     const waiting = to.filter((h) => h !== YOU);
     this.messagesOf(id).push(message);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -766,5 +769,5 @@ function messageFrom(v: unknown): Message | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   if (!num(o.seq) || !str(o.from) || !str(o.text) || !num(o.at)) return null;
-  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}) };
+  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}) };
 }

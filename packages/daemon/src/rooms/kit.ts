@@ -43,7 +43,8 @@ const TOOLS: readonly KitTool[] = [
         text: { type: "string", description: "The message. @name addresses a member; @you is the user." },
         to: { type: "array", items: { type: "string" }, description: "Members to address, besides any @name in the text." },
         files: { type: "array", items: { type: "string" }, description: "Files to point the others at, by absolute path on this machine (they are not copied; the others read them where they are)." },
-        reply_to: { type: "integer", description: "The number of the message this answers (the #n in its envelope)." },
+        reply_to: { type: "integer", description: "The number of the message this answers (the #n in its envelope). It is sent to that message's author too." },
+        expects: { type: "string", enum: ["none", "answer"], description: "Say it every time you address someone: `none` — you report or inform (done, a result, a file) and want no reply; `answer` — you ask or request and wait for one. Readers are told, and do not answer what expects none." },
         room: ROOM_ARG,
       },
       required: ["text"],
@@ -441,7 +442,8 @@ export class RoomKit {
     const to = Array.isArray(args.to) ? args.to.filter((v): v is string => typeof v === "string") : [];
     const replyTo = int(args.reply_to);
     const files = Array.isArray(args.files) ? args.files.filter((v): v is string => typeof v === "string") : [];
-    const message = this.o.store.post(room.id, { from: seat.handle, text, to, files, ...(replyTo === undefined ? {} : { replyTo }) });
+    const expects = args.expects === "none" || args.expects === "answer" ? args.expects : undefined;
+    const message = this.o.store.post(room.id, { from: seat.handle, text, to, files, ...(replyTo === undefined ? {} : { replyTo }), ...(expects ? { expects } : {}) });
     this.o.changed?.(room.id);
     this.o.delivery.look();
     const now = this.o.store.get(room.id);
