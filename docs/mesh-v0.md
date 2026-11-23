@@ -168,6 +168,8 @@ Mac 上网关跑在独立的服务账户里（`gate-service-v0.md`）：登录�
 
 建议：两档都做，安装时问；有 sudo 就用独立账户。服务器上 agent 更常以自动或跳过权限的方式跑，文件层面的隔离比在 Mac 上更要紧。先后上可以先同用户（已验证），独立账户作为后一步。
 
+**2026-11-23 两档都已做**（`docs/gate-simple-v0.md` §5 Linux 一列）。命令不是上面写的 `agentswitch gate system-install`，而是用节点自己运行时里的网关：`sudo …/python/bin/secret-gate system install --owner-uid <uid> --port <网关端口> --runtime <运行时>`，与 Mac 同一个 `system install|update|rotate-key|uninstall`；AgentSwitch 自己从不运行 sudo，`agentswitch gate`、`doctor`、`config` 的 Keys 页和 `install.sh` 的结尾把这条命令连同本机的路径、uid、端口打印出来，由用户自己运行。系统用户叫 `agentswitch-gate`；目录是 `/var/lib/agentswitch/{gate,gate-public,gate-service.json}`，程序是 root 拥有的 `/opt/agentswitch/gate-runtime/`（从用户的运行时以加固方式复制，服务只运行这份），`gate-public` 只对登录用户的主组开放（0750）。是否装了服务与网关一样只看 `gate-service.json`：装了时看护进程不起自己的网关、服务无响应也不兜底，把服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 和端口交给 daemon（即 §4.2 里“独立账户时再加”的两项）；没装时三处界面用五种语言明说“此节点的网关以你的账户运行：只防误看，不防顺手读取”。“安装时问”没有做成交互：`install.sh` 不需要 root，只在结尾打印这条命令。
+
 ### 4.6 在没有浏览器的机器上登录 agent
 
 AgentSwitch 不搬运登录：每台主机上的 agent 各自登录，凭据留在 agent 自己的地方。按各家的说明，无头机器上都能在终端里完成（打印网址，在别的设备上登录，把码贴回来；或填密钥）。配合已有的“没登录的配置开终端就从登录开始”，在手机或 Mac 上新建一个终端就能把登录做完：终端里出网址，在手边的设备上打开，登录后把码贴回终端。没验证（§8）。
@@ -303,7 +305,7 @@ AgentSwitch 不搬运登录：每台主机上的 agent 各自登录，凭据留�
 2. 看护进程、打包（按架构）、安装脚本、systemd 用户服务、`update`、`uninstall`。——**已做**（2026-10-13）：`agentswitch node run`（daemon `src/keeper/`）照 Mac 应用的 `RuntimePlan`、`ChildEnvironment`、`Supervision` 做；`packages/linux`：`build-runtime.sh`（与 Mac 同版本的 Node 24.21.0、CPython 3.12.14，Python 依赖按架构各一份带哈希的锁）、`install.sh`（装与更新同一个脚本：新运行时建在旁边、切 `current`、重启、一分钟内不应答就切回去，留最新两份）、`service install|…|logs`。卸载是 README 里的三行命令，没做成子命令。
 3. 四个 agent 在 Linux 上逐个过（§8 的 1–4），修出来的问题。——**部分**（2026-10-13，见 §8）：Claude Code 终端与 Dispatch 执行器走通；Codex 终端起得来；OpenCode 2.0.28 装上、常驻 serve 起得来，没有 DeepSeek 密钥所以调度模型没跑；pi 没装。修出来的：Dispatch 的浏览器任务（Playwright MCP）在没有 Google Chrome 的机器上用 PATH 里的 Chromium。
 4. 命令行当界面：`terminals`、`new`、`resume`、`attach`。
-5. 凭据网关的独立账户（§4.5）。
+5. 凭据网关的独立账户（§4.5）。——**已做**（2026-11-23，gate-simple-v0 §5 Linux 一列，见 §4.5 末段）。
 6. 浏览器（无头 Camoufox）。
 
 ## 10. 已定与待拍板
@@ -323,7 +325,7 @@ AgentSwitch 不搬运登录：每台主机上的 agent 各自登录，凭据留�
 
 **还要定的**（都有建议）
 
-3. **Linux 上的凭据网关**：两档都做、安装时问、有 sudo 就用独立账户（建议）；还是只做同用户。
+3. **Linux 上的凭据网关**：两档都做、安装时问、有 sudo 就用独立账户（建议）；还是只做同用户。——2026-11-23 两档都做了（§4.5 末段）；不在安装时问，由用户自己运行打印出来的 sudo 命令。
 4. **界面上“按节点分开看、提醒汇总”**（建议）；还是合并成一张列表。
 5. **Linux 的安装形态**：一个按架构的压缩包加安装脚本、systemd 用户服务（建议）。以后可以加“从 Mac 上经 SSH 装到一台 Linux 并顺手配对”，要不要。
 6. **节点之间传新版本，谁的包能收**（§13）：只收和本机这一份同一张证书签的，开关默认关（建议）；还是签名不同的也能收，在接收方确认一次。

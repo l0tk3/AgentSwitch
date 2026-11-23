@@ -1,6 +1,6 @@
 # gate-simple-v0：凭据网关简化——最小服务账户、两处出口、一条规矩（草案）
 
-2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），其余未做。
+2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），§5 的 Linux 一列已做（§5 末尾），其余未做。
 
 本稿只管网关，路由器的 sealer 不在本稿范围（用户定：先不管）。
 
@@ -130,6 +130,18 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 
 Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私钥放在 0600 文件里。界面上明确提示：“此节点只防误看，不防顺手读取”。
 
+**Linux 已做（2026-11-23，第 3 步）**：
+
+- **平台层**：`secret_gate/platform/base.py` 的 `GatePlatform` 是每个系统要给的东西：路径（`system_root`、`runtime_dir`、`services_dir`）、属主（`root_owner`、服务账户）、建账户（`account_ops`、`gather_account`）、两个服务的定义与启停（`service_files`、`stop_ops`、`start_ops`、`reload_proxy_ops`）、对端 uid（`peer_uid`）。只产出数据（`system_ops` 的操作），不执行命令。`platform/macos.py` 是原来的 dscl / sysadminctl / launchctl / LaunchDaemon / `LOCAL_PEERCRED`，搬过去后安装、更新、换钥匙、卸载的计划与搬之前逐字节相同（macOS 的测试只改了导入，一行没动）；`platform/linux.py` 是新的；Windows 在这里加第三个模块。`system_plan` 只写一份，`SystemLayout(prefix, platform)`、`SystemLayout.native()` 给出各系统的路径，`rpc_protocol.peer_uid` 交给平台层。
+- **账户**：系统用户 `agentswitch-gate`，`useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin`（没有 `useradd` 时用 Debian 的 `adduser --system --group`；nologin 按 `/usr/sbin`、`/sbin`、`/usr/bin` 找，都没有用 `/bin/false`）。已有同名账户只在 shell 是 nologin/false、uid 不是 0 时沿用。装完用 `getent passwd`、`getent group` 核对。
+- **目录**：`/var/lib/agentswitch/`（root 0755）下 `gate/`（服务账户 0700，同 macOS）、`gate-public/`（服务账户所有，**属组是登录用户的主组，0750**：只有登录用户的组进得去，其他本机账户连公钥和 CA 证书都读不到；socket 仍是 0666，靠对端 uid 放行）、`gate-service.json`（root 0644，是否装了服务只看它）。程序在 `/opt/agentswitch/gate-runtime/`（root 所有）。日志文件安装时预先建好再交给服务账户，免得 systemd 以 root 建（单元用 `StandardOutput=append:`）。
+- **运行时**：Linux 节点的运行时装在登录用户可写的 `~/.local/share/agentswitch/runtime/<stamp>`。`system install|update --runtime <它>` 以 root 把其中的 `python/`、`secret-gate/`、`VERSIONS` 用与 macOS 相同的加固复制到 `/opt/agentswitch/gate-runtime`（不跟随链接、每项须属于运行时的属主），单元只运行这份副本。上表“没有 App 包问题”一格不对：问题一样在，只是包换成了用户自己的运行时——`sudo` 运行的就是它，那一刻它若已被 agent 改过，装进去的就是改过的程序（同 §6 的“已知不防”）。
+- **systemd**：`/etc/systemd/system/agentswitch-gate-{rpc,proxy}.service`：`User=`/`Group=agentswitch-gate`，环境同 LaunchDaemon（`SECRET_GATE_HOME`、`HOME`、`SECRET_GATE_PUBLIC`、root 拥有的 `PATH`），`UMask=0077`、`Restart=always`，加固 `NoNewPrivileges`、`ProtectSystem=strict`（`ReadWritePaths` 只有网关目录和公开目录）、`ProtectHome`、`PrivateTmp`、`PrivateDevices`、内核与控制组保护、`RestrictAddressFamilies`、空的 `CapabilityBoundingSet`（`systemd-analyze security`：4.9 OK）。装、更新时 `daemon-reload` 再 `enable --now`；换钥匙 `systemctl kill --signal=SIGHUP`；卸载 `disable --now` 后 `daemon-reload`，账户和（默认）钥匙保留。
+- **接口**：`gate.sock` 的对端 uid 由 `SO_PEERCRED` 给出，放行规则不变（root 与 `ownerUid`）。
+- **命令**：`sudo …/secret-gate system install --owner-uid <uid> --port <端口> --runtime <运行时>`（不给 `--owner-uid` 时取 `SUDO_UID`）、`update`、`rotate-key`、`uninstall`、`status`，与 macOS 同一套；测试用 `--root <前缀> --platform linux` 在 Mac 上也能跑全套。拒绝信息按平台说：Linux 上是“凭据网关由系统服务管理，请用 sudo secret-gate system install|update|rotate-key|uninstall 操作。”
+- **daemon（Linux 节点）**：`src/keeper/gateService.ts` 与网关同样只看 `gate-service.json`（读不了也按已装算）。装了时看护进程不起自己的网关、不在用户目录建钥匙，服务无响应时只记日志、不兜底；把服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 和端口交给 daemon。配置出现、消失或服务端口变了（`update --port`），看护进程在下一次探测时交接：停掉或起回自己的网关，带新环境重启 daemon。`agentswitch gate`（新）、`doctor`、`config` 的 Keys 页说明网关在哪个账户下，并打印要用户自己运行的确切命令（本机的路径、uid、端口都填好）；AgentSwitch 从不运行 sudo。没装时三处用五种语言明说“此节点的网关以你的账户运行：只防误看，不防顺手读取”（daemon `src/i18n/`）；装了时 Keys 页不再给“创建密钥对”，改给 `rotate-key` 命令。`install.sh` 结尾运行 `agentswitch gate`（服务的运行时比节点的旧时打印 `system update`）。顺手修了看护进程第一次运行时建钥匙仍用已删除的 `keys new` 的问题（改为 `keygen`）。
+- **实机验证**（OrbStack 里一台随手建的 Ubuntu 24.04 arm64，systemd 255，验证后删除）：`install.sh` 造运行时、起用户服务，`agentswitch gate` 与 doctor 说出同用户一档和安装命令；照打印的命令 `sudo … system install` 14 步全过（4 秒），看护进程下一次探测就停掉自己的网关、让出 8080，daemon 带上服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 重启；两个进程以 `agentswitch-gate` 运行在 `/opt/agentswitch/gate-runtime`；登录用户读 `gate/`、`key.priv`、CA 私钥都是 Permission denied，`keys --json`、`enc --batch`、`system status`、`logs tail` 照常，`keygen` 被拒；经服务的代理对本机回显服务替换了密文、回显被遮成 `[REDACTED:vm/test]`；另一个本机用户进不了 `gate-public`，把它加进登录用户的组后能连到 socket，被 `SO_PEERCRED` 拒绝（rpc 日志 `uid 1000 is not allowed`）；`systemd-analyze verify` 通过；`rotate-key` 后公钥变了、代理日志 `key reloaded`；`update --port 8181` 换了端口（实机发现看护进程仍探测 8080，已修：端口变了也交接）；`uninstall` 停掉并去掉单元，看护进程回到同用户一档、重新起自己的网关。网关的 pytest 在这台机器上 678 项通过（只跳过 macOS 的 `LOCAL_PEERCRED` 一项和两项要 Chromium 的）。
+
 ## 6. 安装与更新（macOS）
 
 - 安装：一次管理员授权，建账户、建目录、生成新钥匙、复制运行时、装 LaunchDaemon。不碰用户目录。
@@ -141,7 +153,7 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 
 1. **脱敏器补齐**（§3.1、§3.2）与**封装下限、长度填充**（§3.3、§3.4）。它直接对应“推不出”，与服务的去留无关，先做。
 2. **精简服务**（§1、§2）：删方法、删多钥匙、删迁移、删 repair；daemon、Mac、iPhone、Android 同步改。
-3. **Linux 服务账户**（§5）：安装脚本、systemd 单元、`SO_PEERCRED`。
+3. **Linux 服务账户**（§5）：安装脚本、systemd 单元、`SO_PEERCRED`。——已做（2026-11-23，见 §5 末尾，含实机验证）。
 4. **Windows**（§5）：服务、命名管道、ACL，以及 Windows CI。
 5. 重写 `BOUNDARY.md`：按“出口 × 输出”列表，开头写明 §0 的“不防”。`gate-service-v0.md` 标为“已被本稿收窄”。
 

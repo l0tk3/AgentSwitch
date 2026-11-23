@@ -7,7 +7,7 @@
 - `packages/secret-gate/` 凭据层（Python）：模型只拿密文或任务范围内的短引用 `enc:ref:`，网络层与浏览器 gate 解密。自带 venv、pytest、AGENTS.md；`BOUNDARY.md` 是各入口的安全边界清单，改浏览器或凭据入口时同步更新
 - `packages/secret-gate-ui/` macOS 原生界面（SwiftUI + SwiftPM）：管理命名密钥对、单条/批量生成密文，全部通过 secret-gate CLI，不自己做密码学
 - `packages/mac-app/` macOS 菜单栏应用（SwiftUI + SwiftPM + xcodegen）：内置 Node/Python 运行时，看护 gate 与 daemon，配对二维码、设备、模型、密钥、环境检测；`scripts/build-app.sh` 打出自包含的 `AgentSwitch.app`（`docs/app-v0.md` §4）
-- `packages/linux/` Linux 节点（无窗口，`docs/mesh-v0.md` §4）：`scripts/build-runtime.sh` 造与 Mac 应用同版本的自包含运行时，`scripts/install.sh` 装进 `~/.local/share/agentswitch` 并交给 systemd 用户服务；看护进程是 daemon 的 `agentswitch node run`（`src/keeper/`）
+- `packages/linux/` Linux 节点（无窗口，`docs/mesh-v0.md` §4）：`scripts/build-runtime.sh` 造与 Mac 应用同版本的自包含运行时，`scripts/install.sh` 装进 `~/.local/share/agentswitch` 并交给 systemd 用户服务；看护进程是 daemon 的 `agentswitch node run`（`src/keeper/`）；凭据网关可由用户自己运行一次 `sudo …/secret-gate system install` 放到系统用户 `agentswitch-gate` 下（`docs/gate-simple-v0.md` §5，`agentswitch gate` 打印这条命令）
 - `.github/workflows/ci.yml` GitHub CI：每次推送与 PR 跑各 package 的测试（daemon、secret-gate、mac-app、ios-app、secret-gate-ui），造 Linux 运行时（x86_64、aarch64，各用 `smoke.sh` 起一次）、Mac 应用（临时签名）和 iPhone 模拟器版
 - `packages/ios-app/` iPhone 应用（SwiftUI，iOS 17+，xcodegen）：`AgentSwitchKit` 纯逻辑包（配对、钉证书指纹、本地造密文、事件流）+ 界面；`scripts/e2e-live.sh` 用它连打包后的运行时做端到端（`docs/app-v0.md` §5）
 - `packages/android-app/` Android 应用（Kotlin + Jetpack Compose，Android 10+，Gradle）：`kit` 模块是 `AgentSwitchKit` 逐文件的 Kotlin 移植（连同测试，`./gradlew :kit:test` 在 Mac 上跑），`app` 模块是界面与手机才有的东西（Keystore、扫码、服务发现、通知）；页面、文案与样子取自 iPhone 版；`scripts/e2e-service.sh` 起一个随手可丢的服务来试（`docs/app-v0.md` §5b）
