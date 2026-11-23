@@ -387,7 +387,7 @@ struct RoomMemberRow: View {
         .onHover { hovering = $0 }
     }
 
-    private var sub: String { [seat.state?.word, seat.canAdd ? "Admin" : nil, seat.muted ? "Muted" : nil].compactMap { $0 }.joined(separator: " · ") }
+    private var sub: String { [seat.state?.word, seat.canAdd ? "Admin" : nil, seat.muted ? "Muted" : nil, seat.unread > 0 ? "\(seat.unread) Unread" : nil].compactMap { $0 }.joined(separator: " · ") }
 }
 
 /// A member's card (§1 名片): who it is, where, in what state, who seated it; the Kit's one switch (§6); and what the
@@ -433,6 +433,7 @@ struct RoomMemberCard: View {
                 if seat.canAdd { line("Role", "Admin") }
                 if seat.muted { line("Muted", "by @" + (seat.mutedBy ?? "?"), color: .waiting) }
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
+                if seat.here { line("Unread", seat.unread == 0 ? "Read everything" : "\(seat.unread) messages", help: "房间里它还没读过的消息数（它入座之后别人说的）。") }
                 if let asks = seat.asks { line("Asks", asks.title, color: .waiting, help: asks.options.joined(separator: "\n")) }
                 if let stats = seat.stats { line("Room Cost", stats.says, help: "这个成员在房间里的开销：被唤醒几次、送进去多少字、发了几条消息、调了几次房间工具。花了多少 token 要看它自己的用量。") }
                 if let claim { line("Changing", "\(claim.names) → \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }

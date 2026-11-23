@@ -28,6 +28,8 @@ export type SeatView = {
   /** Muted by an admin or the user (§6.2): it reads and works but may not post or write the notes. */
   readonly muted: boolean; readonly mutedBy: string | null;
   readonly state: SeatState | null; readonly card: SeatCard | null;
+  /** How many of the room's messages it has not read yet (said since it sat down, by others); null for the user. */
+  readonly unread: number | null;
   /** What its own screen asks now, when it shows a list to choose from (Claude Code's "trust this folder?" at its
    *  start): the question and the rows. Answered with `POST /terminals/:id/choices`, or for all at once with
    *  `POST /rooms/:id/trust`. Null: nothing. */
@@ -86,12 +88,12 @@ export function seatLive(info: TerminalInfo | null): SeatLive | null {
   return info ? { state: seatState(info), card: { ...wasOf(info), mode: info.modeNow ?? info.mode, node: null } } : null;
 }
 
-export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean, stats?: SeatStats): SeatView {
+export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean, stats?: SeatStats, unread = 0): SeatView {
   const info = seat.terminal ? host?.get(seat.terminal) ?? null : null;
   const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null, muted: seat.muted !== undefined, mutedBy: seat.muted?.by ?? null };
-  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null, stats: null, asks: null };
+  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null, stats: null, asks: null, unread: null };
   const was = info ? wasOf(info) : seat.was ?? null;
-  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false, stats: stats ?? { wakes: 0, chars: 0, posts: 0, calls: 0 },
+  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false, stats: stats ?? { wakes: 0, chars: 0, posts: 0, calls: 0 }, unread,
     asks: info?.choices && info.status !== "exited" ? { title: info.choices.title, options: info.choices.options.map((o) => o.label), selected: info.choices.selected, trust: trustYes(info) !== null } : null };
 }
 
@@ -128,7 +130,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   };
 
   const seatsOf = (room: Room): SeatView[] => room.seats.map((seat) => {
-    const view = seatView(seat, host(), hasKit, room.stats[seat.handle]);
+    const view = seatView(seat, host(), hasKit, room.stats[seat.handle], seat.kind === "session" && seat.left === undefined ? rooms.unreadOf(room.id, seat.handle).length : 0);
     // What it is called now is kept for the day its terminal is gone.
     if (seat.terminal && view.card && seat.left === undefined && host()?.get(seat.terminal)) {
       const { mode: _mode, node: _node, ...was } = view.card;

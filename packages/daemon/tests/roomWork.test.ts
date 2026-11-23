@@ -593,13 +593,13 @@ describe("who has read a message", () => {
     const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
     store.seat(room.id, { terminal: "qa", was: { agent: "codex", name: "qa", cwd: "/w", model: null, profile: null } });
     await say("api", "room_post", { text: "@ui @qa the interface is in interface.md" });
-    expect((await say("api", "room_read")).text).toContain("[read by nobody yet]");
+    expect((await say("api", "room_read", { all: true })).text).toContain("[read by nobody yet]");
     delivery.atTurnEnd("ui");                                  // given whole: read
     expect(store.get(room.id).reads).toEqual({ 1: ["ui"] });
-    expect((await say("api", "room_read")).text).toContain("[read by @ui; not yet: @qa]");
+    expect((await say("api", "room_read", { all: true })).text).toContain("[read by @ui; not yet: @qa]");
     await say("qa", "room_read");                              // read by itself
     expect((await call("GET", `/rooms/${room.id}`)).body.reads).toEqual({ 1: ["ui", "qa"] });
-    expect((await say("api", "room_read")).text).toContain("[read by @ui @qa]");
+    expect((await say("api", "room_read", { all: true })).text).toContain("[read by @ui @qa]");
     // An earlier message it only saw a line of is not read until it reads the room.
     store.post(room.id, { from: "api", text: "@ui two" });
     store.post(room.id, { from: "api", text: "@ui three" });
@@ -608,5 +608,57 @@ describe("who has read a message", () => {
     expect(store.get(room.id).reads["3"]).toEqual(["ui"]);
     store.post(room.id, { from: "you", text: "save" });        // the next change writes it
     expect(new RoomStore(home).get(room.id).reads["1"]).toEqual(["ui", "qa"]);
+  });
+});
+
+describe("the room's record in its shared folder", () => {
+  it("holds what was said, the tasks, the notes and the members as files, a member's handover note beside them, and is not listed among the members' files", async () => {
+    const { store, room, say } = made();
+    store.post(room.id, { from: "you", text: "@api start with the interface" });
+    await say("api", "room_tasks", { action: "add", title: "Interface", detail: "POST /login" });
+    await say("api", "room_notes", { text: "expiresAt is in milliseconds" });
+    const dir = store.recordDir(room.id);
+    const read = (name: string) => readFileSync(join(dir, name), "utf8");
+    expect(read("log.md")).toContain("@you → @api\n\n@api start with the interface");
+    expect(read("tasks.md")).toContain("## T1 [to do] Interface");
+    expect(read("notes.md")).toContain("expiresAt is in milliseconds");
+    expect(read("members.md")).toContain("- @api — claude-code");
+    expect(read("README.md")).toContain("Taking work over from another member");
+    // The next message is added to the log, not the log written anew.
+    store.post(room.id, { from: "api", text: "@ui the interface is done" });
+    expect(read("log.md").match(/^## #/gm)).toHaveLength(2);
+    const told = await say("api", "room_handoff", { text: "Interface done and tested. Next: the form needs expiresAt. Watch out: the old field name is still in web/." });
+    expect(told.text).toContain(join(dir, "handoff-api.md"));
+    expect(read("handoff-api.md")).toContain("Watch out: the old field name");
+    const listed = (await say("ui", "room_files")).text;
+    expect(listed).toContain("It is empty");
+    expect(listed).toContain(`The room's own record is in ${dir}`);
+    // A rename is carried into the log.
+    await say("api", "room_rename", { name: "backend" });
+    expect(read("log.md")).toContain("@backend → @ui");
+    expect(read("log.md").split("\n").filter((l) => l.startsWith("## ")).join(" ")).not.toContain("@api");
+  });
+});
+
+describe("reading the room once", () => {
+  it("gives a session only what it has not read, says how far behind it is when it is woken, and shows that per member", async () => {
+    const { store, room, say, call } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
+    store.post(room.id, { from: "api", text: "one, for nobody" });
+    store.post(room.id, { from: "api", text: "two, for nobody" });
+    store.post(room.id, { from: "api", text: "@ui three" });
+    const woken = delivery.atTurnEnd("ui")!;
+    expect(woken).toContain("You have 2 more unread in the room");
+    expect((await call("GET", `/rooms/${room.id}`)).body.seats.find((s: any) => s.handle === "ui").unread).toBe(2);
+    expect((await say("api", "room_members")).text).toContain("2 unread");
+    const first = (await say("ui", "room_read")).text;
+    expect(first).toContain("Unread by you: 2");
+    expect(first).toContain("one, for nobody");
+    expect(first).not.toContain("@ui three");                       // given whole already: read
+    expect((await say("ui", "room_read")).text).toContain("Nothing new");
+    expect((await say("ui", "room_read", { all: true })).text).toContain("@ui three");
+    expect((await say("api", "room_members")).text).toContain("has read everything");
+    store.post(room.id, { from: "api", text: "@ui four" });
+    expect(delivery.atTurnEnd("ui")).toContain("You have read everything else in the room.");
   });
 });

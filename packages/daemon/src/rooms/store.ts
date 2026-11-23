@@ -129,6 +129,10 @@ export type Claim = { readonly handle: string; readonly paths: readonly string[]
 
 export const MAX_TASKS = 200, MAX_TITLE = 200, MAX_DETAIL = 2000, MAX_NOTE = 1000, MAX_CLAIM_PATHS = 30, CLAIM_MINUTES = 30, MAX_CLAIM_MINUTES = 240;
 
+/** The room's own record in its shared folder (store.ts `writeRecord`). */
+export const RECORD_DIR = "_room";
+const stamp = (at: number): string => { const t = new Date(at); const p = (n: number): string => String(n).padStart(2, "0"); return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`; };
+
 /** How many of the newest messages keep who has read them. */
 export const MAX_READS = 300;
 
@@ -193,6 +197,21 @@ export class RoomStore {
     return dir;
   }
 
+  /** A member's own handover note (§9 交接): what only it knows — what it was doing, how far it is, what comes next,
+   *  what to watch out for — kept in the room's record for whoever takes its work over. Where it is. */
+  handoff(id: string, handle: string, text: string): string {
+    const room = this.get(id);
+    const seat = this.member(room, handle);
+    const clean = text.replace(/\r\n?/g, "\n").trim();
+    if (!clean) throw new RoomError(400, "A handover note needs words.");
+    if (clean.length > MAX_NOTES) throw new RoomError(400, `A handover note is ${MAX_NOTES} characters at most; put the rest in files and point at them.`);
+    const dir = this.recordDir(id);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const file = join(dir, `handoff-${seat.handle}.md`);
+    writeFileSync(file, `# Handover note of @${seat.handle}\n\nWritten ${stamp(this.now())}.\n\n${clean}\n`, { mode: 0o600 });
+    return file;
+  }
+
   /** A file in a room's shared folder by its path under it, as it is on the disk. Nothing outside the folder is
    *  reached: not by `..`, and not through a link. */
   fileAt(id: string, path: string): { readonly real: string; readonly size: number; readonly name: string } {
@@ -231,7 +250,8 @@ export class RoomStore {
       let names: string[];
       try { names = readdirSync(dir).sort(); } catch { return; }
       for (const name of names) {
-        if (name.startsWith(".")) continue;
+        // The room's own record is not one of the members' files: said by itself, not listed among them.
+        if (name.startsWith(".") || (depth === 1 && name === RECORD_DIR)) continue;
         let stat;
         try { stat = lstatSync(join(dir, name)); } catch { continue; }
         const path = under ? `${under}/${name}` : name;
@@ -355,6 +375,7 @@ export class RoomStore {
     this.said.delete(id);
     rmSync(join(this.dir, `${id}.json`), { force: true });
     rmSync(join(this.dir, `${id}.jsonl`), { force: true });
+    this.dropRecordIfAlone(id);
     this.discard(id, room.name);
   }
 
@@ -420,6 +441,17 @@ export class RoomStore {
     const { muted: _was, ...rest } = seat;
     this.save({ ...room, seats: room.seats.map((s) => (s === seat ? rest : s)) });
     return rest;
+  }
+
+  /** What a seat has not read yet (§9 已读未读): said since it sat down, by another, and neither given to it whole
+   *  nor read by it. Oldest first. Read once is the point: a session that reads the room is given these and not, each
+   *  time, the latest twenty again. */
+  unreadOf(id: string, handle: string): Message[] {
+    const room = this.get(id);
+    const seat = room.seats.find((s) => s.handle === handle);
+    if (!seat) return [];
+    const floor = room.lastSeq - MAX_READS;
+    return this.messagesOf(id).filter((m) => m.seq > floor && m.at >= seat.joinedAt && m.from !== handle && !(room.reads[String(m.seq)]?.includes(handle)));
   }
 
   /** A seat has read these messages: given them whole, or read them itself. Kept in memory and written with the
@@ -648,6 +680,7 @@ export class RoomStore {
     });
     const after = this.all().get(id)!;
     this.all().set(id, { ...after, reads: Object.fromEntries(Object.entries(after.reads).map(([seq, who]) => [seq, who.map(to)])) });
+    this.rewriteLog(this.get(id));
     return next;
   }
 
@@ -721,6 +754,7 @@ export class RoomStore {
       readSeq: from.kind === "user" ? message.seq : room.readSeq,
       receipts: waiting.length ? { ...room.receipts, [message.seq]: Object.fromEntries(waiting.map((h) => [h, "sent" as Receipt])) } : room.receipts,
     });
+    this.writeRecord(this.get(id), message);
     return message;
   }
 
@@ -781,6 +815,63 @@ export class RoomStore {
     return list;
   }
 
+  // ---- the room's record, in its shared folder
+
+  private readonly recorded = new Map<string, string>();
+
+  /** The room as files in its shared folder, `_room/` (user, 2026-11-23: a session that takes the work over must be
+   *  able to at any time): what was said, the tasks, the pinned notes, who sits here — kept as they change, read
+   *  with a session's own file tools (searched, read in part) instead of paged through a tool. Beside them each
+   *  member's own handover note (`handoff-<name>.md`, written by itself): what only it knows. */
+  recordDir(id: string): string { return join(this.filesDir, id, RECORD_DIR); }
+
+  private writeRecord(room: Room, said?: Message): void {
+    try {
+      const dir = this.recordDir(room.id);
+      const put = (name: string, text: string): void => {
+        const key = `${room.id}/${name}`;
+        if (this.recorded.get(key) === text && existsSync(join(dir, name))) return;
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        writeFileSync(join(dir, name), text, { mode: 0o600 });
+        this.recorded.set(key, text);
+      };
+      const here = room.seats.filter((s) => s.left === undefined);
+      const state = (t: Task): string => (t.state === "todo" ? "to do" : t.state);
+      put("README.md", [
+        `# ${room.name}`, "", room.topic || "(no topic)", "",
+        "This folder is the room's own record, kept by AgentSwitch as the room changes. Do not edit these files: they are written over.", "",
+        "- `log.md` — everything said in the room, oldest first.",
+        "- `tasks.md` — the task list: who does what, how far.",
+        "- `notes.md` — the pinned notes: what was agreed.",
+        "- `members.md` — who sits here.",
+        "- `handoff-<name>.md` — a member's own handover note, written by that member: what it was doing, how far it is, what comes next, what to watch out for.", "",
+        "Taking work over from another member: read `notes.md` and `tasks.md`, then that member's handover note, then search `log.md` for what concerns the task. Then take the task (room_tasks) and say so in the room.", "",
+      ].join("\n"));
+      put("tasks.md", [`# Tasks of ${room.name}`, "", ...(room.tasks.length ? room.tasks.map((t) => `## T${t.n} [${state(t)}${t.owner ? ` · @${t.owner}` : ""}] ${t.title}\n${t.after?.length ? `After: ${t.after.map((a) => `T${a}`).join(", ")}\n` : ""}Added by @${t.by}\n${t.detail ? `\n${t.detail}\n` : ""}${t.note ? `\nResult: ${t.note}\n` : ""}`) : ["No tasks."]), ""].join("\n"));
+      put("notes.md", room.notes ? `# Pinned notes of ${room.name}\n\nLast written by @${room.notes.by}.\n\n${room.notes.text}\n` : `# Pinned notes of ${room.name}\n\nNone.\n`);
+      put("members.md", [`# Members of ${room.name}`, "", ...here.map((s) => (s.kind === "user" ? "- @you — the user" : `- @${s.handle} — ${[s.was?.agent, s.was?.name ? `session "${s.was.name}"` : null, s.was?.cwd, s.canAdd ? "admin" : null, s.muted ? "muted" : null].filter(Boolean).join(" · ")}`)), ""].join("\n"));
+      const line = (m: Message): string => `## #${m.seq} · ${stamp(m.at)} · @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n\n${m.text}\n${m.files?.length ? `\nFiles: ${m.files.join(", ")}\n` : ""}\n`;
+      const log = join(dir, "log.md");
+      if (said && existsSync(log)) appendFileSync(log, line(said), { mode: 0o600 });
+      else if (said || !existsSync(log)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(log, `# What was said in ${room.name}\n\n${this.messagesOf(room.id).map(line).join("")}`, { mode: 0o600 }); }
+    } catch { /* the record is a convenience: the room itself is kept elsewhere */ }
+  }
+
+  /** The whole log written anew (after a rename: the names in it changed). */
+  private rewriteLog(room: Room): void {
+    try { rmSync(join(this.recordDir(room.id), "log.md"), { force: true }); } catch { /* not there */ }
+    this.writeRecord(room);
+  }
+
+  /** A room that goes takes its record with it when the record is all its folder holds; with the members' own files
+   *  there, the record stays among them and goes to the Trash with the folder. */
+  private dropRecordIfAlone(id: string): void {
+    try {
+      const dir = join(this.filesDir, id);
+      if (readdirSync(dir).every((name) => name === RECORD_DIR) && readdirSync(this.recordDir(id)).every((n) => ["README.md", "log.md", "tasks.md", "notes.md", "members.md"].includes(n))) rmSync(this.recordDir(id), { recursive: true, force: true });
+    } catch { /* no folder */ }
+  }
+
   private save(given: Room): Room {
     // The counts are added to in memory between two writes (`count`): the newest are the ones kept.
     const kept = this.all().get(given.id);
@@ -790,6 +881,7 @@ export class RoomStore {
     const file = join(this.dir, `${room.id}.json`), tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(room, null, 2), { mode: 0o600 });
     renameSync(tmp, file);
+    this.writeRecord(room);
     return room;
   }
 }

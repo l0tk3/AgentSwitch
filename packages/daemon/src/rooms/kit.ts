@@ -55,11 +55,12 @@ const TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_read",
-    description: "Read messages of an AgentSwitch Chat Room you sit in: the latest ones, or those after a number, from one member, or containing a text. Messages not addressed to you are not sent to you; this is how you see them.",
+    description: "Read an AgentSwitch Chat Room you sit in. With no arguments: what you have not read yet, and nothing you have — each message is read once. Or: the latest again (`all`), those after a number, from one member, or containing a text. Messages not addressed to you are not sent to you; this is how you see them.",
     inputSchema: {
       type: "object",
       properties: {
         limit: { type: "integer", description: "How many, at most (default 20, up to 100)." },
+        all: { type: "boolean", description: "The latest messages again, read or not. Without it (and without after/from/search) you get only what you have not read yet." },
         after: { type: "integer", description: "Only messages after this number." },
         from: { type: "string", description: "Only this member's messages." },
         search: { type: "string", description: "Only messages containing this text." },
@@ -81,6 +82,11 @@ const TOOLS: readonly KitTool[] = [
     name: "room_files",
     description: "The shared folder of an AgentSwitch Chat Room you sit in: its absolute path and the files in it, newest first. Every member reads and writes this folder directly, with its own file tools. Hand over anything longer than a few lines as a file here — a report, a plan, an interface, a diff, a log — and room_post only its path and one sentence of what it says: nothing is lost in retelling and nobody pays to read it twice. Give a file a name that says what it is, and write a new file rather than changing another member's.",
     inputSchema: { type: "object", properties: { room: ROOM_ARG } },
+  },
+  {
+    name: "room_handoff",
+    description: "Write your handover note for an AgentSwitch Chat Room you sit in: what only you know and whoever takes your work over will need — what you were doing, how far it is (what is done and checked, what is half done), what comes next, what to watch out for, and where the files are. It replaces your earlier note. Write it when you are asked to hand over, when you are about to stop with work unfinished, and before a long task's context is lost; a new member reads it from the room's record (the `_room` folder in the shared folder, with the log, the tasks and the notes).",
+    inputSchema: { type: "object", properties: { text: { type: "string", description: "The note, in plain words. Paths rather than pasted contents." }, room: ROOM_ARG }, required: ["text"] },
   },
   {
     name: "room_rename",
@@ -260,6 +266,11 @@ export class RoomKit {
         case "room_read": return { text: this.read(room, seat, args) };
         case "room_notes": return { text: this.notes(room, seat, args) };
         case "room_files": return { text: this.files(room) };
+        case "room_handoff": {
+          const file = this.o.store.handoff(room.id, seat.handle, typeof args.text === "string" ? args.text : "");
+          this.o.changed?.(room.id);
+          return { text: `Your handover note is kept at ${file}. Whoever takes your work over reads it there; tell them it exists (room_post, expects none) if someone is waiting for it.` };
+        }
         case "room_rename": {
           const other = str(args.handle)?.replace(/^@/, "").toLowerCase();
           const target = other && other !== seat.handle ? room.seats.find((x) => x.handle === (room.renames[other] ?? other)) : seat;
@@ -513,8 +524,9 @@ export class RoomKit {
     const { folder, files, more } = this.o.store.files(room.id);
     const now = (this.o.now ?? Date.now)();
     const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
-    if (!files.length) return `The shared folder of "${room.name}" is ${folder}\nIt is empty. Write files there with your own file tools; room_post their path.`;
-    return [`The shared folder of "${room.name}" is ${folder}`, `${files.length} file${files.length === 1 ? "" : "s"}${more ? " (more are not listed)" : ""}, newest first:`, ...files.map((f) => `  ${f.path} · ${size(f.size)} · ${ago(f.modifiedAt, now)}`)].join("\n");
+    const record = `The room's own record is in ${this.o.store.recordDir(room.id)} (log.md: everything said; tasks.md; notes.md; members.md; members' handover notes) — read README.md there first if you are new or take work over.`;
+    if (!files.length) return `The shared folder of "${room.name}" is ${folder}\nIt is empty. Write files there with your own file tools; room_post their path.\n${record}`;
+    return [record, `The shared folder of "${room.name}" is ${folder}`, `${files.length} file${files.length === 1 ? "" : "s"}${more ? " (more are not listed)" : ""}, newest first:`, ...files.map((f) => `  ${f.path} · ${size(f.size)} · ${ago(f.modifiedAt, now)}`)].join("\n");
   }
 
   private post(room: Room, seat: Seat, args: Record<string, unknown>): string {
@@ -549,12 +561,17 @@ export class RoomKit {
   private read(room: Room, seat: Seat, args: Record<string, unknown>): string {
     const limit = Math.min(Math.max(int(args.limit) ?? 20, 1), 100);
     const after = int(args.after), from = str(args.from)?.replace(/^@/, "").toLowerCase(), search = str(args.search)?.toLowerCase();
-    let found: Message[] = this.o.store.messages(room.id, after === undefined ? {} : { after });
+    // Asked for nothing in particular: what it has not read yet, oldest first, and no more.
+    const unreadOnly = after === undefined && !from && !search && args.all !== true;
+    let found: Message[] = unreadOnly ? this.o.store.unreadOf(room.id, seat.handle) : this.o.store.messages(room.id, after === undefined ? {} : { after });
     if (from) found = found.filter((m) => m.from === from);
     if (search) found = found.filter((m) => m.text.toLowerCase().includes(search));
     const total = found.length;
-    found = after === undefined ? found.slice(-limit) : found.slice(0, limit);
-    const head = `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}.`;
+    found = after === undefined && !unreadOnly ? found.slice(-limit) : found.slice(0, limit);
+    if (unreadOnly && !total) return `Nothing new in "${room.name}" since you last read. (\`all: true\` shows the latest messages again; the whole log is a file: ${this.o.store.recordDir(room.id)}/log.md.)`;
+    const head = unreadOnly
+      ? `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. Unread by you: ${found.length}${total > found.length ? ` of ${total} (the oldest first; read again for the rest)` : ""}.`
+      : `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}.`;
     this.o.store.markRead(room.id, seat.handle, found.filter((m) => m.from !== seat.handle).map((m) => m.seq));
     const reads = this.o.store.get(room.id).reads;
     // Of its own messages it is told who has read them and who has not yet.
@@ -579,7 +596,7 @@ export class RoomKit {
       const live = s.terminal ? this.o.seat(s.terminal) : null;
       const card = live?.card ?? s.was;
       const about = card ? [agentName(card.agent), card.model, card.cwd, live?.card.mode ? `mode ${live.card.mode}` : null].filter(Boolean).join(" · ") : "";
-      return `@${s.handle}${s.handle === me.handle ? " (you)" : ""} — ${about}\n  ${STATE_MEETS[live?.state ?? "exited"]}${s.canAdd ? "; admin (may add sessions, resume, mute, kick)" : ""}${s.muted ? `; muted by @${s.muted.by}` : ""}; brought in by @${s.addedBy}`;
+      return `@${s.handle}${s.handle === me.handle ? " (you)" : ""} — ${about}\n  ${STATE_MEETS[live?.state ?? "exited"]}${s.canAdd ? "; admin (may add sessions, resume, mute, kick)" : ""}${s.kind === "session" && s.handle !== me.handle ? ((n) => (n ? `; ${n} unread` : "; has read everything"))(this.o.store.unreadOf(room.id, s.handle).length) : ""}${s.muted ? `; muted by @${s.muted.by}` : ""}; brought in by @${s.addedBy}`;
     });
     return [`Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}${room.paused ? " (paused by the user)" : ""}. ${here.length} members:`, ...lines].join("\n");
   }
