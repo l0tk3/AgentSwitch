@@ -75,8 +75,9 @@ export function roomOrg(ask: Ask): KitOrg {
       if (res.status >= 300 || !id) refuse(res, "The session was not resumed");
       return { id };
     },
-    async stop(terminal) {
-      await ask("DELETE", `/terminals/${encodeURIComponent(terminal)}`).catch(() => undefined);
+    async stop(terminal, transcript = false) {
+      const res = await ask("DELETE", `/terminals/${encodeURIComponent(terminal)}${transcript ? "?transcript=1" : ""}`).catch(() => null);
+      return !!res && res.status < 300;
     },
   };
 }

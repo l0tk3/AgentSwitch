@@ -193,14 +193,14 @@ describe("bringing sessions in (Admin)", () => {
     const started: unknown[] = [];
     const seat = (terminal: string): SeatLive | null => (states.has(terminal) ? { state: states.get(terminal)!, card: { agent: terminal.startsWith("new") ? "codex" : "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: terminal === "t3" ? "bypassPermissions" : "default", node: null } } : null);
     const kit = new RoomKit({
-      store, seat, delivery, now: () => 10 * 3_600_000,
+      store, seat, delivery, now: () => 10 * 3_600_000, kitWaitMs: 0,
       org: () => ({
         profiles: async () => [{ agent: "claude-code", id: "default", name: "Default", kind: "subscription", health: { status: "healthy", checkedAt: 8 * 3_600_000, message: "" } }, { agent: "codex", id: "abc123", name: "Work", kind: "api", health: null }],
         models: async () => ({ "claude-code": [{ id: "opus", name: "Opus", description: "Opus 5.5" }], pi: [] }),
         sessions: async () => ({ running: [{ terminal: "t1", agent: "claude-code", name: "daemon", cwd: "/w/d", state: "idle", profile: null }, { terminal: "t8", agent: "codex", name: "spare", cwd: "/w/s", state: "idle", profile: "Work" }], resumable: [{ agent: "codex", id: "sess-1", title: "fix login", cwd: "/w/l", updatedAt: 9 * 3_600_000, profile: null }] }),
         check: async (agent, profile) => ({ status: "unhealthy", checkedAt: 1, message: `${agent}/${profile} signed out` }),
         start: async (req) => { started.push(req); const id = `new${started.length}`; states.set(id, "idle"); return id; },
-        stop: async () => undefined,
+        stop: async () => true,
         resume: async (terminal) => { const id = `back-${terminal}`; states.set(id, "idle"); return { id }; },
       }),
     });

@@ -30,7 +30,7 @@ function made() {
     sessions: async () => ({ running: [], resumable: [] }),
     start: async () => "started",
     resume: async (req: { session: string; cwd: string }) => { resumed.push(`${req.session}@${req.cwd}`); states.set("t9", "idle"); return { id: "t9" }; },
-    stop: async (terminal: string) => { stopped.push(terminal); },
+    stop: async (terminal: string, transcript?: boolean) => { stopped.push(transcript ? `${terminal}+record` : terminal); return terminal !== "gone"; },
   };
   const kit = new RoomKit({ store, seat, delivery, now: () => now, changed: (id) => { changed.push(id); }, org: () => org });
   const room = store.create({ name: "login" });
@@ -358,7 +358,7 @@ describe("the rest of what was found in use (2026-11-23)", () => {
     store.note(room.id, "ui", { id: "sess-ui", cwd: "/start/ui" });
     const seat = store.get(room.id).seats.find((s) => s.handle === "ui")!;
     let release: () => void = () => undefined;
-    const org = { stop: async (t: string) => { stopped.push(t); }, resume: () => new Promise<{ id: string }>((r) => { release = () => r({ id: "t9" }); }) };
+    const org = { stop: async (t: string) => { stopped.push(t); return true; }, resume: () => new Promise<{ id: string }>((r) => { release = () => r({ id: "t9" }); }) };
     const first = resumeSeat(store, org, room.id, seat, () => null);
     await expect(resumeSeat(store, org, room.id, seat, () => null)).rejects.toThrow("being resumed already");
     store.unseat(room.id, "ui");                         // kicked while its terminal was starting
@@ -470,5 +470,22 @@ describe("a text that could not be given", () => {
     for (let i = 0; i < 5; i++) { delivery.look(); await new Promise((r) => setTimeout(r, 0)); }
     expect(store.get(room.id).stats.ui ?? { wakes: 0 }).toMatchObject({ wakes: 0 });
     expect(store.get(room.id).receipts).toEqual({ 1: { ui: "sent" } });
+  });
+});
+
+describe("ending a helper (§6.2)", () => {
+  it("closes what a session started, record and all — kicked already or not — and never what the user started", async () => {
+    const { store, room, say, stopped } = made();
+    store.setCanAdd(room.id, "api", true);
+    // `ui` was seated by the user: not an admin's to end.
+    expect(await say("api", "room_manage", { action: "end", handle: "ui" })).toMatchObject({ isError: true, text: expect.stringContaining("started by the user") });
+    const helper = store.seat(room.id, { terminal: "h1", was: { agent: "claude-code", name: "helper", cwd: "/w", model: null, profile: null }, by: "api", byAgent: true, starter: "api" });
+    expect((await say("api", "room_manage", { action: "end", handle: helper.handle })).text).toContain("its terminal closed and its conversation's record deleted");
+    expect(stopped).toEqual(["h1+record"]);
+    expect(store.roomsOf("h1")).toEqual([]);
+    // One kicked before is ended all the same; one whose terminal is gone is said so.
+    const second = store.seat(room.id, { terminal: "gone", was: { agent: "claude-code", name: "second", cwd: "/w", model: null, profile: null }, by: "api", byAgent: true, starter: "api" });
+    store.unseat(room.id, second.handle, "api");
+    expect((await say("api", "room_manage", { action: "end", handle: second.handle })).text).toContain("was not there to close any more");
   });
 });

@@ -23,8 +23,8 @@ export type KitOrg = {
    *  says why not. */
   start(req: { readonly agent: string; readonly cwd: string; readonly profile?: string; readonly model?: string; readonly mode?: string; readonly resume?: string }): Promise<string>;
   /** The session behind an ended terminal goes on in a new one (§6.2). Throws a RoomError that says why not. */
-  /** Ends a terminal started here that nothing sits in after all. */
-  stop(terminal: string): Promise<void>;
+  /** Ends a terminal; `transcript`: its conversation's record goes with it. Whether it was there to end. */
+  stop(terminal: string, transcript?: boolean): Promise<boolean>;
   resume(req: { readonly agent: string; readonly cwd: string; readonly session: string; readonly profile?: string; readonly model?: string; readonly effort?: string; readonly mode?: string }): Promise<{ readonly id: string }>;
 };
 
@@ -133,11 +133,11 @@ const ORG_TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_manage",
-    description: "Admin actions in a Chat Room you sit in, if the user made you an admin of the room (the Admin switch on your card): `resume` a member whose session has ended, bringing the same conversation back; `mute` a member that floods the room or does not do its work (it can still read and work, but not post or write the notes); `unmute` it; `kick` it out of the room (its session keeps running). Only the user can mute or kick another admin, and nobody can manage themselves or the user.",
+    description: "Admin actions in a Chat Room you sit in, if the user made you an admin of the room (the Admin switch on your card): `resume` a member whose session has ended, bringing the same conversation back; `mute` a member that floods the room or does not do its work (it can still read and work, but not post or write the notes); `unmute` it; `kick` it out of the room (its session keeps running); `end` a session that a session started (with room_add) — out of the room, its terminal closed and its conversation's record deleted: for helpers whose work is done, also ones already kicked. A session the user started is never ended from here. Only the user can mute or kick another admin, and nobody can manage themselves or the user.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["resume", "mute", "unmute", "kick"] },
+        action: { type: "string", enum: ["resume", "mute", "unmute", "kick", "end"] },
         handle: { type: "string", description: "The member's @name." },
         room: ROOM_ARG,
       },
@@ -188,7 +188,7 @@ export async function resumeSeat(store: RoomStore, org: Pick<KitOrg, "resume" | 
 }
 
 export class RoomKit {
-  constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number }) {}
+  constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number; /** Tests: how long a started session is waited for. */ readonly kitWaitMs?: number }) {}
 
   private readonly seen = new Set<string>();
 
@@ -305,7 +305,14 @@ export class RoomKit {
     if (mode === "bypass" && !/bypass/i.test(mine)) throw new RoomError(403, "You do not run in bypass yourself, so you can not start a session in bypass. Use manual or auto.");
     const profile = str(args.profile), model = str(args.model);
     const started = await org.start({ agent, cwd, ...(profile ? { profile } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}), ...(resume ? { resume } : {}) });
-    return sit(started, true);
+    const said = sit(started, true);
+    // A session that has started is in the room once its Kit has asked for its tools. One that does not within a
+    // little while is most often stopped at a question of its agent's own that only the user can answer (Claude
+    // Code's "do you trust this folder", in a folder it was never in): said as it is, not "idle, gets the message
+    // now" (2026-11-23: three helpers sat there for minutes, their task undelivered, and nobody was told).
+    for (let waited = 0; !this.seen.has(started) && waited < (this.o.kitWaitMs ?? 10_000); waited += 250) await new Promise((r) => setTimeout(r, 250));
+    if (this.seen.has(started)) return said;
+    return `${said}\n\nBut it has not connected to the room yet, so no message reaches it: it is probably stopped at a question of its own at start (in a folder it has not worked in, Claude Code asks whether the folder is trusted) that only the user can answer. Tell the user (@you) to look at its terminal; what you post to it is given once it connects. A folder under one already trusted needs no such answer.`;
   }
 
   /** An admin's work on one member (§6.2): resume an ended session, mute or unmute it, or kick it out. */
@@ -328,6 +335,18 @@ export class RoomKit {
           ? `@${target.handle} is muted by you (@${me.handle}). It still reads, is woken and works, but can not post or write the notes until you or the user unmute it.`
           : `@${target.handle} can speak again${seat.muted ? " (it is still muted by someone else)" : ""}.`;
       }
+      case "end": {
+        // Only what a session brought up: the user's own sessions are the user's to close.
+        if (!target.byAgent) throw new RoomError(403, `@${target.handle} was started by the user, not by a session: only the user closes it. You can kick it out of the room.`);
+        if (!target.terminal) throw new RoomError(409, `@${target.handle} has no terminal.`);
+        if (target.left === undefined) this.o.store.unseat(room.id, target.handle, me.handle);
+        const ended = await org.stop(target.terminal, true);
+        this.o.changed?.(room.id);
+        this.o.delivery.look();
+        return ended
+          ? `@${target.handle} is ended: out of "${room.name}", its terminal closed and its conversation's record deleted.`
+          : `@${target.handle} is out of "${room.name}"; its terminal was not there to close any more (already closed, or the service started again since).`;
+      }
       case "kick": {
         this.o.store.unseat(room.id, target.handle, me.handle);
         this.o.changed?.(room.id);
@@ -347,7 +366,7 @@ export class RoomKit {
         this.o.delivery.look();
         return `@${back.handle} is back in "${room.name}" with the same conversation (${[agentName(was.agent), was.model, was.cwd].filter(Boolean).join(" · ")}). It knows nothing new of your task: room_post an @${back.handle} message if it should go on.`;
       }
-      default: throw new RoomError(400, "room_manage: action is resume, mute, unmute or kick.");
+      default: throw new RoomError(400, "room_manage: action is resume, mute, unmute, kick or end.");
     }
   }
 
