@@ -27,7 +27,7 @@ enum class SecretUse(val rawValue: String) {
         get() = when (this) {
             Http -> "http（代理替换）"
             Otp -> "otp（获取验证码）"
-            Exec -> "exec（本地命令模板）"
+            Exec -> "exec（作为环境变量交给命令）"
             Fill -> "fill（仅填写浏览器表单）"
         }
 }
@@ -39,8 +39,6 @@ sealed class GatePolicyError(message: String) : Exception(message) {
     data class InvalidHost(val host: String) : GatePolicyError("host 无效：$host")
     data object EmptyUses : GatePolicyError("请至少选择一种用途")
     data object TotpNotBase32 : GatePolicyError("TOTP 密钥须为 base32 格式")
-    data object SeedImportNeedsTotp : GatePolicyError("种子导入授权仅适用于 TOTP")
-    data class SeedImportNotAllowed(val host: String) : GatePolicyError("种子导入目标须为 host 已允许的确切地址：$host")
     data object ValueTooShort : GatePolicyError("值至少需要 ${GatePolicy.minSealLength} 个字符（过短的值遮不住，也容易被猜到）")
 }
 

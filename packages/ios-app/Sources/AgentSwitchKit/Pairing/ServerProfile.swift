@@ -46,7 +46,7 @@ public struct ServerProfile: Codable, Sendable, Equatable, ServerAddressBook {
                   pairedAt: pairedAt)
     }
 
-    /// A copy with a new gate key (the user switched keypairs on the Mac).
+    /// A copy with a new gate key (the user rotated the gate key on the Mac).
     public func with(gate: GateKey?) -> ServerProfile {
         ServerProfile(name: name, port: port, fingerprint: fingerprint, lan: lan, tailnet: tailnet, bonjour: bonjour,
                       gate: gate, deviceId: deviceId, pairedAt: pairedAt)

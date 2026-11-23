@@ -12,15 +12,13 @@ data class SecretPayload private constructor(
     val uses: List<SecretUse>,
     val label: String,
     val kind: SecretKind,
-    val seedImportHosts: List<String>,
 ) {
     /** Byte-identical to `SecretPayload.to_json()`: fixed key order, `separators=(",", ":")`, `ensure_ascii=True`. */
     val jsonText: String
         get() {
             val list = { items: List<String> -> "[" + items.joinToString(",") { PythonJSON.string(it) } + "]" }
             return "{\"v\":${PythonJSON.string(value)},\"host\":${list(hosts)},\"use\":${list(uses.map { it.rawValue })}," +
-                "\"label\":${PythonJSON.string(label)},\"kind\":${PythonJSON.string(kind.rawValue)}," +
-                "\"seed_import_hosts\":${list(seedImportHosts)}}"
+                "\"label\":${PythonJSON.string(label)},\"kind\":${PythonJSON.string(kind.rawValue)}}"
         }
 
     val jsonData: ByteArray get() = jsonText.toByteArray(Charsets.UTF_8)
@@ -38,30 +36,25 @@ data class SecretPayload private constructor(
         }
 
     companion object {
+        /**
+         * A site that needs a TOTP seed itself gets it as an ordinary `secret` sealed for `fill` on that site
+         * (gate-simple-v0 §1); there is no seed-import grant any more.
+         */
         fun make(
             value: String,
             hosts: List<String>,
             uses: Set<SecretUse>,
             label: String,
             kind: SecretKind = SecretKind.Secret,
-            seedImportHosts: List<String> = emptyList(),
         ): SecretPayload {
             if (value.isEmpty()) throw GatePolicyError.EmptyValue
             if (!GatePolicy.isValidLabel(label)) throw GatePolicyError.InvalidLabel(label)
             if (uses.isEmpty()) throw GatePolicyError.EmptyUses
             val normalized = hosts.map(GatePolicy::normalizeHost)
             if (kind == SecretKind.Totp && !GatePolicy.isBase32(value)) throw GatePolicyError.TotpNotBase32
-            val grants = mutableListOf<String>()
-            for (host in seedImportHosts.map(GatePolicy::normalizeHost)) if (host !in grants) grants.add(host)
-            if (grants.isNotEmpty() && kind != SecretKind.Totp) throw GatePolicyError.SeedImportNeedsTotp
-            for (grant in grants) {
-                if (grant.contains("*") || normalized.none { GatePolicy.hostMatches(pattern = it, host = grant) }) {
-                    throw GatePolicyError.SeedImportNotAllowed(grant)
-                }
-            }
             // Last, as `secret-gate enc` checks it after `create` (policy.check_seal_length): only sealing builds one here.
             if (GatePolicy.isTooShortToSeal(value, uses)) throw GatePolicyError.ValueTooShort
-            return SecretPayload(value, normalized, uses.sortedBy { it.rawValue }, label, kind, grants)
+            return SecretPayload(value, normalized, uses.sortedBy { it.rawValue }, label, kind)
         }
     }
 }

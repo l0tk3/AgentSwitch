@@ -53,7 +53,7 @@ data class ServerProfile(
         bonjour = payload.bonjour, gate = gate ?: payload.gate, deviceId = deviceId, pairedAt = pairedAt,
     )
 
-    /** A copy with a new gate key (the user switched keypairs on the Mac). */
+    /** A copy with a new gate key (the user rotated the gate key on the Mac). */
     fun with(gate: GateKey?): ServerProfile = copy(gate = gate)
 
     /**

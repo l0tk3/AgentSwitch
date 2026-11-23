@@ -55,13 +55,13 @@ final class GatePolicyTests: XCTestCase {
 final class SecretPayloadTests: XCTestCase {
     func testJSONMatchesPythonToJSON() throws {
         let p = try SecretPayload.make(value: "pw-fake-1234", hosts: ["A.example.com", "*.b.com:8443"], uses: [.http, .exec], label: "site-a/pass")
-        XCTAssertEqual(p.jsonText, #"{"v":"pw-fake-1234","host":["a.example.com","*.b.com:8443"],"use":["exec","http"],"label":"site-a/pass","kind":"secret","seed_import_hosts":[]}"#)
+        XCTAssertEqual(p.jsonText, #"{"v":"pw-fake-1234","host":["a.example.com","*.b.com:8443"],"use":["exec","http"],"label":"site-a/pass","kind":"secret"}"#)
     }
 
     func testEnsureASCIIEscaping() throws {
         let value = "q\"b\\s/\n\r\t\u{08}\u{0C}\u{01}\u{7F}é中😀"
         let p = try SecretPayload.make(value: value, hosts: [], uses: [.fill], label: "x")
-        XCTAssertEqual(p.jsonText, #"{"v":"q\"b\\s/\n\r\t\b\f\u0001\u007f\u00e9\u4e2d\ud83d\ude00","host":[],"use":["fill"],"label":"x","kind":"secret","seed_import_hosts":[]}"#)
+        XCTAssertEqual(p.jsonText, #"{"v":"q\"b\\s/\n\r\t\b\f\u0001\u007f\u00e9\u4e2d\ud83d\ude00","host":[],"use":["fill"],"label":"x","kind":"secret"}"#)
         let decoded = try JSONSerialization.jsonObject(with: p.jsonData) as? [String: Any]
         XCTAssertEqual(decoded?["v"] as? String, value)
     }
@@ -74,17 +74,6 @@ final class SecretPayloadTests: XCTestCase {
         XCTAssertThrowsError(try SecretPayload.make(value: "not base32!", hosts: [], uses: [.otp], label: "a", kind: .totp)) {
             XCTAssertEqual($0 as? GatePolicyError, .totpNotBase32)
         }
-    }
-
-    func testSeedImportGrants() throws {
-        let p = try SecretPayload.make(value: "JBSWY3DPEHPK3PXP", hosts: ["*.corp.example"], uses: [.otp], label: "t",
-                                       kind: .totp, seedImportHosts: ["vpn.corp.example:443", "VPN.corp.example:443"])
-        XCTAssertEqual(p.seedImportHosts, ["vpn.corp.example:443"])
-        XCTAssertThrowsError(try SecretPayload.make(value: "pw", hosts: ["a.com"], uses: [.http], label: "t", seedImportHosts: ["a.com"])) {
-            XCTAssertEqual($0 as? GatePolicyError, .seedImportNeedsTotp)
-        }
-        XCTAssertThrowsError(try SecretPayload.make(value: "JBSWY3DP", hosts: ["a.com"], uses: [.otp], label: "t", kind: .totp, seedImportHosts: ["b.com"]))
-        XCTAssertThrowsError(try SecretPayload.make(value: "JBSWY3DP", hosts: ["*.a.com"], uses: [.otp], label: "t", kind: .totp, seedImportHosts: ["*.a.com"]))
     }
 
     /// gate-simple-v0 §3.3, policy.check_seal_length: under 8 characters is not sealed for http / fill / exec.

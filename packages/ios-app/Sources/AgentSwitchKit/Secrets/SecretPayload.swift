@@ -8,32 +8,26 @@ public struct SecretPayload: Sendable, Equatable {
     public let uses: [SecretUse]          // sorted, as Python's `sorted(self.uses)`
     public let label: String
     public let kind: SecretKind
-    public let seedImportHosts: [String]
 
+    /// A site that needs a TOTP seed itself gets it as an ordinary `secret` sealed for `fill` on that site
+    /// (gate-simple-v0 §1); there is no seed-import grant any more.
     public static func make(value: String, hosts: [String], uses: Set<SecretUse>, label: String,
-                            kind: SecretKind = .secret, seedImportHosts: [String] = []) throws -> SecretPayload {
+                            kind: SecretKind = .secret) throws -> SecretPayload {
         guard !value.isEmpty else { throw GatePolicyError.emptyValue }
         guard GatePolicy.isValidLabel(label) else { throw GatePolicyError.invalidLabel(label) }
         guard !uses.isEmpty else { throw GatePolicyError.emptyUses }
         let normalized = try hosts.map(GatePolicy.normalizeHost)
         if kind == .totp && !GatePolicy.isBase32(value) { throw GatePolicyError.totpNotBase32 }
-        var grants: [String] = []
-        for host in try seedImportHosts.map(GatePolicy.normalizeHost) where !grants.contains(host) { grants.append(host) }
-        if !grants.isEmpty && kind != .totp { throw GatePolicyError.seedImportNeedsTotp }
-        for grant in grants where grant.contains("*") || !normalized.contains(where: { GatePolicy.hostMatches(pattern: $0, host: grant) }) {
-            throw GatePolicyError.seedImportNotAllowed(grant)
-        }
         // Last, as `secret-gate enc` checks it after `create` (policy.check_seal_length): only sealing builds one here.
         if GatePolicy.isTooShortToSeal(value, uses: uses) { throw GatePolicyError.valueTooShort }
-        return SecretPayload(value: value, hosts: normalized, uses: uses.sorted(), label: label, kind: kind, seedImportHosts: grants)
+        return SecretPayload(value: value, hosts: normalized, uses: uses.sorted(), label: label, kind: kind)
     }
 
     /// Byte-identical to `SecretPayload.to_json()`: fixed key order, `separators=(",", ":")`, `ensure_ascii=True`.
     public var jsonText: String {
         let list: ([String]) -> String = { "[" + $0.map(PythonJSON.string).joined(separator: ",") + "]" }
         return "{\"v\":\(PythonJSON.string(value)),\"host\":\(list(hosts)),\"use\":\(list(uses.map(\.rawValue))),"
-            + "\"label\":\(PythonJSON.string(label)),\"kind\":\(PythonJSON.string(kind.rawValue)),"
-            + "\"seed_import_hosts\":\(list(seedImportHosts))}"
+            + "\"label\":\(PythonJSON.string(label)),\"kind\":\(PythonJSON.string(kind.rawValue))}"
     }
 
     public var jsonData: Data { Data(jsonText.utf8) }

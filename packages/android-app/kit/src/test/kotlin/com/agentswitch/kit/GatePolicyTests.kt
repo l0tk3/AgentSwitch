@@ -79,7 +79,7 @@ class SecretPayloadTests {
         val p = SecretPayload.make(value = "pw-fake-1234", hosts = listOf("A.example.com", "*.b.com:8443"),
             uses = setOf(SecretUse.Http, SecretUse.Exec), label = "site-a/pass")
         assertEquals(
-            """{"v":"pw-fake-1234","host":["a.example.com","*.b.com:8443"],"use":["exec","http"],"label":"site-a/pass","kind":"secret","seed_import_hosts":[]}""",
+            """{"v":"pw-fake-1234","host":["a.example.com","*.b.com:8443"],"use":["exec","http"],"label":"site-a/pass","kind":"secret"}""",
             p.jsonText,
         )
     }
@@ -88,7 +88,7 @@ class SecretPayloadTests {
     fun ensureASCIIEscaping() {
         val value = "q\"b\\s/\n\r\t" + "\u0008\u000C\u0001\u007F" + "é中😀"
         val p = SecretPayload.make(value = value, hosts = emptyList(), uses = setOf(SecretUse.Fill), label = "x")
-        val expected = """{"v":"q\"b\\s/\n\r\t\b\f#u0001#u007f#u00e9#u4e2d#ud83d#ude00","host":[],"use":["fill"],"label":"x","kind":"secret","seed_import_hosts":[]}"""
+        val expected = """{"v":"q\"b\\s/\n\r\t\b\f#u0001#u007f#u00e9#u4e2d#ud83d#ude00","host":[],"use":["fill"],"label":"x","kind":"secret"}"""
             .replace("#u", "\\u")
         assertEquals(expected, p.jsonText)
         val decoded = KitJson.decodeFromString(JSONValue.serializer(), p.jsonData.toString(Charsets.UTF_8))
@@ -108,24 +108,6 @@ class SecretPayloadTests {
         assertEquals(GatePolicyError.TotpNotBase32, assertFailsWith<GatePolicyError> {
             SecretPayload.make(value = "not base32!", hosts = emptyList(), uses = setOf(SecretUse.Otp), label = "a", kind = SecretKind.Totp)
         })
-    }
-
-    @Test
-    fun seedImportGrants() {
-        val p = SecretPayload.make(value = "JBSWY3DPEHPK3PXP", hosts = listOf("*.corp.example"), uses = setOf(SecretUse.Otp), label = "t",
-            kind = SecretKind.Totp, seedImportHosts = listOf("vpn.corp.example:443", "VPN.corp.example:443"))
-        assertEquals(listOf("vpn.corp.example:443"), p.seedImportHosts)
-        assertEquals(GatePolicyError.SeedImportNeedsTotp, assertFailsWith<GatePolicyError> {
-            SecretPayload.make(value = "pw", hosts = listOf("a.com"), uses = setOf(SecretUse.Http), label = "t", seedImportHosts = listOf("a.com"))
-        })
-        assertFailsWith<GatePolicyError> {
-            SecretPayload.make(value = "JBSWY3DP", hosts = listOf("a.com"), uses = setOf(SecretUse.Otp), label = "t", kind = SecretKind.Totp,
-                seedImportHosts = listOf("b.com"))
-        }
-        assertFailsWith<GatePolicyError> {
-            SecretPayload.make(value = "JBSWY3DP", hosts = listOf("*.a.com"), uses = setOf(SecretUse.Otp), label = "t", kind = SecretKind.Totp,
-                seedImportHosts = listOf("*.a.com"))
-        }
     }
 }
 

@@ -31,11 +31,15 @@ final class CrossLanguageTests: XCTestCase {
 
     private var env: [String: String] { ["SECRET_GATE_HOME": home.path] }
 
+    /// The gate's one keypair (gate-simple-v0 §1): `keygen`, then the one row of `keys --json`.
     private func newKeypair() throws -> String {
-        let r = try Proc.run(gate, ["keys", "--json", "new", "default", "--use"], env: env)
+        let made = try Proc.run(gate, ["keygen"], env: env)
+        XCTAssertEqual(made.status, 0, made.stderr)
+        let r = try Proc.run(gate, ["keys", "--json"], env: env)
         XCTAssertEqual(r.status, 0, r.stderr)
         let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(r.stdout.utf8)) as? [[String: Any]])
-        return try XCTUnwrap(rows.first { $0["name"] as? String == "default" }?["public"] as? String)
+        XCTAssertEqual(rows.count, 1)
+        return try XCTUnwrap(rows.first?["public"] as? String)
     }
 
     /// `secret-gate check`: `label: x` / `kind: y` / `hosts: ['a', 'b']` / `uses: ['http']`.
@@ -57,7 +61,7 @@ final class CrossLanguageTests: XCTestCase {
         let payloads = [
             try SecretPayload.make(value: "pw-fake-1234", hosts: ["A.example.com", "*.b.example:8443"], uses: [.http], label: "site-a/pass"),
             try SecretPayload.make(value: "JBSW Y3DP EHPK 3PXP", hosts: ["*.corp.example"], uses: [.otp, .fill], label: "corp/totp",
-                                   kind: .totp, seedImportHosts: ["vpn.corp.example:443"]),
+                                   kind: .totp),
             try SecretPayload.make(value: "\"quote\" \\ 中文 😀 \u{7F}\n", hosts: ["192.168.1.5:8000"], uses: [.exec, .http, .fill], label: "U.1_x-y"),
         ]
         for payload in payloads {

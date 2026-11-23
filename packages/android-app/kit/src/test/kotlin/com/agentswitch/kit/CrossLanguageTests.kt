@@ -49,11 +49,15 @@ class CrossLanguageTests {
 
     private val env: Map<String, String> get() = mapOf("SECRET_GATE_HOME" to home!!.path)
 
+    /** The gate's one keypair (gate-simple-v0 §1): `keygen`, then the one row of `keys --json`. */
     private fun newKeypair(): String {
-        val r = Proc.run(gate, listOf("keys", "--json", "new", "default", "--use"), env = env)
+        val made = Proc.run(gate, listOf("keygen"), env = env)
+        assertEquals(0, made.status, made.stderr)
+        val r = Proc.run(gate, listOf("keys", "--json"), env = env)
         assertEquals(0, r.status, r.stderr)
         val rows = KitJson.decodeFromString(JSONValue.serializer(), r.stdout).array.orEmpty()
-        return assertNotNull(rows.firstOrNull { it["name"]?.string == "default" }?.get("public")?.string)
+        assertEquals(1, rows.size)
+        return assertNotNull(rows.first()["public"]?.string)
     }
 
     /** `secret-gate check`: `label: x` / `kind: y` / `hosts: ['a', 'b']` / `uses: ['http']`. */
@@ -77,7 +81,7 @@ class CrossLanguageTests {
         val payloads = listOf(
             SecretPayload.make(value = "pw-fake-1234", hosts = listOf("A.example.com", "*.b.example:8443"), uses = setOf(SecretUse.Http), label = "site-a/pass"),
             SecretPayload.make(value = "JBSW Y3DP EHPK 3PXP", hosts = listOf("*.corp.example"), uses = setOf(SecretUse.Otp, SecretUse.Fill),
-                label = "corp/totp", kind = SecretKind.Totp, seedImportHosts = listOf("vpn.corp.example:443")),
+                label = "corp/totp", kind = SecretKind.Totp),
             SecretPayload.make(value = "\"quote\" \\ 中文 😀 " + 0x7F.toChar() + "\n", hosts = listOf("192.168.1.5:8000"),
                 uses = setOf(SecretUse.Exec, SecretUse.Http, SecretUse.Fill), label = "U.1_x-y"),
         )

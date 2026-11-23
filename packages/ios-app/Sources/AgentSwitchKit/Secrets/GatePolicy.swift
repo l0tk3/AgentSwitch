@@ -20,7 +20,7 @@ public enum SecretUse: String, CaseIterable, Codable, Sendable, Comparable {
         switch self {
         case .http: return "http（代理替换）"
         case .otp: return "otp（获取验证码）"
-        case .exec: return "exec（本地命令模板）"
+        case .exec: return "exec（作为环境变量交给命令）"
         case .fill: return "fill（仅填写浏览器表单）"
         }
     }
@@ -32,8 +32,6 @@ public enum GatePolicyError: Error, Equatable, LocalizedError {
     case invalidHost(String)
     case emptyUses
     case totpNotBase32
-    case seedImportNeedsTotp
-    case seedImportNotAllowed(String)
     case valueTooShort
 
     public var errorDescription: String? {
@@ -43,8 +41,6 @@ public enum GatePolicyError: Error, Equatable, LocalizedError {
         case .invalidHost(let h): return "host 无效：\(h)"
         case .emptyUses: return "请至少选择一种用途"
         case .totpNotBase32: return "TOTP 密钥须为 base32 格式"
-        case .seedImportNeedsTotp: return "种子导入授权仅适用于 TOTP"
-        case .seedImportNotAllowed(let h): return "种子导入目标须为 host 已允许的确切地址：\(h)"
         case .valueTooShort: return "值至少需要 \(GatePolicy.minSealLength) 个字符（过短的值遮不住，也容易被猜到）"
         }
     }

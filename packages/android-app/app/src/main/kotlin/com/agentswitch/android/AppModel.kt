@@ -435,7 +435,7 @@ class AppModel(
 
     /**
      * The Mac's current gate key. Kept as is when the Mac cannot read it (503), so minting keeps working with the key
-     * from pairing; the gate still opens tokens made for any of its keypairs.
+     * from pairing. The gate has one key (gate-simple-v0 §1); after the Mac rotates it, the new one arrives here.
      */
     suspend fun refreshGateKey() {
         val api = api ?: return
