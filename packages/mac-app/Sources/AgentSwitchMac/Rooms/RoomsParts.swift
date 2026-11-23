@@ -481,23 +481,25 @@ struct RoomMemberCard: View {
                         .help("用同一个会话、同一个配置恢复这个成员；席位名字和颜色不变。")
                         .padding(.top, 10)
                 }
-                HStack(spacing: 8) {
+                // What is done with a member: what goes on with it in two short rows at the left (they fit the card in
+                // both looks), then, under a rule and at the right, the three in red that take it out, in the order of
+                // how much they undo.
+                HStack(spacing: 6) {
                     if let openTerminal, seat.state != .exited {
-                        Button(action: openTerminal) { BracketLabel(word: "Terminal") }.buttonStyle(BracketButtonStyle(role: .primary))
-                            .help("跳到它自己的终端。")
+                        wide("Terminal", role: .primary, help: "跳到它自己的终端。", action: openTerminal)
                     }
-                    Button(action: mention) { BracketLabel(word: "Mention") }.buttonStyle(BracketButtonStyle())
-                    Button { setMuted(!seat.muted) } label: { BracketLabel(word: seat.muted ? "Unmute" : "Mute") }
-                        .buttonStyle(BracketButtonStyle())
-                        .help("禁言：还能读、还能干活，但不能发消息、不能写置顶笔记。")
-                    Spacer()
-                    Button(action: kick) { BracketLabel(word: "Kick") }
-                        .buttonStyle(BracketButtonStyle(role: .destructive))
-                        .help("移出房间；会话本身继续运行，之后还能再拉进来。")
+                    wide("Mention", help: "在输入框里 @ 它。", action: mention)
+                    Spacer(minLength: 0)
                 }
                 .padding(.top, 10)
+                HStack(spacing: 6) {
+                    wide("Rename", help: "改它在这个房间里的名字。") { renaming.toggle(); newName = seat.handle }
+                    wide(seat.muted ? "Unmute" : "Mute", help: "禁言：还能读、还能干活，但不能发消息、不能写置顶笔记。") { setMuted(!seat.muted) }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 6)
                 if renaming {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         RoomField(prompt: "New name in this room", text: $newName, submit: { if !newName.trimmingCharacters(in: .whitespaces).isEmpty { rename(newName) } })
                         Button { rename(newName) } label: { BracketLabel(word: "Save", key: "↩") }
                             .buttonStyle(BracketButtonStyle(role: .primary)).disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -505,18 +507,14 @@ struct RoomMemberCard: View {
                     .padding(.top, 6)
                     Text("只改它在这个房间里的名字（@ 它时用的）；会话自己的名字不变。旧名字仍然能叫到它。").font(.system(size: 11.5)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
                 }
-                HStack(spacing: 8) {
-                    Button { renaming.toggle(); newName = seat.handle } label: { BracketLabel(word: "Rename") }.buttonStyle(BracketButtonStyle())
-                        .help("改它在这个房间里的名字。")
-                    Spacer()
-                    Button { end(false) } label: { BracketLabel(word: "End") }
-                        .buttonStyle(BracketButtonStyle(role: .destructive))
-                        .help("移出房间并关掉它的终端；对话记录留着，之后还能恢复。")
-                    Button { end(true) } label: { BracketLabel(word: "Delete") }
-                        .buttonStyle(BracketButtonStyle(role: .destructive))
-                        .help("移出房间、关掉终端，并删除它的对话记录。删了就恢复不了。")
+                HairRule(color: Look.line).padding(.top, 10)
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    wide("Kick", role: .destructive, help: "移出房间；会话本身继续运行，之后还能再拉进来。", action: kick)
+                    wide("End", role: .destructive, help: "移出房间并关掉它的终端；对话记录留着，之后还能恢复。") { end(false) }
+                    wide("Delete", role: .destructive, help: "移出房间、关掉终端，并删除它的对话记录。删了就恢复不了。") { end(true) }
                 }
-                .padding(.top, 6)
+                .padding(.top, 10)
             } else {
                 Text("已离开房间。").font(.system(size: 12)).foregroundStyle(Look.faint)
             }
@@ -525,6 +523,13 @@ struct RoomMemberCard: View {
         .padding(.vertical, 12)
         .frame(width: 300)
         .roomFloat()
+    }
+
+    /// One of the card's buttons.
+    private func wide(_ word: String, role: BracketButtonStyle.Role = .normal, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { BracketLabel(word: word) }
+            .buttonStyle(BracketButtonStyle(role: role, size: 12))
+            .help(help)
     }
 
     private func line(_ label: String, _ value: String, mono: Bool = false, color: Color = Look.ink, help: String? = nil) -> some View {
