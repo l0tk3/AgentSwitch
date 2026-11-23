@@ -449,7 +449,7 @@ function terminalEnds(terminals: TerminalHost | undefined, now: number): LiveEnd
 
 // ---- text ----
 
-/** Stored text as a person reads it: the sealer's legend cut off, each ciphertext a lock. */
+/** Stored text as a person reads it: an old sealer legend cut off, each ciphertext a lock. */
 function readable(text: string): string {
   return withoutLegend(text).replace(TOKEN, "🔒");
 }

@@ -1,5 +1,5 @@
 /** The assistant conversation (assistant-v0 §1.1): one conversation for the one user, in its own sqlite file next to
- *  the task store. Only sealed text is ever stored. A user message carries the client's id so a resend is answered
+ *  the task store. Messages are stored as typed (until 2026-11-23 they were sealed first, router-v0 §9). A user message carries the client's id so a resend is answered
  *  from here instead of acting twice. The watches (§1 `watch`, step 3) live in the same file: a restart keeps them. */
 
 import { mkdirSync } from "node:fs";

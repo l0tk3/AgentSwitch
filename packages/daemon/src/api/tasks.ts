@@ -1,6 +1,5 @@
 /** Tasks: create, list, show, follow the event stream, approve / answer / cancel, hand off. */
 
-import type { SealContext, SealedEntry } from "../secrets/sealer.js";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -44,25 +43,16 @@ function remoteRefusal(body: z.infer<typeof NewTaskBody>): string | null {
   return null;
 }
 
-type Sealed = { ok: true; text: string; sealed: readonly SealedEntry[] } | { ok: false; code: "unroutable" | "unavailable"; error: string };
-
-/** Every submission passes the sealer (router-v0 §9) before anything is stored; a sealer failure refuses the
- *  submission rather than storing the text as is. Without a sealer (echo mode, no gate) the text goes as is. */
-async function sealSubmission(deps: ApiDeps, text: string, ctx: SealContext): Promise<Sealed> {
-  if (!deps.sealer) return { ok: true, text, sealed: [] };
-  const r = await deps.sealer(text, ctx);
-  if (!r.ok) return { ok: false, code: r.code, error: r.error };
-  return { ok: true, text: r.text, sealed: r.sealed };
-}
 const AnswerBody = z.object({ approval_id: z.string().min(1), text: z.string().max(MAX_ANSWER_LENGTH).optional(), answers: z.record(z.string(), z.array(z.string())).optional() })
   .refine((b) => b.text !== undefined || b.answers !== undefined, { message: "text or answers required" });
 const HandoffBody = z.object({ to: TargetRef.optional() });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
 const RateBody = z.object({ rating: z.union([z.literal(1), z.literal(-1), z.null()]) });
 
-type IntakeStage = "sealing" | "creating";
-type IntakeResult = { ok: true; task: Task; elapsedMs: number; sealingMs: number }
-  | { ok: false; status: 400 | 404 | 409 | 500 | 503; error: string; streamError: string; elapsedMs: number; sealingMs: number };
+/** Until 2026-11-23 a "sealing" stage came first (router-v0 §9, removed); only "creating" is sent now. */
+type IntakeStage = "creating";
+type IntakeResult = { ok: true; task: Task; elapsedMs: number }
+  | { ok: false; status: 400 | 404 | 409 | 500; error: string; streamError: string; elapsedMs: number };
 
 /** A bounded receipt, not an execution stream. Slow readers and disconnects never repeat or hold up creation. */
 function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promise<IntakeResult>, elapsed: () => number): ReadableStream<Uint8Array> {
@@ -74,7 +64,7 @@ function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promi
       void (async () => {
         try {
           const result = await receive((stage) => send({ type: "progress", stage, elapsedMs: elapsed() }));
-          if (result.ok) send({ type: "accepted", task: result.task, elapsedMs: result.elapsedMs, sealingMs: result.sealingMs });
+          if (result.ok) send({ type: "accepted", task: result.task, elapsedMs: result.elapsedMs });
           else send({ type: "error", status: result.status, error: result.streamError });
         } catch {
           // Provider errors can contain the original input; never echo them into the receipt.
@@ -91,9 +81,6 @@ function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promi
 export type TaskBody = z.infer<typeof NewTaskBody>;
 export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404 | 409; error: string; streamError?: string };
 
-/** The second half of taking a task, after sealing (shared by POST /tasks and the assistant, assistant-v0 §1.1): the
- *  referenced parent and thread are looked up again (sealing takes seconds; they may be gone or archived meanwhile), the
- *  work dir chosen, attachments moved in, the task submitted. */
 /** A new folder for a task that names none: under the default work folder when it is on and allowed, else a
  *  throw-away one in the data directory. */
 function defaultTaskFolder(deps: ApiDeps): { dir: string; kept: boolean } {
@@ -109,9 +96,12 @@ function defaultTaskFolder(deps: ApiDeps): { dir: string; kept: boolean } {
 
 const SEARCH_LIMIT = 30;
 
-export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }): Admitted {
-  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, task: _raw, ...rest } = body;
-  // The assistant's folder comes here unchecked (POST /tasks checked its own before sealing): check it now.
+/** Taking a task (shared by POST /tasks and the assistant, assistant-v0 §1.1): the referenced parent and thread are
+ *  looked up, the work dir chosen, attachments moved in, the task submitted. The text goes on as typed: the automatic
+ *  sealing before this (router-v0 §9) was removed on 2026-11-23. */
+export function admitTask(deps: ApiDeps, body: TaskBody): Admitted {
+  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body;
+  // The assistant's folder comes here unchecked: check it now.
   const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
   if (cwdProblem) return { ok: false, status: 400, error: cwdProblem };
   const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
@@ -131,7 +121,7 @@ export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly te
   const id = randomUUID().slice(0, 8);
   try { attachments = uploadIds?.length ? deps.uploads.moveToDir(uploadIds, taskInDir(deps.artifactsDir, id), false) : []; }
   catch (err) { return { ok: false, status: 400, error: (err as Error).message, streamError: "附件无法保存，请重新检查附件后提交。" }; }
-  const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), id, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
+  const task = deps.engine.submit({ ...rest, id, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
   return { ok: true, task };
 }
 
@@ -143,37 +133,27 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     if (!body.success) return c.json({ error: zodIssues(body.error) }, 400);
     const refused = remoteCaller(c.env) ? remoteRefusal(body.data) : null;
     if (refused) return c.json({ error: refused }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
+    const { cwd, parent_id, thread_id } = body.data;
     const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
     if (cwdProblem) return c.json({ error: cwdProblem }, 400);
-    let parent = parent_id ? deps.store.getTask(parent_id) : undefined;
+    const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
     const initialThreadId = thread_id ?? parent?.threadId;
-    let thread = initialThreadId ? deps.store.getThread(initialThreadId) : undefined;
+    const thread = initialThreadId ? deps.store.getThread(initialThreadId) : undefined;
     if (initialThreadId && !thread) return c.json({ error: "thread not found" }, 404);
     if (thread?.status === "archived") return c.json({ error: "thread is archived; reopen it first" }, 409);
     // A follow-up takes over its parent's cwd, which may predate the current rules.
     const inheritedProblem = cwd === undefined && parent && !parent.ephemeral ? checkStoredCwd(parent.cwd, deps.cwdRules, deps.workRoot) : null;
     if (inheritedProblem) return c.json({ error: `the parent task's ${inheritedProblem}` }, 400);
     const receive = async (progress: (stage: IntakeStage) => void = () => undefined): Promise<IntakeResult> => {
-      let sealingMs = 0;
-      const failure = (status: Extract<IntakeResult, { ok: false }>["status"], error: string, streamError = error): IntakeResult => ({ ok: false, status, error, streamError, elapsedMs: elapsed(), sealingMs });
-      if (deps.sealer) progress("sealing");
-      const sealStarted = Date.now();
-      let sealed: Sealed;
-      try { sealed = await sealSubmission(deps, rest.task, { ...(parent ? { parentTask: parent.task } : {}), ...(thread?.title ? { threadTitle: thread.title } : {}) }); }
-      catch { sealed = { ok: false, code: "unavailable", error: "凭据保护服务暂时不可用，消息未创建任务，请稍后重试。" }; }
-      finally { sealingMs = deps.sealer ? Date.now() - sealStarted : 0; }
-      if (!sealed.ok) return failure(sealed.code === "unroutable" ? 400 : 503, sealed.error, sealed.code === "unroutable"
-        ? "凭据缺少目标站点或原文用途授权，请补充后重试。" : "凭据保护服务暂时不可用，消息未创建任务，请稍后重试。");
       progress("creating");
-      const admitted = admitSealed(deps, body.data, sealed);
-      if (!admitted.ok) return failure(admitted.status, admitted.error, admitted.streamError ?? admitted.error);
+      const admitted = admitTask(deps, body.data);
+      if (!admitted.ok) return { ok: false, status: admitted.status, error: admitted.error, streamError: admitted.streamError ?? admitted.error, elapsedMs: elapsed() };
       const task = admitted.task;
       const elapsedMs = elapsed();
       // A diagnostic failure after submit must not turn an accepted task into a retryable rejection.
-      try { deps.bus.publish(deps.store.appendEvent(task.id, "step", { action: "intake", durationMs: elapsedMs, sealingMs })); } catch { /* The task receipt still takes precedence. */ }
-      return { ok: true, task, elapsedMs, sealingMs };
+      try { deps.bus.publish(deps.store.appendEvent(task.id, "step", { action: "intake", durationMs: elapsedMs })); } catch { /* The task receipt still takes precedence. */ }
+      return { ok: true, task, elapsedMs };
     };
     const wantsStream = (c.req.header("accept") ?? "").split(",").some((part) => part.split(";")[0]?.trim().toLowerCase() === "application/x-ndjson" && !/;\s*q=0(?:\.0*)?(?:\s*;|\s*$)/i.test(part));
     if (wantsStream) {
@@ -183,7 +163,7 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
       return c.newResponse(intakeStream(receive, elapsed));
     }
     const result = await receive();
-    c.header("Server-Timing", `sealing;dur=${result.sealingMs}, intake;dur=${result.elapsedMs}`);
+    c.header("Server-Timing", `intake;dur=${result.elapsedMs}`);
     return result.ok ? c.json(result.task, 201) : c.json({ error: result.error }, result.status);
   });
 
@@ -283,23 +263,8 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     if (!evidence || !task || TERMINAL.has(task.status)) return c.json({ error: "no pending question with that id" }, 404);
     const checked = validateAnswers(evidence.questions, body.data.answers ?? answersFromText(evidence.questions, body.data.text?.trim() ?? ""));
     if (!checked.ok) return c.json({ error: checked.error }, 400);
-    // Answers are another plaintext entrance. Seal before ApprovalDesk stores the answer or emits it.
-    const answers: Record<string, string[]> = {};
-    const entries: SealedEntry[] = [];
-    // Only the sealer sees this plaintext bundle. A host named in another answer can supply
-    // the destination for a credential without ever copying that plaintext into stored evidence.
-    const answerContext = `${task.task}\n\nQuestions and user answers:\n${JSON.stringify({ questions: evidence.questions, answers: checked.answers })}`;
-    for (const [id, values] of Object.entries(checked.answers)) {
-      answers[id] = [];
-      for (const value of values) {
-        const sealed = await sealSubmission(deps, value, { parentTask: answerContext });
-        if (!sealed.ok) return c.json({ error: "could not seal the answer; it was not stored" }, sealed.code === "unroutable" ? 400 : 503);
-        answers[id].push(sealed.text);
-        entries.push(...sealed.sealed);
-      }
-    }
-    const r = deps.engine.answer(body.data.approval_id, { answers, sealed: !!deps.sealer });
-    if (r.ok && entries.length) deps.bus.publish(deps.store.appendEvent(task.id, "sealed", { entries, source: "answer", approvalId: approval.id }));
+    // Answers are stored as typed (the automatic sealing of answers was removed on 2026-11-23, router-v0 §9).
+    const r = deps.engine.answer(body.data.approval_id, { answers: checked.answers });
     return r.ok ? c.json({ ok: true }) : c.json({ error: r.error }, r.code === "not_found" ? 404 : 400);
   });
 

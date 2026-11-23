@@ -62,13 +62,15 @@
 
 路由器的"CLAUDE.md"：用户手写的 markdown，每次分诊原样进路由器的 system prompt。内容三类：
 
-- **站点与账号**：URL、账号、密码/2FA/Token 的 **secret-gate 密文**（可以写明文，保存时由 sealer 换成密文，§9 末尾）、备注（表单类型、登录后标题）。
+- **站点与账号**：URL、账号、密码/2FA/Token 的 **secret-gate 密文**（2026-11-23 起保存时不再自动换成密文，§9；明文行仍按下面的 lint 删掉）、备注（表单类型、登录后标题）。
 - **环境**：代理地址、内网可达条件、该用哪个二进制。
 - **偏好**：某目录优先哪个 harness、某类任务别用贵模型。
 
 路由器的义务写在提示词里：任务提到列出的站点/账号时，把 URL、账号、密文**原样**抄进简报；不得编造凭据；缺凭据时在简报里说明并降低置信度，不能让执行者"去找密码"。
 
-## 9. 明文入口：sealer（2026-09-22）
+## 9. 明文入口：sealer（2026-09-22，2026-11-23 已删除）
+
+> **2026-11-23 删除（用户决定，凭据网关与调度之后重新设计）**：本节的自动封存整个拿掉了。任务提交、对话助理的每条消息、CONTEXT.md 保存、问题的回答都按用户写的原样往下走，不再先让路由器模型找凭据、不再经 gate 造 `enc:` 密文；`secrets/sealer.ts`、`secrets/minter.ts`、提交时的「sealing」进度阶段、给执行者的说明（legend）、`sealed` 事件都不再有。gate 本身不动：Mac/手机上手动造密文、代理、浏览器填写、`secret_exec`、`enc:ref:`、用户自己贴进来的 `enc:` 密文照常可用。旧记录里的 `sealed` 事件和文本末尾的旧说明照常读得出、显示时照旧截掉。下文是删除前的设计，留作记录。
 
 > 2026-09-28：配了本地模型时，sealer 由本地前台接替并多做脱敏，调度模型只见脱敏文本；没配时本节照旧。见 `docs/local-model-v0.md`。
 
@@ -152,7 +154,7 @@ harnesses:
 router:
   harness: opencode
   model: deepseek/deepseek-flash    # 以后可换本地模型
-  default: {harness: opencode, model: deepseek/deepseek-flash}   # 路由失效时的兜底
+  # default: 2026-11-23 删除（用户决定，待重新设计）：兜底永远是上面这个 harness/model；旧文件里写了也只读不用
 ```
 
 - `models` 里的 key 是执行器实际接受的模型 ID：Claude Code 走 `--model` / SDK 的 `model` 字段，Codex 走 app-server `newConversation.model`，OpenCode 走 `provider/model`。
@@ -195,7 +197,7 @@ router:
 
 校验（纯函数 `validateDecision(decision, targets, quota, running)`），按顺序：
 
-1. `harness` 必须在目录里，`model` 必须在该 harness 的 `models` 键集合里（通配按前缀）且未标 `unavailable`；`model` 缺省用 `default_model`。不通过则换下一个 fallback，全不行用 `router.default`。
+1. `harness` 必须在目录里，`model` 必须在该 harness 的 `models` 键集合里（通配按前缀）且未标 `unavailable`；`model` 缺省用 `default_model`。不通过则换下一个 fallback，全不行用 `router.default`（2026-11-23 起恒等于路由器自己的 harness/model）。
 2. `needs_browser` 为真时 harness 的 `browser` 必须为 true。
 3. 额度：`quota.remaining(harness) < 阈值` 视为不可用，进入 fallback 链。
 4. 并发：`running[harness] >= max_concurrent` 时排队而不是换目标（换目标会让同一任务在不同模型间漂移，难以复现）。

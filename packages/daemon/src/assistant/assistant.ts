@@ -1,5 +1,5 @@
-/** The router as the user's assistant (assistant-v0 §1.1). Every phone message: sealed first (the conversation never
- *  holds plaintext), stored, answered by one router-model call with one action — reply, create_task, status, cancel —
+/** The router as the user's assistant (assistant-v0 §1.1). Every phone message: stored as typed (until 2026-11-23 it
+ *  was sealed first, router-v0 §9), answered by one router-model call with one action — reply, create_task, status, cancel —
  *  and stored again. A message with files or a pinned executor is a task without asking. When the assistant cannot
  *  answer usefully the message becomes a task as before, so nothing the user says is lost. A resend with the same
  *  client id gets the first answer. */
@@ -13,7 +13,6 @@ import type { Engine } from "../engine/engine.js";
 import type { Store } from "../engine/store.js";
 import type { Task } from "../engine/types.js";
 import { askJson } from "../router/ask.js";
-import type { SealedEntry, Sealer } from "../secrets/sealer.js";
 import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
 import { extractJsonObject } from "../util/json.js";
 import type { AssistantKind, AssistantLog, AssistantMessage } from "./log.js";
@@ -75,7 +74,7 @@ const Decision = z.discriminatedUnion("action", [
 type Decision = z.infer<typeof Decision>;
 
 export type TaskRequest = { readonly task: string; readonly parent_id?: string; readonly cwd?: string; readonly attachments?: string[]; readonly pin?: TargetRef };
-export type Admit = (body: TaskRequest, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }) =>
+export type Admit = (body: TaskRequest) =>
   { ok: true; task: Task } | { ok: false; status: number; error: string };
 
 export type AssistantDeps = {
@@ -84,7 +83,6 @@ export type AssistantDeps = {
   readonly engine: Pick<Engine, "cancel">;
   /** The router model as a text-only agent; absent (echo mode) = every message is a task. */
   readonly router?: Router;
-  readonly sealer?: Sealer;
   readonly admit: Admit;
   /** The data directory's work root: its throw-away folders are not offered as earlier folders. */
   readonly workRoot?: string;
@@ -145,24 +143,22 @@ export class Assistant {
   }
 
   private async answer(input: Incoming): Promise<Answered> {
-    const sealed = this.deps.sealer ? await this.deps.sealer(input.text) : { ok: true as const, text: input.text, sealed: [], ms: 0 };
-    if (!sealed.ok) return { ok: false, status: sealed.code === "unroutable" ? 400 : 503, error: sealed.error };
+    const said = input.text;
     const history = this.deps.log.recent(HISTORY_MESSAGES);
-    const user = this.deps.log.append({ role: "user", text: sealed.text, kind: "message", taskIds: [], clientId: input.clientId, replyTo: null });
+    const user = this.deps.log.append({ role: "user", text: said, kind: "message", taskIds: [], clientId: input.clientId, replyTo: null });
     const reply = (kind: AssistantKind, text: string, taskIds: readonly string[] = []) =>
       this.deps.log.append({ role: "assistant", text, kind, taskIds, clientId: null, replyTo: user.seq });
     const create = (kind: "task" | "fallback", text: string, request: TaskRequest): Answered => {
-      const admitted = this.deps.admit({ ...request, ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...(input.pin ? { pin: input.pin } : {}) },
-        { text: request.task, sealed: sealed.sealed });
+      const admitted = this.deps.admit({ ...request, ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...(input.pin ? { pin: input.pin } : {}) });
       if (!admitted.ok) return { ok: true, user, assistant: reply("reply", `任务未创建：${admitted.error}`) };
       return { ok: true, user, assistant: reply(kind, text, [admitted.task.id]), task: admitted.task };
     };
 
     // Files and a pinned executor only make sense for a task: no need to ask.
-    if (input.attachments?.length || input.pin) return create("task", "已建任务。", { task: sealed.text });
+    if (input.attachments?.length || input.pin) return create("task", "已建任务。", { task: said });
     const register = buildRegister(this.deps.store, (this.deps.now ?? Date.now)(), new Map(this.deps.log.watches().map((w) => [w.taskId, w.everyMs])));
-    const decision = this.deps.router ? await this.decide(history, sealed.text, register) : null;
-    if (!decision) return create("fallback", "已建任务。", { task: sealed.text });
+    const decision = this.deps.router ? await this.decide(history, said, register) : null;
+    if (!decision) return create("fallback", "已建任务。", { task: said });
 
     switch (decision.action) {
       case "reply":
@@ -184,7 +180,7 @@ export class Assistant {
         return { ok: true, user, assistant: reply("watch", decision.text, ids) };
       }
       case "create_task": {
-        const task = decision.task && keepsTokens(sealed.text, decision.task) ? decision.task : sealed.text;
+        const task = decision.task && keepsTokens(said, decision.task) ? decision.task : said;
         const parent = decision.parent_id && register.allIds.has(decision.parent_id) ? decision.parent_id : undefined;
         // A named or earlier folder, checked against the cwd rules when the task is admitted.
         const cwd = decision.cwd ? expandHome(decision.cwd.trim()) : undefined;

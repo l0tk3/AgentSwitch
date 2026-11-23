@@ -9,7 +9,6 @@ import { liveSnapshot, plainLine, splitAction, toolLine, toolPhrase, toolWord } 
 import { encodeEvidence } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
-import { LEGEND_HEADER } from "../src/secrets/sealer.js";
 import type { TerminalHost, TerminalInfo, TurnEnd } from "../src/terminals/host.js";
 
 const open: Store[] = [];
@@ -95,12 +94,12 @@ describe("live snapshot", () => {
     for (const id of [free, secret, multi]) expect(rows.get(id)?.ask).toMatchObject({ kind: "question", answerable: false });
   });
 
-  it("a thread's first task goes by the thread's title, a later one by its own request; ciphertexts are locks", () => {
+  it("a thread's first task goes by the thread's title, a later one by its own request; ciphertexts are locks, an old sealer legend is cut", () => {
     const f = build();
     const thread = f.store.createThread("/w", "整理下载目录");
     const first = f.store.createTask({ task: "整理下载目录，重复的放一起", cwd: "/w", threadId: thread.id });
     f.at(f.now() + 1_000);
-    const later = f.store.createTask({ task: `把结果发给我 enc:v1:${"T".repeat(40)}\n\n${LEGEND_HEADER}\n- password`, cwd: "/w", threadId: thread.id });
+    const later = f.store.createTask({ task: `把结果发给我 enc:v1:${"T".repeat(40)}\n\n[AgentSwitch sealed the credentials in this message. …]\n- password`, cwd: "/w", threadId: thread.id });
     for (const t of [first, later]) f.store.updateTask(t.id, { status: "running" });
     const titles = new Map(liveSnapshot(f.store, undefined, f.now()).rows.map((r) => [r.id, r.title]));
     expect(titles.get(first.id)).toBe("整理下载目录");

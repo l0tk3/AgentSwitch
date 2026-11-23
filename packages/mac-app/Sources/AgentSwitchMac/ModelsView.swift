@@ -2,15 +2,14 @@ import AgentSwitchMacCore
 import SwiftUI
 
 /// 模型: usage (docs/ui-v0.md §4.2). With `dispatch` it is the Dispatch page's own part instead (2026-11-22): the
-/// router model and the default target via `GET|PUT /settings/models`; the daemon applies them on restart. Pickers
-/// show model names (Opus 5.5) and save the ids.
+/// dispatch (router) model via `GET|PUT /settings/models`; the daemon applies it on restart. It is the only model
+/// setting: the Default executor/model section was removed on 2026-11-23 (the dispatch model is the fallback too).
+/// Pickers show model names (Opus 5.5) and save the ids.
 struct ModelsView: View {
     @Environment(AppModel.self) private var model
     var dispatch = false
     @State private var settings: ModelSettings?
     @State private var routerModel = ""
-    @State private var harness = ""
-    @State private var targetModel = ""
     @State private var problem: String?
     @State private var saved: String?
     @State private var busy = false
@@ -44,7 +43,7 @@ struct ModelsView: View {
     }
 
     private func form(_ s: ModelSettings) -> some View {
-        let changes = ModelSettingsUpdate.diff(current: s, routerModel: routerModel, defaultHarness: harness, defaultModel: targetModel)
+        let changes = ModelSettingsUpdate.diff(current: s, routerModel: routerModel)
         return Form {
             Section {
                 Picker("Dispatch Model", selection: $routerModel) {
@@ -53,19 +52,7 @@ struct ModelsView: View {
             } header: {
                 SectionLabel("Dispatch")
             } footer: {
-                Footer("根据消息内容选择执行器和模型。")
-            }
-            Section {
-                Picker("Executor", selection: $harness) {
-                    ForEach(s.harnessNames, id: \.self) { Text(HarnessName.display($0)).tag($0) }
-                }
-                Picker("Model", selection: $targetModel) {
-                    ForEach(options(s.models(for: harness), current: targetModel), id: \.self) { Text(ModelName.display($0)).tag($0) }
-                }
-            } header: {
-                SectionLabel("Default")
-            } footer: {
-                Footer("调度模型无法判断、所选模型均不可用或调度出错时，任务交由此模型执行。")
+                Footer("根据消息内容选择执行器和模型；无法判断、所选模型均不可用或调度出错时，由它自己执行。")
             }
             Section {
             } footer: {
@@ -81,10 +68,6 @@ struct ModelsView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: harness) { _, next in
-            let models = s.models(for: next)
-            if !models.contains(targetModel) { targetModel = s.harnesses[next]?.defaultModel ?? models.first ?? "" }
-        }
     }
 
     /// What the last save did, or whether saved settings still wait for a restart.
@@ -116,8 +99,6 @@ struct ModelsView: View {
             let s = try await model.client.modelSettings()
             settings = s
             routerModel = s.router.model ?? s.router.options.first ?? ""
-            harness = s.defaultTarget.harness ?? s.harnessNames.first ?? ""
-            targetModel = s.defaultTarget.model ?? s.harnesses[harness]?.defaultModel ?? ""
             problem = nil
         } catch {
             problem = error.localizedDescription
@@ -127,7 +108,7 @@ struct ModelsView: View {
     private func save(_ s: ModelSettings) async {
         busy = true
         defer { busy = false }
-        let update = ModelSettingsUpdate.diff(current: s, routerModel: routerModel, defaultHarness: harness, defaultModel: targetModel)
+        let update = ModelSettingsUpdate.diff(current: s, routerModel: routerModel)
         do {
             let result = try await model.client.saveModelSettings(update)
             problem = nil

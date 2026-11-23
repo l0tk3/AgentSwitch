@@ -59,7 +59,6 @@ final class DaemonModelsTests: XCTestCase {
         """
         let m = try JSONDecoder().decode(ModelSettings.self, from: Data(json.utf8))
         XCTAssertEqual(m.router.options, ["deepseek/deepseek-flash", "claude-haiku"])
-        XCTAssertEqual(m.defaultTarget.harness, "codex")
         XCTAssertEqual(m.harnessNames, ["claude-code", "codex", "opencode"])
         XCTAssertEqual(m.models(for: "claude-code"), ["claude-opus-5", "claude-sonnet-5"])
         XCTAssertEqual(m.harnesses["claude-code"]?.defaultModel, "claude-sonnet-5")
@@ -69,14 +68,11 @@ final class DaemonModelsTests: XCTestCase {
     }
 
     func testUpdateCarriesOnlyChanges() throws {
-        let current = ModelSettings(router: .init(model: "r1", options: ["r1", "r2"]), defaultTarget: .init(harness: "codex", model: "a"), harnesses: [:])
-        XCTAssertTrue(ModelSettingsUpdate.diff(current: current, routerModel: "r1", defaultHarness: "codex", defaultModel: "a").isEmpty)
-        let routerOnly = ModelSettingsUpdate.diff(current: current, routerModel: "r2", defaultHarness: "codex", defaultModel: "a")
+        let current = ModelSettings(router: .init(model: "r1", options: ["r1", "r2"]), harnesses: [:])
+        XCTAssertTrue(ModelSettingsUpdate.diff(current: current, routerModel: "r1").isEmpty)
+        XCTAssertTrue(ModelSettingsUpdate.diff(current: current, routerModel: nil).isEmpty)
+        let routerOnly = ModelSettingsUpdate.diff(current: current, routerModel: "r2")
         XCTAssertEqual(String(decoding: try JSONEncoder().encode(routerOnly), as: UTF8.self), #"{"router":{"model":"r2"}}"#)
-        let target = ModelSettingsUpdate.diff(current: current, routerModel: nil, defaultHarness: "claude-code", defaultModel: "s")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        XCTAssertEqual(String(decoding: try encoder.encode(target), as: UTF8.self), #"{"default":{"harness":"claude-code","model":"s"}}"#)
     }
 
     func testErrorMessageExtraction() {
@@ -158,7 +154,7 @@ final class DaemonClientTests: XCTestCase {
         let listed = try await client.devices()
         XCTAssertEqual(listed, [])
         try await client.revokeDevice(id: "a b")
-        let saved = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "x", defaultHarness: nil, defaultModel: nil))
+        let saved = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "x"))
         XCTAssertTrue(saved.restartRequired)
         let health = try await client.health()
         XCTAssertEqual(health.version, "0.1.0")
@@ -278,15 +274,15 @@ final class FakeDaemonIntegrationTests: XCTestCase {
 
         let models = try await client.modelSettings()
         XCTAssertTrue(models.harnessNames.contains("codex"))
-        let saved = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: nil, defaultHarness: "codex", defaultModel: "gpt-5.5"))
+        let saved = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "claude-haiku-4-5-20251001"))
         XCTAssertTrue(saved.restartRequired)
         let reread = try await client.modelSettings()
-        XCTAssertEqual(reread.defaultTarget.model, "gpt-5.5")
+        XCTAssertEqual(reread.router.model, "claude-haiku-4-5-20251001")
         do {
-            _ = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: nil, defaultHarness: "codex", defaultModel: "nope"))
+            _ = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "nope"))
             XCTFail()
         } catch {
-            XCTAssertEqual(error as? DaemonError, .http(status: 400, message: "unknown harness/model"))
+            XCTAssertEqual(error as? DaemonError, .http(status: 400, message: "router.model nope is not a opencode model"))
         }
     }
 }

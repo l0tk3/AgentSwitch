@@ -6,7 +6,7 @@ import { Assistant } from "./assistant/assistant.js";
 import { AssistantLog } from "./assistant/log.js";
 import { announceUpdate, Reporter, type ReporterOptions } from "./assistant/reports.js";
 import { updateState } from "./files/appUpdate.js";
-import { admitSealed, type TaskBody } from "./api/tasks.js";
+import { admitTask, type TaskBody } from "./api/tasks.js";
 import type { ApiDeps } from "./api/shared.js";
 import { BrowserSlots } from "./executors/browserSlots.js";
 import { cloneRoot, CloneSweeper } from "./executors/chromeClones.js";
@@ -55,9 +55,7 @@ import { echoExecutor } from "./executors/echo.js";
 import { defaultGate, gateHealth, gateNotFound, proxyEndpoint, warmBrowserMcp, type GateOptions } from "./executors/gate.js";
 import { gateRefsExecutor } from "./executors/gateRefs.js";
 import { gateRefs } from "./secrets/refs.js";
-import { gateMinter } from "./secrets/minter.js";
 import { platformExperience } from "./engine/platformContext.js";
-import { routerSealer, type Sealer } from "./secrets/sealer.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
 import { OpenCodeExecServer, opencodeServeConfig } from "./executors/opencodeServer.js";
@@ -308,8 +306,6 @@ export type BuildOverrides = {
   readonly opencode?: OpenCodeServer;
   /** The OpenCode executors' own resident server (real executors only); when absent they run `opencode run --standalone`. */
   readonly opencodeExec?: OpenCodeExecServer;
-  /** Tests: a sealer without a model or the gate. */
-  readonly sealer?: Sealer;
   /** Tests: the planner for multi-step tasks (loop-v0 §6). */
   readonly planner?: PlannerFactory;
   /** Tests: remote state without openssl or the network (null = off whatever cfg.remote says). */
@@ -413,9 +409,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const extensionsSummary = () => summarizeExtensions(extensions);
   // loop-v0 §6: the planner runs multi-step tasks; only with a real router, and only while its harness has quota.
   const planner = overrides.planner ?? (cfg.router === "echo" || overrides.router ? undefined : plannerFor(targets, resident, () => quota.map()));
-  // The sealer (router-v0 §9) is the same text-only agent plus `secret-gate enc --batch`; only with real executors, which require the gate.
+  // Real executors require the gate. (The automatic sealer that also ran on it, router-v0 §9, was removed on 2026-11-23.)
   const gate = cfg.executors === "real" ? defaultGate() : null;
-  const sealer = overrides.sealer ?? (summarizer && gate ? routerSealer(oracle("sealer"), gateMinter(gate), () => loadContext(contextPath).text, targets.router.timeout_ms) : undefined);
   // gate-next-v0 §1/§3: per-execution enc:ref: scope and proxy health.
   const wiredExecutors = gate ? executors.map((executor) => gateRefsExecutor(executor, { refs: gateRefs(gate), health: () => gateHealth(gate) })) : executors;
   // Kept browser logins (threads-v0 §4b): real executors only; the directory is read-denied to them (prot.readDenied).
@@ -658,16 +653,16 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
-  // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
+  // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
   // Ends, questions for the user and watched tasks' progress, told in the conversation (assistant-v0 step 3).
   const reporter = new Reporter({ log: conversation, store, bus, home: cfg.home, ...overrides.reports });
   reporter.start();
   announceUpdate(cfg.home, conversation);
-  const assistant = new Assistant({ log: conversation, store, engine, ...(assistantRouter ? { router: assistantRouter } : {}), ...(sealer ? { sealer } : {}),
-    admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), workRoot: apiDeps.workRoot, ...(sessions ? { sessions } : {}), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
+  const assistant = new Assistant({ log: conversation, store, engine, ...(assistantRouter ? { router: assistantRouter } : {}),
+    admit: (body) => admitTask(apiDeps, body as TaskBody), workRoot: apiDeps.workRoot, ...(sessions ? { sessions } : {}), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
   const api = createApp({ ...apiDeps, assistant });
   // The Kit's organizing tools ask this API itself, as this Mac's own screens would.
   roomAsk = async (method, path, body) => {

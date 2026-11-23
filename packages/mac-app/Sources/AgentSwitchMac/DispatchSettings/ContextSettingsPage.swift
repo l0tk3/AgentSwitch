@@ -101,25 +101,17 @@ struct ContextSettingsPage: View {
         .formStyle(.grouped)
     }
 
-    /// After a save: what was sealed and which lines were dropped; before: lines the daemon dropped when it read the file.
+    /// After a save: which lines were dropped; before: lines the daemon dropped when it read the file.
     @ViewBuilder
     private func contextNotes(_ store: ContextSettingsStore) -> some View {
         if let result = store.contextResult, !store.contextDirty {
             Section {
                 Label(result.savedLine, systemImage: "checkmark.circle.fill").foregroundStyle(Color.ok)
-                ForEach(Array(result.sealed.enumerated()), id: \.offset) { _, field in
-                    HStack(spacing: 8) {
-                        Image(systemName: "lock").foregroundStyle(.secondary).frame(width: 16)
-                        Text(field.field.isEmpty ? field.label : field.field)
-                        Text(([field.label] + field.hosts).filter { !$0.isEmpty && $0 != field.field }.joined(separator: " · "))
-                            .mono(11).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    }
-                }
                 ForEach(result.warnings, id: \.self) { line in
                     Text(line).mono(11).foregroundStyle(Color.waiting).lineLimit(2).textSelection(.enabled)
                 }
             } footer: {
-                if !result.warnings.isEmpty { Footer("以上行疑似明文凭据且无法加密，已移除。") }
+                if !result.warnings.isEmpty { Footer("以上行疑似明文凭据，已移除。") }
             }
         } else if !store.contextWarnings.isEmpty {
             Section {

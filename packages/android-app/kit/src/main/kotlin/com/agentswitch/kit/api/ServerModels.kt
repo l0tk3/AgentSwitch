@@ -285,19 +285,11 @@ data class ContextDocument(
     val warnings: List<String>,
 )
 
-/** One credential the Mac's sealer found in a CONTEXT.md save and replaced with a token (never the value). */
-@Serializable
-data class SealedField(
-    val label: String,
-    val field: String,
-    val hosts: List<String>,
-)
-
-/** `PUT /context`: the lint's warnings and what was sealed. */
+/** `PUT /context`: the lint's warnings. (Until 2026-11-23 it also said what the Mac sealed; that automatic sealing was
+ *  removed, and the always-empty `sealed` a Mac still sends is ignored.) */
 @Serializable
 data class ContextSaveResult(
     val warnings: List<String> = emptyList(),
-    val sealed: List<SealedField> = emptyList(),
 )
 
 /** `GET /context/example`. */

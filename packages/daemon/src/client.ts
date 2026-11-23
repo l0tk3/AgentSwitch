@@ -125,7 +125,7 @@ export class Client {
   context() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/context"); }
   memory() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/memory"); }
   putMemory(text: string) { return this.call<{ path: string; warnings: string[] }>("PUT", "/memory", { text }); }
-  /** CONTEXT.md saved: what looks like a credential is sealed first (`sealed`), lines that may not stay are said (`warnings`). */
+  /** CONTEXT.md saved as typed; lines that may not stay are said (`warnings`). `sealed` is always empty since 2026-11-23. */
   putContext(text: string) { return this.call<{ path: string; warnings: string[]; sealed: { label: string }[] }>("PUT", "/context", { text }); }
   /** What dispatch learned of platforms (docs/threads-v0.md), and one forgotten. */
   platformMemory() { return this.call<{ records: PlatformMemory[] }>("GET", "/platform-memory"); }

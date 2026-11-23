@@ -27,8 +27,7 @@ struct DispatchSettingsDemo: DispatchService {
     func contextExample() async throws -> String { "# 站点与账号\n- \n\n# 环境限制\n- \n\n# 偏好\n- " }
 
     func saveContext(_ text: String) async throws -> DispatchSaveResult {
-        DispatchSaveResult(warnings: ["- 测试环境 token ghp_x8Q2… （无法确定所属站点）"],
-                           sealed: [DispatchSealedField(label: "财务平台", field: "密码", hosts: ["fin.example.com"])])
+        DispatchSaveResult(warnings: ["- 测试环境 token ghp_x8Q2…"])
     }
 
     func memory() async throws -> DispatchTextDocument {

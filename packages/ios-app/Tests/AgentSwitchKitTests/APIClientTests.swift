@@ -62,7 +62,6 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(example, "# 示例")
         let saved = try await api.saveContext("# 站点\n- 财务")
         XCTAssertEqual(saved.warnings.count, 1)
-        XCTAssertEqual(saved.sealed.map(\.field), ["account password"])
         let put = try XCTUnwrap(transport.requests.last)
         XCTAssertEqual(put.httpMethod, "PUT")
         XCTAssertEqual(put.value(forHTTPHeaderField: "Content-Type"), "application/json")

@@ -2,7 +2,6 @@
 
 import type { ShownFoldersStore } from "../sessions/shownFolders.js";
 import type { Assistant } from "../assistant/assistant.js";
-import type { Sealer } from "../secrets/sealer.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -31,8 +30,6 @@ export type ApiDeps = {
   /** What the nodes this one uses last said of their own Live Activity (docs/mesh-v0.md §5.2 跨节点的提醒): listed
    *  beside this node's own for its own screens. Never waits for a node. */
   readonly liveElsewhere?: () => readonly { readonly id: string; readonly name: string; readonly body: Record<string, unknown>; readonly ahead?: number }[];
-  /** Turns plaintext credentials in a submission into tokens before anything is stored (router-v0 §9); absent in echo mode. */
-  readonly sealer?: Sealer;
   /** Chat Room's rooms (docs/chatroom-v0.md); absent = off. */
   readonly rooms?: import("../rooms/store.js").RoomStore;
   /** Chatroom Kit: what a session in a room can do there (docs/chatroom-v0.md §6). */

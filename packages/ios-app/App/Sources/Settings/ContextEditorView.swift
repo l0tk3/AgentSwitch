@@ -65,7 +65,6 @@ struct ContextEditorView: View {
 
     static func savedLine(_ result: ContextSaveResult) -> String {
         var parts = ["已保存"]
-        if !result.sealed.isEmpty { parts.append("\(result.sealed.count) 个凭据已加密（\(result.sealed.map(\.field).joined(separator: "、"))）") }
         if !result.warnings.isEmpty { parts.append("部分行已移除") }
         return parts.joined(separator: "，")
     }
@@ -98,7 +97,7 @@ struct ContextEditorView: View {
         defer { saving = false }
         do {
             let result = try await api.saveContext(text)
-            await load()   // what the Mac kept, after sealing and the lint
+            await load()   // what the Mac kept, after the lint
             warnings = result.warnings
             saved = result
         } catch {

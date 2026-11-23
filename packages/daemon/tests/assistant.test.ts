@@ -1,4 +1,4 @@
-/** The router as the user's assistant (assistant-v0 §1.1): every phone message is sealed, stored, answered with one
+/** The router as the user's assistant (assistant-v0 §1.1): every phone message is stored as typed, answered with one
  *  action — reply, create_task, status, cancel — and a failed assistant call still creates the task. */
 
 import { mkdtempSync } from "node:fs";
@@ -7,12 +7,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
 import type { Router } from "../src/core/modelCall.js";
-import type { Sealer } from "../src/secrets/sealer.js";
 import { TARGETS_PATH } from "./helpers.js";
 
 const TOKEN = "enc:v1:" + "T".repeat(40);
-/** Seals "hunter2222" like the real sealer would (no legend: nothing else is needed here). */
-const sealer: Sealer = async (text) => ({ ok: true, text: text.split("hunter2222").join(TOKEN), sealed: text.includes("hunter2222") ? [{ label: "x/pass", field: "password", kind: "secret", hosts: ["x.com"], uses: ["http"], token: TOKEN }] : [], ms: 1 });
 
 /** An assistant that answers from a script; each call gets the next reply (a function sees the message). */
 function scripted(replies: (string | ((message: string) => string))[]): Router & { calls: string[] } {
@@ -30,7 +27,7 @@ function scripted(replies: (string | ((message: string) => string))[]): Router &
 function daemon(assistant: Router | undefined) {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-assistant-"));
   const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const d = buildDaemon(cfg, { sealer, ...(assistant ? { assistant } : {}) });
+  const d = buildDaemon(cfg, { ...(assistant ? { assistant } : {}) });
   const say = async (text: string, extra: Record<string, unknown> = {}) => {
     const res = await d.app.request("/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, client_id: `c-${Math.random().toString(36).slice(2, 12)}`, ...extra }) });
     return { status: res.status, body: await res.json() as Record<string, any> };
@@ -40,15 +37,14 @@ function daemon(assistant: Router | undefined) {
 }
 
 describe("assistant", () => {
-  it("answers without creating a task, and the conversation keeps only sealed text", async () => {
+  it("answers without creating a task, and the conversation keeps the text as typed (no automatic sealing since 2026-11-23)", async () => {
     const f = daemon(scripted([JSON.stringify({ action: "reply", text: "你好，我在。" })]));
-    const r = await f.say("在吗？密码是 hunter2222");
+    const r = await f.say(`在吗？密文是 ${TOKEN}`);
     expect(r.status).toBe(200);
     expect(r.body.assistant).toMatchObject({ role: "assistant", text: "你好，我在。", kind: "reply", taskIds: [] });
     expect(r.body.task).toBeUndefined();
     const log = JSON.stringify(await f.messages());
-    expect(log).toContain(TOKEN);
-    expect(log).not.toContain("hunter2222");
+    expect(log).toContain(`在吗？密文是 ${TOKEN}`);
     expect(f.d.store.listTasks(10)).toEqual([]);
   });
 
@@ -57,10 +53,10 @@ describe("assistant", () => {
       JSON.stringify({ action: "create_task", text: "好的。", task: "登录 x.com（没带密文）" }),
       JSON.stringify({ action: "create_task", text: "好的。", task: `用 ${TOKEN} 登录 x.com 看通知` }),
     ]));
-    const a = await f.say("登录 x.com，密码 hunter2222");
+    const a = await f.say(`登录 x.com，密码 ${TOKEN}`);
     expect(a.body.task.task).toBe(`登录 x.com，密码 ${TOKEN}`);   // the rewrite dropped the token: the user's words
     expect(a.body.assistant).toMatchObject({ kind: "task", taskIds: [a.body.task.id] });
-    const b = await f.say("再看一下通知，密码 hunter2222");
+    const b = await f.say(`再看一下通知，密码 ${TOKEN}`);
     expect(b.body.task.task).toBe(`用 ${TOKEN} 登录 x.com 看通知`);
     await f.d.engine.idle();
   });
@@ -174,7 +170,7 @@ describe("assistant", () => {
     expect((await f.messages(last[0]!.seq)).map((m) => m.text)).toEqual(["二"]);
   });
 
-  it("refuses an empty message and a sealer failure stores nothing", async () => {
+  it("refuses an empty message and stores nothing", async () => {
     const f = daemon(scripted([]));
     expect((await f.say("")).status).toBe(400);
     expect(await f.messages()).toEqual([]);

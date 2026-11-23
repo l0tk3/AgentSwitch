@@ -4,7 +4,6 @@
 
 import type { Store } from "../engine/store.js";
 import { TERMINAL, type Task, type TaskEvent } from "../engine/types.js";
-import { LEGEND_HEADER } from "../secrets/sealer.js";
 import { ago } from "../util/ago.js";
 
 export const REGISTER_ACTIVE = 10;
@@ -16,9 +15,13 @@ export type Register = { readonly text: string; readonly activeIds: ReadonlySet<
 /** The apps' fixed status words (docs/ui-v0.md §4), so the assistant says a task's state the way the screens do. */
 const STATUS: Record<string, string> = { queued: "排队", routing: "进行中", running: "进行中", waiting_approval: "等你处理", done: "已完成", partial: "未完成", blocked: "未完成", failed: "失败", cancelled: "已取消" };
 
-/** The user's text without the sealer's executor legend (it is for executors, not for talking about the task). */
+/** How the legend the automatic sealer appended for executors began (router-v0 §9, removed on 2026-11-23). Nothing
+ *  writes it any more; tasks and messages stored before then still carry it, and it is cut when they are read. */
+const OLD_LEGEND_START = "\n\n[AgentSwitch sealed the credentials";
+
+/** The user's text without an old executor legend (it was for executors, not for talking about the task). */
 export function withoutLegend(text: string): string {
-  const at = text.indexOf(`\n\n${LEGEND_HEADER}`);
+  const at = text.indexOf(OLD_LEGEND_START);
   return at >= 0 ? text.slice(0, at) : text;
 }
 

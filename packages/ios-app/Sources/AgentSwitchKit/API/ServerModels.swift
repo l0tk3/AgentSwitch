@@ -234,24 +234,16 @@ public struct ContextDocument: Decodable, Sendable, Hashable {
     }
 }
 
-/// One credential the Mac's sealer found in a CONTEXT.md save and replaced with a token (never the value).
-public struct SealedField: Decodable, Sendable, Hashable {
-    public let label: String
-    public let field: String
-    public let hosts: [String]
-}
-
-/// `PUT /context`: the lint's warnings and what was sealed.
+/// `PUT /context`: the lint's warnings. (Until 2026-11-23 it also said what the Mac sealed; that automatic sealing was
+/// removed, and the always-empty `sealed` a Mac still sends is not read.)
 public struct ContextSaveResult: Decodable, Sendable, Hashable {
     public let warnings: [String]
-    public let sealed: [SealedField]
 
-    private enum CodingKeys: String, CodingKey { case warnings, sealed }
+    private enum CodingKeys: String, CodingKey { case warnings }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
-        sealed = try c.decodeIfPresent([SealedField].self, forKey: .sealed) ?? []
     }
 }
 

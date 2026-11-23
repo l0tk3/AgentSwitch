@@ -1,7 +1,7 @@
 /** Context: what dispatch reads before every task (CONTEXT.md), the facts the summarizer added (MEMORY.md), and what it
  *  learned of the sites it worked on — the Mac's Dispatch › Context. The two files are edited in the user's own editor
- *  and saved whole; the service seals what looks like a credential in CONTEXT.md and says which lines it would not
- *  keep. Another node's (`--on`) can be read, not changed. */
+ *  and saved whole, as typed; the service says which lines it would not keep (an older service also said what it
+ *  sealed). Another node's (`--on`) can be read, not changed. */
 
 import type { Messages } from "../../i18n/index.js";
 import type { PageProps } from "../app.js";

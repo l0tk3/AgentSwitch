@@ -56,7 +56,7 @@ describe("send UI", () => {
     await click();
     expect(posts(fetcher)).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(8_000);
-    expect(home.render(state.get())).toContain("可能需要几十秒");
+    expect(home.render(state.get())).toContain("发送仍在处理中");
     pending.resolve(reply(newTask, 201));
     await sending;
     expect(state.get()).toMatchObject({ view: "task", task: newTask });

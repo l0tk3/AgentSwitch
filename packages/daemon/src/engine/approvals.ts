@@ -12,7 +12,7 @@ export type ResolvedBy = "user" | "router" | "timeout" | "executor";
  *  is withdrawn rather than left for the user to answer into nothing (docs/control-v0.md §4). */
 export type RequestOptions = { readonly humanOnly?: boolean; readonly signal?: AbortSignal };
 /** What the user sent back: plain text answers the first question; `answers` covers several. */
-export type GivenAnswer = { readonly text?: string; readonly answers?: unknown; /** Internal API flag after raw length validation and sealing; never accepted from an HTTP body. */ readonly sealed?: boolean };
+export type GivenAnswer = { readonly text?: string; readonly answers?: unknown; };
 export type AnswerResult = { readonly ok: true } | { readonly ok: false; readonly code: "not_found" | "bad_answer"; readonly error: string };
 
 type Pending = { readonly kind: "approval"; readonly resolve: (d: ApprovalDecision) => void; readonly timer: NodeJS.Timeout }
@@ -90,8 +90,8 @@ export class ApprovalDesk {
     if (!task || TERMINAL.has(task.status)) return { ok: false, code: "not_found", error: "no active task with that question" };
     const ev = current?.kind === "question" && current.status === "pending" && this.pending.has(approvalId) ? parseEvidence(current.evidence) : null;
     if (!current || !ev) return { ok: false, code: "not_found", error: "no pending question with that id" };
-    const checked = given.answers !== undefined ? validateAnswers(ev.questions, given.answers, given.sealed)
-      : given.text?.trim() ? validateAnswers(ev.questions, answersFromText(ev.questions, given.text.trim()), given.sealed)
+    const checked = given.answers !== undefined ? validateAnswers(ev.questions, given.answers)
+      : given.text?.trim() ? validateAnswers(ev.questions, answersFromText(ev.questions, given.text.trim()))
       : { ok: false as const, error: "text or answers required" };
     if (!checked.ok) return { ok: false, code: "bad_answer", error: checked.error };
     const p = this.take(approvalId);

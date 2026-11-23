@@ -5,7 +5,6 @@ import type { Attempt } from "../router/reroute.js";
 import type { Attachment } from "../files/uploads.js";
 import type { TargetRef } from "../core/target.js";
 import type { ApprovalPolicy } from "./approvalPolicy.js";
-import type { SealedEntry } from "../secrets/sealer.js";
 
 /** Who handed this task over (threads-v0 §4); the engine builds the handoff package from it at dispatch. */
 export type HandoffFrom = TargetRef & { readonly taskId: string; readonly reason: "user" | `failure:${string}` | "quota" };
@@ -30,8 +29,6 @@ export type NewTask = {
   readonly attachments?: readonly Attachment[];
   /** Thread to run in; default: the parent's thread, else a new one. */
   readonly threadId?: string;
-  /** Credentials the sealer replaced with tokens before the task was stored (router-v0 §9): labels and hosts, never values. */
-  readonly sealed?: readonly SealedEntry[];
   /** Targets the router must not pick (a handoff excludes the executor being handed off from). */
   readonly exclude?: readonly TargetRef[];
   readonly handoffFrom?: HandoffFrom;
@@ -107,6 +104,8 @@ export type TaskEventType =
   | "supervisor"
   | "feedback"
   | "rated"
+  /** No longer written: the automatic sealer (router-v0 §9) was removed on 2026-11-23. Kept because stored task
+   *  records may still hold such events (credential labels and hosts, never values), and they must load and show. */
   | "sealed"
   | "transfer_grant"
   | "step";

@@ -5,9 +5,10 @@ import Foundation
 public enum DispatchTimeouts {
     /// Reads and quick writes (the phone's and the web console's 15 s).
     public static let request: TimeInterval = 15
-    /// `POST /assistant`: the message is sealed, answered by the assistant and may create a task first.
+    /// `POST /assistant`: the message is answered by the assistant and may create a task first.
     public static let assistant: TimeInterval = 90
-    /// Writes that pass the sealer (`PUT /context`, `POST /tasks/:id/answer`, the console's 120 s).
+    /// `PUT /context`, `POST /tasks/:id/answer`, `POST /tasks` (the console's 120 s). Named for the automatic sealing
+    /// these writes passed until 2026-11-23 (router-v0 §9, removed); an older daemon may still run it.
     public static let sealing: TimeInterval = 120
     /// Uploads and downloads (up to 100 MB).
     public static let transfer: TimeInterval = 180

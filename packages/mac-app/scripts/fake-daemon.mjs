@@ -24,7 +24,7 @@ const NAME = hostname().replace(/\.local$/, "");
 
 let devices = [];
 let pairing = null;
-let models = { router: "deepseek/deepseek-flash", harness: "claude-code", model: "claude-sonnet-5" };
+let models = { router: "deepseek/deepseek-flash" };
 const catalog = {
   "claude-code": { models: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001"], default_model: "claude-sonnet-5" },
   codex: { models: ["gpt-6-astra", "gpt-5.5"], default_model: "gpt-6-astra" },
@@ -78,13 +78,17 @@ createServer(async (req, res) => {
   }
   if (route === "GET /settings/models") {
     return send(res, 200, { router: { model: models.router, options: ["deepseek/deepseek-flash", "claude-haiku-4-5-20251001"] },
-      default: { harness: models.harness, model: models.model }, harnesses: catalog });
+      default: { harness: "opencode", model: models.router }, harnesses: catalog });
   }
   if (route === "PUT /settings/models") {
     const b = await body(req);
     if (!b) return send(res, 400, { error: "invalid JSON" });
-    if (b.default && !catalog[b.default.harness]?.models.includes(b.default.model)) return send(res, 400, { error: "unknown harness/model" });
-    models = { router: b.router?.model ?? models.router, harness: b.default?.harness ?? models.harness, model: b.default?.model ?? models.model };
+    // As the daemon since 2026-11-23: the dispatch model is the only setting; a `default` is refused.
+    if ("default" in b) return send(res, 400, { error: "default is no longer a setting" });
+    const options = ["deepseek/deepseek-flash", "claude-haiku-4-5-20251001"];
+    if (!b.router?.model) return send(res, 400, { error: "router required" });
+    if (!options.includes(b.router.model)) return send(res, 400, { error: `router.model ${b.router.model} is not a opencode model` });
+    models = { router: b.router.model };
     return send(res, 200, { restartRequired: true });
   }
   if (route === "POST /__fake/pair") {

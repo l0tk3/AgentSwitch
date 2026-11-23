@@ -1,8 +1,9 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// 设置 › 模型: `GET /targets`, read-only — the scheduling model and its default, then each executor's models. Usage
-/// is on the settings root (用量, docs/ui-v0.md §4.2), not here.
+/// 设置 › 模型: `GET /targets`, read-only — the scheduling model, then each executor's models. (A separate default model
+/// was removed on 2026-11-23: the scheduling model is the fallback too.) Usage is on the settings root (用量,
+/// docs/ui-v0.md §4.2), not here.
 struct ModelsView: View {
     @Environment(AppModel.self) private var model
     @State private var targets: Targets?
@@ -15,11 +16,10 @@ struct ModelsView: View {
                 if let router = targets.router {
                     Section {
                         LabeledContent("Model", value: ModelName.display(router.model))
-                        if let fallback = router.defaultTarget { LabeledContent("Default Model", value: fallback.displayName) }
                     } header: {
                         SectionLabel("Router")
                     } footer: {
-                        Text("调度模型根据消息内容选择执行的模型；无法判断时交由默认模型执行。")
+                        Text("调度模型根据消息内容选择执行的模型；无法判断时由它自己执行。")
                     }
                 }
                 ForEach(targets.harnesses.keys.sorted(), id: \.self) { name in

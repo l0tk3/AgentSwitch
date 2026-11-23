@@ -109,7 +109,7 @@ fun ContextEditorView() {
                     saving = true
                     try {
                         val result = api.saveContext(text)
-                        load() // what the Mac kept, after sealing and the lint
+                        load() // what the Mac kept, after the lint
                         warnings = result.warnings
                         saved = result
                     } catch (e: CancellationException) { throw e } catch (e: Exception) { model.handle(e); error = e.message ?: e.javaClass.simpleName }
@@ -136,7 +136,6 @@ fun ContextEditorView() {
 
 fun savedLine(result: ContextSaveResult): String {
     val parts = mutableListOf("已保存")
-    if (result.sealed.isNotEmpty()) parts.add("${result.sealed.size} 个凭据已加密（${result.sealed.joinToString("、") { it.field }}）")
     if (result.warnings.isNotEmpty()) parts.add("部分行已移除")
     return parts.joinToString("，")
 }

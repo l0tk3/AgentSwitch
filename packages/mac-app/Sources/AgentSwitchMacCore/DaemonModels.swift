@@ -152,16 +152,12 @@ public struct RemoteInfo: Decodable, Equatable, Sendable {
     }
 }
 
-/// `GET /settings/models` → `{router:{model, options}, default:{harness, model}, harnesses:{<name>:{models, default_model}}}`.
+/// `GET /settings/models` → `{router:{model, options}, harnesses:{<name>:{models, default_model}}}`. The daemon also sends
+/// `default` (always the router target since 2026-11-23, when the separate default executor/model was removed); not read.
 public struct ModelSettings: Decodable, Equatable, Sendable {
     public struct Router: Equatable, Sendable {
         public let model: String?
         public let options: [String]
-    }
-
-    public struct Target: Equatable, Sendable {
-        public let harness: String?
-        public let model: String?
     }
 
     public struct Harness: Equatable, Sendable {
@@ -170,14 +166,12 @@ public struct ModelSettings: Decodable, Equatable, Sendable {
     }
 
     public let router: Router
-    public let defaultTarget: Target
     public let harnesses: [String: Harness]
     /// GET reports the saved selection; true when it differs from what the running daemon uses.
     public let restartPending: Bool
 
-    public init(router: Router, defaultTarget: Target, harnesses: [String: Harness], restartPending: Bool = false) {
+    public init(router: Router, harnesses: [String: Harness], restartPending: Bool = false) {
         self.router = router
-        self.defaultTarget = defaultTarget
         self.harnesses = harnesses
         self.restartPending = restartPending
     }
@@ -189,11 +183,6 @@ public struct ModelSettings: Decodable, Equatable, Sendable {
                             options: r.first(FlexibleStringList.self, "options", "models")?.values ?? [])
         } else {
             router = Router(model: nil, options: [])
-        }
-        if let d = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("default")) {
-            defaultTarget = Target(harness: d.first(String.self, "harness"), model: d.first(String.self, "model"))
-        } else {
-            defaultTarget = Target(harness: nil, model: nil)
         }
         var harnesses: [String: Harness] = [:]
         if let h = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("harnesses")) {
@@ -215,37 +204,22 @@ public struct ModelSettings: Decodable, Equatable, Sendable {
     }
 }
 
-/// `PUT /settings/models {router?:{model}, default?:{harness, model}}`.
+/// `PUT /settings/models {router:{model}}`: the dispatch model is the only model setting (the default executor/model
+/// was removed on 2026-11-23; the daemon refuses `default`).
 public struct ModelSettingsUpdate: Encodable, Equatable, Sendable {
     public struct RouterChange: Encodable, Equatable, Sendable { public let model: String }
-    public struct DefaultChange: Encodable, Equatable, Sendable {
-        public let harness: String
-        public let model: String
-    }
 
     public let router: RouterChange?
-    public let `default`: DefaultChange?
 
-    public init(routerModel: String?, defaultHarness: String?, defaultModel: String?) {
+    public init(routerModel: String?) {
         router = routerModel.map { RouterChange(model: $0) }
-        if let harness = defaultHarness, let model = defaultModel {
-            self.default = DefaultChange(harness: harness, model: model)
-        } else {
-            self.default = nil
-        }
     }
 
-    public var isEmpty: Bool { router == nil && self.default == nil }
+    public var isEmpty: Bool { router == nil }
 
     /// Only what differs from `current`, so an untouched field is never rewritten.
-    public static func diff(current: ModelSettings, routerModel: String?, defaultHarness: String?,
-                            defaultModel: String?) -> ModelSettingsUpdate {
-        let routerChanged = routerModel != nil && routerModel != current.router.model
-        let targetChanged = defaultHarness != nil && defaultModel != nil
-            && (defaultHarness != current.defaultTarget.harness || defaultModel != current.defaultTarget.model)
-        return ModelSettingsUpdate(routerModel: routerChanged ? routerModel : nil,
-                                   defaultHarness: targetChanged ? defaultHarness : nil,
-                                   defaultModel: targetChanged ? defaultModel : nil)
+    public static func diff(current: ModelSettings, routerModel: String?) -> ModelSettingsUpdate {
+        ModelSettingsUpdate(routerModel: routerModel != nil && routerModel != current.router.model ? routerModel : nil)
     }
 }
 

@@ -151,7 +151,7 @@ final class DispatchModelDecodingTests: XCTestCase {
         XCTAssertEqual(doc.warnings, ["line 3"])
         let saved = try DispatchFixture.decode(DispatchSaveResult.self,
             #"{"path":"/x","warnings":["w"],"sealed":[{"label":"fin/pass","field":"账号密码","hosts":["fin.example.test"],"uses":["http"]}]}"#)
-        XCTAssertEqual(saved.savedLine, "已保存，1 个凭据已加密（账号密码），部分行已移除")
+        XCTAssertEqual(saved.savedLine, "已保存，部分行已移除")   // an older daemon's `sealed` is not read
         XCTAssertEqual(try DispatchFixture.decode(DispatchSaveResult.self, #"{"path":"/m","warnings":[]}"#).savedLine, "已保存")
 
         let memory = try DispatchFixture.decode(DispatchPlatformMemoryList.self, #"""

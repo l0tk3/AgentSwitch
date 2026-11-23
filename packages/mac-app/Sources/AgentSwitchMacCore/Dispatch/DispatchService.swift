@@ -84,7 +84,7 @@ public protocol DispatchService: Sendable {
     func context() async throws -> DispatchTextDocument
     /// `GET /context/example`.
     func contextExample() async throws -> String
-    /// `PUT /context {text}`: sealed like a task (may wait for the sealer), linted; what was sealed comes back.
+    /// `PUT /context {text}`: saved as typed, linted; the dropped lines come back.
     func saveContext(_ text: String) async throws -> DispatchSaveResult
     /// `GET /memory`: memory.md.
     func memory() async throws -> DispatchTextDocument

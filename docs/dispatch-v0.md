@@ -134,7 +134,7 @@
 
 | 页 | 内容 | 对应 |
 |---|---|---|
-| `Context` | 环境说明 `context.md`（过 sealer，同手机）、记忆 `memory.md`、平台经验（逐条删除） | 手机 设置 › Context；网页 Context |
+| `Context` | 环境说明 `context.md`（按原样保存，同手机；2026-11-23 前过 sealer）、记忆 `memory.md`、平台经验（逐条删除） | 手机 设置 › Context；网页 Context |
 | `Extensions` | 执行器可用的 MCP 服务与 skill：新增、编辑、开关、删除 | 网页 Extensions |
 | `Log` | 调度模型每次的决定（时间、来源、执行器、目录、任务，点开看理由） | 网页 Log |
 | `History` | 搜索任务和结果（control-v0 §4）；话题（进行中 / 已归档：归档、恢复、删除）；清空全部记录 | 手机 设置 › Manage |

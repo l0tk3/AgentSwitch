@@ -193,10 +193,9 @@ export async function submitTask(body, { onAccepted } = {}) {
   update({ status: stage, message: pending.length ? "正在上传附件，请稍候…" : "正在发送消息，请稍候…" });
   const slow = setTimeout(() => {
     const sub = get().taskSubmissions[key];
-    if (sub?.status === "uploading" || sub?.status === "sending") update({ ...sub, message: sub.phase === "sealing"
-      ? "消息已到达，敏感字段的识别与加密仍在进行，尚未开始调度。请勿重复发送。"
-      : sub.phase === "creating" ? "敏感信息处理已完成，正在创建任务回执。请勿重复发送。"
-      : "发送仍在处理中，可能需要几十秒：敏感字段识别并加密后才会创建任务。请勿重复点击。" });
+    if (sub?.status === "uploading" || sub?.status === "sending") update({ ...sub, message: sub.phase === "creating"
+      ? "消息已到达，正在创建任务回执。请勿重复发送。"
+      : "发送仍在处理中，请勿重复点击。" });
   }, 8_000);
   let task;
   try {
@@ -204,10 +203,7 @@ export async function submitTask(body, { onAccepted } = {}) {
     stage = "sending";
     if (pending.length) update({ status: "sending", message: "附件已上传，正在发送消息…" });
     task = await postTask(attachments.length ? { ...body, attachments } : body, { onProgress: ({ stage: phase, elapsedMs }) => {
-      const checked = get().taskSubmissions[key]?.phase === "sealing";
-      update({ status: "sending", phase, serverElapsedMs: elapsedMs, message: phase === "sealing"
-        ? "消息已到达，正在识别敏感字段并加密，完成后开始调度。"
-        : checked ? `敏感信息处理完成（${(elapsedMs / 1000).toFixed(1)} 秒），正在创建任务回执…` : "消息已到达，正在创建任务回执…" });
+      update({ status: "sending", phase, serverElapsedMs: elapsedMs, message: "消息已到达，正在创建任务回执…" });
     } });
     if (!task || typeof task.id !== "string") throw new Error("Missing task receipt");
   } catch (err) {

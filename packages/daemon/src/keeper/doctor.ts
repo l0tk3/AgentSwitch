@@ -84,7 +84,7 @@ export async function doctor(env: NodeJS.ProcessEnv = process.env, print: (line:
     }
     if (name === "opencode") say(findDeepSeekKey(env) ? "ok" : "warn", "  deepseek", findDeepSeekKey(env) ? "a key is there (the dispatch model)" : "no DeepSeek key: opencode auth login (Dispatch's router uses deepseek/deepseek-flash)");
   }
-  if (!which("opencode", path)) say("warn", "dispatch", "without OpenCode the router, the assistant and the sealer do not run (docs/router-v0.md)");
+  if (!which("opencode", path)) say("warn", "dispatch", "without OpenCode the router and the assistant do not run (docs/router-v0.md)");
 
   section("tools");
   for (const [name, why] of [["git", "the folders' git state"], ["unzip", "installing the browser engine"], ["lsof", "the browser's list of local servers; sessions open elsewhere"], ["openssl", "the remote listener's certificate"]] as const) {

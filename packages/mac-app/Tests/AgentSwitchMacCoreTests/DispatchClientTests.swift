@@ -72,7 +72,7 @@ final class DispatchClientTests: XCTestCase {
         try await api.deleteEntry(seq: 12)
         XCTAssertEqual(transport.lines, ["GET /assistant?last=60", "GET /assistant?after=9", "POST /assistant", "DELETE /assistant/12"])
         let post = transport.requests[2]
-        XCTAssertEqual(post.timeoutInterval, DispatchTimeouts.assistant, "the assistant answers after sealing and maybe creating a task")
+        XCTAssertEqual(post.timeoutInterval, DispatchTimeouts.assistant, "the assistant answers after maybe creating a task")
         XCTAssertEqual(post.value(forHTTPHeaderField: "Content-Type"), "application/json")
         let body = try XCTUnwrap(F.body(post))
         XCTAssertEqual(body["client_id"] as? String, "client-0001")
@@ -118,7 +118,7 @@ final class DispatchClientTests: XCTestCase {
         XCTAssertEqual(bodies[3]?["approval_id"] as? String, "ap1")
         XCTAssertEqual(bodies[3]?["decision"] as? String, "deny")
         XCTAssertEqual((bodies[4]?["answers"] as? [String: [String]])?["clarify"], ["用工作账号"])
-        XCTAssertEqual(transport.requests[4].timeoutInterval, DispatchTimeouts.sealing, "answers pass the sealer")
+        XCTAssertEqual(transport.requests[4].timeoutInterval, DispatchTimeouts.sealing, "answers keep the long write timeout")
         XCTAssertEqual(bodies[5]?.count, 0, "cancel sends {}")
         XCTAssertNil(bodies[6]?["to"], "hand to Auto: the router picks, leaving out the current executor")
         XCTAssertEqual((bodies[7]?["to"] as? [String: String])?["model"], "gpt-5.5")
@@ -219,7 +219,7 @@ final class DispatchClientTests: XCTestCase {
             "DELETE /skills/pdf", "GET /skills/discover", "POST /skills/import", "GET /routing/log?limit=50",
             "GET /search?q=%E4%B8%8B%E8%BD%BD%20%E7%9B%AE%E5%BD%95&limit=30", "DELETE /history",
         ])
-        XCTAssertEqual(transport.requests[3].timeoutInterval, DispatchTimeouts.sealing, "context.md is sealed like a task")
+        XCTAssertEqual(transport.requests[3].timeoutInterval, DispatchTimeouts.sealing, "context.md keeps the long write timeout")
         XCTAssertEqual(F.body(transport.requests[3])?["text"] as? String, "# 站点")
         XCTAssertEqual(F.body(transport.requests[9])?["enabled"] as? Bool, false, "a toggle sends the whole server back")
         XCTAssertEqual(F.body(transport.requests[13]).map { Array($0.keys) }, ["enabled"], "only what changes")

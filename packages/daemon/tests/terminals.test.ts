@@ -18,7 +18,6 @@ import { folderFiles, matchFiles } from "../src/terminals/files.js";
 import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, codexCompactingOnScreen, workingOnScreen, choicesOnScreen, printedSince, commandRows, inputEmpty, screenRows, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
-import type { Sealer } from "../src/secrets/sealer.js";
 import { agentLauncher, claudeHookSettings, CODEX_ATTENTION, codexRoomArgs, HOOK_SCRIPT, ROOM_KIT_SCRIPT, withoutParentSession } from "../src/terminals/launch.js";
 import { deleteTranscript } from "../src/terminals/transcripts.js";
 import { elsewhereCheck, type ElsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
@@ -1055,12 +1054,12 @@ describe("terminal host", () => {
 });
 
 describe("terminals over HTTP", () => {
-  async function start(elsewhere?: ElsewhereCheck, sealer?: Sealer) {
+  async function start(elsewhere?: ElsewhereCheck) {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
     let base = "";
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => base, true), ...(elsewhere ? { terminalElsewhere: elsewhere } : {}), ...(sealer ? { sealer } : {}) });
+    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => base, true), ...(elsewhere ? { terminalElsewhere: elsewhere } : {}) });
     const token = ensureLocalToken(home);
     const port = await new Promise<number>((done) => {
       const server = listenLocal(daemon, 0, (info: AddressInfo) => done(info.port), new LocalAuth(token));
@@ -1444,12 +1443,9 @@ describe("terminals over HTTP", () => {
   });
 
   it("a question through the real hook command: answered from the API, checked, Other's words as written, never in the audit", async () => {
-    // A terminal is not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08): the service's sealer, there for
-    // Dispatch, is never asked about what is typed into a terminal — not even when an older screen says `seal`.
-    const TOKEN = "enc:v1:" + "Q".repeat(40);
-    let sealerAsked = 0;
-    const sealer: Sealer = async (t) => { sealerAsked += 1; return { ok: true, text: t.split("hunter2").join(TOKEN), sealed: [], ms: 1 }; };
-    const { home, cwd, base, token, call } = await start(undefined, sealer);
+    // A terminal is not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08): what is typed goes as written,
+    // even when an older screen says `seal`.
+    const { home, cwd, base, token, call } = await start();
     const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
     const events = follow(base, token, id);
     const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
@@ -1473,8 +1469,6 @@ describe("terminals over HTTP", () => {
       questions: [expect.objectContaining({ question: "日期格式化用哪个库？" }), expect.objectContaining({ question: "发布前跑哪些检查？" })],
       answers: { "日期格式化用哪个库？": "Luxon", "发布前跑哪些检查？": "单元测试, 先连 db（密码 hunter2）跑迁移" },
     } });
-    expect(sealerAsked).toBe(0);
-    expect(screen()).not.toContain(TOKEN);
     expect((await answer({ decision: "deny" })).status).toBe(404);
     const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     expect(audit.filter((a) => a.action === "permission")).toEqual([expect.objectContaining({ detail: { decision: "allow", tool: "AskUserQuestion" } })]);
@@ -1691,14 +1685,11 @@ describe("terminals over HTTP", () => {
     expect(late.find((e) => e.event === "sent")!.data.replies).toMatchObject([{ text: "hello there" }]);
   });
 
-  it("a reply is typed as written, whatever an older screen asks for: nothing of a terminal's goes through the sealer", async () => {
+  it("a reply is typed as written, whatever an older screen asks for", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const TOKEN = "enc:v1:" + "S".repeat(40);
-    let sealerAsked = 0;
-    const sealer: Sealer = async (text) => { sealerAsked += 1; return { ok: true, text: text.split("hunter2").join(TOKEN), sealed: [], ms: 1 }; };
-    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false), sealer });
+    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false) });
     closers.push(() => daemon.close());
     const req = (path: string, body: unknown) => daemon.api.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, markRemote({}, { deviceId: "phone" }));
     const created = (await (await req("/terminals", { harness: "codex", cwd })).json()) as { terminal: { id: string } };
@@ -1718,8 +1709,6 @@ describe("terminals over HTTP", () => {
     await until(() => text(events).includes("got: pw hunter2") && text(events).includes("got: again hunter2"));
     expect(await (await req(`/terminals/${id}/input`, { text: "ls -la", seal: false })).json()).toEqual({ ok: true, sealed: 0, attached: 0 });
     await until(() => text(events).includes("got: ls -la"));
-    expect(sealerAsked).toBe(0);
-    expect(text(events)).not.toContain(TOKEN);
   });
 
   it("opens a terminal in its folder as the disk spells it, and lists it so (2026-10-17: one folder showed as two)", async () => {

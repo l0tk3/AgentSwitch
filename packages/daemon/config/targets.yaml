@@ -104,5 +104,5 @@ router:
   planner_timeout_ms: 120000       # separate budget for planner startup and one JSON correction
   min_confidence: 0.5
   quota_threshold: 0.05
-  default: {harness: opencode, model: "deepseek/deepseek-flash"}
+  # No `default`: the fallback target is always this router harness/model (a separate default was removed 2026-11-23).
   planner: {harness: claude-code, model: claude-opus-5-5}   # loop-v0: fallback planner; the router names one per multi-step task

@@ -7,5 +7,5 @@ export const RATE_LIMIT_PROBE_PROMPT = "Reply with the single word: ok";
  *  these names to leave those sessions out. The executor runs OpenCode's own `build` agent, like the user; those
  *  sessions are told apart by the ids AgentSwitch records. */
 export const OWN_OPENCODE_AGENTS: readonly string[] = [
-  "router", "dispatcher", "oracle", "summarizer", "supervisor", "question-translator", "sealer", "credential-repair", "assistant",
+  "router", "dispatcher", "oracle", "summarizer", "supervisor", "question-translator", "sealer" /* removed 2026-11-23; its old sessions remain */, "credential-repair", "assistant",
 ];

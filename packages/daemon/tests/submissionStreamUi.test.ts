@@ -36,20 +36,17 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("live task intake feedback", () => {
-  it("shows server-confirmed sealing and creation before acceptance, without a duplicate POST", async () => {
+  it("shows server-confirmed creation before acceptance, without a duplicate POST", async () => {
     const frames = stream(), fetcher = server(frames.response);
     const submitted = actions.submitTask({ task: task.task });
-    frames.send({ type: "progress", stage: "sealing", elapsedMs: 0 });
-    await vi.waitUntil(() => state.get().taskSubmissions.home?.phase === "sealing");
-    expect(home.render(state.get())).toContain("检查并加密中…");
+    frames.send({ type: "progress", stage: "creating", elapsedMs: 40 });
+    await vi.waitUntil(() => state.get().taskSubmissions.home?.phase === "creating");
+    expect(home.render(state.get())).toContain("创建任务中…");
     expect(home.render(state.get())).toContain("消息已到达");
     expect(state.get().task).toBeNull();
     await actions.submitTask({ task: task.task });
     expect(fetcher.mock.calls.filter(([, opts]) => opts.method === "POST")).toHaveLength(1);
-    frames.send({ type: "progress", stage: "creating", elapsedMs: 16400 });
-    await vi.waitUntil(() => state.get().taskSubmissions.home?.phase === "creating");
-    expect(home.render(state.get())).toContain("敏感信息处理完成（16.4 秒）");
-    frames.send({ type: "accepted", task, elapsedMs: 16402, sealingMs: 16400 });
+    frames.send({ type: "accepted", task, elapsedMs: 42 });
     await submitted;
     expect(state.get()).toMatchObject({ view: "task", task });
     expect(state.get().taskSubmissions.home.status).toBe("sent");
@@ -58,7 +55,7 @@ describe("live task intake feedback", () => {
   it("keeps a lost stream uncertain and refuses to silently send it again", async () => {
     const frames = stream(), fetcher = server(frames.response);
     const submitted = actions.submitTask({ task: task.task });
-    frames.send({ type: "progress", stage: "sealing", elapsedMs: 0 }); frames.close();
+    frames.send({ type: "progress", stage: "creating", elapsedMs: 0 }); frames.close();
     await submitted;
     expect(state.get().taskSubmissions.home.status).toBe("uncertain");
     await actions.submitTask({ task: task.task });
@@ -95,7 +92,8 @@ describe("live task intake feedback", () => {
   });
 
   it("separates intake, routing, planning and actual execution feedback", () => {
-    expect(detail.eventLine({ type: "step", payload: { action: "intake", durationMs: 12500, sealingMs: 12000 } })).toContain("识别与加密 12.0 秒");
+    expect(detail.eventLine({ type: "step", payload: { action: "intake", durationMs: 12500, sealingMs: 12000 } })).toContain("识别与加密 12.0 秒");   // an old record
+    expect(detail.eventLine({ type: "step", payload: { action: "intake", durationMs: 40 } })).toBe("已接收 · 从接收到创建任务共 0.0 秒");
     expect(feedback(task, []).label).toBe("调度中…");
     const planned = [{ type: "routed", seq: 1, payload: { verdict: { ok: true, harness: "codex", model: "fixture" } } },
       { type: "step", seq: 2, payload: { action: "plan", model: "codex/fixture" } }];

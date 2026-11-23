@@ -7,7 +7,6 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { gateRefsExecutor } from "../src/executors/gateRefs.js";
 import type { ExecutionInput } from "../src/executors/types.js";
-import { gateMinter } from "../src/secrets/minter.js";
 import { gateRefs } from "../src/secrets/refs.js";
 
 // An empty public dir: with an installed gate service (gate-service-v0) the CLI would otherwise find its socket and
@@ -21,10 +20,13 @@ afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: 
 async function setup(): Promise<{ bin: string; home: string; tokens: string[] }> {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-refs-contract-")); homes.push(home);
   expect(spawnSync(binary, ["keygen"], { env: { ...process.env, SECRET_GATE_HOME: home }, encoding: "utf8" }).status).toBe(0);
-  const minted = await gateMinter({ bin: binary, home })([
+  // Minted with the gate's own `enc --batch`, values on stdin (the daemon no longer mints: router-v0 §9, removed 2026-11-23).
+  const entries = [
     { label: "fixture/mail", value: "fixture-password-1", kind: "secret", hosts: ["mail.fixture.example"], uses: ["http"] },
     { label: "fixture/erp", value: "fixture-password-2", kind: "secret", hosts: ["erp.fixture.example:8443"], uses: ["http"] },
-  ]);
+  ];
+  const enc = spawnSync(binary, ["enc", "--batch"], { env: { ...process.env, SECRET_GATE_HOME: home }, input: JSON.stringify(entries), encoding: "utf8" });
+  const minted = JSON.parse(enc.stdout) as ({ token: string } | { error: string })[];
   const tokens = minted.map((m) => { if (!("token" in m)) throw new Error("fixture mint failed"); return m.token; });
   return { bin: binary, home, tokens };
 }

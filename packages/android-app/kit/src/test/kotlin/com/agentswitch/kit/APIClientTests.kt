@@ -76,7 +76,6 @@ class APIClientTests {
         assertEquals("# 示例", example)
         val saved = api.saveContext("# 站点\n- 财务")
         assertEquals(1, saved.warnings.size)
-        assertEquals(listOf("account password"), saved.sealed.map { it.field })
         val put = assertNotNull(transport.requests.lastOrNull())
         assertEquals("PUT", put.method)
         assertEquals("application/json", put.header("Content-Type"))

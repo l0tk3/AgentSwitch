@@ -67,7 +67,10 @@ export const Targets = z
       thread_confidence: z.number().min(0).max(1).default(0.6),
       /** docs/supervisor-v0.md: approvals on the user's behalf, watchdog, acceptance. */
       supervisor: SupervisorConfig.prefault({}),
-      default: TargetRef,
+      /** The fallback target: always the dispatch model on the router's harness (set below from `harness` and `model`).
+       *  A separate default executor/model was removed on 2026-11-23 (user decision, pending a redesign); a `default`
+       *  still written in a targets.yaml is read and ignored. */
+      default: z.unknown().optional(),
       /** loop-v0 §6: the model that runs multi-step tasks; absent = the router itself. */
       planner: TargetRef.nullable().default(null),
     }),
@@ -81,9 +84,9 @@ export const Targets = z
         ctx.addIssue({ code: "custom", message: `harness ${name}: default_model ${h.default_model} not in models` });
       }
     }
-    const d = t.harnesses[t.router.default.harness];
-    if (!d || !modelKey(d, t.router.default.model)) {
-      ctx.addIssue({ code: "custom", message: "router.default must name a listed harness/model" });
+    const r = t.harnesses[t.router.harness];
+    if (!r || !modelKey(r, t.router.model)) {
+      ctx.addIssue({ code: "custom", message: "router.model must be a listed model of router.harness" });
     }
     const p = t.router.planner ? t.harnesses[t.router.planner.harness] : undefined;
     if (t.router.planner && (!p || !modelKey(p, t.router.planner.model))) {
@@ -95,7 +98,8 @@ export const Targets = z
         if (!h || !modelKey(h, ref.model)) ctx.addIssue({ code: "custom", message: `categories.${name}: ${ref.harness}/${ref.model} not in catalog` });
       }
     }
-  });
+  })
+  .transform((t) => ({ ...t, router: { ...t.router, default: { harness: t.router.harness, model: t.router.model } as TargetRef } }));
 export type Targets = z.infer<typeof Targets>;
 
 export function parseTargets(text: string): Targets {

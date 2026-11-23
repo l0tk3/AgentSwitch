@@ -1,21 +1,23 @@
-/** Model settings for the Mac app (app-v0 §2 模型设置, local only): GET shows the router model, the default target and
- *  every harness's models as they will be after the next start; PUT checks a change against the catalog and merges it
- *  into $AGENTSWITCH_HOME/models.json. The running daemon keeps its catalog; the Mac app restarts it. */
+/** Model settings for the Mac app (app-v0 §2 模型设置, local only): GET shows the router (dispatch) model and every
+ *  harness's models as they will be after the next start; PUT checks a router model against the catalog and writes it
+ *  to $AGENTSWITCH_HOME/models.json. The running daemon keeps its catalog; the Mac app restarts it. The dispatch model
+ *  is the only model setting: the separate default executor/model was removed on 2026-11-23 (user decision, pending a
+ *  redesign). GET still returns `default`, equal to the router target, for older Mac apps; PUT refuses it. */
 
 import type { Hono } from "hono";
-import { applyModelOverlay, ModelOverlay, modelSettings, overlayProblems, readModelOverlay, writeModelOverlay } from "../router/modelOverlay.js";
+import { applyModelOverlay, ModelOverlayChange, modelSettings, overlayProblems, readModelOverlay, writeModelOverlay } from "../router/modelOverlay.js";
 import type { Targets } from "../router/targets.js";
 import { issues, type ApiDeps } from "./shared.js";
 
-/** Router model and default target: the only two things the overlay changes. */
-const selection = (t: Targets): string => JSON.stringify([t.router.model, t.router.default.harness, t.router.default.model]);
+/** The router model: the only thing the overlay changes (the fallback target follows it). */
+const selection = (t: Targets): string => t.router.model;
 
 export function mountModelSettings(app: Hono, deps: ApiDeps): void {
   /** targets.yaml after discovery, before the overlay; the running catalog when the daemon was built without one. */
   const base = (): Targets => deps.models?.base ?? deps.targets;
   const pending = (): Targets => {
     const read = deps.models ? readModelOverlay(deps.models.path) : { overlay: null };
-    return read.overlay ? applyModelOverlay(base(), read.overlay).targets : base();
+    return applyModelOverlay(base(), read.overlay ?? {}).targets;
   };
 
   app.get("/settings/models", (c) => {
@@ -25,13 +27,15 @@ export function mountModelSettings(app: Hono, deps: ApiDeps): void {
 
   app.put("/settings/models", async (c) => {
     if (!deps.models) return c.json({ error: "model settings file not configured" }, 503);
-    const body = ModelOverlay.safeParse(await c.req.json().catch(() => ({})));
+    const raw: unknown = await c.req.json().catch(() => ({}));
+    if (raw && typeof raw === "object" && "default" in raw) {
+      return c.json({ error: "default is no longer a setting (removed 2026-11-23): tasks the dispatch model cannot place run on the dispatch model itself; send router only" }, 400);
+    }
+    const body = ModelOverlayChange.safeParse(raw);
     if (!body.success) return c.json({ error: issues(body.error) }, 400);
-    if (!body.data.router && !body.data.default) return c.json({ error: "router or default required" }, 400);
     const problems = overlayProblems(base(), body.data);
     if (problems.length) return c.json({ error: problems.join("; ") }, 400);
-    const current = readModelOverlay(deps.models.path).overlay ?? {};
-    writeModelOverlay(deps.models.path, { ...current, ...body.data });
+    writeModelOverlay(deps.models.path, body.data);
     return c.json({ restartRequired: true });
   });
 }

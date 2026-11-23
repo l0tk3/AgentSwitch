@@ -180,20 +180,6 @@ describe("permanent task deletion", () => {
     expect(f.store.getTask(task.id)).toBeDefined(); expect(f.store.getApproval(a.id)).toBeDefined();
     expect(f.store.eventsSince(task.id)).toHaveLength(1); db.close();
   });
-
-  it.each(["parent", "thread", "archived"] as const)("rechecks %s after a delayed submission sealer", async (kind) => {
-    const started = deferred(), release = deferred();
-    const f = fixture({ sealer: async (text) => { started.resolve(); await release.promise; return { ok: true, text, sealed: [], ms: 0 }; } });
-    const thread = f.store.createThread(f.cwd), task = f.create(thread.id);
-    const request = f.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "follow up", cwd: f.cwd, ...(kind === "parent" ? { parent_id: task.id } : { thread_id: thread.id }) }) });
-    await started.promise;
-    if (kind === "archived") f.store.archiveThread(thread.id);
-    else expect(f.engine.deleteThread(thread.id)).toEqual({ ok: true });
-    release.resolve();
-    const res = await request;
-    expect(res.status).toBe(kind === "archived" ? 409 : 404);
-    expect(f.store.listTasks()).toHaveLength(kind === "archived" ? 1 : 0);
-  });
 });
 
 describe("the conversation goes with the task (threads-v0 手动删除)", () => {

@@ -1,8 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { composePrompt, executorInstructions, FEEDBACK_GUIDANCE, CREDENTIAL_USE_GUIDANCE } from "../src/executors/instructions.js";
-import { echoRouter } from "../src/router/routers/echo.js";
-import { fakeMinter } from "../src/secrets/minter.js";
-import { LEGEND_HEADER, legend, routerSealer } from "../src/secrets/sealer.js";
 
 describe("feedback and provenance reach executor prompts", () => {
   it.each([
@@ -33,32 +30,5 @@ describe("feedback and provenance reach executor prompts", () => {
     expect(CREDENTIAL_USE_GUIDANCE).toContain("secret_exec(argv, env)");
     expect(instructions).not.toContain("secret_repair");
     expect(composePrompt({ brief: "已明确的一步任务", handoffNote: null, context: null, feedback: "  " })).toBe("已明确的一步任务");
-  });
-});
-
-describe("credential candidates do not become user statements or token grants", () => {
-  it("preserves explicit user meaning before a conflicting generated legend without another model call", async () => {
-    const raw = "将下列恢复码录入 https://panel.example 的恢复码字段：fixture-recovery-abc";
-    const router = echoRouter([JSON.stringify({
-      secrets: [{ value: "fixture-recovery-abc", field: "session key", label: "panel/session", hosts: ["panel.example"], uses: ["http"] }],
-      layout: null,
-    })]);
-    const minter = vi.fn(fakeMinter());
-    const result = await routerSealer(router, minter, () => "")(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("fixture failed to seal");
-    expect(router.calls).toHaveLength(1);
-    expect(minter).toHaveBeenCalledTimes(1);
-    const [userText, candidates] = result.text.split(LEGEND_HEADER);
-    const entry = result.sealed[0]!;
-    expect(userText?.trim()).toBe(raw.replace("fixture-recovery-abc", entry.token));
-    expect(candidates).toContain(`- session key (for panel.example): ${entry.token}`);
-    expect(result.text).not.toContain("fixture-recovery-abc");
-
-    // Updating the descriptive candidate must not produce a different token or modify any capability metadata.
-    const corrected = legend([{ ...entry, field: "recovery code" }], null);
-    expect(corrected).toContain(`- recovery code (for panel.example): ${entry.token}`);
-    expect(entry).toMatchObject({ field: "session key", kind: "secret", hosts: ["panel.example"], uses: ["http"] });
-    expect(minter).toHaveBeenCalledTimes(1);
   });
 });

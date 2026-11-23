@@ -25,12 +25,12 @@ import com.agentswitch.android.rememberBack
 import com.agentswitch.kit.api.HarnessSpec
 import com.agentswitch.kit.api.Targets
 import com.agentswitch.kit.feed.ModelName
-import com.agentswitch.kit.feed.displayName
 import kotlinx.coroutines.CancellationException
 
 /**
- * Settings › Models: `GET /targets`, read-only — the scheduling model and its default, then each executor's models. Usage
- * is on the settings root (docs/ui-v0.md §4.2), not here.
+ * Settings › Models: `GET /targets`, read-only — the scheduling model, then each executor's models. (A separate default
+ * model was removed on 2026-11-23: the scheduling model is the fallback too.) Usage is on the settings root
+ * (docs/ui-v0.md §4.2), not here.
  */
 @Composable
 fun ModelsView() {
@@ -55,9 +55,8 @@ fun ModelsView() {
         val t = targets ?: model.dispatch.targets
         if (t != null) {
             t.router?.let { router ->
-                FormSection("Router", footer = "调度模型根据消息内容选择执行的模型；无法判断时交由默认模型执行。") {
+                FormSection("Router", footer = "调度模型根据消息内容选择执行的模型；无法判断时由它自己执行。") {
                     LabeledRow("Model", ModelName.display(router.model), first = true)
-                    router.defaultTarget?.let { LabeledRow("Default Model", it.displayName) }
                 }
             }
             for (name in t.harnesses.keys.sorted()) t.harnesses[name]?.let { HarnessSection(name, it) }

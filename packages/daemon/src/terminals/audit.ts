@@ -1,6 +1,5 @@
 /** What was done to AgentSwitch's terminals and from where (docs/terminal-v0.md §4): one JSON line each in
- *  `$AGENTSWITCH_HOME/terminals/audit.jsonl`. Replies are recorded by length and whether the sealer changed them, never
- *  by content. */
+ *  `$AGENTSWITCH_HOME/terminals/audit.jsonl`. Replies are recorded by length, never by content. */
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";

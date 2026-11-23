@@ -43,14 +43,12 @@ next to it as `src/` does. What ships: `dist/`, `config/`, `ui/`, `package.json`
 Development executor: put an `@echo {...}` directive in the task text to script the run:
 `{"delayMs":50,"approval":"rm -rf /tmp/x","fail":"quota","failTimes":1,"result":"ok","tokens":123}`.
 
-## Plaintext credentials in a task (router-v0 §9)
+## Plaintext credentials in a task (router-v0 §9) — removed 2026-11-23
 
-Write tasks as you like, accounts and passwords included. Every submission passes the sealer before
-it is stored: the router's text-only agent decides what is sensitive and which host each value is for
-(from the text, CONTEXT.md and the earlier turn), the daemon mints tokens with `secret-gate enc --batch`
-(the desktop UI's command and current keypair) and stores the task with tokens in place of the values.
-A `sealed` event lists labels and hosts. An http credential whose site nothing names is refused (400);
-a sealer failure refuses the submission (503) instead of storing plaintext. Echo mode has no sealer.
+Removed on 2026-11-23 by the user's decision, pending a redesign of the credential gateway and dispatch:
+tasks, assistant messages, CONTEXT.md saves and answers go on as typed; nothing finds credentials in them
+or mints tokens. The gate itself stays: ciphertext made by hand on the Mac or phone, `enc:` tokens pasted
+into a task, the proxy, browser fill, `secret_exec` and refs work as before. Old `sealed` events still load.
 
 ## Phone draft UI
 
@@ -126,7 +124,7 @@ The daemon checks each quotation against its source and records the source ID an
 At most one clarification retry is allowed per task, on the same model and existing session. Side effects,
 missing execution telemetry, invalid diagnosis, policy restrictions, a repeated refusal or a failed retry
 stop recovery; none triggers automatic model switching. Refusals bypass ordinary success acceptance.
-Answers submitted through the API pass the configured sealer before being stored, just like new tasks.
+Answers submitted through the API are stored as typed (the sealer that ran on them was removed on 2026-11-23).
 
 ## Supervisor (supervisor-v0)
 

@@ -22,46 +22,25 @@ public struct DispatchTextDocument: Decodable, Sendable, Hashable {
     }
 }
 
-/// One credential the sealer found in a context.md save and replaced with a token (never the value).
-public struct DispatchSealedField: Decodable, Sendable, Hashable {
-    public let label: String
-    public let field: String
-    public let hosts: [String]
-
-    public init(label: String, field: String, hosts: [String]) {
-        self.label = label
-        self.field = field
-        self.hosts = hosts
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: AnyKey.self)
-        self.init(label: c.first(String.self, "label") ?? "", field: c.first(String.self, "field") ?? "", hosts: c.first([String].self, "hosts") ?? [])
-    }
-}
-
-/// `PUT /context` and `PUT /memory`: the lint's warnings and (context only) what was sealed.
+/// `PUT /context` and `PUT /memory`: the lint's warnings. (Until 2026-11-23 a context save also said what the daemon
+/// sealed; that automatic sealing was removed, and the `sealed` a daemon still sends is always empty and not read.)
 public struct DispatchSaveResult: Decodable, Sendable, Hashable {
     public let path: String?
     public let warnings: [String]
-    public let sealed: [DispatchSealedField]
 
-    public init(path: String? = nil, warnings: [String] = [], sealed: [DispatchSealedField] = []) {
+    public init(path: String? = nil, warnings: [String] = []) {
         self.path = path
         self.warnings = warnings
-        self.sealed = sealed
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
-        self.init(path: c.first(String.self, "path"), warnings: c.first([String].self, "warnings") ?? [],
-                  sealed: c.first([DispatchSealedField].self, "sealed") ?? [])
+        self.init(path: c.first(String.self, "path"), warnings: c.first([String].self, "warnings") ?? [])
     }
 
-    /// The line after a save (the phone's ContextEditorView): 已保存，2 个凭据已加密（账号密码、令牌），部分行已移除.
+    /// The line after a save (the phone's ContextEditorView): 已保存，部分行已移除.
     public var savedLine: String {
         var parts = ["已保存"]
-        if !sealed.isEmpty { parts.append("\(sealed.count) 个凭据已加密（\(sealed.map(\.field).joined(separator: "、"))）") }
         if !warnings.isEmpty { parts.append("部分行已移除") }
         return parts.joined(separator: "，")
     }

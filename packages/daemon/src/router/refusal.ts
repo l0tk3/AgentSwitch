@@ -1,5 +1,5 @@
 /** Refusal diagnosis may restore omitted user context, but cannot rewrite a task or authorize it.
- *  Source text must already have passed the normal credential-sealing entrance. */
+ *  Source text is as the user typed it (the automatic sealing entrance, router-v0 §9, was removed on 2026-11-23). */
 
 import { createHash } from "node:crypto";
 import { z } from "zod";

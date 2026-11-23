@@ -6,7 +6,7 @@ import { get } from "./state.js";
 export function sendState(s, key) {
   const sub = s.taskSubmissions?.[key] || {};
   const busy = ["uploading", "sending"].includes(sub.status);
-  return { ...sub, busy, locked: busy || sub.status === "uncertain", label: busy ? sub.phase === "sealing" ? "检查并加密中…" : sub.phase === "creating" ? "创建任务中…" : "发送中…" : sub.status === "uncertain" ? "结果待确认" : sub.status === "error" ? "重新发送" : "发送" };
+  return { ...sub, busy, locked: busy || sub.status === "uncertain", label: busy ? sub.phase === "creating" ? "创建任务中…" : "发送中…" : sub.status === "uncertain" ? "结果待确认" : sub.status === "error" ? "重新发送" : "发送" };
 }
 
 export function sendFeedback(s, key) {
