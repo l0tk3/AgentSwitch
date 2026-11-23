@@ -169,6 +169,9 @@ export type Room = {
    *  given it whole, or read it themselves with room_read. Its sender is not listed (it wrote it). Kept for the last
    *  `MAX_READS` messages. */
   readonly reads: Readonly<Record<string, readonly string[]>>;
+  /** The message from which reading is kept: what was said before a room first kept it counts as read by everyone
+   *  (a room from before said "74 unread" to a member that had been given every one of them). */
+  readonly readsFrom: number;
   /** Names seats went by before they were renamed, each with the name it is now: an `@old` still finds its seat. */
   readonly renames: Readonly<Record<string, string>>;
   /** What has not arrived: message number → handle → where it is. */
@@ -316,7 +319,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, reads: {}, renames: {}, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, reads: {}, readsFrom: 0, renames: {}, receipts: {} };
     this.save(room);
     return room;
   }
@@ -451,7 +454,7 @@ export class RoomStore {
     const seat = room.seats.find((s) => s.handle === handle);
     if (!seat) return [];
     const floor = room.lastSeq - MAX_READS;
-    return this.messagesOf(id).filter((m) => m.seq > floor && m.at >= seat.joinedAt && m.from !== handle && !(room.reads[String(m.seq)]?.includes(handle)));
+    return this.messagesOf(id).filter((m) => m.seq > floor && m.seq > room.readsFrom && m.at >= seat.joinedAt && m.from !== handle && !(room.reads[String(m.seq)]?.includes(handle)));
   }
 
   /** A seat has read these messages: given them whole, or read them itself. Kept in memory and written with the
@@ -956,7 +959,7 @@ function roomFrom(v: unknown): Room | null {
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
-    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, reads: Object.fromEntries(Object.entries((o.reads ?? {}) as Record<string, unknown>).filter(([seq, v]) => /^\d+$/.test(seq) && Array.isArray(v)).map(([seq, v]) => [seq, (v as unknown[]).filter(str)])), renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
+    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, readsFrom: num(o.readsFrom) ? o.readsFrom : (num(o.lastSeq) ? o.lastSeq : 0), reads: Object.fromEntries(Object.entries((o.reads ?? {}) as Record<string, unknown>).filter(([seq, v]) => /^\d+$/.test(seq) && Array.isArray(v)).map(([seq, v]) => [seq, (v as unknown[]).filter(str)])), renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
   };
 }
 
