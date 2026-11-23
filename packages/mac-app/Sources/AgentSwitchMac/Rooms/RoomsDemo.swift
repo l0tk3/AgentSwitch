@@ -30,9 +30,9 @@ extension RoomsDemo {
            "card":{"agent":"claude-code","name":"daemon","cwd":"/Users/you/Projects/AgentSwitch/packages/daemon","model":"claude-fable-5-2","profile":"Work","color":"mint","mode":"acceptEdits","node":null}},
           {"handle":"mac-app","kind":"session","terminal":"t2","face":{"rows":[".###.","#.#.#","#####","..#..",".#.#."],"color":6},"joinedAt":0,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"idle","kit":false,
            "card":{"agent":"codex","name":"Mac App","cwd":"/Users/you/Projects/AgentSwitch/packages/mac-app","model":"gpt-6-sol","profile":null,"mode":"default","node":null}},
-          {"handle":"ios-app","kind":"session","terminal":"t3","face":{"rows":["##.##","#...#",".###.","#.#.#","##.##"],"color":3},"joinedAt":0,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"waiting",
+          {"handle":"ios-app","kind":"session","terminal":"t3","face":{"rows":["##.##","#...#",".###.","#.#.#","##.##"],"color":3},"joinedAt":0,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"waiting","asks":{"title":"Do you trust the files in this folder?","options":["Yes, proceed","No, exit"],"selected":0,"trust":true},
            "card":{"agent":"opencode","name":"ios-app","cwd":"/Users/you/Projects/AgentSwitch/packages/ios-app","model":"deepseek-flash","profile":"Personal","color":"violet","mode":"default","node":null}},
-          {"handle":"web","kind":"session","terminal":"t4","face":{"rows":["#...#",".#.#.","#####","#.#.#",".###."],"color":8},"joinedAt":0,"addedBy":"daemon","canAdd":false,"byAgent":true,"left":null,"state":"signed_out",
+          {"handle":"web","kind":"session","terminal":"t4","face":{"rows":["#...#",".#.#.","#####","#.#.#",".###."],"color":8},"joinedAt":0,"addedBy":"daemon","canAdd":false,"byAgent":true,"left":null,"state":"exited",
            "card":{"agent":"pi","name":"web","cwd":"/Users/you/Projects/Web","model":"deepseek-flash","profile":null,"mode":null,"node":null}}],
          "messages":[
           {"seq":1,"from":"you","to":["daemon"],"text":"@daemon 登录接口的返回里加一个 `expiresAt`，改完告诉另外两边。","at":\(at(42))},

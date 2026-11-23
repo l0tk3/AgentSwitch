@@ -348,6 +348,23 @@ final class RoomsModel {
         act { try await $0.unseat(seat, in: id) }
     }
 
+    /// Out of the room and its terminal closed; `delete`: its conversation's record deleted too.
+    func end(seat: String, delete: Bool) {
+        guard let id = selected else { return }
+        card = nil
+        act { try await $0.unseat(seat, close: delete ? "delete" : "end", in: id) }
+    }
+
+    func resumeAll() {
+        guard let id = selected else { return }
+        act { try await $0.resumeAll(in: id) }
+    }
+
+    func trustAll() {
+        guard let id = selected else { return }
+        act { try await $0.trustAll(in: id) }
+    }
+
     func delete() {
         guard let id = selected else { return }
         sheet = nil

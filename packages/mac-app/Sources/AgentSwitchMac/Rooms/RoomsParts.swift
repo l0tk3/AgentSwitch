@@ -382,6 +382,8 @@ struct RoomMemberCard: View {
     let resume: () -> Void
     let mention: () -> Void
     let kick: () -> Void
+    /// Out of the room and its terminal closed; true: its conversation's record deleted too.
+    var end: (Bool) -> Void = { _ in }
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -407,6 +409,7 @@ struct RoomMemberCard: View {
                 if seat.canAdd { line("Role", "Admin") }
                 if seat.muted { line("Muted", "by @" + (seat.mutedBy ?? "?"), color: .waiting) }
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
+                if let asks = seat.asks { line("Asks", asks.title, color: .waiting, help: asks.options.joined(separator: "\n")) }
                 if let stats = seat.stats { line("Room Cost", stats.says, help: "这个成员在房间里的开销：被唤醒几次、送进去多少字、发了几条消息、调了几次房间工具。花了多少 token 要看它自己的用量。") }
                 if let claim { line("Changing", "\(claim.names) → \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }
             }
@@ -462,6 +465,16 @@ struct RoomMemberCard: View {
                         .help("移出房间；会话本身继续运行，之后还能再拉进来。")
                 }
                 .padding(.top, 10)
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button { end(false) } label: { BracketLabel(word: "End") }
+                        .buttonStyle(BracketButtonStyle(role: .destructive))
+                        .help("移出房间并关掉它的终端；对话记录留着，之后还能恢复。")
+                    Button { end(true) } label: { BracketLabel(word: "Delete") }
+                        .buttonStyle(BracketButtonStyle(role: .destructive))
+                        .help("移出房间、关掉终端，并删除它的对话记录。删了就恢复不了。")
+                }
+                .padding(.top, 6)
             } else {
                 Text("已离开房间。").font(.system(size: 12)).foregroundStyle(Look.faint)
             }

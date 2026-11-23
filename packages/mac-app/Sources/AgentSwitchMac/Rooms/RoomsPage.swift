@@ -226,6 +226,7 @@ private struct RoomView: View {
             .frame(height: 40)
             HairRule(color: Look.line)
             if room.room.paused { banner } else if let rounds = room.room.rounds { told(rounds) }
+            needs
             if let said = model.problem ?? model.error { problem(said) }
             timeline
             HairRule(color: Look.line)
@@ -237,7 +238,7 @@ private struct RoomView: View {
                     Color.clear.contentShape(Rectangle()).onTapGesture { model.card = nil }
                     RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
                                    setMuted: { model.setMuted($0, seat: handle) }, resume: { model.resume(seat: handle) },
-                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) })
+                                   mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
             }
@@ -266,6 +267,35 @@ private struct RoomView: View {
             Spacer()
             Button { model.setPaused(true) } label: { BracketLabel(word: "Pause") }.buttonStyle(BracketButtonStyle(size: 12))
             Button { model.roundsSeen() } label: { BracketLabel(word: "OK") }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.waiting.opacity(look.isClassic ? 0.14 : 0.1))
+        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+    }
+
+    /// Members that need one thing of the user, several at once (§6.2): their agents ask whether a folder is trusted,
+    /// or their sessions have ended.
+    @ViewBuilder
+    private var needs: some View {
+        let asking = room.sessions.filter { $0.asks?.trust == true }
+        let ended = room.sessions.filter { $0.state == .exited }
+        if !asking.isEmpty {
+            notice("\(asking.map { "@" + $0.handle }.joined(separator: " ")) 在等你确认是否信任它的文件夹，确认之前收不到消息。",
+                   help: asking.compactMap { $0.card?.cwd }.joined(separator: "\n"), word: asking.count > 1 ? "Trust All" : "Trust") { model.trustAll() }
+        }
+        if !ended.isEmpty {
+            notice("\(ended.map { "@" + $0.handle }.joined(separator: " ")) 的会话已经结束。", help: "用同一个会话、同一个目录恢复，席位不变。",
+                   word: ended.count > 1 ? "Resume All" : "Resume") { model.resumeAll() }
+        }
+    }
+
+    private func notice(_ text: String, help: String, word: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            BlinkingSquare()
+            Text(text).font(.system(size: 12.5)).foregroundStyle(Look.ink).lineLimit(2).help(help)
+            Spacer()
+            Button(action: action) { BracketLabel(word: word) }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

@@ -137,6 +137,14 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         }
     }
     public let stats: Stats?
+    /// What its own screen asks now (a list to choose from, like "trust this folder?" at its start); `trust`: it is
+    /// exactly that question, which the room can answer for all at once.
+    public struct Asks: Decodable, Equatable, Sendable {
+        public let title: String
+        public let options: [String]
+        public let trust: Bool
+    }
+    public let asks: Asks?
     /// The state as the service wrote it; one this app does not know reads as `error`.
     public let stateWord: String?
     public let card: SeatCard?
@@ -152,7 +160,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stats, stateWord = "state" }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stats, asks, stateWord = "state" }
 
     public init(handle: String, kind: String = "session", terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = Room.you,
                 canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, muted: Bool = false, mutedBy: String? = nil,
@@ -170,6 +178,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         self.muted = muted
         self.mutedBy = mutedBy
         self.stats = nil
+        self.asks = nil
         self.stateWord = state?.rawValue
         self.card = card
     }
@@ -188,6 +197,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         muted = (try? c.decodeIfPresent(Bool.self, forKey: .muted)) ?? false
         mutedBy = try? c.decodeIfPresent(String.self, forKey: .mutedBy)
         stats = try? c.decodeIfPresent(Stats.self, forKey: .stats)
+        asks = try? c.decodeIfPresent(Asks.self, forKey: .asks)
         stateWord = try? c.decodeIfPresent(String.self, forKey: .stateWord)
         card = try? c.decodeIfPresent(SeatCard.self, forKey: .card)
         kit = try? c.decodeIfPresent(Bool.self, forKey: .kit)
@@ -687,8 +697,20 @@ public extension DaemonClient {
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))/resume", timeout: 60)
     }
 
-    func unseat(_ handle: String, in room: String) async throws {
-        _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", timeout: 10)
+    /// Out of the room. `close`: `"end"` closes its terminal too (the conversation is kept), `"delete"` deletes the
+    /// conversation's record as well.
+    func unseat(_ handle: String, close: String? = nil, in room: String) async throws {
+        _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))" + (close.map { "?close=\($0)" } ?? ""), timeout: 30)
+    }
+
+    /// Every member whose session has ended is brought back.
+    func resumeAll(in room: String) async throws {
+        _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/resume", timeout: 180)
+    }
+
+    /// "Trust this folder?" answered yes for every member whose screen asks exactly that.
+    func trustAll(in room: String) async throws {
+        _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/trust", timeout: 20)
     }
 
     /// The body of what the user says: `files` only when there are some (the service takes no unknown or empty extra).
