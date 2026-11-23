@@ -69,8 +69,9 @@ from secret_gate.win_service import Supervisor, child_commands, child_env
 from secret_gate.winpipe import SERVICE_PIPE, expected_server_sid, pipe_name
 
 OWNER = "S-1-5-21-1004336348-1177238915-682003330-1001"
-SC = "C:\\Windows\\System32\\sc.exe"
-NET = "C:\\Windows\\System32\\net.exe"
+# The Windows directory as the system names it (C:\Windows off Windows; some installs say C:\WINDOWS)
+SC = f"{fsacl.windows_dir()}\\System32\\sc.exe"
+NET = f"{fsacl.windows_dir()}\\System32\\net.exe"
 
 
 def _ops(plan):

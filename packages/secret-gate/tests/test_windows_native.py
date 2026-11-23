@@ -102,3 +102,40 @@ def test_known_folders_and_the_windows_directory_come_from_the_system(monkeypatc
     monkeypatch.setenv("SystemRoot", "C:\\Users\\Public\\evil")
     assert "evil" not in fsacl.known_folder("ProgramData", "x") and "evil" not in fsacl.windows_dir()
     assert os.path.isdir(fsacl.known_folder("ProgramFiles", "x"))
+
+
+
+def test_a_non_elevated_login_user_cannot_read_the_service_home(tmp_path):
+    """gate\\ gets SYSTEM, Administrators and the service only (platform/windows.py GATE_GRANTS). Under UAC a
+    non-elevated token has the Administrators group for deny only, so the login user, administrator or not, reads
+    nothing there. This process may be elevated (the CI runner is); it reads as such a token by impersonating its own
+    token restricted the way UAC restricts it (LUA_TOKEN, Administrators deny-only, no privileges)."""
+    import win32api
+    import win32security
+
+    from secret_gate.platform.windows import GATE_GRANTS
+
+    gate = tmp_path / "gate"
+    gate.mkdir()
+    (gate / "key.priv").write_text("not for the login user")
+    fsacl.set_acl(gate, GATE_GRANTS, reset_children=True)
+    access = (win32security.TOKEN_DUPLICATE | win32security.TOKEN_QUERY | win32security.TOKEN_IMPERSONATE
+              | win32security.TOKEN_ASSIGN_PRIMARY)
+    token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), access)
+    admins = win32security.ConvertStringSidToSid(fsacl.ADMINISTRATORS_SID)
+    lua = win32security.CreateRestrictedToken(token, win32security.DISABLE_MAX_PRIVILEGE | 0x4,   # LUA_TOKEN
+                                              ((admins, 0),), None, None)
+    try:
+        win32security.ImpersonateLoggedOnUser(lua)
+        try:
+            with pytest.raises(PermissionError):
+                (gate / "key.priv").read_text()
+            with pytest.raises(PermissionError):
+                list(gate.iterdir())
+        finally:
+            win32security.RevertToSelf()
+        if fsacl.is_admin():                                  # the same token unrestricted: Administrators may
+            assert (gate / "key.priv").read_text() == "not for the login user"
+        assert fsacl.private_problem(gate) is None
+    finally:
+        fsacl.set_acl(gate, ((fsacl.current_user_sid(), "full"),), reset_children=True)   # the owner may: clean-up
