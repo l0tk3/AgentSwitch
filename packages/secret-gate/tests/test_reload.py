@@ -87,6 +87,7 @@ def test_read_missing_file_means_no_exceptions(tmp_path):
     (lambda p: (p.write_bytes(b"\xff\xfe host\n"), p.chmod(0o644)), "not UTF-8"),
     (lambda p: (p.write_text("a.example\n"), p.chmod(0o000)), "cannot read"),
 ])
+@pytest.mark.posix
 def test_read_refuses_untrustworthy_files(tmp_path, setup, match):
     path = tmp_path / UPSTREAM_INSECURE_FILE
     setup(path)
@@ -142,6 +143,7 @@ def test_reloader_swaps_the_addon_set_and_reports(tmp_path):
     assert "reloaded" in lines[0] and "FAILED" in lines[1]
 
 
+@pytest.mark.posix
 def test_running_installs_sighup_handler_and_done_removes_it(tmp_path):
     addon = UpstreamTlsAddon(frozenset())
     loop = FakeLoop()
@@ -158,6 +160,7 @@ def test_running_installs_sighup_handler_and_done_removes_it(tmp_path):
 
 
 @pytest.mark.parametrize("error", [NotImplementedError(), RuntimeError("not the main thread")])
+@pytest.mark.posix
 def test_running_without_signal_support_reports_and_keeps_going(tmp_path, error):
     loop = FakeLoop(fail=error)
     lines: list[str] = []
@@ -174,7 +177,66 @@ def test_platform_without_sighup(tmp_path):
                                      get_loop=FakeLoop, signum=None)
     reloader.running()
     reloader.done()
-    assert "no SIGHUP" in lines[0]
+    assert "no SIGHUP" in lines[0] and "restart the proxy" in lines[0]   # a loop that cannot run the watcher
+
+
+def test_without_sighup_the_proxy_watches_its_key_and_the_list(tmp_path):
+    """Windows (gate-simple-v0 §5): no signal; a changed key.priv or upstream-insecure.txt is reloaded on the next
+    look, an unchanged one is not."""
+    from secret_gate.keyring import create_keypair
+    from secret_gate.proxy_addon import SecretGateAddon
+    from secret_gate.resolver import Resolver
+
+    create_keypair(tmp_path)
+    first = Resolver.from_home(tmp_path)
+    gate = SecretGateAddon(first)
+    addon = UpstreamTlsAddon(frozenset())
+    lines: list[str] = []
+    reloader = InsecureHostsReloader(addon, tmp_path, emit=lines.append, keys=gate, signum=None)
+
+    async def scenario() -> None:
+        reloader.running()
+        assert "watching key.priv and upstream-insecure.txt" in lines[0] and reloader._watch is not None
+        assert reloader.check_files() is False                            # nothing changed since start
+        create_keypair(tmp_path, replace=True)                              # system rotate-key
+        assert reloader.check_files() is True and gate.resolver is not first
+        assert lines[-1] == "secret-gate: key reloaded"
+        assert reloader.check_files() is False
+        _write(tmp_path, "watched.example\n")
+        assert reloader.check_files() is True and addon.patterns == {"watched.example"}
+        reloader.done()
+        assert reloader._watch is None
+
+    asyncio.run(scenario())
+
+
+def test_the_watcher_loop_reloads_by_itself(tmp_path, monkeypatch):
+    from secret_gate import reload as reload_module
+
+    monkeypatch.setattr(reload_module, "WATCH_INTERVAL_SECONDS", 0.01)
+    addon = UpstreamTlsAddon(frozenset())
+    reloader = InsecureHostsReloader(addon, tmp_path, emit=lambda _line: None, signum=None)
+
+    async def scenario() -> bool:
+        reloader.running()
+        _write(tmp_path, "loop.example\n")
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            if addon.patterns == {"loop.example"}:
+                break
+        reloader.done()
+        return addon.patterns == {"loop.example"}
+
+    assert asyncio.run(scenario())
+
+
+def test_on_windows_the_list_is_trusted_by_its_acl(tmp_path, monkeypatch):
+    path = _write(tmp_path, "a.example\n", 0o666)                           # modes mean nothing there
+    monkeypatch.setattr("secret_gate.reload.fsacl.write_problem", lambda _p: None)
+    assert read_insecure_hosts(path, windows=True) == {"a.example"}
+    monkeypatch.setattr("secret_gate.reload.fsacl.write_problem", lambda _p: "writable by S-1-5-32-545")
+    with pytest.raises(ValidationError, match="writable by S-1-5-32-545"):
+        read_insecure_hosts(path, windows=True)
 
 
 def test_default_emit_writes_one_line_to_stderr(tmp_path, capsys):
@@ -185,6 +247,7 @@ def test_default_emit_writes_one_line_to_stderr(tmp_path, capsys):
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGHUP"), reason="POSIX only")
+@pytest.mark.posix
 def test_real_sighup_through_an_asyncio_loop(tmp_path):
     """One real signal to this process, sent only after the loop's handler is verifiably in place."""
     previous = signal.getsignal(signal.SIGHUP)
@@ -213,6 +276,7 @@ def test_real_sighup_through_an_asyncio_loop(tmp_path):
         signal.signal(signal.SIGHUP, previous)
 
 
+@pytest.mark.posix
 def test_start_up_uses_the_strict_rules(tmp_path, capsys):
     from secret_gate.reload import initial_patterns
 

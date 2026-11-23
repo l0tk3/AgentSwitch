@@ -17,6 +17,7 @@ from secret_gate.mcp_backend import LocalMcpBackend, RemoteMcpBackend, default_b
 from secret_gate.mcp_server import build_server
 from secret_gate.policy import SecretPayload
 from secret_gate.tokens import make_token
+from tests import shell
 from tests.fixtures import fake_secrets as fs
 from tests.service_fixtures import running_service
 
@@ -69,7 +70,7 @@ def test_every_tool_is_forwarded_with_this_executions_scope():
                 "describe": _tool_text(await server.call_tool("secret_describe", {"token": ref})),
                 "http": _tool_text(await server.call_tool("secret_http", {"method": "GET", "url": "https://portal-a.example.com/",
                                                                            "headers": {"Authorization": f"Bearer {ref}"}})),
-                "exec": _tool_text(await server.call_tool("secret_exec", {"argv": ["/bin/sh", "-c", "echo got $PW"],
+                "exec": _tool_text(await server.call_tool("secret_exec", {"argv": shell.echo("got {PW}"),
                                                                            "env": {"PW": ref}})),
                 "otp": _tool_text(await server.call_tool("secret_otp", {"token": totp})),
             }
@@ -78,7 +79,9 @@ def test_every_tool_is_forwarded_with_this_executions_scope():
         assert json.loads(out["describe"])["ref"] == ref
         assert seen[0].headers["authorization"] == f"Bearer {fs.PORTAL.password}"
         assert json.loads(out["http"])["body"] == "welcome Bearer [REDACTED:portal-a/pass]"
-        assert json.loads(out["exec"]) == {"returncode": 0, "stdout": "got [REDACTED:portal-a/pass]\n", "stderr": ""}
+        result = json.loads(out["exec"])
+        assert {**result, "stdout": shell.out(result["stdout"])} == {"returncode": 0, "stdout": "got [REDACTED:portal-a/pass]\n",
+                                                                      "stderr": ""}
         assert out["otp"].isdigit() and len(out["otp"]) == 6
         assert calls[1:] == ["mcp.describe", "mcp.http", "exec.resolve", "mcp.otp"]
         everything = json.dumps(out)

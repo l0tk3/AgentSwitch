@@ -23,6 +23,11 @@ keeps the previous resolver (the failure is reported).
 
 Without this addon SIGHUP terminates mitmdump (default action); under launchd `KeepAlive` restarts it, which
 also re-reads the file, but drops every open connection.
+
+Windows has no SIGHUP (gate-simple-v0 §5, Windows column): there the reloader watches `key.priv` and the list instead,
+one stat every WATCH_INTERVAL_SECONDS, and reloads when either changed (`check_files`). `system rotate-key` then needs no
+signal: the proxy picks the new key up by itself within seconds. The list's own trust check is the file's ACL there
+(fsacl.write_problem), since Windows has no group/other mode bits.
 """
 
 from __future__ import annotations
@@ -38,7 +43,8 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING, Protocol
 
-from .constants import HOST_PATTERN
+from . import fsacl
+from .constants import HOST_PATTERN, PRIVATE_KEY_FILE
 from .errors import GateError, ValidationError
 from .upstream_tls import UPSTREAM_INSECURE_FILE, UpstreamTlsAddon
 
@@ -52,6 +58,7 @@ class ResolverHolder(Protocol):
     def replace_resolver(self, resolver: Resolver) -> None: ...
 
 MAX_FILE_BYTES = 64 * 1024
+WATCH_INTERVAL_SECONDS = 2.0
 MAX_LISTED_CHANGES = 20
 _PREFIX = f"secret-gate: {UPSTREAM_INSECURE_FILE}"
 
@@ -96,7 +103,7 @@ def check_insecure_hosts(text: str) -> frozenset[str]:
     return frozenset(out)
 
 
-def read_insecure_hosts(path: Path) -> frozenset[str]:
+def read_insecure_hosts(path: Path, *, windows: bool = fsacl.IS_WINDOWS) -> frozenset[str]:
     """Strictly load the admin's list; raises ValidationError when the file must not be trusted."""
     try:
         info = path.stat()
@@ -106,7 +113,14 @@ def read_insecure_hosts(path: Path) -> frozenset[str]:
         raise ValidationError(f"cannot stat {path}: {exc.strerror or exc}") from None
     if not stat.S_ISREG(info.st_mode):
         raise ValidationError(f"{path} is not a regular file")
-    if stat.S_IMODE(info.st_mode) & 0o022:
+    if windows:
+        try:
+            problem = fsacl.write_problem(path)
+        except Exception as exc:  # noqa: BLE001 - pywintypes.error: an ACL that cannot be read is not trusted
+            problem = f"its access control list cannot be read ({exc})"
+        if problem:
+            raise ValidationError(f"{path} is {problem}; only you or the gate service may be able to change it")
+    elif stat.S_IMODE(info.st_mode) & 0o022:
         raise ValidationError(f"{path} is writable by group/others (mode {stat.S_IMODE(info.st_mode):o}); chmod 644")
     if info.st_size > MAX_FILE_BYTES:
         raise ValidationError(f"{path} is larger than {MAX_FILE_BYTES} bytes")
@@ -174,6 +188,8 @@ class InsecureHostsReloader:
         self._get_loop = get_loop
         self._signum = signum
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._watch: asyncio.Task | None = None
+        self._seen: tuple = ()
 
     def reload(self) -> ReloadResult:
         result = reload_patterns(self._path, self._target.patterns)
@@ -198,11 +214,51 @@ class InsecureHostsReloader:
         self._emit("secret-gate: key reloaded")
         return True
 
+    # Windows: watch the files instead of a signal -----------------------------------------------
+
+    def _signature(self) -> tuple:
+        out: list[tuple[int, int, int] | None] = []
+        for path in (self._home / PRIVATE_KEY_FILE, self._path):
+            try:
+                info = path.stat()
+            except OSError:
+                out.append(None)
+                continue
+            out.append((info.st_mtime_ns, info.st_size, info.st_ino))
+        return tuple(out)
+
+    def check_files(self) -> bool:
+        """One look of the watcher: reload when `key.priv` or the list changed since the last look."""
+        current = self._signature()
+        if current == self._seen:
+            return False
+        self._seen = current
+        self.reload()
+        return True
+
+    async def _watch_files(self, interval: float) -> None:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                self.check_files()
+            except Exception as exc:  # noqa: BLE001 - a failed look must not end the watcher
+                self._emit(f"{_PREFIX}: watch failed ({type(exc).__name__}); trying again")
+
+    def _start_watching(self) -> None:
+        self._seen = self._signature()
+        try:
+            self._watch = self._get_loop().create_task(self._watch_files(WATCH_INTERVAL_SECONDS))
+        except (AttributeError, RuntimeError) as exc:
+            self._emit(f"{_PREFIX}: no SIGHUP on this platform and no watcher ({exc}); restart the proxy to reload")
+            return
+        self._emit(f"{_PREFIX}: no SIGHUP on this platform; watching {PRIVATE_KEY_FILE} and {UPSTREAM_INSECURE_FILE} "
+                   f"for changes every {WATCH_INTERVAL_SECONDS:g} s")
+
     # mitmproxy hooks -------------------------------------------------------------------------
 
     def running(self) -> None:
         if self._signum is None:
-            self._emit(f"{_PREFIX}: no SIGHUP on this platform; restart the proxy to reload")
+            self._start_watching()
             return
         loop = self._get_loop()
         try:
@@ -213,6 +269,9 @@ class InsecureHostsReloader:
         self._loop = loop
 
     def done(self) -> None:
+        if self._watch is not None:
+            self._watch.cancel()
+            self._watch = None
         if self._loop is not None and self._signum is not None:
             self._loop.remove_signal_handler(self._signum)
             self._loop = None

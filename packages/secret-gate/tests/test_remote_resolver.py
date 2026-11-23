@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import stat
 
 import pytest
 
@@ -21,6 +20,7 @@ from secret_gate.tokens import make_token
 from tests.fixtures import fake_secrets as fs
 from tests.service_fixtures import running_service
 from tests.test_browser_gate import FakePlaywright, texts
+from tests.conftest import private
 
 SCOPE = "browser-scope-0123456789abcdef"
 PAGE = "https://login.portal-a.example.com/signin"
@@ -97,5 +97,5 @@ def test_service_setup_takes_key_and_mask_from_the_service(monkeypatch):
         assert setup.public_key == load_public_key(svc.home) and setup.grant is not None
         assert setup.mask.selectors_for("a.example:443") == (".card",)
         assert setup.resolver.scope == SCOPE and setup.out_dir == out_dir
-        assert stat.S_IMODE(out_dir.stat().st_mode) == 0o700
+        assert private(out_dir, 0o700)
     assert not out_dir.exists()                                          # removed at exit

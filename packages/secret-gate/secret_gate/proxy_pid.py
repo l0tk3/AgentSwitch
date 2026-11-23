@@ -4,6 +4,10 @@ Both run as the service account, so the rpc server may signal the proxy, but onl
 address it by label. The proxy therefore records its own pid once it is listening (mitmproxy's `running` hook, in
 the mitmdump process itself) and removes it on a clean shutdown. A reader trusts the file only when it is a
 regular file of this uid, not writable by others, holding one pid of a live process that this uid may signal.
+
+Windows has neither uids in `st_uid` nor modes nor SIGHUP: the file is trusted for living in the gate home (whose ACL
+keeps everyone else out, fsacl.py), liveness is OpenProcess/GetExitCodeProcess (os.kill(pid, 0) would *terminate* the
+process there), and the proxy reloads by watching its key file instead of a signal (reload.py).
 """
 
 from __future__ import annotations
@@ -14,6 +18,8 @@ import stat
 import sys
 from collections.abc import Callable
 from pathlib import Path
+
+from . import fsacl
 
 PID_FILE = "proxy.pid"
 MAX_PID_BYTES = 32
@@ -26,7 +32,7 @@ def pid_path(home: Path) -> Path:
 def write_pid(home: Path, pid: int | None = None) -> None:
     path = pid_path(home)
     tmp = path.with_name(f".{PID_FILE}.{os.getpid()}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(f"{os.getpid() if pid is None else pid}\n")
     os.replace(tmp, path)
@@ -38,13 +44,15 @@ def remove_pid(home: Path, pid: int | None = None) -> None:
         pid_path(home).unlink(missing_ok=True)
 
 
-def read_pid(home: Path, uid: int | None = None) -> int | None:
+def read_pid(home: Path, uid: int | None = None, *, windows: bool = fsacl.IS_WINDOWS) -> int | None:
     path = pid_path(home)
     try:
         info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != (os.getuid() if uid is None else uid):
+        if not stat.S_ISREG(info.st_mode):
             return None
-        if stat.S_IMODE(info.st_mode) & 0o022:
+        if not windows and info.st_uid != (os.getuid() if uid is None else uid):
+            return None
+        if not windows and stat.S_IMODE(info.st_mode) & 0o022:
             return None
         text = path.read_bytes()[:MAX_PID_BYTES].decode("ascii").strip()
     except (OSError, UnicodeDecodeError):
@@ -53,6 +61,8 @@ def read_pid(home: Path, uid: int | None = None) -> int | None:
 
 
 def alive(pid: int, kill: Callable[[int, int], None] = os.kill) -> bool:
+    if fsacl.IS_WINDOWS and kill is os.kill:
+        return fsacl.process_alive(pid)
     try:
         kill(pid, 0)
     except OSError:  # ESRCH: gone; EPERM: another user's process now holds that pid
@@ -69,8 +79,8 @@ def signal_proxy(home: Path, kill: Callable[[int, int], None] = os.kill,
                  signum: int = getattr(signal, "SIGHUP", 1)) -> bool:
     """SIGHUP the proxy (reload keys and upstream exceptions). False when there is no live proxy to signal."""
     pid = read_pid(home)
-    if pid is None or not alive(pid, kill):
-        return False
+    if pid is None or not alive(pid, kill) or (fsacl.IS_WINDOWS and kill is os.kill):
+        return False  # Windows: no signal to send; the proxy notices a new key itself (reload.KeyFileWatcher)
     try:
         kill(pid, signum)
     except OSError:

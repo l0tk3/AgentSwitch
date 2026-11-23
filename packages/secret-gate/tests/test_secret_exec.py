@@ -17,6 +17,7 @@ from secret_gate.policy import SecretPayload
 from secret_gate.refs import RefRegistry
 from secret_gate.resolver import Resolver
 from secret_gate.tokens import make_token
+from tests import shell
 from tests.service_fixtures import running_service
 
 VALUE = "s3cret-Exec-Value-42"
@@ -37,6 +38,7 @@ def _no_value(out: dict) -> None:
     assert VALUE not in json.dumps(out) and VALUE.lower() not in json.dumps(out).lower()
 
 
+@pytest.mark.posix
 def test_the_value_reaches_the_command_only_through_env_and_never_comes_back(local):
     backend, _, public = local
     token = _token(public)
@@ -54,6 +56,7 @@ def test_the_value_reaches_the_command_only_through_env_and_never_comes_back(loc
         assert "[REDACTED:db/pass]" in out["stdout"] + out["stderr"]
 
 
+@pytest.mark.posix
 def test_the_child_environment_is_minimal_and_stdin_empty(local, monkeypatch, tmp_path):
     backend, _, public = local
     monkeypatch.setenv("SECRET_GATE_SCOPE", SCOPE)
@@ -71,6 +74,7 @@ def test_the_child_environment_is_minimal_and_stdin_empty(local, monkeypatch, tm
         "HOME": "/h", "TZ": "UTC", "PATH": EXEC_PATH}
 
 
+@pytest.mark.posix
 def test_it_runs_as_the_login_user(local):
     backend, _, public = local
     out = backend.exec(["/usr/bin/id", "-u"], {"DB_PASSWORD": _token(public)})
@@ -127,8 +131,8 @@ def test_only_exec_tokens_open_and_nothing_runs_otherwise(local):
 def test_references_of_this_execution_work(local):
     backend, resolver, public = local
     ref = resolver.register(_token(public))
-    out = backend.exec(["/bin/sh", "-c", "echo $PW"], {"PW": ref})
-    assert out["stdout"] == "[REDACTED:db/pass]\n"
+    out = backend.exec(shell.echo("{PW}"), {"PW": ref})
+    assert shell.out(out["stdout"]) == "[REDACTED:db/pass]\n"
 
 
 def test_large_output_is_withheld_whole_and_failures_name_only_their_kind(local):
@@ -151,6 +155,7 @@ def test_large_output_is_withheld_whole_and_failures_name_only_their_kind(local)
     assert VALUE not in str(exc.value)
 
 
+@pytest.mark.posix
 def test_op_exec_hands_the_runner_the_minimal_environment(keypair):
     seen: dict = {}
 
@@ -165,6 +170,7 @@ def test_op_exec_hands_the_runner_the_minimal_environment(keypair):
     assert seen["env"] == {"HOME": "/home/u", "PATH": EXEC_PATH, "API_KEY": VALUE}
 
 
+@pytest.mark.posix
 def test_with_the_service_the_command_runs_as_this_user_with_a_value_from_exec_resolve():
     with running_service() as svc:
         from secret_gate.keystore import load_public_key
@@ -174,3 +180,110 @@ def test_with_the_service_the_command_runs_as_this_user_with_a_value_from_exec_r
         assert out["stdout"] == f"{os.getuid()}\n[REDACTED:db/pass]\n"
         audit = svc.audit.read_text()
         assert VALUE not in audit and "exec.resolve" in audit and "printenv" not in audit
+
+
+# -- Windows: cmd and PowerShell instead of sh (gate-simple-v0 §5) ---------------------------------------------------
+
+@pytest.mark.windows
+def test_windows_the_value_reaches_the_command_only_through_env_and_never_comes_back(local):
+    backend, _, public = local
+    token = _token(public)
+    out = backend.exec(shell.powershell("$env:DB_PASSWORD.Length"), {"DB_PASSWORD": token})
+    assert out["returncode"] == 0 and out["stdout"].strip() == str(len(VALUE)), out
+    for argv in (["cmd", "/d", "/c", "set"], ["cmd", "/d", "/c", "set DB_PASSWORD"], shell.echo("{DB_PASSWORD}"),
+                 shell.powershell("$env:DB_PASSWORD.ToUpper()"), shell.powershell("$env:DB_PASSWORD.Substring(2, 12)"),
+                 shell.powershell("[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:DB_PASSWORD))"),
+                 shell.powershell("-join ([Text.Encoding]::UTF8.GetBytes($env:DB_PASSWORD) | % { $_.ToString('x2') })"),
+                 shell.powershell("Get-ChildItem env:")):
+        out = backend.exec(argv, {"DB_PASSWORD": token})
+        assert out["returncode"] == 0, out
+        _no_value(out)
+        assert "[REDACTED:db/pass]" in out["stdout"] + out["stderr"], argv
+
+
+@pytest.mark.windows
+def test_windows_the_child_environment_is_minimal_and_stdin_empty(local, monkeypatch, tmp_path):
+    from secret_gate.gate_ops import WINDOWS_EXEC_INHERITED_ENV, exec_child_env
+
+    backend, _, public = local
+    monkeypatch.setenv("SECRET_GATE_SCOPE", SCOPE)
+    monkeypatch.setenv("LEAKY_TOKEN", "should-not-pass")
+    monkeypatch.chdir(tmp_path)
+    out = backend.exec(["cmd", "/d", "/c", "set"], {"DB_PASSWORD": _token(public)})
+    names = {line.split("=", 1)[0].upper() for line in shell.out(out["stdout"]).splitlines() if "=" in line}
+    allowed = {n.upper() for n in (*WINDOWS_EXEC_INHERITED_ENV, *exec_child_env({}), "DB_PASSWORD", "PROMPT")}
+    assert names <= allowed, names - allowed                              # cmd adds PROMPT itself
+    assert "LEAKY_TOKEN" not in names and "SECRET_GATE_SCOPE" not in names and "DB_PASSWORD" in names
+    assert f"PATH={exec_child_env({})['PATH']}" in shell.out(out["stdout"]).splitlines()
+    out = backend.exec(["cmd", "/d", "/c", "cd"], {"DB_PASSWORD": _token(public)})
+    assert shell.out(out["stdout"]).strip().lower() == str(tmp_path).lower()
+    out = backend.exec(["findstr", "/r", "."], {"DB_PASSWORD": _token(public)})   # nothing on stdin: no match
+    assert out["returncode"] == 1 and out["stdout"] == ""
+
+
+@pytest.mark.windows
+def test_windows_it_runs_as_the_login_user(local):
+    from secret_gate.fsacl import current_user_sid
+
+    backend, _, public = local
+    out = backend.exec(["whoami", "/user", "/fo", "csv", "/nh"], {"DB_PASSWORD": _token(public)})
+    assert current_user_sid() in out["stdout"], out
+
+
+@pytest.mark.windows
+def test_windows_op_exec_hands_the_runner_the_minimal_environment(keypair):
+    from secret_gate.gate_ops import exec_child_env
+
+    seen: dict = {}
+
+    def runner(argv, **kw):
+        seen.update(kw, argv=argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    resolver = Resolver(keypair.private)
+    base = {"USERPROFILE": "C:\\Users\\u", "SECRET": "x", "PATH": "C:\\evil", "PATHEXT": ".EVIL"}
+    op_exec(lambda t: resolver.resolve_exact(t, use=USE_EXEC), argv=["tool", "--flag"],
+            env={"API_KEY": _token(keypair.public)}, runner=runner, base_env=base, cwd="C:\\")
+    assert seen["env"] == {**exec_child_env(base), "API_KEY": VALUE}
+    assert seen["env"]["USERPROFILE"] == "C:\\Users\\u" and "SECRET" not in seen["env"]
+    assert "evil" not in seen["env"]["PATH"].lower() and seen["env"]["PATHEXT"] == ".COM;.EXE;.BAT;.CMD"
+
+
+@pytest.mark.windows
+def test_windows_with_the_service_the_command_runs_as_this_user_with_a_value_from_exec_resolve():
+    from secret_gate.fsacl import current_user_sid
+
+    with running_service() as svc:
+        from secret_gate.keystore import load_public_key
+
+        token = _token(load_public_key(svc.home))
+        out = RemoteMcpBackend(svc.client, None).exec(["cmd", "/d", "/c", "whoami /user /fo csv /nh & echo %PW%"],
+                                                      {"PW": token})
+        assert current_user_sid() in out["stdout"] and "[REDACTED:db/pass]" in out["stdout"], out
+        audit = svc.audit.read_text()
+        assert VALUE not in audit and "exec.resolve" in audit and "whoami" not in audit
+
+
+# -- the Windows environment and names, checked on every system -------------------------------------------------
+
+def test_windows_child_environment_comes_from_the_windows_directory():
+    from secret_gate.gate_ops import exec_child_env, windows_exec_path
+
+    base = {"USERPROFILE": "C:\\Users\\u", "TEMP": "C:\\Users\\u\\Temp", "PATH": "C:\\evil", "COMSPEC": "evil.exe",
+            "PATHEXT": ".PY", "PSModulePath": "C:\\evil", "SystemRoot": "C:\\evil", "SECRET_GATE_HOME": "x"}
+    env = exec_child_env(base, platform="win32", windows="C:\\Windows")
+    assert env == {"USERPROFILE": "C:\\Users\\u", "TEMP": "C:\\Users\\u\\Temp", "SystemRoot": "C:\\Windows",
+                   "windir": "C:\\Windows", "SystemDrive": "C:", "ComSpec": "C:\\Windows\\System32\\cmd.exe",
+                   "PATHEXT": ".COM;.EXE;.BAT;.CMD", "PATH": windows_exec_path("C:\\Windows")}
+    assert env["PATH"].split(";")[:2] == ["C:\\Windows\\System32", "C:\\Windows"]
+    assert exec_child_env({"HOME": "/h", "PATH": "/evil"}, platform="darwin") == {"HOME": "/h", "PATH": EXEC_PATH}
+
+
+@pytest.mark.parametrize("name", ["PATHEXT", "COMSPEC", "PSMODULEPATH", "SYSTEMROOT", "WINDIR", "TEMP", "USERPROFILE",
+                                  "APPDATA", "COR_PROFILER", "COR_ENABLE_PROFILING", "CORECLR_PROFILER_PATH",
+                                  "COMPLUS_VERSION", "DOTNET_STARTUP_HOOKS", "__COMPAT_LAYER", "_NT_SYMBOL_PATH",
+                                  "PSEXECUTIONPOLICYPREFERENCE", "PROMPT"])
+def test_windows_only_names_are_refused_there_and_only_there(name, keypair):
+    with pytest.raises(ValidationError):
+        check_exec_env({name: _token(keypair.public)}, platform="win32")
+    assert check_exec_env({name: "enc:ref:AAAAAAAAAAAAAAAA"}, platform="darwin")   # macOS/Linux unchanged

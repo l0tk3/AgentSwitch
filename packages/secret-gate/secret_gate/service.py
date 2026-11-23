@@ -104,7 +104,7 @@ class ServiceDeps:
 
 
 def system_deps() -> ServiceDeps:
-    return ServiceDeps(uid=os.getuid(), launch_agents=Path.home() / "Library" / "LaunchAgents",
+    return ServiceDeps(uid=getattr(os, "getuid", lambda: -1)(), launch_agents=Path.home() / "Library" / "LaunchAgents",
                        runner=run_command)
 
 

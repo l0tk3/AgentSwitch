@@ -8,6 +8,7 @@ from secret_gate.constants import USE_EXEC
 from secret_gate.errors import PolicyViolation, ValidationError
 from secret_gate.gate_ops import op_describe, op_exec, op_http, op_otp
 from secret_gate.otp import totp
+from tests import shell
 from tests.conftest import FIXED_TIME
 from tests.fixtures import fake_secrets as fs
 
@@ -72,11 +73,19 @@ def _exec(resolver, token, argv, **kw):
     return op_exec(lambda t: resolver.resolve_exact(t, use=USE_EXEC), argv=argv, env={"PW": token}, **kw)
 
 
+@pytest.mark.posix
 def test_op_exec_redacts_output(resolver, db_pass):
     result = _exec(resolver, db_pass, ["/bin/sh", "-c", 'printf "pw=%s %s" "$PW" "$0"', "x"])
     assert result.returncode == 0
     assert fs.DB.password not in result.stdout
     assert result.stdout == "pw=[REDACTED:db-d/pass] x"
+
+
+def test_op_exec_redacts_output_of_this_systems_shell(resolver, db_pass):
+    result = _exec(resolver, db_pass, shell.echo("pw={PW}"))
+    assert result.returncode == 0
+    assert fs.DB.password not in result.stdout
+    assert shell.out(result.stdout) == "pw=[REDACTED:db-d/pass]\n"
 
 
 def test_op_exec_use_policy(resolver, portal_pass):

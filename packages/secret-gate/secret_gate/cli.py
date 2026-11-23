@@ -95,6 +95,13 @@ def _find_mitmdump() -> str | None:
 def _cmd_proxy(args: argparse.Namespace) -> int:
     load_private_key(gate_home())  # fail early with a clear message
     entry = Path(__file__).with_name("mitm_entry.py")
+    if sys.platform == "win32":
+        # No exec on Windows (os.execv starts a new process and ends this one, so whoever supervises this process,
+        # the Windows service host, would see it exit at once): run mitmdump in this process instead.
+        from mitmproxy.tools.main import mitmdump as run_mitmdump
+
+        run_mitmdump(mitmdump_argv("mitmdump", entry, args.port, confdir=args.confdir)[1:])
+        return 0
     mitmdump = _find_mitmdump()
     if not mitmdump:
         print("mitmdump not found; pip install mitmproxy", file=sys.stderr)
@@ -243,7 +250,17 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def utf8_output(streams: tuple = ()) -> None:
+    """Windows writes a pipe or file in the ANSI code page, where every Chinese message would fail to encode: the
+    CLI's output is UTF-8 there as everywhere else (a console keeps its own Unicode path)."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        if not stream.isatty() and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
+    if sys.platform == "win32":
+        utf8_output()
     args = build_parser().parse_args(argv)
     if args.cmd == "enc" and not args.use:
         args.use = [USE_HTTP]

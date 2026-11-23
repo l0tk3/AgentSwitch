@@ -9,12 +9,13 @@ from secret_gate.keystore import (
     parse_public_key,
     save_keypair,
 )
+from tests.conftest import private
 
 
 def test_save_and_load(tmp_path):
     kp = generate_keypair()
     priv, pub = save_keypair(tmp_path / "h", kp)
-    assert oct(priv.stat().st_mode & 0o777) == "0o600"
+    assert private(priv, 0o600)
     assert load_private_key(tmp_path / "h") == kp.private
     assert load_public_key(tmp_path / "h") == kp.public
 
@@ -26,6 +27,7 @@ def test_refuse_overwrite(tmp_path):
     save_keypair(tmp_path, generate_keypair(), overwrite=True)
 
 
+@pytest.mark.posix
 def test_refuse_loose_permissions(tmp_path):
     priv, _ = save_keypair(tmp_path, generate_keypair())
     priv.chmod(0o644)

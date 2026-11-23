@@ -6,6 +6,7 @@ from secret_gate.keyring import KEY_NAME, create_keypair, has_keypair, keypair_i
 from secret_gate.keystore import load_private_key, load_public_key
 from secret_gate.publish import key_rows
 from secret_gate.crypto import b64url_encode
+from tests.conftest import private
 
 
 def test_empty_home_has_no_keypair(tmp_path):
@@ -18,7 +19,7 @@ def test_empty_home_has_no_keypair(tmp_path):
 def test_create_writes_the_one_keypair_at_the_top_of_the_home(tmp_path):
     info = create_keypair(tmp_path)
     assert info.name == KEY_NAME and info.path == tmp_path and len(info.public) > 20
-    assert oct((tmp_path / "key.priv").stat().st_mode & 0o777) == "0o600"
+    assert private(tmp_path / "key.priv", 0o600)
     assert b64url_encode(load_public_key(tmp_path)) == info.public
     assert [r.cli_json() for r in key_rows(tmp_path)] == [
         {"name": KEY_NAME, "public": info.public, "current": True, "legacy": False, "created": info.created_at}]

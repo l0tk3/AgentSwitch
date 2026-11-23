@@ -23,6 +23,7 @@ from secret_gate.reload import InsecureHostsReloader
 from secret_gate.resolver import Resolver
 from secret_gate.tokens import make_token
 from secret_gate.upstream_tls import UpstreamTlsAddon
+from tests.conftest import WINDOWS
 
 CERT = b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
 
@@ -41,7 +42,7 @@ def test_keys_json_is_published_atomically_with_public_keys_only(tmp_path):
     data = json.loads((public / "keys.json").read_text())
     assert [(r["name"], r["current"], r["legacy"]) for r in data] == [("main", True, False)]
     assert set(data[0]) == {"name", "publicKey", "current", "legacy", "createdAt"}
-    assert data[0]["publicKey"] == main.public and _mode(public / "keys.json") == 0o644
+    assert data[0]["publicKey"] == main.public and (WINDOWS or _mode(public / "keys.json") == 0o644)
     assert "key.priv" not in (public / "keys.json").read_text()
     assert read_rows(public) == rows
     assert current_public_key(rows) == current_public_key(read_rows(public))
@@ -91,6 +92,7 @@ def test_ca_publication_copies_the_certificate_never_the_key(tmp_path):
 
 # -- proxy.pid ----------------------------------------------------------------------------------
 
+@pytest.mark.posix
 def test_pid_file_round_trip_and_trust_rules(tmp_path):
     assert read_pid(tmp_path) is None and not proxy_running(tmp_path)
     write_pid(tmp_path)
@@ -109,6 +111,22 @@ def test_pid_file_round_trip_and_trust_rules(tmp_path):
     assert read_pid(tmp_path) is None
 
 
+def test_pid_file_on_windows_is_trusted_for_where_it_lives(tmp_path, monkeypatch):
+    """Windows has no uid in st_uid and no mode bits: the gate home's ACL is the check, and liveness is not os.kill
+    (which would terminate the process there); a key change is noticed by the proxy itself, no signal is sent."""
+    write_pid(tmp_path, pid=4242)
+    (tmp_path / "proxy.pid").chmod(0o666)
+    assert read_pid(tmp_path, uid=12345, windows=True) == 4242
+    (tmp_path / "proxy.pid").write_text("garbage")
+    assert read_pid(tmp_path, windows=True) is None
+    monkeypatch.setattr("secret_gate.proxy_pid.fsacl.IS_WINDOWS", True)
+    monkeypatch.setattr("secret_gate.proxy_pid.fsacl.process_alive", lambda pid: pid == 4242)
+    assert alive(4242) and not alive(5151)
+    monkeypatch.setattr("secret_gate.proxy_pid.read_pid", lambda _home: 4242)
+    assert signal_proxy(tmp_path) is False
+
+
+@pytest.mark.posix
 def test_signal_proxy_sends_sighup_only_to_a_live_recorded_proxy(tmp_path):
     sent: list[tuple[int, int]] = []
 
@@ -173,6 +191,7 @@ def test_a_failed_key_reload_keeps_the_previous_keys(tmp_path):
     assert InsecureHostsReloader(UpstreamTlsAddon(frozenset()), tmp_path).reload_keys() is False  # no addon given
 
 
+@pytest.mark.posix
 def test_real_sighup_reloads_keys_through_an_asyncio_loop(tmp_path):
     create_keypair(tmp_path)
     first = Resolver.from_home(tmp_path)

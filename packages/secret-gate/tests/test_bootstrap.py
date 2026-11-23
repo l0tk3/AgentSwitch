@@ -31,6 +31,7 @@ from secret_gate.bootstrap import (
 from secret_gate.cli import main
 from secret_gate.errors import ValidationError
 from secret_gate.proxy_probe import VERDICT_GATE, VERDICT_OTHER_HTTP, ProbeResult
+from tests.conftest import private
 
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 GATE = ProbeResult(VERDICT_GATE, "refused the probe value with 403 X-Secret-Gate: denied")
@@ -91,6 +92,7 @@ def test_check_ca_states(tmp_path):
     assert check_ca(home, proxy_ca, NOW).status == STATUS_OK
 
 
+@pytest.mark.posix
 def test_check_ca_unreadable(tmp_path):
     home = tmp_path
     ca, proxy_ca = home / "ca.pem", tmp_path / "proxy.pem"
@@ -142,11 +144,11 @@ def test_global_config_paths(tmp_path):
 def test_write_creates_private_file_and_refuses_to_overwrite(tmp_path, deps):
     target = tmp_path / "out.json"
     assert write_snippet(target, "{}\n", force=False, deps=deps) == target
-    assert target.read_text() == "{}\n" and target.stat().st_mode & 0o777 == 0o600
+    assert target.read_text() == "{}\n" and private(target, 0o600)
     with pytest.raises(ValidationError, match="--force"):
         write_snippet(target, "new", force=False, deps=deps)
     write_snippet(target, "new", force=True, deps=deps)
-    assert target.read_text() == "new" and target.stat().st_mode & 0o777 == 0o600
+    assert target.read_text() == "new" and private(target, 0o600)
 
 
 def test_write_never_touches_global_configs(tmp_path, deps):

@@ -268,6 +268,7 @@ def test_secret_exec_output(resolver, keypair, v):
     assert_unrecoverable(seen, v)
 
 
+@pytest.mark.posix
 def test_secret_exec_really_running_env_printenv_and_set_x(resolver, keypair):
     v = VALUES[0]
     token = _token(keypair, v, uses=(USE_EXEC,))
@@ -276,6 +277,24 @@ def test_secret_exec_really_running_env_printenv_and_set_x(resolver, keypair):
     result = op_exec(_exec_resolve(resolver), argv=["/bin/sh", "-c", script], env={"PW": token})
     assert result.returncode == 0
     assert_unrecoverable([result.stdout, result.stderr], v)
+
+
+@pytest.mark.windows
+def test_secret_exec_really_running_set_echo_and_powershell_on_windows(resolver, keypair):
+    """The same as above with cmd's `set`/`echo` and PowerShell's slicing and hex (gate-simple-v0 §5)."""
+    from tests import shell
+
+    v = VALUES[0]
+    token = _token(keypair, v, uses=(USE_EXEC,))
+    seen = []
+    for argv in (["cmd", "/d", "/c", "echo on & set PW & echo %PW%"],
+                 shell.powershell("$env:PW.Substring(0, $env:PW.Length - 6); $env:PW.Substring(8); "
+                                  "-join ([Text.Encoding]::UTF8.GetBytes($env:PW) | % { $_.ToString('x2') }); "
+                                  "Get-ChildItem env: | Format-List")):
+        result = op_exec(_exec_resolve(resolver), argv=argv, env={"PW": token})
+        assert result.returncode == 0, result
+        seen += [result.stdout, result.stderr]
+    assert_unrecoverable(seen, v)
 
 
 # -- the browser gate ---------------------------------------------------------------------------------------------------

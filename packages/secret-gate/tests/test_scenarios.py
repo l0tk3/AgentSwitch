@@ -13,6 +13,7 @@ from secret_gate.otp import totp
 from secret_gate.policy import SecretPayload
 from secret_gate.proxy_addon import SecretGateAddon
 from secret_gate.tokens import make_token
+from tests import shell
 from tests.conftest import FIXED_TIME
 from tests.fixtures import fake_secrets as fs
 
@@ -106,8 +107,10 @@ def test_scenario_exec_exfil_blocked(resolver, db_pass, portal_pass):
 
 # 6. A command that (mis)prints the secret: output is redacted anyway.
 def test_scenario_exec_output_redacted(resolver, db_pass):
-    r = _exec(resolver, ["sh", "-c", "echo PGPASSWORD=$PGPASSWORD; echo done"], {"PGPASSWORD": db_pass})
-    assert r.stdout == "PGPASSWORD=[REDACTED:db-d/pass]\ndone\n"
+    argv = (["cmd", "/d", "/c", "(echo PGPASSWORD=%PGPASSWORD%)&(echo done)"] if shell.WINDOWS else
+            ["sh", "-c", "echo PGPASSWORD=$PGPASSWORD; echo done"])
+    r = _exec(resolver, argv, {"PGPASSWORD": db_pass})
+    assert shell.out(r.stdout) == "PGPASSWORD=[REDACTED:db-d/pass]\ndone\n"
 
 
 # 7. The model uses a password token where an OTP is expected.

@@ -27,6 +27,7 @@ from mcp.client.stdio import stdio_client
 from secret_gate.constants import USE_HTTP
 from secret_gate.policy import SecretPayload
 from secret_gate.tokens import make_token
+from tests.conftest import private
 
 pytestmark = pytest.mark.skipif(not os.environ.get("SG_BROWSER_E2E"), reason="set SG_BROWSER_E2E=1 to launch Chromium")
 
@@ -163,7 +164,7 @@ def test_fill_passes_client_side_validation(gate_home, keypair, tmp_path, site):
     # Playwright MCP persists unredacted snapshots; they must land in the gate home (0700), be swept
     # after every call, and never appear under the cwd.
     assert not (Path.cwd() / ".playwright-mcp").exists()
-    assert (gate_home / "browser-out").stat().st_mode & 0o077 == 0
+    assert private(gate_home / "browser-out")
     assert [p for p in (gate_home / "browser-out").iterdir() if p.is_file()] == []
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import stat
 
 import pytest
 
@@ -12,6 +11,7 @@ from secret_gate.refs import RefRegistry, check_scope, new_ref
 from secret_gate.resolver import Resolver
 from secret_gate.tokens import find_refs, find_secrets, is_ref, is_secret
 from tests.fixtures import fake_secrets as fs
+from tests.conftest import private
 
 SCOPE_A = "scope-a-0123456789abcdefghij"
 SCOPE_B = "scope-b-0123456789abcdefghij"
@@ -67,7 +67,7 @@ def test_register_is_stable_per_scope_and_distinct_across_scopes(registry, porta
 
 def test_registry_file_is_private_and_holds_no_plaintext_or_scope(registry, portal_pass):
     registry.register(SCOPE_A, portal_pass, fs.PORTAL.label)
-    assert stat.S_IMODE(registry.path.stat().st_mode) == 0o600
+    assert private(registry.path, 0o600)
     raw = registry.path.read_bytes()
     assert fs.PORTAL.password.encode() not in raw and SCOPE_A.encode() not in raw
 

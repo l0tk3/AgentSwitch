@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from . import fsacl
 from .constants import (
     EXEC_TIMEOUT_SECONDS,
     HTTP_TIMEOUT_SECONDS,
@@ -163,6 +165,28 @@ EXEC_DENIED_NAMES = frozenset({
 EXEC_DENIED_PREFIXES = ("LD_", "DYLD_", "PYTHON", "NODE_", "PERL", "RUBY", "BASH_FUNC_", "LC_", "GIT_",
                         "SECRET_GATE_", "NPM_CONFIG_", "XDG_")
 
+# Windows (gate-simple-v0 §5): the child's base comes from the system, not from this process. PATH is fixed below the
+# Windows directory (GetWindowsDirectoryW), PATHEXT and ComSpec are fixed, and only these variables are taken over;
+# the agent may not set any of them, nor anything that makes cmd, PowerShell, the .NET runtime or the loader run
+# something else (profilers, startup hooks, compatibility shims, symbol paths, module paths).
+WINDOWS_EXEC_INHERITED_ENV = ("USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+                              "USERNAME", "LANG", "LC_ALL", "TZ")
+WINDOWS_EXEC_PATHEXT = ".COM;.EXE;.BAT;.CMD"
+WINDOWS_EXEC_DENIED_NAMES = frozenset({
+    "PATHEXT", "COMSPEC", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOMEDRIVE",
+    "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMW6432", "COMMONPROGRAMFILES",
+    "COMMONPROGRAMW6432", "ALLUSERSPROFILE", "PUBLIC", "USERNAME", "USERDOMAIN", "PSMODULEPATH",
+    "PSEXECUTIONPOLICYPREFERENCE", "__PSLOCKDOWNPOLICY", "PROMPT", "DIRCMD", "COPYCMD", "__COMPAT_LAYER",
+    "_NT_SYMBOL_PATH", "_NT_ALT_SYMBOL_PATH", "MSYS", "CYGWIN", "OPENSSL_MODULES", "OPENSSL_ENGINES",
+})
+WINDOWS_EXEC_DENIED_PREFIXES = ("COR_", "CORECLR_", "COMPLUS_", "DOTNET_", "MSYS2_", "PSMODULE")
+
+
+def windows_exec_path(windows: str) -> str:
+    system32 = windows + "\\System32"
+    return ";".join((system32, windows, system32 + "\\Wbem", system32 + "\\WindowsPowerShell\\v1.0",
+                     system32 + "\\OpenSSH"))
+
 
 def check_exec_argv(argv: object) -> tuple[str, ...]:
     """The agent's own command line: 1–MAX_EXEC_ARGS non-empty strings, none holding a token or reference (a value
@@ -179,26 +203,43 @@ def check_exec_argv(argv: object) -> tuple[str, ...]:
     return tuple(argv)
 
 
-def check_exec_env(env: object) -> dict[str, str]:
+def _denied(name: str, platform: str) -> bool:
+    if name in EXEC_DENIED_NAMES or name.startswith(EXEC_DENIED_PREFIXES):
+        return True
+    return platform == "win32" and (name in WINDOWS_EXEC_DENIED_NAMES or name.startswith(WINDOWS_EXEC_DENIED_PREFIXES))
+
+
+def check_exec_env(env: object, *, platform: str = sys.platform) -> dict[str, str]:
     """`{NAME: token or reference}`: 1–MAX_EXEC_ENV upper-case names that are not loader, interpreter or base
-    variables; each value exactly one enc:v1: token or enc:ref: reference."""
+    variables (on Windows also its own, WINDOWS_EXEC_DENIED_*); each value exactly one enc:v1: token or enc:ref:
+    reference."""
     if not isinstance(env, dict) or not env or len(env) > MAX_EXEC_ENV:
         raise ValidationError(f"env 应为 1–{MAX_EXEC_ENV} 个 {{变量名: 密文或引用}}")
     for name, value in env.items():
         if not isinstance(name, str) or not _EXEC_ENV_NAME.fullmatch(name) or name != name.upper():
             raise ValidationError(f"环境变量名 {name!r} 无效：只能用大写字母、数字和下划线，且不以数字开头")
-        if name in EXEC_DENIED_NAMES or name.startswith(EXEC_DENIED_PREFIXES):
+        if _denied(name, platform):
             raise ValidationError(f"环境变量 {name} 不允许：它会改变程序、加载器或解释器的行为")
         if not isinstance(value, str) or value != value.strip() or not is_secret(value):
             raise ValidationError(f"环境变量 {name} 的值应恰好是一个密文（enc:v1:…）或引用（enc:ref:…）")
     return dict(env)
 
 
-def exec_child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
-    """The child's base environment: PATH = EXEC_PATH, and HOME, LANG, LC_ALL, TZ, TMPDIR of this process if set."""
+def exec_child_env(base: Mapping[str, str] | None = None, *, platform: str = sys.platform,
+                   windows: str | None = None) -> dict[str, str]:
+    """The child's base environment: PATH = EXEC_PATH, and HOME, LANG, LC_ALL, TZ, TMPDIR of this process if set.
+
+    Windows: SystemRoot, windir, SystemDrive, ComSpec, PATHEXT and PATH from the Windows directory (`windows`, default
+    GetWindowsDirectoryW), plus WINDOWS_EXEC_INHERITED_ENV of this process if set (TEMP, the profile directories)."""
     source = os.environ if base is None else base
-    env = {name: source[name] for name in EXEC_INHERITED_ENV if source.get(name)}
-    env["PATH"] = EXEC_PATH
+    if platform != "win32":
+        env = {name: source[name] for name in EXEC_INHERITED_ENV if source.get(name)}
+        env["PATH"] = EXEC_PATH
+        return env
+    root = windows or fsacl.windows_dir()
+    env = {name: source[name] for name in WINDOWS_EXEC_INHERITED_ENV if source.get(name)}
+    env.update({"SystemRoot": root, "windir": root, "SystemDrive": root[:2], "ComSpec": root + "\\System32\\cmd.exe",
+                "PATHEXT": WINDOWS_EXEC_PATHEXT, "PATH": windows_exec_path(root)})
     return env
 
 

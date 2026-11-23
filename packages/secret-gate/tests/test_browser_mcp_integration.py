@@ -15,6 +15,7 @@ from mcp.client.stdio import stdio_client
 from secret_gate.browser_mcp import PROXY_VARS, downstream_command, downstream_env, parse_command, private_output_dir
 from secret_gate.errors import ValidationError
 from tests.fixtures import fake_secrets as fs
+from tests.conftest import private
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_playwright_mcp.py"
 PAGE = "https://login.portal-a.example.com/signin"
@@ -30,7 +31,7 @@ def test_downstream_env_strips_proxy_vars():
 
 def test_downstream_command_forces_private_output_dir(tmp_path):
     out = private_output_dir(tmp_path / "home")
-    assert out.is_dir() and (out.stat().st_mode & 0o777) == 0o700
+    assert out.is_dir() and private(out, 0o700)
     assert downstream_command(["npx", "pw"], out) == ["npx", "pw", f"--output-dir={out}"]
     assert downstream_command(["npx", "pw", "--output-dir=/x"], out) == ["npx", "pw", "--output-dir=/x"]
     assert downstream_command(["npx", "--output-dir", "/x"], out) == ["npx", "--output-dir", "/x"]

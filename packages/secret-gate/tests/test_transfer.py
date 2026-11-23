@@ -14,6 +14,7 @@ from secret_gate.refs import RefRegistry
 from secret_gate.resolver import Resolver
 from secret_gate.transfer import TransferGrant, legend, seal_matches, show_sealed
 from tests.test_browser_gate import FakePlaywright, texts
+from tests.conftest import private
 
 SOURCE = "https://crm.example.com/customers/42"
 DEST = "https://erp.example.com:8443/customers/new"
@@ -159,11 +160,9 @@ def test_no_sealing_outside_the_source_or_for_other_kinds(setup):
 
 
 def test_audit_log_is_private_and_best_effort(tmp_path, capsys):
-    import stat
-
     path = tmp_path / "logs" / "a.jsonl"
     Audit(path, SCOPE).record("fill", host="x:443", ok=True)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and json.loads(path.read_text())["event"] == "fill"
+    assert private(path, 0o600) and json.loads(path.read_text())["event"] == "fill"
     Audit(None).record("ignored")
     blocked = tmp_path / "file"
     blocked.write_text("")
