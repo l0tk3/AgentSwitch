@@ -146,16 +146,16 @@ describe("the Chatroom Kit", () => {
     expect(delivery.atTurnEnd("t3")).toContain("20:41\nFiles: /w/api.md\n\n@ios 看这个");
   });
 
-  it("keeps a session to one room, and takes that room by its name or id", async () => {
-    const { kit, store, room } = made();
+  it("asks which room when the session sits in several, and takes that room by its name or id", async () => {
+    const { kit, store } = made();
     const other = store.create({ name: "Release" });
-    expect(() => store.seat(other.id, { terminal: "t1", was: { agent: "codex", name: "daemon", cwd: "/w", model: null, profile: null } })).toThrow("一个会话同一时间只能在一个房间");
-    expect((await kit.call("t1", "room_members", { room: room.id })).text).toContain("Room \"重构登录模块\"");
+    store.seat(other.id, { terminal: "t1", was: { agent: "codex", name: "daemon", cwd: "/w", model: null, profile: null } });
+    expect((await kit.call("t1", "room_members", {}))).toMatchObject({ isError: true, text: expect.stringContaining("say which with `room`") });
+    expect((await kit.call("t1", "room_members", { room: "release" })).text).toContain("Room \"Release\"");
+    expect((await kit.call("t1", "room_members", { room: other.id })).text).toContain("Room \"Release\"");
     expect((await kit.call("t1", "room_members", { room: "nope" }))).toMatchObject({ isError: true });
-    // Out of the first, it may sit in the other.
-    store.unseat(room.id, "daemon");
-    expect(store.seat(other.id, { terminal: "t1", was: { agent: "codex", name: "daemon", cwd: "/w", model: null, profile: null } }).handle).toBe("daemon");
   });
+
 });
 
 describe("a terminal's own programs", () => {
@@ -188,6 +188,17 @@ describe("a terminal's own programs", () => {
 });
 
 describe("bringing sessions in (Admin)", () => {
+  it("makes a room and sits in it, the switch still on, keeping its seat in the first", async () => {
+    const { kit, store, room } = org();
+    store.setCanAdd(room.id, "daemon", true);
+    const made = await kit.call("t1", "room_create", { name: "发布检查", topic: "发版前过一遍" });
+    expect(made.text).toContain("Room \"发布检查\"");
+    const other = store.list().find((r) => r.name === "发布检查")!;
+    expect(other).toMatchObject({ topic: "发版前过一遍", createdBy: "daemon" });
+    expect(other.seats.map((s) => [s.handle, s.canAdd])).toEqual([["you", true], ["t1", true]]);
+    expect(store.roomsOf("t1").map((s) => s.room.id).sort()).toEqual([room.id, other.id].sort());
+  });
+
   function org() {
     const { store, delivery, room, states } = made();
     const started: unknown[] = [];
@@ -213,7 +224,7 @@ describe("bringing sessions in (Admin)", () => {
     expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_handoff", "room_rename", "session_rename", "room_tasks", "room_changing"]);
     expect(await kit.call("t1", "profiles", {})).toMatchObject({ isError: true, text: expect.stringContaining("is not an admin of the room") });
     store.setCanAdd(room.id, "daemon", true);
-    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_handoff", "room_rename", "session_rename", "room_tasks", "room_changing", "rooms", "room_add", "room_manage", "profiles", "models", "sessions", "profile_check"]);
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_handoff", "room_rename", "session_rename", "room_tasks", "room_changing", "rooms", "room_create", "room_add", "room_manage", "profiles", "models", "sessions", "profile_check"]);
     expect((await kit.call("t1", "profiles", {})).text).toBe("2 profiles:\nclaude-code · default · \"Default\" · subscription · healthy, checked 2 h ago\ncodex · abc123 · \"Work\" · API key · not checked yet");
     expect((await kit.call("t1", "models", { agent: "claude-code" })).text).toBe("claude-code:\n  opus — Opus · Opus 5.5");
     const sessions = (await kit.call("t1", "sessions", {})).text;

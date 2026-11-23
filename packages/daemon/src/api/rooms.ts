@@ -148,8 +148,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     return {
       id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt,
       members: seats.length,
-      // The sessions seated here: a session sits in one room at a time, so a screen that offers sessions to seat
-      // shows these as taken.
+      // The sessions seated here: a screen that offers sessions to seat says which rooms each already sits in
+      // (it may sit in several).
       terminals: seats.flatMap((s) => (s.terminal ? [s.terminal] : [])),
       faces: seats.filter((s) => s.kind === "session").slice(0, 4).map((s) => ({ handle: s.handle, face: s.face })),
       last: last ? { seq: last.seq, from: last.from, text: last.text.slice(0, 200), at: last.at } : null,

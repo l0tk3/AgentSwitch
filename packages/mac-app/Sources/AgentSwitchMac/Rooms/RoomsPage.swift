@@ -668,10 +668,9 @@ private struct RoomSheet: View {
 
     private func pick(_ terminal: TerminalInfo) -> some View {
         let on = picked.contains(terminal.id)
-        // A session sits in one room at a time: one that sits elsewhere is shown, and can not be picked.
+        // The rooms it sits in already are said beside it; it can sit in this one too.
         let held = model.roomHolding(terminal.id, besides: kind == .add ? model.selected : nil)
         return Button {
-            guard held == nil else { return }
             if on { picked.removeAll { $0 == terminal.id } } else { picked.append(terminal.id) }
         } label: {
             HStack(spacing: 10) {
@@ -687,10 +686,8 @@ private struct RoomSheet: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
-            .opacity(held == nil ? 1 : 0.45)
         }
         .buttonStyle(.plain)
-        .disabled(held != nil)
-        .help(held.map { "已经在房间「\($0.name)」里。一个会话同一时间只能在一个房间。" } ?? "")
+        .help(held.map { "已经在房间「\($0.name)」里；也能再进这一个。" } ?? "")
     }
 }

@@ -389,7 +389,6 @@ export class RoomStore {
     const room = this.get(id);
     const old = room.seats.find((s) => s.terminal === o.terminal);
     if (old && old.left === undefined) throw new RoomError(409, `这个会话已经在房间里了（@${old.handle}）`);
-    this.elsewhere(id, o.terminal);
     if (room.seats.filter((s) => s.left === undefined).length >= MAX_SEATS) throw new RoomError(409, `一个房间最多 ${MAX_SEATS} 个成员`);
     const byAgent = o.byAgent ?? old?.byAgent ?? false;
     if (old) {
@@ -403,13 +402,6 @@ export class RoomStore {
     const seat: Seat = { handle, kind: "session", terminal: o.terminal, face, joinedAt: this.now(), addedBy: o.by ?? YOU, canAdd: byAgent ? false : (o.canAdd ?? false), byAgent, was: o.was, ...(o.starter ? { starter: o.starter } : {}) };
     this.save({ ...room, seats: [...room.seats, seat] });
     return seat;
-  }
-
-  /** A session sits in one room at a time (user, 2026-11-23): in two it is woken by both and answers one with the
-   *  other's work in its head. Refused, with the room it is in. */
-  private elsewhere(id: string, terminal: string): void {
-    const other = this.roomsOf(terminal).find((s) => s.room.id !== id);
-    if (other) throw new RoomError(409, `这个会话已经在房间「${other.room.name}」里（@${other.seat.handle}）。一个会话同一时间只能在一个房间：先把它从那边移出。`);
   }
 
   /** A seat leaves (the user, or an admin kicking it). What was on its way to it is dropped: nobody is there to take
@@ -501,7 +493,6 @@ export class RoomStore {
     if (seat.kind === "user") throw new RoomError(400, "用户没有会话");
     if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
     if (room.seats.some((s) => s !== seat && s.left === undefined && s.terminal === terminal)) throw new RoomError(409, "这个会话已经在房间里了");
-    this.elsewhere(id, terminal);
     const next: Seat = { ...seat, terminal, was };
     // What its old terminal was given and never dealt with (it ended in the middle of a turn), and what came for it
     // while nobody was there, waits for it again: the same seat is back to take it.

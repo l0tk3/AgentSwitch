@@ -381,7 +381,7 @@ final class RoomsModel {
     /// What the last thing came to is put away (the banner's `×`).
     func dismissProblem() { problem = nil }
 
-    /// The room a session already sits in, other than the one on screen: it can not be seated in a second.
+    /// A room a session already sits in, other than the one on screen (said beside it when sessions are offered).
     func roomHolding(_ terminal: String, besides room: String?) -> RoomSummary? {
         rooms.first { $0.id != room && $0.terminals.contains(terminal) }
     }
