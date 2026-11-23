@@ -69,11 +69,37 @@ def test_op_http_validation(resolver):
 
 
 def test_op_exec_redacts_output(resolver, db_pass):
-    tpls = {"echo": ExecTemplate("echo", ("echo", "-n", "pw={SECRET}", "{ARG0}"), max_args=1)}
+    tpls = {"echo": ExecTemplate("echo", ("/bin/sh", "-c", 'printf "pw=%s %s" "$PW" "$0"', "{ARG0}"), max_args=1,
+                                 env={"PW": "{SECRET}"})}
     result = op_exec(resolver, tpls, template="echo", token=db_pass, args=["x"])
     assert result.returncode == 0
     assert fs.DB.password not in result.stdout
     assert result.stdout == "pw=[REDACTED:db-d/pass] x"
+
+
+def test_op_exec_passes_the_value_by_env_or_stdin_never_argv(resolver, db_pass, monkeypatch):
+    monkeypatch.setenv("SECRET_GATE_SCOPE", "scope-of-the-gate")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:8080")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    for name in ("LANG", "LC_ALL", "LC_CTYPE", "TZ"):
+        monkeypatch.delenv(name, raising=False)
+    tpls = {"env": ExecTemplate("env", ("/usr/bin/env",), max_args=0, env={"PGPASSWORD": "{SECRET}"}),
+            "stdin": ExecTemplate("stdin", ("/bin/cat",), max_args=0, stdin="pw={SECRET}\n")}
+    seen = []
+    real = subprocess.run
+
+    def runner(argv, **kw):
+        seen.append((argv, kw))
+        return real(argv, **kw)
+
+    by_env = op_exec(resolver, tpls, template="env", token=db_pass, runner=runner)
+    lines = sorted(by_env.stdout.splitlines())
+    assert lines == ["PATH=/usr/bin:/bin", "PGPASSWORD=[REDACTED:db-d/pass]"]      # nothing else of the gate's env
+    assert fs.DB.password not in " ".join(seen[0][0]) and seen[0][1]["stdin"] is subprocess.DEVNULL
+    by_stdin = op_exec(resolver, tpls, template="stdin", token=db_pass, runner=runner)
+    assert by_stdin.stdout == "pw=[REDACTED:db-d/pass]\n"
+    assert seen[1][1]["input"] == f"pw={fs.DB.password}\n" and fs.DB.password not in " ".join(seen[1][0])
+    assert set(seen[1][1]["env"]) == {"PATH"}
 
 
 def test_op_exec_not_whitelisted(resolver, db_pass):
@@ -82,19 +108,19 @@ def test_op_exec_not_whitelisted(resolver, db_pass):
 
 
 def test_op_exec_use_policy(resolver, portal_pass):
-    tpls = {"echo": ExecTemplate("echo", ("echo", "{SECRET}"), max_args=0)}
+    tpls = {"echo": ExecTemplate("echo", ("echo",), max_args=0, stdin="{SECRET}")}
     with pytest.raises(PolicyViolation):
         op_exec(resolver, tpls, template="echo", token=portal_pass)
 
 
 def test_op_exec_custom_runner(resolver, db_pass):
-    tpls = {"t": ExecTemplate("t", ("prog", "{SECRET}"), max_args=0)}
+    tpls = {"t": ExecTemplate("t", ("prog",), max_args=0, env={"TOKEN": "{SECRET}"})}
     seen = {}
 
     def runner(argv, **kw):
-        seen["argv"] = argv
+        seen["argv"], seen["env"] = argv, kw["env"]
         return subprocess.CompletedProcess(argv, 3, stdout="", stderr=f"bad {fs.DB.password}")
 
     result = op_exec(resolver, tpls, template="t", token=db_pass, runner=runner)
-    assert seen["argv"] == ("prog", fs.DB.password)
+    assert seen["argv"] == ["prog"] and seen["env"]["TOKEN"] == fs.DB.password
     assert result.returncode == 3 and result.stderr == "bad [REDACTED:db-d/pass]"

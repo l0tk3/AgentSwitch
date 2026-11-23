@@ -20,10 +20,11 @@ from typing import Any
 
 from .constants import DEFAULT_PROXY_PORT
 from .errors import GateError, ValidationError
+from .migrate import IMPORT_CONFIG_FLAG, held_config
 from .rpc_client import RpcClient
 from .service import SERVICE_LABEL, Runner, port_arg, run_command
 from .service_paths import ServiceConfig, SystemLayout, read_service_config
-from .system_exec import SystemDeps, execute, local_status
+from .system_exec import SystemDeps, execute, local_status, read_runtime_versions
 from .system_ops import DSCL
 from .system_plan import (
     InstallFacts,
@@ -59,16 +60,14 @@ def gather_install_facts(options: InstallOptions, runner: Runner, *, simulate: b
     """Read-only look at the machine: users and groups (dscl), the runtime's version, an old LaunchAgent."""
     users = {} if simulate else _ids(runner, "/Users", "UniqueID")
     groups = {} if simulate else _ids(runner, "/Groups", "PrimaryGroupID")
-    try:
-        version = runtime_version((options.runtime / "VERSIONS").read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise ValidationError(f"无法读取运行时的 VERSIONS 文件：{exc.strerror or exc}") from None
+    version = runtime_version(read_runtime_versions(options.runtime))
     agent = None
     if options.user_home is not None:
         candidate = options.user_home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
         agent = candidate if os.path.lexists(candidate) else None
     return InstallFacts(account=choose_account(users, groups), runtime_version=version,
-                        installed_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"), old_agent_plist=agent)
+                        installed_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"), old_agent_plist=agent,
+                        held_config=held_config(options.migrate_from, options.owner_uid))
 
 
 def _layout(args: argparse.Namespace) -> SystemLayout:
@@ -123,7 +122,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
     user_home = Path(args.user_home) if args.user_home else (None if args.root else _owner_home(args.owner_uid))
     options = InstallOptions(owner_uid=args.owner_uid, port=args.port, runtime=Path(args.runtime).expanduser().resolve(),
                              migrate_from=owner_path(args.migrate_from, user_home) if args.migrate_from else None,
-                             user_home=user_home)
+                             user_home=user_home, import_config=args.import_config)
     deps = _deps(args, layout)
     facts = gather_install_facts(options, deps.runner, simulate=deps.simulate, now=datetime.now(timezone.utc))
     plan = install_plan(layout, options, facts)
@@ -140,10 +139,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
     layout = _layout(args)
     config = read_service_config(layout.config)
     runtime = Path(args.runtime).expanduser().resolve()
-    try:
-        version = runtime_version((runtime / "VERSIONS").read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise ValidationError(f"无法读取运行时的 VERSIONS 文件：{exc.strerror or exc}") from None
+    version = runtime_version(read_runtime_versions(runtime))
     new = replace(config, runtime_version=version, proxy_port=args.port or config.proxy_port)
     plan = update_plan(layout, runtime, new)
     if args.dry_run:
@@ -229,6 +225,9 @@ def add_system_parser(sub: argparse._SubParsersAction) -> None:
     i.add_argument("--port", type=port_arg, default=DEFAULT_PROXY_PORT, help=f"proxy port (default {DEFAULT_PROXY_PORT})")
     i.add_argument("--runtime", required=True, help="the App bundle's Contents/Resources/runtime")
     i.add_argument("--migrate-from", help="the owner's old gate home (~/.secret-gate)")
+    i.add_argument(IMPORT_CONFIG_FLAG, dest="import_config", action="store_true",
+                   help="also import exec_templates.json and upstream-insecure.txt from --migrate-from; only after the "
+                        "user saw them (the plan summarizes them): they were writable by the login user's processes")
     i.add_argument("--user-home", help="the owner's home for the old ~/.mitmproxy CA key and LaunchAgent (default: from --owner-uid; none with --root)")
     _common(i)
     i.set_defaults(fn=_cmd_install)

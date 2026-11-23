@@ -137,12 +137,12 @@ def test_mcp_methods_run_inside_the_service_and_redact():
         seen.append(request)
         return httpx.Response(200, text=f"hello {request.content.decode()}")
 
-    def runner(argv, **_kw):
-        return subprocess.CompletedProcess(argv, 0, stdout=f"ran with {argv[-1]}", stderr="")
+    def runner(argv, **kw):
+        return subprocess.CompletedProcess(argv, 0, stdout=f"ran with {kw['env']['V']}", stderr="")
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with running_service(http_client=lambda: client, exec_runner=runner) as svc:
-        (svc.home / "exec_templates.json").write_text(json.dumps({"echo": {"argv": ["/bin/echo", "{SECRET}"]}}))
+        (svc.home / "exec_templates.json").write_text(json.dumps({"echo": {"argv": ["/bin/echo"], "env": {"V": "{SECRET}"}}}))
         token = _token(svc, uses=(USE_HTTP, USE_EXEC))
         assert svc.client.call("mcp.describe", {"token": token})["label"] == "portal-a/pass"
         out = svc.client.call("mcp.http", {"method": "POST", "url": "https://portal-a.example.com/login", "body": token})
@@ -285,7 +285,7 @@ def test_a_slow_call_does_not_hold_up_other_clients():
         return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
 
     with running_service(exec_runner=slow_runner) as svc:
-        (svc.home / "exec_templates.json").write_text(json.dumps({"slow": {"argv": ["/bin/true", "{SECRET}"]}}))
+        (svc.home / "exec_templates.json").write_text(json.dumps({"slow": {"argv": ["/bin/true"], "stdin": "{SECRET}"}}))
         token = _token(svc, uses=(USE_EXEC,))
         results: list = []
         worker = threading.Thread(target=lambda: results.append(svc.client.call("mcp.exec", {"template": "slow", "token": token})))

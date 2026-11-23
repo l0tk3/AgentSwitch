@@ -110,9 +110,17 @@ class MigrateFiles:
     source: Path
     owner_uid: int
     gate: Path
+    import_config: bool = False         # exec_templates.json, upstream-insecure.txt: only once the user confirmed them
+    held: tuple[str, ...] = ()          # their summary when the plan was made (shown by --dry-run)
 
     def describe(self) -> str:
-        return f"copy refs.sqlite3, exec_templates.json, upstream-insecure.txt, screenshot-mask.json, logs → {self.gate}"
+        if self.import_config:
+            text = (f"rebuild refs.sqlite3 from its valid rows; copy exec_templates.json, upstream-insecure.txt "
+                    f"(confirmed), screenshot-mask.json, logs → {self.gate}")
+        else:
+            text = (f"rebuild refs.sqlite3 from its valid rows; copy screenshot-mask.json, logs → {self.gate}; "
+                    f"exec_templates.json, upstream-insecure.txt are NOT imported (need --import-config)")
+        return "\n     ".join((text, *self.held))
 
 
 @dataclass(frozen=True)

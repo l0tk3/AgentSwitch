@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import stat
 from dataclasses import replace
 from datetime import datetime
@@ -21,6 +22,7 @@ from secret_gate.crypto import generate_keypair
 from secret_gate.errors import GateError
 from secret_gate.keyring import current_name, list_keypairs, set_current
 from secret_gate.keystore import save_keypair
+from secret_gate.migrate import import_refs, summarize_config
 from secret_gate.policy import SecretPayload
 from secret_gate.refs import RefRegistry
 from secret_gate.resolver import Resolver
@@ -32,12 +34,13 @@ from secret_gate.service_paths import (
     SystemLayout,
     read_service_config,
 )
-from secret_gate.system_exec import SystemDeps, execute, local_status
+from secret_gate.system_exec import SystemDeps, check_tree, execute, local_status
 from secret_gate.system_plan import (
     Account,
     InstallFacts,
     InstallOptions,
     install_plan,
+    render,
     uninstall_plan,
     update_plan,
 )
@@ -144,8 +147,9 @@ class World:
         return SystemDeps(runner=runner or FakeRunner(), status=status or local_status(self.layout.gate),
                           sleep=lambda _s: None, **kw)
 
-    def install(self, runner=None, status=None, **kw):
-        return execute(install_plan(self.layout, self.options(), self.facts()), self.deps(runner, status, **kw))
+    def install(self, runner=None, status=None, import_config=False, **kw):
+        return execute(install_plan(self.layout, self.options(import_config=import_config), self.facts()),
+                       self.deps(runner, status, **kw))
 
 
 @pytest.fixture
@@ -178,10 +182,13 @@ def test_install_migrates_everything_and_leaves_moved_txt(world):
     assert (layout.public / "ca.pem").read_text().startswith("-----BEGIN CERTIFICATE-----")
     assert b"PRIVATE KEY" not in (layout.public / "ca.pem").read_bytes()
     assert _mode(layout.mitmproxy / "mitmproxy-ca.pem") == 0o600
-    # data and trusted config
+    # data; the login user's exec templates and upstream exceptions are not imported without a confirmation
     assert RefRegistry.from_home(layout.gate).lookup(SCOPE, RefRegistry.from_home(layout.gate).register(SCOPE, world.tokens["work"], "old/work")).token
-    assert (layout.gate / "upstream-insecure.txt").read_text() == "intranet.example\n"
-    assert _mode(layout.gate / "exec_templates.json") == 0o600
+    assert _mode(layout.gate / "refs.sqlite3") == 0o600
+    assert not (layout.gate / "upstream-insecure.txt").exists() and not (layout.gate / "exec_templates.json").exists()
+    assert any("exec_templates.json：未迁入" in line for line in outcome.lines)
+    assert any('x：argv ["/bin/echo", "{SECRET}"]' in line for line in outcome.lines)
+    assert any("不校验上游证书的主机 intranet.example" in line for line in outcome.lines)
     assert (layout.gate / "logs" / "before-service" / "browser-audit.jsonl").exists()
     # runtime copy
     wrapper = (layout.runtime / "bin" / "secret-gate").read_text()
@@ -198,12 +205,69 @@ def test_install_migrates_everything_and_leaves_moved_txt(world):
     assert ("/bin/launchctl", "bootout", f"gui/{UID}/com.agentswitch.secret-gate.proxy") in runner.calls
     assert runner.calls[-1] == ("/bin/launchctl", "bootstrap", "system", str(layout.plist("com.agentswitch.gate.proxy")))
     # the login user's side
-    assert sorted(p.name for p in world.old.iterdir()) == ["MOVED.txt", "notes.txt"]
+    assert sorted(p.name for p in world.old.iterdir()) == ["MOVED.txt", "exec_templates.json", "notes.txt",
+                                                            "upstream-insecure.txt"]
+    assert any("保留" in line and "upstream-insecure.txt：未迁入" in line for line in outcome.lines)
     moved = (world.old / "MOVED.txt").read_text()
     assert str(layout.gate) in moved and SERVICE_USER in moved
     assert sorted(p.name for p in (world.user_home / ".mitmproxy").iterdir()) == ["mitmproxy-ca-cert.pem"]
     assert not world.agent.exists()
     assert any("保留" in line and "notes.txt" in line for line in outcome.lines)
+
+
+def test_config_from_the_users_home_is_imported_only_when_confirmed(world):
+    templates = '{"psql": {"argv": ["psql", "-h", "{ARG0}"], "env": {"PGPASSWORD": "{SECRET}"}, "max_args": 1}}'
+    (world.old / "exec_templates.json").write_text(templates)
+    plan = install_plan(world.layout, world.options(), world.facts(held_config=system_cli.held_config(world.old, UID)))
+    shown = "\n".join(render(plan))
+    assert "NOT imported (need --import-config)" in shown and "exec 模板、上游证书例外不迁入" in shown
+    assert 'psql：argv ["psql", "-h", "{ARG0}"]；env {"PGPASSWORD": "{SECRET}"}' in shown
+    assert "不校验上游证书的主机 intranet.example" in shown
+    outcome = world.install(import_config=True)
+    assert outcome.ok, outcome.lines
+    assert (world.layout.gate / "exec_templates.json").read_text() == templates
+    assert (world.layout.gate / "upstream-insecure.txt").read_text() == "intranet.example\n"
+    assert _mode(world.layout.gate / "exec_templates.json") == 0o600
+    assert any("迁移短引用库、可信配置（已确认）和日志" in line for line in outcome.lines)
+    assert sorted(p.name for p in world.old.iterdir()) == ["MOVED.txt", "notes.txt"]
+
+
+def test_cli_imports_config_only_with_the_flag(world, capsys):
+    assert system_cli_main(_cli(world, "--dry-run")) == 0
+    assert "NOT imported" in capsys.readouterr().out
+    assert system_cli_main(_cli(world, "--import-config")) == 0
+    assert (world.layout.gate / "exec_templates.json").exists() and (world.layout.gate / "upstream-insecure.txt").exists()
+
+
+def test_summaries_escape_control_characters_and_cap_lengths():
+    lines = summarize_config("exec_templates.json", json.dumps(
+        {f"t{n}": {"argv": ["\x1b[2Jx" * 100]} for n in range(25)}).encode())
+    assert lines[0] == "exec_templates.json：25 个模板" and "另有 5 个模板未列出" in lines[-1]
+    assert all("\x1b" not in line and len(line) <= 201 for line in lines)
+    assert summarize_config("exec_templates.json", b"{nope") == ("exec_templates.json：不是有效的 JSON（5 字节）",)
+    assert summarize_config("upstream-insecure.txt", b"# c\n") == ("upstream-insecure.txt：不校验上游证书的主机 （无）",)
+
+
+def test_refs_are_rebuilt_from_valid_rows_never_taken_over_as_a_file(tmp_path):
+    old = tmp_path / "old.sqlite3"
+    registry = RefRegistry(old)
+    ref = registry.register(SCOPE, _token(generate_keypair().public, "a"), "a")
+    registry.release("released-scope-0123456789ab")
+    with sqlite3.connect(old) as conn:                                       # what a planted file could carry
+        conn.execute("CREATE TABLE extra (x)")
+        conn.execute("CREATE TRIGGER t AFTER INSERT ON refs BEGIN INSERT INTO extra VALUES (new.token); END")
+        conn.execute("INSERT INTO refs VALUES ('enc:ref:AAAAAAAAAAAAAAAA', ?, 'not a token', 'b', 0)",
+                     (conn.execute("SELECT scope FROM refs").fetchone()[0],))
+        conn.execute("UPDATE refs SET created = 1e12 WHERE ref = ?", (ref,))
+    target = tmp_path / "new.sqlite3"
+    assert import_refs(old.read_bytes(), target, now=1000.0) == 1
+    with sqlite3.connect(target) as conn:
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+        assert "extra" not in names and "t" not in names
+        assert conn.execute("SELECT ref, created FROM refs").fetchall() == [(ref, 1000.0)]
+        assert conn.execute("SELECT count(*) FROM scopes WHERE released IS NOT NULL").fetchone() == (1,)
+    assert _mode(target) == 0o600
+    assert import_refs(b"not sqlite at all", tmp_path / "x.sqlite3") is None
 
 
 def test_a_failing_command_stops_the_install_and_says_what_was_not_done(world):
@@ -275,6 +339,75 @@ def test_a_runtime_symlink_leaving_the_copy_is_refused(world, tmp_path):
     (world.runtime / "python" / "lib" / "escape").symlink_to(tmp_path)
     outcome = world.install()
     assert not outcome.ok and any("符号链接指向副本之外" in line for line in outcome.lines)
+
+
+def _secret_dir(tmp_path: Path) -> Path:
+    """Stands in for the gate home: what root could read and the login user could not."""
+    secret = tmp_path / "gate-home"
+    (secret / "python" / "bin").mkdir(parents=True)
+    (secret / "python" / "bin" / "secret-gate").write_text("#!/bin/sh\n")
+    (secret / "python" / "bin" / "secret-gate").chmod(0o700)
+    (secret / "key.priv").write_text("PRIVATE")
+    (secret / "key.priv").chmod(0o600)
+    return secret
+
+
+@pytest.mark.parametrize("item", ["python", "secret-gate"])
+def test_a_top_level_runtime_item_that_is_a_symlink_is_never_followed(world, tmp_path, item):
+    secret = _secret_dir(tmp_path)
+    moved = world.runtime / f"{item}.real"
+    (world.runtime / item).rename(moved)
+    (world.runtime / item).symlink_to(secret if item == "secret-gate" else secret / "python")
+    outcome = world.install()
+    assert not outcome.ok and any(f"运行时中的 {item} 不是目录" in line for line in outcome.lines)
+    assert not world.layout.runtime_staging.exists() or not any(
+        p.name == "key.priv" for p in world.layout.runtime_staging.rglob("*"))
+    assert _mode(secret / "key.priv") == 0o600                              # nothing outside the copy was chmodded
+
+
+def test_a_symlinked_versions_file_is_never_read(world, tmp_path):
+    secret = tmp_path / "root-only"
+    secret.write_text("secret-gate=leaked-line\n")
+    (world.runtime / "VERSIONS").unlink()
+    (world.runtime / "VERSIONS").symlink_to(secret)
+    with pytest.raises(GateError, match="VERSIONS 是符号链接"):
+        system_cli.gather_install_facts(world.options(), FakeRunner(), simulate=True, now=datetime(2026, 9, 27))
+    outcome = execute(install_plan(world.layout, world.options(), world.facts()), world.deps())
+    assert not outcome.ok and any("VERSIONS 是符号链接" in line for line in outcome.lines)
+    assert not world.layout.config.exists() or "leaked" not in world.layout.config.read_text()
+
+
+def test_runtime_entries_of_another_owner_or_odd_types_are_refused(world, tmp_path, monkeypatch):
+    os.mkfifo(world.runtime / "python" / "lib" / "pipe")
+    outcome = world.install()
+    assert not outcome.ok and any("pipe 不是普通文件、目录或符号链接" in line for line in outcome.lines)
+    (world.runtime / "python" / "lib" / "pipe").unlink()
+    # A hard link to a file root can read but the user cannot keeps that file's owner: refused, never copied.
+    real_stat, victim = os.stat, world.runtime / "python" / "lib" / "x.py"
+
+    def stat_as_root_owned(path, *a, **kw):
+        info = real_stat(path, *a, **kw)
+        if (path == "x.py" or path == victim) and info.st_uid == UID:
+            return os.stat_result((info.st_mode, info.st_ino, info.st_dev, info.st_nlink, 0, *info[5:]))
+        return info
+    monkeypatch.setattr("secret_gate.system_exec.os.stat", stat_as_root_owned)
+    outcome = world.install()
+    assert not outcome.ok and any("x.py 不属于 App 包的属主" in line for line in outcome.lines)
+
+
+def test_check_tree_only_verifies(tmp_path):
+    tree = tmp_path / "tree"
+    tree.mkdir(mode=0o755)
+    tree.chmod(0o755)
+    (tree / "f").write_text("x")
+    (tree / "f").chmod(0o600)
+    with pytest.raises(GateError, match="文件权限不对"):
+        check_tree(tree)
+    assert _mode(tree / "f") == 0o600
+    (tree / "f").chmod(0o644)
+    (tree / "abs").symlink_to(tree / "f")                                   # absolute, even if it points inside
+    with pytest.raises(GateError, match="符号链接指向副本之外"):
+        check_tree(tree)
 
 
 def test_update_replaces_the_runtime_and_restarts(world, tmp_path):

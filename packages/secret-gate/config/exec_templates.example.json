@@ -1,4 +1,4 @@
 {
-  "mysql": {"argv": ["mysql", "-h", "{ARG0}", "-u", "{ARG1}", "-p{SECRET}", "-e", "{ARG2}"], "max_args": 3},
-  "psql":  {"argv": ["env", "PGPASSWORD={SECRET}", "psql", "-h", "{ARG0}", "-U", "{ARG1}", "-c", "{ARG2}"], "max_args": 3}
+  "mysql": {"argv": ["mysql", "-h", "{ARG0}", "-u", "{ARG1}", "-e", "{ARG2}"], "env": {"MYSQL_PWD": "{SECRET}"}, "max_args": 3},
+  "psql":  {"argv": ["psql", "-h", "{ARG0}", "-U", "{ARG1}", "-c", "{ARG2}"], "env": {"PGPASSWORD": "{SECRET}"}, "max_args": 3}
 }

@@ -51,8 +51,8 @@ def test_every_tool_is_forwarded_with_this_executions_scope():
         seen.append(request)
         return httpx.Response(200, text="welcome " + request.headers["authorization"])
 
-    def runner(argv, **_kw):
-        return subprocess.CompletedProcess(argv, 0, stdout="echo " + argv[-1], stderr="")
+    def runner(argv, **kw):
+        return subprocess.CompletedProcess(argv, 0, stdout="echo " + kw["input"], stderr="")
 
     def bridge(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -62,7 +62,7 @@ def test_every_tool_is_forwarded_with_this_executions_scope():
     client = httpx.Client(transport=httpx.MockTransport(site))
     with running_service(http_client=lambda: client, exec_runner=runner,
                          repair_transport=httpx.MockTransport(bridge)) as svc:
-        (svc.home / "exec_templates.json").write_text(json.dumps({"echo": {"argv": ["/bin/echo", "{SECRET}"]}}))
+        (svc.home / "exec_templates.json").write_text(json.dumps({"echo": {"argv": ["/bin/echo"], "stdin": "{SECRET}"}}))
         token = _token(svc.home, uses={USE_HTTP, USE_EXEC})
         totp = _token(svc.home, value=fs.TOTP_SECRET_B32, uses={USE_OTP}, kind=KIND_TOTP, label="portal-a/totp")
         ref = svc.client.call("refs.register", {"scope": SCOPE, "tokens": [token]})["refs"][0]["ref"]

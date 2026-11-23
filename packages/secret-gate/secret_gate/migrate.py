@@ -4,6 +4,10 @@ Two phases, so a failure never loses a private key:
 
 1. `migrate_keys` / `migrate_files` *copy* into the service's gate home and verify each copy (bytes read back, a
    private key must derive its public key). Every old keypair becomes a legacy keypair: decrypt only.
+   `exec_templates.json` and `upstream-insecure.txt` are only imported when the caller says so (`--import-config`,
+   after the user saw them): they were writable by every process of the login user, and as the service's trusted
+   config they would decide what the service account runs and which upstream certificates it does not check. The
+   refs registry is rebuilt from validated rows, never taken over as a file (see `import_refs`).
 2. `cleanup_user_home` runs only after the service answered with those keys. It deletes an original only when
    an identical copy is in the gate home, then leaves `MOVED.txt`. Files it does not know stay where they are.
 
@@ -12,22 +16,48 @@ The login user's directories are only touched through UserDir (no symlink is eve
 
 from __future__ import annotations
 
+import json
+import math
 import os
+import re
 import sqlite3
+import time
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
 from nacl.public import PrivateKey
 
-from .constants import EXEC_TEMPLATES_FILE, PRIVATE_KEY_FILE, PUBLIC_KEY_FILE, REFS_FILE
+from .constants import (
+    EXEC_TEMPLATES_FILE,
+    LABEL_PATTERN,
+    PRIVATE_KEY_FILE,
+    PUBLIC_KEY_FILE,
+    REFS_FILE,
+)
 from .crypto import KEY_BYTES, b64url_decode, b64url_encode
 from .errors import TokenError, ValidationError
-from .keyring import CURRENT_FILE, KEYS_DIR, LEGACY_DIR, LEGACY_NAME, NAME_PATTERN, RESERVED_NAMES, list_keypairs
+from .keyring import (
+    CURRENT_FILE,
+    KEYS_DIR,
+    LEGACY_DIR,
+    LEGACY_NAME,
+    NAME_PATTERN,
+    RESERVED_NAMES,
+    list_keypairs,
+)
 from .keystore import make_private_dirs
-from .upstream_tls import UPSTREAM_INSECURE_FILE
+from .refs import _SCHEMA as REFS_SCHEMA
+from .tokens import is_ref, is_token
+from .upstream_tls import UPSTREAM_INSECURE_FILE, parse_insecure_hosts
 from .user_dir import UserDir
 
-TRUSTED_FILES = (EXEC_TEMPLATES_FILE, UPSTREAM_INSECURE_FILE, "screenshot-mask.json")
+CONFIRM_FILES = (EXEC_TEMPLATES_FILE, UPSTREAM_INSECURE_FILE)   # imported only with --import-config
+TRUSTED_FILES = (*CONFIRM_FILES, "screenshot-mask.json")
+IMPORT_CONFIG_FLAG = "--import-config"
+SUMMARY_MAX_ITEMS = 20
+SUMMARY_MAX_CHARS = 200
+_SCOPE_KEY = re.compile(r"^[0-9a-f]{64}$")
 TRANSIENT_FILES = ("ca.pem", "proxy.pid", CURRENT_FILE)  # regenerated or meaningless once the service runs
 TRANSIENT_DIRS = ("browser-out",)
 LOGS_DIR = "logs"
@@ -165,16 +195,105 @@ class _nothing:
         return None
 
 
-def _refs_db_ok(path: Path) -> bool:
+def _short(text: str) -> str:
+    """One line of user-written text for the report: control characters escaped, length capped."""
+    text = "".join(ch if ch.isprintable() else ch.encode("unicode_escape").decode("ascii") for ch in text)
+    return text if len(text) <= SUMMARY_MAX_CHARS else text[:SUMMARY_MAX_CHARS] + "…"
+
+
+def summarize_config(name: str, data: bytes) -> tuple[str, ...]:
+    """What a held-back config file would do, for the user to judge: template names with argv, env and stdin;
+    the hosts whose upstream certificate would not be checked."""
+    text = data.decode("utf-8", "replace")
+    if name == EXEC_TEMPLATES_FILE:
+        try:
+            templates = json.loads(text)
+        except ValueError:
+            return (f"{name}：不是有效的 JSON（{len(data)} 字节）",)
+        if not isinstance(templates, dict):
+            return (f"{name}：格式无效（应为 JSON 对象）",)
+        lines = [f"{name}：{len(templates)} 个模板"]
+        for tname, spec in list(templates.items())[:SUMMARY_MAX_ITEMS]:
+            spec = spec if isinstance(spec, dict) else {}
+            parts = [f"argv {json.dumps(spec.get('argv'), ensure_ascii=False)}"]
+            if isinstance(spec.get("env"), dict):
+                parts.append(f"env {json.dumps(spec['env'], ensure_ascii=False)}")
+            if "stdin" in spec:
+                parts.append(f"stdin {json.dumps(spec['stdin'], ensure_ascii=False)}")
+            lines.append(_short(f"  {tname}：{'；'.join(parts)}"))
+        if len(templates) > SUMMARY_MAX_ITEMS:
+            lines.append(f"  另有 {len(templates) - SUMMARY_MAX_ITEMS} 个模板未列出")
+        return tuple(lines)
+    hosts = sorted(parse_insecure_hosts(text))
+    shown = "、".join(hosts[:SUMMARY_MAX_ITEMS]) + (f" 等 {len(hosts)} 个" if len(hosts) > SUMMARY_MAX_ITEMS else "")
+    return (_short(f"{name}：不校验上游证书的主机 {shown or '（无）'}"),)
+
+
+def held_config(source: Path | None, owner_uid: int) -> tuple[str, ...]:
+    """Read-only: the summary of each confirm-first file in the old gate home (for the plan and --dry-run)."""
+    if source is None:
+        return ()
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
-            return conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
-    except sqlite3.Error:
-        return False
+        with (UserDir.open(source, owner_uid) or _nothing()) as home:
+            if home is None:
+                return ()
+            lines: list[str] = []
+            for name in CONFIRM_FILES:
+                data = home.read(name)
+                if data is not None:
+                    lines.extend(summarize_config(name, data))
+            return tuple(lines)
+    except ValidationError as exc:
+        return (f"无法读取 {source} 中的配置：{exc}",)
 
 
-def migrate_files(source: Path, owner_uid: int, gate: Path) -> tuple[str, ...]:
-    """Copy the refs registry, the trusted config files and the logs into the gate home (0600), verified."""
+def import_refs(data: bytes, target: Path, now: float | None = None) -> int | None:
+    """Rebuild the refs registry at `target` from the rows of an old one; None when it cannot be read.
+
+    The old file was writable by the login user, so it is never taken over as a file (no schema, trigger or view of
+    it ever reaches the service): it is opened in memory, read-only, with `trusted_schema` off, and only rows that
+    pass the registry's own formats are written into a fresh database. A row only maps a reference to a ciphertext
+    inside one scope; the ciphertext keeps its own host/use policy, and its holder could present it directly, so a
+    planted row grants nothing. `created` is capped at now, so a planted row cannot outlive the usual expiry."""
+    now = time.time() if now is None else now
+    try:
+        with closing(sqlite3.connect(":memory:")) as old:
+            old.deserialize(data)
+            old.execute("PRAGMA trusted_schema = OFF")
+            old.execute("PRAGMA query_only = ON")
+            if old.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                return None
+            scopes = old.execute("SELECT scope, created, released FROM scopes").fetchall()
+            refs = old.execute("SELECT ref, scope, token, label, created FROM refs").fetchall()
+    except (sqlite3.Error, ValueError, TypeError):
+        return None
+
+    def when(value: object) -> float | None:
+        return min(float(value), now) if isinstance(value, (int, float)) and math.isfinite(value) else None
+
+    good_scopes = {s: (when(c), when(r) if r is not None else None) for s, c, r in scopes
+                   if isinstance(s, str) and _SCOPE_KEY.fullmatch(s) and when(c) is not None}
+    good_refs = [(r, s, t.strip(), label, when(c)) for r, s, t, label, c in refs
+                 if isinstance(r, str) and is_ref(r) and r == r.strip() and s in good_scopes
+                 and good_scopes[s][1] is None and isinstance(t, str) and is_token(t)
+                 and isinstance(label, str) and LABEL_PATTERN.fullmatch(label) and when(c) is not None]
+    target.unlink(missing_ok=True)
+    os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, PRIVATE_FILE_MODE))
+    with closing(sqlite3.connect(target, isolation_level=None)) as new:
+        for statement in REFS_SCHEMA:
+            new.execute(statement)
+        new.execute("BEGIN")
+        new.executemany("INSERT INTO scopes (scope, created, released) VALUES (?, ?, ?)",
+                        [(s, c, r) for s, (c, r) in good_scopes.items()])
+        new.executemany("INSERT OR IGNORE INTO refs (ref, scope, token, label, created) VALUES (?, ?, ?, ?, ?)", good_refs)
+        new.execute("COMMIT")
+    return len(good_refs)
+
+
+def migrate_files(source: Path, owner_uid: int, gate: Path, import_config: bool = False) -> tuple[str, ...]:
+    """Copy the refs registry (rebuilt, see import_refs), the screenshot mask and the logs into the gate home (0600),
+    verified; exec_templates.json and upstream-insecure.txt only with `import_config` (the user confirmed them),
+    otherwise they are summarized and left where they are."""
     lines: list[str] = []
     with (UserDir.open(source, owner_uid) or _nothing()) as home:
         if home is None:
@@ -183,19 +302,31 @@ def migrate_files(source: Path, owner_uid: int, gate: Path) -> tuple[str, ...]:
             data = home.read(name)
             if data is None:
                 continue
+            if name in CONFIRM_FILES and not import_config:
+                lines.append(f"{name}：未迁入（该文件曾可被登录用户的任何进程修改；核对下列内容后，"
+                             f"以 {IMPORT_CONFIG_FLAG} 重新运行安装才会迁入）")
+                lines.extend(summarize_config(name, data))
+                continue
             target = gate / name
             if target.exists():
                 lines.append(f"{name}：服务目录中已有，保留服务中的版本")
                 continue
             staging = gate / f".{name}.migrating"
             staging.unlink(missing_ok=True)
-            _write_private(staging, data)
-            if name == REFS_FILE and not _refs_db_ok(staging):
-                staging.unlink()
-                lines.append(f"{name}：已损坏，未迁移（短引用只在任务执行期间有效）")
+            if name == REFS_FILE:
+                count = import_refs(data, staging)
+                if count is None:
+                    staging.unlink(missing_ok=True)
+                    lines.append(f"{name}：无法读取，未迁移（短引用只在任务执行期间有效）")
+                    continue
+                os.replace(staging, target)
+                lines.append(f"{name} → {target}（重建，{count} 条引用）")
                 continue
+            _write_private(staging, data)
             os.replace(staging, target)
             lines.append(f"{name} → {target}")
+            if name in CONFIRM_FILES:
+                lines.extend(summarize_config(name, data))
         lines.extend(_migrate_logs(home, gate))
     return tuple(lines)
 
@@ -284,7 +415,8 @@ def cleanup_user_home(source: Path, owner_uid: int, gate: Path, moved_text: str)
         home.write_new(MOVED_FILE, moved_text.encode())
         left = sorted(set(home.names()) - {MOVED_FILE})
     lines = [f"{source} 中已迁移的原有文件已删除，留下 {MOVED_FILE}"]
-    lines += [f"保留 {source / k}：服务目录中无相同的副本" for k in kept]
+    lines += [f"保留 {source / k}：未迁入（需确认，见上）" if k in CONFIRM_FILES and not (gate / k).exists()
+              else f"保留 {source / k}：服务目录中无相同的副本" for k in kept]
     holding = {k.split("/", 1)[0] for k in kept}
     lines += [f"保留 {source / n}：未识别的文件" for n in left if n not in holding]
     return tuple(lines)

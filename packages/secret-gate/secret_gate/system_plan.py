@@ -99,6 +99,7 @@ class InstallOptions:
     runtime: Path
     migrate_from: Path | None = None
     user_home: Path | None = None  # the owner's home: old ~/.mitmproxy CA key, old LaunchAgent
+    import_config: bool = False    # also import exec_templates.json, upstream-insecure.txt (the user confirmed them)
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ class InstallFacts:
     runtime_version: str
     installed_at: str
     old_agent_plist: Path | None = None  # present in the owner's ~/Library/LaunchAgents
+    held_config: tuple[str, ...] = ()    # summary of the old exec_templates.json / upstream-insecure.txt (migrate.py)
 
 
 def runtime_version(versions_text: str) -> str:
@@ -155,7 +157,8 @@ def moved_text(layout: SystemLayout, at: str) -> str:
     return (
         "凭据网关已改为系统服务（docs/gate-service-v0.md）。本目录原有的内容已迁移：\n"
         f"- 密钥：{layout.gate}/keys/legacy/（仅解密，不再作为当前密钥）\n"
-        f"- 短引用库、exec_templates.json、upstream-insecure.txt、screenshot-mask.json：{layout.gate}/\n"
+        f"- 短引用库、screenshot-mask.json：{layout.gate}/\n"
+        "- exec_templates.json、upstream-insecure.txt：只在安装时确认过（--import-config）才迁入；未迁入的仍留在本目录\n"
         f"- 公钥列表与 CA 证书：{layout.public}/keys.json、{layout.public}/ca.pem\n"
         f"这些文件归服务账户 {SERVICE_USER} 所有，修改需要管理员权限；请在 Mac 应用里操作。\n"
         f"迁移时间：{at}\n"
@@ -228,7 +231,10 @@ def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFa
         steps.append(Step("迁移旧密钥（仅解密）", (MigrateKeys(source, options.owner_uid, layout.gate),)))
     steps.append(Step(f"新建当前密钥 {NEW_KEY_NAME}", (CreateCurrentKey(layout.gate, NEW_KEY_NAME),)))
     if source is not None:
-        steps.append(Step("迁移短引用库、可信配置和日志", (MigrateFiles(source, options.owner_uid, layout.gate),)))
+        title = ("迁移短引用库、可信配置（已确认）和日志" if options.import_config
+                 else "迁移短引用库、截图遮挡配置和日志（exec 模板、上游证书例外不迁入）")
+        steps.append(Step(title, (MigrateFiles(source, options.owner_uid, layout.gate, options.import_config,
+                                               facts.held_config),)))
     steps += [
         Step("生成 mitmproxy CA", (GenerateCA(layout.mitmproxy),)),
         Step("发布 keys.json 和 ca.pem", (Publish(layout),)),

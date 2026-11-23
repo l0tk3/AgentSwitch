@@ -8,7 +8,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .constants import EXEC_TIMEOUT_SECONDS, HTTP_TIMEOUT_SECONDS, USE_EXEC, USE_HTTP, USE_OTP
+from .constants import (
+    EXEC_TIMEOUT_SECONDS,
+    HTTP_TIMEOUT_SECONDS,
+    USE_EXEC,
+    USE_HTTP,
+    USE_OTP,
+)
 from .errors import ValidationError
 from .exec_templates import ExecTemplate, get_template
 from .redact import redact
@@ -99,15 +105,21 @@ def op_exec(
     args: tuple[str, ...] | list[str] = (),
     runner=subprocess.run,
 ) -> ExecResult:
+    """Run a whitelisted template. The value reaches the child only through the template's `env` and/or `stdin`
+    (never argv, which every user of the machine can read); the child's environment is minimal (exec_templates
+    `child_env`); stdout and stderr are redacted before they return."""
     tpl = get_template(templates, template)
     resolution = resolver.resolve(token, use=USE_EXEC)
-    argv = tpl.render(resolution.value, tuple(args))
+    rendered = tpl.render(resolution.value, tuple(args))
+    stdin = {"input": rendered.stdin} if rendered.stdin is not None else {"stdin": subprocess.DEVNULL}
     proc = runner(
-        argv,
+        list(rendered.argv),
         capture_output=True,
         text=True,
         timeout=EXEC_TIMEOUT_SECONDS,
         check=False,
+        env=rendered.env,
+        **stdin,
     )
     return ExecResult(
         returncode=proc.returncode,

