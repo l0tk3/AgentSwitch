@@ -1,6 +1,6 @@
 # gate-simple-v0：凭据网关简化——最小服务账户、两处出口、一条规矩（草案）
 
-2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），§5 的 Linux 一列已做（§5 末尾），§5 的 Windows 一列已做（只在 Windows CI 上验证过，§5 末尾），其余未做。
+2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），§5 的 Linux 一列已做（§5 末尾），§5 的 Windows 一列**开发中**（§5 末尾），其余未做。
 
 本稿只管网关，路由器的 sealer 不在本稿范围（用户定：先不管）。
 
@@ -142,7 +142,11 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 - **daemon（Linux 节点）**：`src/keeper/gateService.ts` 与网关同样只看 `gate-service.json`（读不了也按已装算）。装了时看护进程不起自己的网关、不在用户目录建钥匙，服务无响应时只记日志、不兜底；把服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 和端口交给 daemon。配置出现、消失或服务端口变了（`update --port`），看护进程在下一次探测时交接：停掉或起回自己的网关，带新环境重启 daemon。`agentswitch gate`（新）、`doctor`、`config` 的 Keys 页说明网关在哪个账户下，并打印要用户自己运行的确切命令（本机的路径、uid、端口都填好）；AgentSwitch 从不运行 sudo。没装时三处用五种语言明说“此节点的网关以你的账户运行：只防误看，不防顺手读取”（daemon `src/i18n/`）；装了时 Keys 页不再给“创建密钥对”，改给 `rotate-key` 命令。`install.sh` 结尾运行 `agentswitch gate`（服务的运行时比节点的旧时打印 `system update`）。顺手修了看护进程第一次运行时建钥匙仍用已删除的 `keys new` 的问题（改为 `keygen`）。
 - **实机验证**（OrbStack 里一台随手建的 Ubuntu 24.04 arm64，systemd 255，验证后删除）：`install.sh` 造运行时、起用户服务，`agentswitch gate` 与 doctor 说出同用户一档和安装命令；照打印的命令 `sudo … system install` 14 步全过（4 秒），看护进程下一次探测就停掉自己的网关、让出 8080，daemon 带上服务的 `SECRET_GATE_PUBLIC`、`SECRET_GATE_CA` 重启；两个进程以 `agentswitch-gate` 运行在 `/opt/agentswitch/gate-runtime`；登录用户读 `gate/`、`key.priv`、CA 私钥都是 Permission denied，`keys --json`、`enc --batch`、`system status`、`logs tail` 照常，`keygen` 被拒；经服务的代理对本机回显服务替换了密文、回显被遮成 `[REDACTED:vm/test]`；另一个本机用户进不了 `gate-public`，把它加进登录用户的组后能连到 socket，被 `SO_PEERCRED` 拒绝（rpc 日志 `uid 1000 is not allowed`）；`systemd-analyze verify` 通过；`rotate-key` 后公钥变了、代理日志 `key reloaded`；`update --port 8181` 换了端口（实机发现看护进程仍探测 8080，已修：端口变了也交接）；`uninstall` 停掉并去掉单元，看护进程回到同用户一档、重新起自己的网关。网关的 pytest 在这台机器上 678 项通过（只跳过 macOS 的 `LOCAL_PEERCRED` 一项和两项要 Chromium 的）。
 
-**Windows 已做（2026-11-23，第 4 步；只在 Windows CI 上验证过，见本段末尾）**：
+**Windows：开发中**
+
+**开发中（2026-11-23，用户定）**：Windows 一列的代码已在 main 上，网关全套测试在 Windows CI 和一台真实的 Windows 11（非管理员）上都通过；在 Windows 上实际安装服务的 smoke（`scripts/windows_service_smoke.ps1`）还没通过，修到一半停了。CI 的 Windows 任务设为不阻断（`continue-on-error`）。在它通过之前，不要在 Windows 上把服务模式当成可用。
+
+下面是已写好的部分：
 
 - **平台层**：`secret_gate/platform/windows.py` 是第三个 `GatePlatform`。`base.py` 为它多了几个钩子（`root_owned_ops`、`directory_ops`、`ownership_ops`、`key_access_ops`、`service_definition_ops`、`remove_service_ops`、`preflight`、`is_admin`），默认实现就是原来 POSIX 的 chown/chmod 与写服务定义文件，所以 macOS 和 Linux 的安装、更新、换钥匙、卸载计划与之前逐字节相同（新旧代码各渲染一遍比对过）。`--root <前缀> --platform windows` 在 Mac 上也能跑全套（Windows 路径去掉盘符放到前缀下）。
 - **账户与服务（决定：一个服务、一个账户）**：虚拟账户只属于一个服务（`NT SERVICE\<服务名>`），两个服务就是两个都要读钥匙的账户。所以只有一个 Windows 服务 `AgentSwitchGate`，以 `NT SERVICE\AgentSwitchGate` 运行（SID 是 S-1-5-80 加服务名大写 UTF-16 的 SHA-1，不用查就知道，`fsacl.service_sid`，用 TrustedInstaller 的 SID 核对过算法）。服务本身是个小宿主（`secret_gate/win_service.py`）：pywin32 的 servicemanager 跑在运行时自己的 `python.exe -I -X utf8 -m secret_gate.win_service` 里（不用 pythonservice.exe，不在注册表里登记 Python 类），由它启动 `secret-gate rpc` 和 `secret-gate proxy` 两个子进程，任一退出 2 秒后重启（相当于 KeepAlive / Restart=always），子进程放进“宿主一走就全结束”的作业对象；宿主自己挂了由 `sc failure … restart` 重启。子进程的环境同 LaunchDaemon（`SECRET_GATE_HOME`、`HOME`、`SECRET_GATE_PUBLIC`、由运行时和 Windows 目录组成的 `PATH`），另有 `USERPROFILE`、`TEMP` 指向网关目录，没有代理变量；`-I` 让 `PYTHONPATH` 之类不起作用。注册用 `sc.exe create/config AgentSwitchGate binPath= … obj= "NT SERVICE\AgentSwitchGate" start= auto`，启停用 `net stop|start`（会等到真的停下、起来；`sc stop` 不等），卸载 `sc.exe delete`；都用 Windows 目录（`GetWindowsDirectoryW`）下的绝对路径。
@@ -169,7 +173,7 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 1. **脱敏器补齐**（§3.1、§3.2）与**封装下限、长度填充**（§3.3、§3.4）。它直接对应“推不出”，与服务的去留无关，先做。
 2. **精简服务**（§1、§2）：删方法、删多钥匙、删迁移、删 repair；daemon、Mac、iPhone、Android 同步改。
 3. **Linux 服务账户**（§5）：安装脚本、systemd 单元、`SO_PEERCRED`。——已做（2026-11-23，见 §5 末尾，含实机验证）。
-4. **Windows**（§5）：服务、命名管道、ACL，以及 Windows CI。——已做（2026-11-23，见 §5 末尾；只在 Windows CI 上验证过）。
+4. **Windows**（§5）：服务、命名管道、ACL，以及 Windows CI。——**开发中**（2026-11-23：测试通过，服务安装 smoke 未通过，见 §5 末尾）。
 5. 重写 `BOUNDARY.md`：按“出口 × 输出”列表，开头写明 §0 的“不防”。`gate-service-v0.md` 标为“已被本稿收窄”。
 
 每一步都要有测试。“推不出”专门有一组：模拟网站按各种方式回显（整值、截断、分段、大小写、base64、十六进制、超大响应、WebSocket），断言模型能看到的输出里拼不出原值。

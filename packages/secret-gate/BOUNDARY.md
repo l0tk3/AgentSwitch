@@ -135,6 +135,8 @@
 
 ## 凭据网关服务（gate-service-v0；Linux、Windows：gate-simple-v0 §5）
 
+> Windows 的各行是**开发中**的：网关测试在 Windows 上通过，服务安装的 smoke 还没通过（gate-simple-v0 §5）。在它通过之前，这些行描述的是设计，不是已验证的边界。
+
 | 入口 | 规则 | 挡什么 | 失败行为 | 测试 |
 |---|---|---|---|---|
 | `gate.sock` 连接 | socket 0666；连接时由内核（`LOCAL_PEERCRED`）给出对端 uid，只放行 root 和 `gate-service.json` 的 `ownerUid`；配置缺失或无效时只放行 root | 本机其他用户调用网关 | 不读请求，直接断开 | `tests/test_rpc.py::test_socket_is_0666_and_only_allowed_uids_get_an_answer`、`tests/test_rpc.py::test_peer_uid_is_the_kernels_record_of_the_other_end`、`tests/test_rpc.py::test_allowed_uids_come_from_gate_service_json` |

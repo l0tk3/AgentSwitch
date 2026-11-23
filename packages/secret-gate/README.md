@@ -150,7 +150,7 @@ systemd units, run once with `sudo` (the Linux node prints the exact command: `a
 --signal=SIGHUP`, `uninstall` disables both units and reloads systemd. The per-system parts (account, service
 manager, paths, peer check) are `secret_gate/platform/{macos,linux,windows}.py` behind `platform/base.py`.
 
-**Windows** (gate-simple-v0 §5; only the gate: the daemon, the terminals and the apps have no Windows version, so
+**Windows — in development** (the suite passes on Windows; installing the service, `scripts/windows_service_smoke.ps1`, does not pass yet: do not rely on service mode on Windows). (gate-simple-v0 §5; only the gate: the daemon, the terminals and the apps have no Windows version, so
 nothing runs the install for you). One Windows service, `AgentSwitchGate`, under its own virtual account `NT
 SERVICE\AgentSwitchGate` (no password, nothing to create: it comes with the service). A virtual account belongs to
 exactly one service, so the service is a small host (`secret_gate/win_service.py`, pywin32's servicemanager in the
