@@ -258,8 +258,21 @@ private fun Timeline(
     val handles = remember(detail.seats) { RoomText.handles(detail.seats) }
     val state = rememberLazyListState()
     val last = detail.messages.lastOrNull()?.seq
-    // The newest is at the bottom, and stays in sight as more come.
-    LaunchedEffect(last, rows.size) { if (rows.isNotEmpty()) state.scrollToItem(rows.size + 1) }
+    val scope = rememberCoroutineScope()
+    // The reader is at the end (2026-11-24, user: 应该加一个回到底部的按钮): `↓ Latest` is away. `unseen`: a message
+    // came while they read further up, and they were left where they were. As on a terminal's record.
+    var atEnd by remember { mutableStateOf(true) }
+    var unseen by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        androidx.compose.runtime.snapshotFlow { state.isScrollInProgress to !state.canScrollForward }.collect { (moving, end) ->
+            if (moving || end) { atEnd = end; if (end) unseen = false }
+        }
+    }
+    // The newest is at the bottom, and stays in sight as more come while the reader is there; the user's own always.
+    LaunchedEffect(last, rows.size) {
+        if (rows.isEmpty()) return@LaunchedEffect
+        if (atEnd || detail.messages.lastOrNull()?.from == RoomSeat.you) state.scrollToItem(rows.size + 1) else unseen = true
+    }
     // A picture that comes after its message was drawn makes it taller: the end stays in sight when it was.
     LaunchedEffect(model.picturesShown) {
         if (model.picturesShown > 0 && rows.isNotEmpty() && (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= rows.size) state.scrollToItem(rows.size + 1)
@@ -275,6 +288,7 @@ private fun Timeline(
         }
         return
     }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), state = state) {
         item("topic") {
             if (detail.room.topic.isNotEmpty()) Text(detail.room.topic, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(top = 10.dp), color = Theme.secondaryInk, style = plain(12))
@@ -287,6 +301,24 @@ private fun Timeline(
             )
         }
         item("end") { Spacer(Modifier.height(8.dp)) }
+    }
+    if (!atEnd) {
+        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)) {
+            androidx.compose.foundation.layout.Row(
+                Modifier.grounded(Theme.panel, 16.dp).framed(Theme.line, 16.dp)
+                    .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null, role = Role.Button) {
+                        unseen = false
+                        scope.launch { state.animateScrollToItem(rows.size + 1) }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val tint = if (unseen) Theme.signal else Theme.ink
+                Text("↓", color = tint, style = mono(13))
+                Text(lookWord(if (unseen) "New" else "Latest"), color = tint, style = mono(12, FontWeight.Medium))
+            }
+        }
+    }
     }
 }
 

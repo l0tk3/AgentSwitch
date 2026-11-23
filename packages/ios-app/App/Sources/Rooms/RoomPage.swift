@@ -21,6 +21,10 @@ struct RoomPage: View {
     @State private var files = false
     /// A file of the shared folder's sheet asked for on the Files page (`Show in Files`): shown there once the sheet is gone.
     @State private var fileToShow: String?
+    /// The reader is at the timeline's end; `unseen`: a message came while they were not.
+    @State private var atEnd = true
+    @State private var unseen = false
+    @State private var visibleHeight: CGFloat = 0
     @FocusState private var writing: Bool
 
     struct MembersRequest: Identifiable {
@@ -188,7 +192,11 @@ struct RoomPage: View {
                 if rows.isEmpty {
                     empty(detail)
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    // Not lazy (2026-11-24, user: 白屏bug): a lazy stack guesses the heights of rows it has not drawn,
+                    // and a jump to its end as the keyboard came up landed past what was drawn — an empty screen
+                    // until it was dragged. A room holds a few hundred messages at most: laid out whole, the end is
+                    // where it is.
+                    VStack(alignment: .leading, spacing: 0) {
                         if !detail.room.topic.isEmpty {
                             Text(detail.room.topic).font(.system(size: 12.5)).foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 10)
@@ -202,14 +210,28 @@ struct RoomPage: View {
                                            openFile: { showFile($0) })
                                 .id(row.id)
                         }
-                        Color.clear.frame(height: 8).id("end")
+                        Color.clear.frame(height: 8).id("end").reportsListEnd(in: "roomTimeline")
                     }
                 }
             }
+            .coordinateSpace(name: "roomTimeline")
+            .background(GeometryReader { g in Color.clear.onAppear { visibleHeight = g.size.height }.onChange(of: g.size.height) { _, h in visibleHeight = h } })
+            .onPreferenceChange(ListEndY.self) { endY in
+                let now = visibleHeight == 0 || endY <= visibleHeight + 40
+                if now != atEnd { withAnimation(.easeOut(duration: 0.15)) { atEnd = now } }
+                if now { unseen = false }
+            }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: detail.messages.last?.seq) { withAnimation(nil) { proxy.scrollTo("end", anchor: .bottom) } }
-            .onChange(of: writing) { _, on in if on { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo("end", anchor: .bottom) } } }
+            .onChange(of: detail.messages.last?.seq) {
+                if atEnd || detail.messages.last?.from == RoomSeat.you { withAnimation(nil) { proxy.scrollTo("end", anchor: .bottom) } } else { unseen = true }
+            }
+            .onChange(of: writing) { _, on in if on && atEnd { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo("end", anchor: .bottom) } } }
+            .overlay(alignment: .bottom) {
+                if !atEnd && !rows.isEmpty {
+                    LatestButton(unseen: unseen) { unseen = false; withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
+                }
+            }
         }
     }
 

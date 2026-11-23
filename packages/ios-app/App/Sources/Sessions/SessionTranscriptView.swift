@@ -23,6 +23,9 @@ struct SessionTranscriptView: View {
         let work: String
     }
 
+    /// The reader is at the record's end: `↓ Latest` is away (as on a terminal's record).
+    @State private var atEnd = true
+
     private var shown: SessionSummary { record.session ?? session }
     private var hasChanges: Bool { session.harness == "claude-code" || session.harness == "codex" }
 
@@ -55,6 +58,8 @@ struct SessionTranscriptView: View {
                         BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
                     }
                     Color.clear.frame(height: 1).id(Self.end)
+                        .onAppear { atEnd = true }
+                        .onDisappear { atEnd = false }
                 }
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, Theme.Space.m)
@@ -62,6 +67,11 @@ struct SessionTranscriptView: View {
             // The latest is what matters: opened at the end, and following it as it grows. (Not
             // defaultScrollAnchor(.bottom), which also pushes a short record down to the bottom of the screen.)
             .onChange(of: record.items.last) { scroller.scrollTo(Self.end, anchor: .bottom) }
+            .overlay(alignment: .bottom) {
+                if !atEnd && record.loaded && !record.items.isEmpty {
+                    LatestButton(unseen: false) { withAnimation(.snappy(duration: 0.2)) { scroller.scrollTo(Self.end, anchor: .bottom) } }
+                }
+            }
         }
         .background(Theme.base)
         .safeAreaInset(edge: .bottom) {

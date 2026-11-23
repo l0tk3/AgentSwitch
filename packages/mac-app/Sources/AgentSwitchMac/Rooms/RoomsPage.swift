@@ -209,6 +209,10 @@ private struct RoomView: View {
     let home: String
     var showTerminal: (String) -> Void = { _ in }
     @Environment(\.interfaceLook) private var look
+    /// The reader is at the timeline's end (2026-11-24, user: 应该加一个回到底部的按钮): `↓ Latest` is away; `unseen`:
+    /// a message came while they were reading further up, and they were left where they were.
+    @State private var atEnd = true
+    @State private var unseen = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -341,12 +345,32 @@ private struct RoomView: View {
                             RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil))
                                 .id(row.id)
                         }
+                        Color.clear.frame(height: 1).id("end")
+                            .onAppear { atEnd = true; unseen = false }
+                            .onDisappear { atEnd = false }
                     }
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                 }
-                .onAppear { if let last = model.rows.last { proxy.scrollTo(last.id, anchor: .bottom) } }
-                .onChange(of: model.rows.last?.id) { _, last in if let last { proxy.scrollTo(last, anchor: .bottom) } }
+                .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+                .onChange(of: room.room.id) { proxy.scrollTo("end", anchor: .bottom) }
+                .onChange(of: model.rows.last?.id) {
+                    // Followed while the reader is at the end, or when it is the user's own; else left where it is.
+                    if atEnd || room.messages.last?.from == Room.you { proxy.scrollTo("end", anchor: .bottom) } else { unseen = true }
+                }
+                .overlay(alignment: .bottom) {
+                    if !atEnd {
+                        Button { unseen = false; withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } } label: {
+                            Text(unseen ? "↓ New" : "↓ Latest").mono(Look.size(11.5, look), weight: .medium).foregroundStyle(unseen ? Color.signal : Look.ink)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .grounded(Look.panel, radius: look.isClassic ? 13 : 0)
+                                .framed(Look.line, radius: look.isClassic ? 13 : 0)
+                        }
+                        .buttonStyle(.plain)
+                        .fixedSize()
+                        .padding(.bottom, 10)
+                    }
+                }
             }
         }
     }

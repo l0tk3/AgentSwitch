@@ -141,19 +141,7 @@ struct TerminalRecordView: View {
             .onChange(of: page.status) { follow(scroller) }
             .overlay(alignment: .bottom) {
                 if !atEnd {
-                    Button { withAnimation(.snappy(duration: 0.2)) { scroller.scrollTo(Self.end, anchor: .bottom) } } label: {
-                        HStack(spacing: 5) {
-                            LookGlyph(glyph: "↓", symbol: "arrow.down", size: 13)
-                            Text(unseen ? "New" : "Latest").mono(12, weight: .medium)
-                        }
-                        .foregroundStyle(unseen ? Theme.signal : Theme.ink)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .grounded(Theme.panel, radius: 16)
-                        .framed(Theme.line, radius: 16)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 8)
-                    .transition(.opacity)
+                    LatestButton(unseen: unseen) { withAnimation(.snappy(duration: 0.2)) { scroller.scrollTo(Self.end, anchor: .bottom) } }
                 }
             }
         }
