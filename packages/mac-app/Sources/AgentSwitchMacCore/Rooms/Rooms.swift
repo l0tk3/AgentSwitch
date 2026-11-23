@@ -454,6 +454,8 @@ public struct Room: Decodable, Equatable, Sendable {
     public let tasks: [RoomTask]
     /// What members say they are changing now.
     public let claims: [RoomClaim]
+    /// Who has read which message: message number → the members that were given it whole or read it themselves.
+    public let reads: [String: [String]]
     /// The room's shared folder on its node; nil from a service that has none.
     public let folder: String?
     public let room: Head
@@ -462,7 +464,7 @@ public struct Room: Decodable, Equatable, Sendable {
     /// Message number → handle → where it is.
     public let receipts: [String: [String: String]]
 
-    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes, tasks, claims, folder }
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes, tasks, claims, folder, reads }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -473,6 +475,7 @@ public struct Room: Decodable, Equatable, Sendable {
         notes = try? c.decodeIfPresent(RoomNotes.self, forKey: .notes)
         tasks = (try? c.decodeIfPresent([RoomTask].self, forKey: .tasks)) ?? []
         claims = (try? c.decodeIfPresent([RoomClaim].self, forKey: .claims)) ?? []
+        reads = (try? c.decodeIfPresent([String: [String]].self, forKey: .reads)) ?? [:]
         folder = try? c.decodeIfPresent(String.self, forKey: .folder)
     }
 
@@ -485,6 +488,14 @@ public struct Room: Decodable, Equatable, Sendable {
     /// The tasks a task still waits for.
     public func waits(_ task: RoomTask) -> [Int] { task.after.filter { n in tasks.contains { $0.n == n && $0.state != .done } } }
 
+    /// Of the sessions a message was for: those that have read it, and those that have not yet (the ones still seated).
+    public func readers(of message: RoomMessage) -> (read: [String], unread: [String]) {
+        let here = Set(sessions.map(\.handle))
+        let asked = message.to.filter { here.contains($0) && $0 != message.from }
+        let read = Set(reads[String(message.seq)] ?? [])
+        return (asked.filter { read.contains($0) }, asked.filter { !read.contains($0) })
+    }
+
     /// What a member says it is changing now.
     public func claim(of handle: String) -> RoomClaim? { claims.first { $0.handle == handle } }
 
@@ -492,6 +503,7 @@ public struct Room: Decodable, Equatable, Sendable {
         self.notes = notes
         self.tasks = []
         self.claims = []
+        self.reads = [:]
         self.folder = nil
         self.room = room
         self.seats = seats

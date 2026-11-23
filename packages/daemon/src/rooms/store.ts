@@ -129,6 +129,9 @@ export type Claim = { readonly handle: string; readonly paths: readonly string[]
 
 export const MAX_TASKS = 200, MAX_TITLE = 200, MAX_DETAIL = 2000, MAX_NOTE = 1000, MAX_CLAIM_PATHS = 30, CLAIM_MINUTES = 30, MAX_CLAIM_MINUTES = 240;
 
+/** How many of the newest messages keep who has read them. */
+export const MAX_READS = 300;
+
 export type SeatStats = { readonly wakes: number; readonly chars: number; readonly posts: number; readonly calls: number };
 
 export type Room = {
@@ -158,6 +161,10 @@ export type Room = {
    *  how many characters, how many messages it posted, how many tool calls it made here. The tokens are the agent's
    *  own to say; these are what the room adds. */
   readonly stats: Readonly<Record<string, SeatStats>>;
+  /** Who has read which message (user, 2026-11-23: "哪个 session 已读未读"): message number → the seats that were
+   *  given it whole, or read it themselves with room_read. Its sender is not listed (it wrote it). Kept for the last
+   *  `MAX_READS` messages. */
+  readonly reads: Readonly<Record<string, readonly string[]>>;
   /** Names seats went by before they were renamed, each with the name it is now: an `@old` still finds its seat. */
   readonly renames: Readonly<Record<string, string>>;
   /** What has not arrived: message number → handle → where it is. */
@@ -289,7 +296,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, renames: {}, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, reads: {}, renames: {}, receipts: {} };
     this.save(room);
     return room;
   }
@@ -413,6 +420,25 @@ export class RoomStore {
     const { muted: _was, ...rest } = seat;
     this.save({ ...room, seats: room.seats.map((s) => (s === seat ? rest : s)) });
     return rest;
+  }
+
+  /** A seat has read these messages: given them whole, or read them itself. Kept in memory and written with the
+   *  room's next change, like the counts. */
+  markRead(id: string, handle: string, seqs: readonly number[]): void {
+    const room = this.all().get(id);
+    if (!room || !seqs.length) return;
+    const reads: Record<string, readonly string[]> = { ...room.reads };
+    let changed = false;
+    for (const seq of seqs) {
+      const had = reads[String(seq)] ?? [];
+      if (had.includes(handle)) continue;
+      reads[String(seq)] = [...had, handle];
+      changed = true;
+    }
+    if (!changed) return;
+    const floor = room.lastSeq - MAX_READS;
+    for (const seq of Object.keys(reads)) if (Number(seq) <= floor) delete reads[seq];
+    this.all().set(id, { ...room, reads });
   }
 
   /** Adds to what a seat has cost. Kept in memory and written with the room's next change: a count is not worth a
@@ -620,6 +646,8 @@ export class RoomStore {
       renames: { ...Object.fromEntries(Object.entries(room.renames).map(([was, now]) => [was, to(now)])), [old]: name },
       stats,
     });
+    const after = this.all().get(id)!;
+    this.all().set(id, { ...after, reads: Object.fromEntries(Object.entries(after.reads).map(([seq, who]) => [seq, who.map(to)])) });
     return next;
   }
 
@@ -755,7 +783,8 @@ export class RoomStore {
 
   private save(given: Room): Room {
     // The counts are added to in memory between two writes (`count`): the newest are the ones kept.
-    const room: Room = { ...given, stats: this.all().get(given.id)?.stats ?? given.stats };
+    const kept = this.all().get(given.id);
+    const room: Room = { ...given, stats: kept?.stats ?? given.stats, reads: kept?.reads ?? given.reads };
     this.all().set(room.id, room);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const file = join(this.dir, `${room.id}.json`), tmp = `${file}.${process.pid}.tmp`;
@@ -835,7 +864,7 @@ function roomFrom(v: unknown): Room | null {
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
-    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
+    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, reads: Object.fromEntries(Object.entries((o.reads ?? {}) as Record<string, unknown>).filter(([seq, v]) => /^\d+$/.test(seq) && Array.isArray(v)).map(([seq, v]) => [seq, (v as unknown[]).filter(str)])), renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
   };
 }
 

@@ -171,6 +171,8 @@ export class RoomDelivery {
     this.told.add(terminal);
     const last = waiting[waiting.length - 1]!;
     this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length });
+    // Read: the one it was given whole. The earlier ones it saw a line of are read when it reads the room.
+    this.o.store.markRead(last.room.id, last.seat.handle, [last.message.seq]);
   }
 
   private waitingFor(terminal: string): { room: Room; seat: Seat; message: Message }[] {

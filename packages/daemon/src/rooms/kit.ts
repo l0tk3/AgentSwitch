@@ -555,12 +555,20 @@ export class RoomKit {
     const total = found.length;
     found = after === undefined ? found.slice(-limit) : found.slice(0, limit);
     const head = `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}.`;
+    this.o.store.markRead(room.id, seat.handle, found.filter((m) => m.from !== seat.handle).map((m) => m.seq));
+    const reads = this.o.store.get(room.id).reads;
+    // Of its own messages it is told who has read them and who has not yet.
+    const readBy = (m: Message): string => {
+      if (m.from !== seat.handle || !m.to.length) return "";
+      const sessions = m.to.filter((h) => h !== YOU), read = sessions.filter((h) => reads[String(m.seq)]?.includes(h)), not = sessions.filter((h) => !read.includes(h));
+      return sessions.length ? `\n[${read.length ? `read by ${read.map((h) => `@${h}`).join(" ")}` : "read by nobody yet"}${not.length && read.length ? `; not yet: ${not.map((h) => `@${h}`).join(" ")}` : ""}]` : "";
+    };
     // What it reads here it has: a message that still waited for it is not given to it a second time.
     for (const m of found) {
       const waits = room.receipts[String(m.seq)]?.[seat.handle];
       if (waits === "sent" || waits === "queued") this.o.store.setReceipt(room.id, m.seq, seat.handle, null);
     }
-    const lines = found.map((m) => `#${m.seq} ${hm(m.at)} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}`);
+    const lines = found.map((m) => `#${m.seq} ${hm(m.at)} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m)}`);
     return [head, ...lines].join("\n\n");
   }
 

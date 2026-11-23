@@ -586,3 +586,27 @@ describe("a seat's name", () => {
     expect(store.roomsOf("api")[0]!.seat.handle).toBe("backend");
   });
 });
+
+describe("who has read a message", () => {
+  it("is the seats given it whole or that read it themselves, told to its sender and to the screens, and kept over a restart", async () => {
+    const { home, store, room, say, call } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
+    store.seat(room.id, { terminal: "qa", was: { agent: "codex", name: "qa", cwd: "/w", model: null, profile: null } });
+    await say("api", "room_post", { text: "@ui @qa the interface is in interface.md" });
+    expect((await say("api", "room_read")).text).toContain("[read by nobody yet]");
+    delivery.atTurnEnd("ui");                                  // given whole: read
+    expect(store.get(room.id).reads).toEqual({ 1: ["ui"] });
+    expect((await say("api", "room_read")).text).toContain("[read by @ui; not yet: @qa]");
+    await say("qa", "room_read");                              // read by itself
+    expect((await call("GET", `/rooms/${room.id}`)).body.reads).toEqual({ 1: ["ui", "qa"] });
+    expect((await say("api", "room_read")).text).toContain("[read by @ui @qa]");
+    // An earlier message it only saw a line of is not read until it reads the room.
+    store.post(room.id, { from: "api", text: "@ui two" });
+    store.post(room.id, { from: "api", text: "@ui three" });
+    delivery.atTurnEnd("ui");
+    expect(store.get(room.id).reads["2"]).toBeUndefined();
+    expect(store.get(room.id).reads["3"]).toEqual(["ui"]);
+    store.post(room.id, { from: "you", text: "save" });        // the next change writes it
+    expect(new RoomStore(home).get(room.id).reads["1"]).toEqual(["ui", "qa"]);
+  });
+});

@@ -150,6 +150,7 @@ struct RoomMessageRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if !message.files.isEmpty { files }
                 receipts
+                readers
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -251,6 +252,25 @@ struct RoomMessageRow: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// Who of those it was for has read it (user, 2026-11-23): `✓ daemon ios` — and who has not, when nothing else
+    /// says so already (a receipt still open says where it is).
+    @ViewBuilder
+    private var readers: some View {
+        let who = room.readers(of: message)
+        let waiting = Set(room.receipts(of: message.seq).map(\.handle))
+        let unread = who.unread.filter { !waiting.contains($0) }
+        if !who.read.isEmpty || !unread.isEmpty {
+            HStack(spacing: 12) {
+                if !who.read.isEmpty { Text((look.isClassic ? "Read · " : "✓ ") + who.read.joined(separator: " ")).foregroundStyle(Look.faint) }
+                if !unread.isEmpty { Text((look.isClassic ? "Unread · " : "○ ") + unread.joined(separator: " ")).foregroundStyle(Look.ink2) }
+            }
+            .mono(11.5)
+            .lineLimit(1)
+            .padding(.top, 1)
+            .help("已读：这条消息整条送到了它面前，或者它自己读了房间。")
+        }
     }
 
     @ViewBuilder

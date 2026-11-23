@@ -42,6 +42,7 @@ extension RoomsDemo {
           {"seq":5,"from":"daemon","to":["mac-app","web"],"text":"@mac-app 毫秒。@web 你那边的类型也要改。","at":\(at(10))},
           {"seq":6,"from":"mac-app","to":["you"],"text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}],
          "receipts":{"2":{"ios-app":"queued"},"5":{"web":"ended"}},
+         "reads":{"1":["daemon"],"2":["mac-app"],"5":["mac-app"]},
          "notes":{"text":"接口：/login 返回 expiresAt（毫秒）\\n待办：web 的类型","at":\(at(20)),"by":"daemon"},
          "folder":"/Users/you/Library/Application Support/AgentSwitch/room-files/login",
          "tasks":[

@@ -159,7 +159,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   const whole = (room: Room, messages: readonly Message[]) => ({
     room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
-    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, claims: rooms.claims(room.id),
+    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, claims: rooms.claims(room.id), reads: room.reads,
   });
 
   const seat = (roomId: string, terminal: string, canAdd: boolean | undefined): Seat => {
