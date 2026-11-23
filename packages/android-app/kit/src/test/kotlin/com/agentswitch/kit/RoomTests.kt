@@ -29,7 +29,7 @@ class RoomTests {
          "messages":[
           {"seq":1,"from":"you","to":["daemon"],"text":"@daemon 接口改完了吗","at":1700000000000},
           {"seq":2,"from":"daemon","to":["web","you"],"replyTo":1,"text":"改完了 @web @you，见 `api.md`","at":1700000060000,"files":["/Users/x/proj/api.md"]},
-          {"seq":3,"from":"daemon","to":[],"text":"记一笔","at":1700000090000}],
+          {"seq":3,"from":"daemon","to":[],"text":"记一笔","at":1700000090000,"task":3}],
          "receipts":{"2":{"web":"ended","daemon":"nonsense"},"x":{"web":"sent"},"1":{"daemon":"queued"}},
          "notes":{"text":"接口：/login","at":1700000000000,"by":"daemon"},
          "problems":["这个会话已经结束，恢复之后再拉进来"]}
@@ -57,6 +57,9 @@ class RoomTests {
         assertEquals(mapOf(1 to mapOf("daemon" to RoomReceipt.Queued), 2 to mapOf("web" to RoomReceipt.Ended)), d.receipts)
         assertEquals("daemon", d.notes?.by)
         assertEquals(listOf("/Users/x/proj/api.md"), d.message(2)?.files)
+        // A message's task (T3) is read; none when it is about no one task.
+        assertEquals(3, d.message(3)?.task)
+        assertNull(d.message(2)?.task)
         assertEquals(1, d.problems.size)
         // No Kit: it sits and goes on, without the Kit. Not one that left or ended.
         assertTrue(d.seat("web")!!.noKit)
@@ -122,6 +125,28 @@ class RoomTests {
     }
 
     @Test
+    fun testTimelineRowsByTask() {
+        val utc = ZoneId.of("UTC")
+        val day = 86_400_000L
+        val ms = listOf(
+            RoomMessage(1, "you", text = "a", at = day, task = 1),
+            RoomMessage(2, "you", text = "b", at = day + 1, task = 1),
+            RoomMessage(3, "you", text = "c", at = day + 2, task = 2),
+            RoomMessage(4, "you", text = "d", at = day + 3),
+            RoomMessage(5, "you", text = "e", at = day + 4, task = 1),
+        )
+        // A run breaks where the task changes.
+        assertEquals(listOf(false, true, false, false, false), RoomRow.rows(ms, utc).map { it.continues })
+        // Narrowed to T1: its messages alone, run together.
+        val only = RoomRow.rows(ms, utc, task = 1)
+        assertEquals(listOf(1, 2, 5), only.map { it.message.seq })
+        assertEquals(listOf(false, true, true), only.map { it.continues })
+        assertEquals("T3 登录接口", RoomTask.word(3, "登录接口"))
+        assertEquals("T3", RoomTask.word(3, ""))
+        assertEquals("T1 abcdefghijklmnopqrs…", RoomTask.word(1, "abcdefghijklmnopqrstuvwxyz"))
+    }
+
+    @Test
     fun testTextPiecesAndTheNameBeingTyped() {
         val handles = setOf("daemon", "you", "all")
         assertEquals(
@@ -160,6 +185,8 @@ class RoomTests {
         val said = api.say("hi", "a", replyTo = 2)
         assertEquals(mapOf("daemon" to RoomReceipt.Sent), said.reach)
         assertEquals("""{"text":"hi","replyTo":2}""", String(transport.requests.last().body!!))
+        api.say("on it", "a", files = listOf("/x/a.md"), task = 3)
+        assertEquals("""{"text":"on it","files":["/x/a.md"],"task":3}""", String(transport.requests.last().body!!))
         assertNull(api.setRoomNotes("a", ""))
         api.roundsSeen("a")
         assertEquals("/rooms/a/rounds/ok", transport.paths.last())

@@ -155,6 +155,8 @@ data class RoomMessage(
     val at: Long = 0,
     /** Files it comes with, by where they are on the Mac. */
     val files: List<String> = emptyList(),
+    /** The task of the room's list it is about (`T3`), as a topic (2026-11-24); null: about no one task. */
+    val task: Int? = null,
 )
 
 /** Where a message is on its way to a seat (§5). Dealt with, there is no receipt. */
@@ -203,6 +205,14 @@ data class RoomTask(
 
     /** As it is called in the room: `T3`. */
     val label: String get() = "T$n"
+
+    companion object {
+        /** A message's task label (2026-11-24): `T3 登录接口`, the title cut to what fits beside a name. */
+        fun word(n: Int, title: String?): String {
+            if (title.isNullOrEmpty()) return "T$n"
+            return "T$n " + if (title.length > 20) title.take(19) + "…" else title
+        }
+    }
 }
 
 /** How a room's work stands, in the list: how many tasks of each state. */
@@ -430,13 +440,15 @@ data class RoomRow(
 
         fun day(at: Long, zone: ZoneId = ZoneId.systemDefault()): LocalDate = Instant.ofEpochMilli(at).atZone(zone).toLocalDate()
 
-        fun rows(messages: List<RoomMessage>, zone: ZoneId = ZoneId.systemDefault()): List<RoomRow> {
+        /** [task]: only the messages about that task of the list (its label tapped); null: all of them. */
+        fun rows(messages: List<RoomMessage>, zone: ZoneId = ZoneId.systemDefault(), task: Int? = null): List<RoomRow> {
             val rows = ArrayList<RoomRow>(messages.size)
             var before: RoomMessage? = null
             for (m in messages) {
+                if (task != null && m.task != task) continue
                 val b = before
                 val newDay = b == null || day(b.at, zone) != day(m.at, zone)
-                val continues = !newDay && m.replyTo == null && b?.from == m.from && m.at - (b?.at ?: m.at) < gapMs
+                val continues = !newDay && m.replyTo == null && b?.from == m.from && b.task == m.task && m.at - (b?.at ?: m.at) < gapMs
                 rows += RoomRow(m, continues, newDay, m.replyTo?.let { n -> messages.firstOrNull { it.seq == n } })
                 before = m
             }

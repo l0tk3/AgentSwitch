@@ -83,6 +83,8 @@ import com.agentswitch.kit.api.RoomMessage
 import com.agentswitch.kit.api.RoomReceiptLine
 import com.agentswitch.kit.api.RoomRow
 import com.agentswitch.kit.api.RoomSeat
+import com.agentswitch.kit.api.RoomTask
+import com.agentswitch.kit.api.RoomTaskState
 import com.agentswitch.kit.api.RoomText
 import com.agentswitch.android.components.LocalOpenLink
 import com.agentswitch.kit.api.roundsSeen
@@ -205,10 +207,15 @@ fun RoomPage(id: String) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (!classic) Scanlines(Modifier.fillMaxSize())
             if (detail != null) {
+                Column(Modifier.fillMaxSize()) {
+                model.taskFilter?.let { n -> TaskFilterBar(n, detail) { model.taskFilter = null } }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                 Timeline(detail, model, openCard = { members(it) }, reply = { model.replyTo = it; runCatching { focus.requestFocus() } }, mention = ::mention, showMenu = { menu = it })
+                }
+                }
             }
         }
-        if (detail != null) RoomWriter(model, detail.seats, focus) { scope.launch { model.send(app.api) } }
+        if (detail != null) RoomWriter(model, detail, focus, showMenu = { menu = it }) { scope.launch { model.send(app.api) } }
     }
     PixelBoxEffect(menu, { menu = null }) { it }
     PixelBoxEffect(confirmDelete, { confirmDelete = false }) {
@@ -254,7 +261,7 @@ private fun RoundsNotice(rounds: Int, ok: () -> Unit, pause: () -> Unit) {
 private fun Timeline(
     detail: RoomDetail, model: RoomPageModel, openCard: (String) -> Unit, reply: (Int) -> Unit, mention: (String) -> Unit, showMenu: (PixelBox) -> Unit,
 ) {
-    val rows = remember(detail.messages) { RoomRow.rows(detail.messages) }
+    val rows = remember(detail.messages, model.taskFilter) { RoomRow.rows(detail.messages, task = model.taskFilter) }
     val handles = remember(detail.seats) { RoomText.handles(detail.seats) }
     val state = rememberLazyListState()
     val last = detail.messages.lastOrNull()?.seq
@@ -377,6 +384,7 @@ private fun MessageRow(
                             )
                             seat?.card?.agent?.takeIf { it.isNotEmpty() }?.let { RoomAgentMark(it) }
                             Text(RoomWords.time(m.at), color = Theme.inkDim, style = mono(11))
+                            m.task?.let { n -> TaskLabel(n, detail.task(n)?.title) { model.taskFilter = n } }
                         }
                     }
                     Text(
@@ -428,7 +436,8 @@ private fun Receipts(m: RoomMessage, detail: RoomDetail) {
  * before the field picks photos; they wait above it, and go with the message (RoomFileViews).
  */
 @Composable
-private fun RoomWriter(model: RoomPageModel, seats: List<RoomSeat>, focus: FocusRequester, send: () -> Unit) {
+private fun RoomWriter(model: RoomPageModel, detail: RoomDetail, focus: FocusRequester, showMenu: (PixelBox) -> Unit, send: () -> Unit) {
+    val seats = detail.seats
     val classic = LocalLook.current.isClassic
     val offers = RoomMention.query(model.draft)?.let { RoomMention.offers(it, seats) } ?: emptyList()
     var preparing by remember { mutableStateOf(false) }
@@ -447,6 +456,7 @@ private fun RoomWriter(model: RoomPageModel, seats: List<RoomSeat>, focus: Focus
                     Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "Close") { model.replyTo = null }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
                 }
             }
+            if (detail.tasks.isNotEmpty()) TaskPicker(model, detail, showMenu)
             RoomAttachmentStrip(model, preparing)
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Theme.Space.s)) {
                 RoomPhotosButton(model) { preparing = it }
@@ -492,4 +502,49 @@ private fun MentionPicker(offers: List<String>, seats: List<RoomSeat>, pick: (St
             if (i != offers.size - 1) HairRule()
         }
     }
+}
+
+/** A message's task (2026-11-24, user: 给消息加tag): `T3 登录接口`; a tap shows that task's messages alone. */
+@Composable
+private fun TaskLabel(n: Int, title: String?, tap: () -> Unit) {
+    val classic = LocalLook.current.isClassic
+    Text(
+        RoomTask.word(n, title),
+        Modifier.grounded(if (classic) Theme.panel else androidx.compose.ui.graphics.Color.Transparent, 4.dp).framed(Theme.line, if (classic) 4.dp else 0.dp)
+            .clickable(role = Role.Button, onClickLabel = "Only this task") { tap() }.padding(horizontal = 5.dp, vertical = 1.dp),
+        color = Theme.secondaryInk, style = mono(11), maxLines = 1,
+    )
+}
+
+/** The timeline narrowed to one task (its label tapped): said, with the way back. */
+@Composable
+private fun TaskFilterBar(n: Int, detail: RoomDetail, showAll: () -> Unit) {
+    val task = detail.task(n)
+    Column(Modifier.fillMaxWidth().background(Theme.panel)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Only " + RoomTask.word(n, task?.title), Modifier.weight(1f, fill = false), color = Theme.ink, style = mono(12), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            task?.owner?.let { Text("@$it", color = Theme.inkDim, style = mono(11), maxLines = 1) }
+            Spacer(Modifier.weight(1f))
+            SquareButton("Show All", showAll, expand = false)
+        }
+        HairRule()
+    }
+}
+
+/**
+ * Which task the next message is about (2026-11-24): taken from the message answered or the task the timeline shows;
+ * a tap drops down the open tasks (and the current one) and No Task.
+ */
+@Composable
+private fun TaskPicker(model: RoomPageModel, detail: RoomDetail, showMenu: (PixelBox) -> Unit) {
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    val current = model.draftTask
+    Text(
+        current?.let { "Task: " + RoomTask.word(it, detail.task(it)?.title) + " ▾" } ?: "Task: — ▾",
+        Modifier.onGloballyPositioned { bounds = it.boundsInRoot() }.clickable(role = Role.Button, onClickLabel = "Pick a task") {
+            showMenu(PixelBox(anchor = bounds, cancel = null, actions = listOf(PixelBox.Action("No Task") { model.draftTask = null }) +
+                detail.tasks.filter { it.state != RoomTaskState.Done || it.n == current }.map { t -> PixelBox.Action(RoomTask.word(t.n, t.title)) { model.draftTask = t.n } }))
+        }.padding(vertical = 2.dp),
+        color = if (current == null) Theme.inkDim else Theme.secondaryInk, style = mono(11), maxLines = 1, overflow = TextOverflow.Ellipsis,
+    )
 }

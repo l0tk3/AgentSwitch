@@ -72,8 +72,13 @@ final class RoomPageModel {
     var draft = "" { didSet { if draft != oldValue { tokensChanged() } } }
     /// The `[Image #1]` tokens standing in the box for the pictures (RoomAttachTokens), by each one's id.
     @ObservationIgnored private var attachTokens = RoomAttachTokens()
-    /// The message being answered.
-    var replyTo: Int?
+    /// The message being answered; its task becomes the next message's.
+    var replyTo: Int? { didSet { if let replyTo, let task = detail?.message(replyTo)?.task { draftTask = task } } }
+    /// The task the next message is about (2026-11-24): taken from the message answered, or the one the timeline is
+    /// narrowed to; the user can change it beside the box. nil: about no one task.
+    var draftTask: Int?
+    /// The timeline narrowed to one task's messages (a label tapped); nil: all of them.
+    var taskFilter: Int? { didSet { if let taskFilter, taskFilter != oldValue { draftTask = taskFilter } } }
     private(set) var sending = false
     /// The pictures picked here to go with the next message (`RoomMessage.maxFiles` at most).
     private(set) var attachments: [RoomAttachment] = []
@@ -184,7 +189,7 @@ final class RoomPageModel {
                 paths.append(put.path)
             }
             uploading = nil
-            try await api.say(text, in: id, replyTo: replyTo, files: paths)
+            try await api.say(text, in: id, replyTo: replyTo, files: paths, task: draftTask)
             draft = ""
             attachments = []
             attachTokens.clear()

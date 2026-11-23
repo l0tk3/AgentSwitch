@@ -12,7 +12,7 @@ private struct CreateRoomBody: Encodable { let name: String; let topic: String?;
 private struct UpdateRoomBody: Encodable { let name: String?; let topic: String?; let paused: Bool? }
 private struct AddSeatBody: Encodable { let terminal: String; let canAdd: Bool? }
 private struct SetSeatBody: Encodable { let canAdd: Bool }
-private struct SayBody: Encodable { let text: String; let replyTo: Int?; let files: [String]? }
+private struct SayBody: Encodable { let text: String; let replyTo: Int?; let files: [String]?; let task: Int? }
 private struct ReadBody: Encodable { let seq: Int }
 private struct NotesBody: Encodable { let text: String }
 private struct NotesReply: Decodable { let notes: RoomNotes? }
@@ -117,8 +117,8 @@ extension AgentSwitchAPI {
     /// The user speaks; who it is for is read from the `@names` in the text. `files`: what it comes with, by where
     /// each is on the Mac (`RoomMessage.maxFiles` at most).
     @discardableResult
-    public func say(_ text: String, in room: String, replyTo: Int? = nil, files: [String] = []) async throws -> RoomSaid {
-        try await post(["rooms", room, "messages"], body: SayBody(text: text, replyTo: replyTo, files: files.isEmpty ? nil : files))
+    public func say(_ text: String, in room: String, replyTo: Int? = nil, files: [String] = [], task: Int? = nil) async throws -> RoomSaid {
+        try await post(["rooms", room, "messages"], body: SayBody(text: text, replyTo: replyTo, files: files.isEmpty ? nil : files, task: task))
     }
 
     /// The user has seen up to `seq`.

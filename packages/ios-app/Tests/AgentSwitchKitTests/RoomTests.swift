@@ -124,6 +124,30 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(RoomRow.quote("@daemon 看一下 `GET /clash`\n好吗"), "看一下 GET /clash 好吗")
     }
 
+    func testAMessageIsAboutOneTaskAndTheTimelineNarrowsToIt() throws {
+        let decoded = try JSONDecoder().decode([RoomMessage].self, from: Data(#"[{"seq":1,"from":"daemon","to":[],"text":"a","at":1,"task":3},{"seq":2,"from":"daemon","to":[],"text":"b","at":2},{"seq":3,"from":"daemon","to":[],"text":"c","at":3,"task":null}]"#.utf8))
+        XCTAssertEqual(decoded.map(\.task), [3, nil, nil])
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let base: Int64 = 1_763_800_000_000 / 86_400_000 * 86_400_000 + 10 * 3_600_000
+        let messages = [
+            RoomMessage(seq: 1, from: "daemon", text: "一", at: base, task: 3),
+            RoomMessage(seq: 2, from: "daemon", text: "二", at: base + 1000, task: 3),
+            RoomMessage(seq: 3, from: "daemon", text: "三", at: base + 2000),          // the task changes: a new head
+            RoomMessage(seq: 4, from: "daemon", text: "四", at: base + 3000, task: 3),
+            RoomMessage(seq: 5, from: "you", text: "五", at: base + 4000, task: 1),
+        ]
+        XCTAssertEqual(RoomRow.rows(messages, calendar: calendar).map(\.continues), [false, true, false, false, false])
+        let only = RoomRow.rows(messages, task: 3, calendar: calendar)
+        XCTAssertEqual(only.map(\.message.seq), [1, 2, 4])
+        XCTAssertEqual(only.map(\.continues), [false, true, true])   // seq 3 is not shown: 4 runs on under 2
+        XCTAssertEqual(only.map(\.newDay), [true, false, false])
+        XCTAssertEqual(RoomRow.rows(messages, task: 9, calendar: calendar), [])
+        XCTAssertEqual(RoomMessage.taskWord(3, "登录接口"), "T3 登录接口")
+        XCTAssertEqual(RoomMessage.taskWord(3, nil), "T3")
+        XCTAssertEqual(RoomMessage.taskWord(12, "abcdefghijklmnopqrstuvwxyz"), "T12 abcdefghijklmnopqrs…")
+    }
+
     func testATextIsCutIntoWordsCodeAndTheNamesOfSeats() {
         let handles: Set<String> = ["daemon", "ios-app", "you", "all"]
         XCTAssertEqual(RoomText.pieces("@daemon 看 `a@b` 和 @ios-app，@Daemon；@nobody a@you.com @types/node", handles: handles), [
@@ -209,6 +233,8 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(try body(9) as NSDictionary, ["text": "@daemon 好", "replyTo": 2])
         _ = try await api.say("没有引用", in: "a1b2c3d4e5")
         XCTAssertEqual(try body(10) as NSDictionary, ["text": "没有引用"])
+        _ = try await api.say("@daemon 接着", in: "a1b2c3d4e5", replyTo: 2, task: 3)
+        XCTAssertEqual(try body(11) as NSDictionary, ["text": "@daemon 接着", "replyTo": 2, "task": 3])
         let seen = try await api.markRoomRead("a1b2c3d4e5", upTo: 9)
         XCTAssertEqual(seen, 4)
         try await api.deleteRoom("a1b2c3d4e5")
@@ -216,7 +242,7 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, [
             "GET /rooms", "GET /rooms", "GET /rooms/a1b2c3d4e5", "GET /rooms/a1b2c3d4e5", "POST /rooms", "PATCH /rooms/a1b2c3d4e5",
             "POST /rooms/a1b2c3d4e5/seats", "PATCH /rooms/a1b2c3d4e5/seats/daemon", "DELETE /rooms/a1b2c3d4e5/seats/mac-app",
-            "POST /rooms/a1b2c3d4e5/messages", "POST /rooms/a1b2c3d4e5/messages", "POST /rooms/a1b2c3d4e5/read", "DELETE /rooms/a1b2c3d4e5",
+            "POST /rooms/a1b2c3d4e5/messages", "POST /rooms/a1b2c3d4e5/messages", "POST /rooms/a1b2c3d4e5/messages", "POST /rooms/a1b2c3d4e5/read", "DELETE /rooms/a1b2c3d4e5",
         ])
         // The service's own words come back as the error.
         do { try await api.deleteRoom("gone"); XCTFail("deleted a room that is not there") } catch let error as APIError {

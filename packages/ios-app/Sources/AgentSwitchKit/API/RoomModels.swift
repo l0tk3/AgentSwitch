@@ -209,6 +209,8 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
     public let at: Int64
     /// Files it comes with, by where they are on the node (§3 附件).
     public let files: [String]
+    /// The task of the room's list it is about (`T3`), as a topic (2026-11-24); nil: about no one task.
+    public let task: Int?
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
@@ -227,10 +229,11 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains((fileName(path) as NSString).pathExtension.lowercased())
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = []) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil) {
         self.files = files
+        self.task = task
         self.seq = seq
         self.from = from
         self.to = to
@@ -248,6 +251,13 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         at = (try? c.decode(Int64.self, forKey: .at)) ?? 0
         files = (try? c.decode([String].self, forKey: .files)) ?? []
+        task = (try? c.decodeIfPresent(Int.self, forKey: .task)).flatMap { $0 }
+    }
+
+    /// A task's label (2026-11-24): `T3 登录接口`, the title cut to what fits beside a name.
+    public static func taskWord(_ n: Int, _ title: String?) -> String {
+        guard let title, !title.isEmpty else { return "T\(n)" }
+        return "T\(n) " + (title.count > 20 ? String(title.prefix(19)) + "…" : title)
     }
 }
 
@@ -767,12 +777,13 @@ public struct RoomRow: Sendable, Hashable, Identifiable {
     /// Messages further apart than this do not run together.
     public static let gap: TimeInterval = 5 * 60
 
-    public static func rows(_ messages: [RoomMessage], calendar: Calendar = .current) -> [RoomRow] {
+    /// `task`: only the messages about that task of the list (its label tapped); nil: all of them.
+    public static func rows(_ messages: [RoomMessage], task: Int? = nil, calendar: Calendar = .current) -> [RoomRow] {
         var rows: [RoomRow] = []
         var before: RoomMessage?
-        for m in messages {
+        for m in messages where task == nil || m.task == task {
             let newDay = before.map { !calendar.isDate($0.date, inSameDayAs: m.date) } ?? true
-            let continues = !newDay && m.replyTo == nil && before?.from == m.from && m.date.timeIntervalSince(before?.date ?? m.date) < gap
+            let continues = !newDay && m.replyTo == nil && before?.from == m.from && before?.task == m.task && m.date.timeIntervalSince(before?.date ?? m.date) < gap
             rows.append(RoomRow(message: m, continues: continues, newDay: newDay, quoted: m.replyTo.flatMap { n in messages.first { $0.seq == n } }))
             before = m
         }

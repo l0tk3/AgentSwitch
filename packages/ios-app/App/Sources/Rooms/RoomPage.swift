@@ -43,6 +43,7 @@ struct RoomPage: View {
                 ErrorText(message: Binding(get: { model.error }, set: { model.error = $0 }))
                     .padding(.horizontal, Theme.Space.l).padding(.vertical, 6).id(error)
             }
+            if let detail, let n = model.taskFilter { filterBar(n, detail) }
             if let detail { timeline(detail) } else { Spacer(minLength: 0) }
         }
         .background { ZStack { Theme.base; if !look.isClassic { Scanlines() } }.ignoresSafeArea() }
@@ -184,8 +185,24 @@ struct RoomPage: View {
         .overlay(alignment: .bottom) { HairRule() }
     }
 
+    /// The timeline narrowed to one task (its label tapped): said, with the way back.
+    private func filterBar(_ n: Int, _ detail: RoomDetail) -> some View {
+        let task = detail.tasks.first { $0.n == n }
+        return HStack(spacing: 10) {
+            Text("Only " + RoomMessage.taskWord(n, task?.title)).mono(12).foregroundStyle(Theme.ink).lineLimit(1)
+            if let owner = task?.owner { Text("@" + owner).mono(11.5).foregroundStyle(Theme.inkDim).lineLimit(1) }
+            Spacer(minLength: 0)
+            Button { model.taskFilter = nil } label: { ButtonWord("Show All") }
+                .buttonStyle(SquareButtonStyle(expand: false))
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, 6)
+        .background(Theme.panel)
+        .overlay(alignment: .bottom) { HairRule() }
+    }
+
     private func timeline(_ detail: RoomDetail) -> some View {
-        let rows = RoomRow.rows(detail.messages)
+        let rows = RoomRow.rows(detail.messages, task: model.taskFilter)
         let handles = RoomText.handles(of: detail.seats)
         return ScrollViewReader { proxy in
             ScrollView {
@@ -207,7 +224,8 @@ struct RoomPage: View {
                                            openCard: { members = MembersRequest(card: $0) },
                                            reply: { model.replyTo = row.message.seq; writing = true },
                                            mention: { mention($0) },
-                                           openFile: { showFile($0) })
+                                           openFile: { showFile($0) },
+                                           openTask: { model.taskFilter = $0 })
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 8).id("end").reportsListEnd(in: "roomTimeline")
@@ -284,6 +302,8 @@ private struct RoomMessageRow: View {
     let mention: (String) -> Void
     /// A file a message came with, by where it is on the node.
     let openFile: (String) -> Void
+    /// The timeline narrowed to a task's messages (its label tapped).
+    let openTask: (Int) -> Void
     @Environment(\.interfaceLook) private var look
 
     private static let faceSide: CGFloat = 26
@@ -346,7 +366,20 @@ private struct RoomMessageRow: View {
             .buttonStyle(.plain).allowsHitTesting(m.from != RoomSeat.you)
             if let agent = seat?.card?.agent, !agent.isEmpty { RoomAgentMark(agent: agent) }
             Text(RoomWords.time(m.date)).mono(11.5).foregroundStyle(Theme.inkDim)
+            if let n = m.task { taskLabel(n) }
         }
+    }
+
+    /// A message's task (2026-11-24): `T3 登录接口`; a tap shows that task's messages alone.
+    private func taskLabel(_ n: Int) -> some View {
+        Button { openTask(n) } label: {
+            Text(RoomMessage.taskWord(n, detail.tasks.first { $0.n == n }?.title)).mono(11).foregroundStyle(Theme.secondaryInk).lineLimit(1)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 4)
+                .framed(Theme.line, radius: look.isClassic ? 4 : 0)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Only T\(n)")
     }
 
     private func quote(_ quoted: RoomMessage) -> some View {
@@ -393,6 +426,7 @@ private struct RoomWriter: View {
             if !offers.isEmpty { picker(offers) }
             if let n = model.replyTo { replying(n) }
             if model.sendError != nil { ErrorText(message: $model.sendError) }
+            if let tasks = model.detail?.tasks, !tasks.isEmpty { taskPicker(tasks) }
             RoomAttachmentStrip(model: model)
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 Button { pickingPhotos = true } label: {
@@ -436,6 +470,22 @@ private struct RoomWriter: View {
             photoItems = []
             Task { await model.attach(await PickedFiles.photos(items)) }
         }
+    }
+
+    /// Which task the next message is about (2026-11-24): taken from the message answered or the task the timeline
+    /// shows; the user can change it or say none. Open tasks, and the one picked even when done.
+    private func taskPicker(_ tasks: [RoomTask]) -> some View {
+        Menu {
+            Button("No Task") { model.draftTask = nil }
+            Divider()
+            ForEach(tasks.filter { $0.state != .done || $0.n == model.draftTask }) { task in
+                Button(RoomMessage.taskWord(task.n, task.title)) { model.draftTask = task.n }
+            }
+        } label: {
+            Text(model.draftTask.map { n in "Task: " + RoomMessage.taskWord(n, tasks.first { $0.n == n }?.title) } ?? "Task: —")
+                .mono(11.5).foregroundStyle(model.draftTask == nil ? Theme.inkDim : Theme.secondaryInk).lineLimit(1)
+        }
+        .accessibilityLabel("Task")
     }
 
     private func replying(_ n: Int) -> some View {

@@ -130,8 +130,29 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
     /** The `[Image #1]` / `[File …]` tokens standing in the box for the pictures (RoomAttachTokens), by each one's id. */
     private val attachTokens = RoomAttachTokens()
 
-    /** The message being answered. */
-    var replyTo: Int? by mutableStateOf(null)
+    private var replyingTo: Int? by mutableStateOf(null)
+
+    /** The message being answered: its task becomes the next message's. */
+    var replyTo: Int?
+        get() = replyingTo
+        set(value) {
+            replyingTo = value
+            if (value != null) detail?.message(value)?.task?.let { draftTask = it }
+        }
+
+    /** The task the next message is about (2026-11-24): taken from the message answered, or the one the timeline is
+     *  narrowed to; the user can change it beside the box. null: about no one task. */
+    var draftTask: Int? by mutableStateOf(null)
+
+    private var narrowedTo: Int? by mutableStateOf(null)
+
+    /** The timeline narrowed to one task's messages (a label tapped); null: all of them. */
+    var taskFilter: Int?
+        get() = narrowedTo
+        set(value) {
+            narrowedTo = value
+            if (value != null) draftTask = value
+        }
     var sending: Boolean by mutableStateOf(false)
         private set
 
@@ -274,7 +295,7 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
             }
             putting = false
             uploading = null
-            api.say(text, id, replyTo, paths)
+            api.say(text, id, replyTo, paths, draftTask)
             draft = ""
             attachments = emptyList()
             attachTokens.clear()
