@@ -76,7 +76,7 @@ jobs:
   secret-gate-windows:
     name: secret-gate · Windows (pytest, service smoke)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: packages/secret-gate
@@ -91,7 +91,8 @@ jobs:
       - run: python -m venv .venv; .venv\Scripts\pip install --quiet -c ../mac-app/scripts/python-constraints.txt -e '.[dev]'
       # UTF-8 mode for the tests only: they read the gate's UTF-8 files with Path.read_text(), as on POSIX (the gate
       # itself names its encodings, and its service runs with -X utf8)
-      - run: .venv\Scripts\pytest --cov-fail-under=0
+      # A hung test fails after 2 minutes with every thread's stack instead of silently using up the job's time.
+      - run: .venv\Scripts\pytest --cov-fail-under=0 -v -rfE --timeout=120 --timeout-method=thread
         env:
           PYTHONUTF8: "1"
       - name: windows_service_smoke.ps1 (install, status, enc, proxy, rotate-key, uninstall)
