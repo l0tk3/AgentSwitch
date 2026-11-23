@@ -298,6 +298,102 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// One piece of the room's work (§9 任务表): who does what, and how far it is.
+public struct RoomTask: Decodable, Equatable, Sendable, Identifiable {
+    public enum State: String, Sendable, CaseIterable { case doing, todo, done }
+
+    public let n: Int
+    public let title: String
+    public let detail: String?
+    public let state: State
+    public let owner: String?
+    public let by: String
+    public let updatedAt: Int64
+    /// Tasks that come first, by number.
+    public let after: [Int]
+    /// How it ended, in a line.
+    public let note: String?
+
+    public var id: Int { n }
+    public var name: String { "T\(n)" }
+
+    private enum CodingKeys: String, CodingKey { case n, title, detail, state, owner, by, updatedAt, after, note }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        n = try c.decode(Int.self, forKey: .n)
+        title = try c.decode(String.self, forKey: .title)
+        detail = try? c.decodeIfPresent(String.self, forKey: .detail)
+        state = State(rawValue: (try? c.decode(String.self, forKey: .state)) ?? "") ?? .todo
+        owner = try? c.decodeIfPresent(String.self, forKey: .owner)
+        by = (try? c.decodeIfPresent(String.self, forKey: .by)) ?? Room.you
+        updatedAt = RoomJSON.int(c, .updatedAt) ?? 0
+        after = (try? c.decodeIfPresent([Int].self, forKey: .after)) ?? []
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// A member saying which files it is changing (§9): a word to the others, not a lock, gone by itself at `until`.
+public struct RoomClaim: Decodable, Equatable, Sendable {
+    public let handle: String
+    public let paths: [String]
+    public let why: String?
+    public let until: Int64
+
+    private enum CodingKeys: String, CodingKey { case handle, paths, why, until }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        handle = try c.decode(String.self, forKey: .handle)
+        paths = (try? c.decodeIfPresent([String].self, forKey: .paths)) ?? []
+        why = try? c.decodeIfPresent(String.self, forKey: .why)
+        until = RoomJSON.int(c, .until) ?? 0
+    }
+
+    public var untilDate: Date { Date(timeIntervalSince1970: Double(until) / 1000) }
+
+    /// `form.ts +2`: the first one's name, and how many more.
+    public var names: String {
+        let all = paths.map { ($0 as NSString).lastPathComponent }
+        return (all.first ?? "") + (all.count > 1 ? " +\(all.count - 1)" : "")
+    }
+}
+
+/// What is in a room's shared folder (§9), the newest first.
+public struct RoomFiles: Decodable, Equatable, Sendable {
+    public struct File: Decodable, Equatable, Sendable, Identifiable {
+        /// Under the folder.
+        public let path: String
+        public let size: Int64
+        public let modifiedAt: Int64
+
+        public var id: String { path }
+        public var date: Date { Date(timeIntervalSince1970: Double(modifiedAt) / 1000) }
+
+        private enum CodingKeys: String, CodingKey { case path, size, modifiedAt }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            path = try c.decode(String.self, forKey: .path)
+            size = RoomJSON.int(c, .size) ?? 0
+            modifiedAt = RoomJSON.int(c, .modifiedAt) ?? 0
+        }
+    }
+
+    public let folder: String
+    public let files: [File]
+    public let more: Bool
+
+    private enum CodingKeys: String, CodingKey { case folder, files, more }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folder = try c.decode(String.self, forKey: .folder)
+        files = (try? c.decodeIfPresent([File].self, forKey: .files)) ?? []
+        more = (try? c.decodeIfPresent(Bool.self, forKey: .more)) ?? false
+    }
+}
+
 /// A room as it is read: itself, its seats (those that left too: they said things), what was said, and the receipts
 /// still open.
 public struct Room: Decodable, Equatable, Sendable {
@@ -320,13 +416,18 @@ public struct Room: Decodable, Equatable, Sendable {
     public static func roundsSays(_ n: Int) -> String { "这里的会话已经连续往返 \(n) 次，没有你参与。没有中断它们。" }
 
     public let notes: RoomNotes?
+    public let tasks: [RoomTask]
+    /// What members say they are changing now.
+    public let claims: [RoomClaim]
+    /// The room's shared folder on its node; nil from a service that has none.
+    public let folder: String?
     public let room: Head
     public let seats: [RoomSeat]
     public let messages: [RoomMessage]
     /// Message number → handle → where it is.
     public let receipts: [String: [String: String]]
 
-    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes }
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes, tasks, claims, folder }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -335,10 +436,28 @@ public struct Room: Decodable, Equatable, Sendable {
         messages = try c.decode([RoomMessage].self, forKey: .messages)
         receipts = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .receipts)) ?? [:]
         notes = try? c.decodeIfPresent(RoomNotes.self, forKey: .notes)
+        tasks = (try? c.decodeIfPresent([RoomTask].self, forKey: .tasks)) ?? []
+        claims = (try? c.decodeIfPresent([RoomClaim].self, forKey: .claims)) ?? []
+        folder = try? c.decodeIfPresent(String.self, forKey: .folder)
     }
+
+    /// The tasks in the order they are read: being done, to do, done (the last finished first).
+    public func tasks(_ state: RoomTask.State) -> [RoomTask] {
+        let found = tasks.filter { $0.state == state }
+        return state == .done ? found.sorted { $0.updatedAt > $1.updatedAt } : found
+    }
+
+    /// The tasks a task still waits for.
+    public func waits(_ task: RoomTask) -> [Int] { task.after.filter { n in tasks.contains { $0.n == n && $0.state != .done } } }
+
+    /// What a member says it is changing now.
+    public func claim(of handle: String) -> RoomClaim? { claims.first { $0.handle == handle } }
 
     public init(room: Head, seats: [RoomSeat], messages: [RoomMessage], receipts: [String: [String: String]] = [:], notes: RoomNotes? = nil) {
         self.notes = notes
+        self.tasks = []
+        self.claims = []
+        self.folder = nil
         self.room = room
         self.seats = seats
         self.messages = messages
@@ -548,6 +667,35 @@ public extension DaemonClient {
     /// The user has seen the sessions' rounds go by (`OK`): counted from here again.
     func roundsSeen(in room: String) async throws {
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/rounds/ok", timeout: 10)
+    }
+
+    /// A task the user adds; `owner`: the member whose it is.
+    func addTask(_ title: String, detail: String = "", owner: String? = nil, in room: String) async throws {
+        _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/tasks", body: try JSONSerialization.data(withJSONObject: DaemonClient.taskBody(title: title, detail: detail, owner: owner)), timeout: 10)
+    }
+
+    static func taskBody(title: String, detail: String, owner: String?) -> [String: Any] {
+        var object: [String: Any] = ["title": title]
+        if !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { object["detail"] = detail }
+        if let owner { object["owner"] = owner }
+        return object
+    }
+
+    /// A task's state, or whose it is (`.some(nil)`: nobody's).
+    func setTask(_ n: Int, state: RoomTask.State? = nil, owner: String?? = nil, in room: String) async throws {
+        var object: [String: Any] = [:]
+        if let state { object["state"] = state.rawValue }
+        if let owner { object["owner"] = owner ?? NSNull() }
+        _ = try await call("PATCH", "/rooms/\(DaemonClient.segment(room))/tasks/\(n)", body: try JSONSerialization.data(withJSONObject: object), timeout: 10)
+    }
+
+    func deleteTask(_ n: Int, in room: String) async throws {
+        _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/tasks/\(n)", timeout: 10)
+    }
+
+    /// What is in the room's shared folder.
+    func roomFiles(_ room: String) async throws -> RoomFiles {
+        try decode(RoomFiles.self, try await call("GET", "/rooms/\(DaemonClient.segment(room))/files", timeout: 10))
     }
 
     /// The pinned notes, whole, in place of what was there.

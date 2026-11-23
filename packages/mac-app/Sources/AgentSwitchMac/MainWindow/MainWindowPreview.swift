@@ -100,6 +100,14 @@ enum MainWindowPreview {
     static func renderRooms(model: AppModel, into directory: URL) async throws {
         let name = InterfaceLook.current.isClassic ? "main-rooms-classic" : "main-rooms"
         try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name).png"))
+        // What floats over it (§9): the task list, the shared folder, and a member's card with what it is changing.
+        for (sheet, card, tail) in [(RoomsModel.Sheet.tasks, nil, "tasks"), (.files, nil, "files"), (nil, "mac-app", "card")] as [(RoomsModel.Sheet?, String?, String)] {
+            RoomsDemo.opens = sheet
+            RoomsDemo.card = card
+            try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name)-\(tail).png"))
+        }
+        RoomsDemo.opens = nil
+        RoomsDemo.card = nil
     }
 
     static func renderRail(model: AppModel, into directory: URL) async throws {

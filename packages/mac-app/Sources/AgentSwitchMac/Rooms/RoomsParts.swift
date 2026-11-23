@@ -342,6 +342,8 @@ struct RoomMemberRow: View {
 struct RoomMemberCard: View {
     let seat: RoomSeat
     let home: String
+    /// What it says it is changing now (§9).
+    var claim: RoomClaim? = nil
     let setCanAdd: (Bool) -> Void
     let mention: () -> Void
     let remove: () -> Void
@@ -368,6 +370,7 @@ struct RoomMemberCard: View {
                 if let state = seat.state { line("State", ClassicWords.word(state.word, in: look), color: state.wordColor) }
                 if seat.needsResume { line("Kit", "No Kit", color: .waiting) }
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
+                if let claim { line("Changing", "\(claim.names) · until \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }
             }
             .padding(.top, 10)
             .padding(.bottom, 12)
@@ -416,10 +419,10 @@ struct RoomMemberCard: View {
         .roomFloat()
     }
 
-    private func line(_ label: String, _ value: String, mono: Bool = false, color: Color = Look.ink) -> some View {
+    private func line(_ label: String, _ value: String, mono: Bool = false, color: Color = Look.ink, help: String? = nil) -> some View {
         GridRow {
             Text(label).mono(12).foregroundStyle(Look.faint).gridColumnAlignment(.leading)
-            Text(value).font(.system(size: 12, design: mono ? .monospaced : .default)).foregroundStyle(color).lineLimit(1).truncationMode(.middle).help(value)
+            Text(value).font(.system(size: 12, design: mono ? .monospaced : .default)).foregroundStyle(color).lineLimit(1).truncationMode(.middle).help(help ?? value)
         }
     }
 }

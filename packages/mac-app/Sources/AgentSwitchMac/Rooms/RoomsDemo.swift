@@ -27,7 +27,14 @@ extension RoomsDemo {
           {"seq":5,"from":"daemon","to":["mac-app","web"],"text":"@mac-app 毫秒。@web 你那边的类型也要改。","at":\(at(10))},
           {"seq":6,"from":"mac-app","to":["you"],"text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}],
          "receipts":{"2":{"ios-app":"queued"},"5":{"web":"ended"}},
-         "notes":{"text":"接口：/login 返回 expiresAt（毫秒）\\n待办：web 的类型","at":\(at(20)),"by":"daemon"}}
+         "notes":{"text":"接口：/login 返回 expiresAt（毫秒）\\n待办：web 的类型","at":\(at(20)),"by":"daemon"},
+         "folder":"/Users/you/Library/Application Support/AgentSwitch/room-files/login",
+         "tasks":[
+          {"n":1,"title":"定登录接口","state":"done","owner":"daemon","by":"you","updatedAt":\(at(30)),"note":"见 interface.md"},
+          {"n":2,"title":"Mac 的模型跟着改","detail":"加 expiresAt，毫秒","state":"doing","owner":"mac-app","by":"daemon","updatedAt":\(at(12)),"after":[1]},
+          {"n":3,"title":"iPhone 的模型跟着改","state":"todo","owner":"ios-app","by":"daemon","updatedAt":\(at(12)),"after":[1]},
+          {"n":4,"title":"发一版","state":"todo","by":"you","updatedAt":\(at(5)),"after":[2,3]}],
+         "claims":[{"handle":"mac-app","paths":["/Users/you/Projects/AgentSwitch/packages/mac-app/Sources/Login.swift","/Users/you/Projects/AgentSwitch/packages/mac-app/Sources/Session.swift"],"why":"T2","at":\(at(10)),"until":\(at(-20))}]}
         """
         let room = try! JSONDecoder().decode(Room.self, from: Data(json.utf8))
         let list = try! JSONDecoder().decode([RoomSummary].self, from: Data("""
@@ -38,5 +45,15 @@ extension RoomsDemo {
          {"id":"docs","name":"文档","topic":"clash-v0 第 12 节","paused":false,"members":2,"unread":0,"forYou":false,"rounds":7,"last":null}]
         """.utf8))
         return RoomsDemo(rooms: list, room: room)
+    }()
+
+    static let files: RoomFiles = {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return try! JSONDecoder().decode(RoomFiles.self, from: Data("""
+        {"folder":"/Users/you/Library/Application Support/AgentSwitch/room-files/login","more":false,"files":[
+          {"path":"interface.md","size":2140,"modifiedAt":\(now - 30 * 60_000)},
+          {"path":"review/mac-app.md","size":18432,"modifiedAt":\(now - 3 * 3_600_000)},
+          {"path":"plan.md","size":812,"modifiedAt":\(now - 26 * 3_600_000)}]}
+        """.utf8))
     }()
 }

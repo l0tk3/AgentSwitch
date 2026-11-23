@@ -11,7 +11,7 @@ import SwiftUI
 final class RoomsModel {
     /// What floats over the page: a room being made, sessions being added to the one on screen, or its name and topic
     /// being changed.
-    enum Sheet: Equatable { case new, add, edit, notes }
+    enum Sheet: Equatable { case new, add, edit, notes, tasks, files }
 
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// A made-up page for the design preview: shown as it is, the service never asked.
@@ -56,6 +56,8 @@ final class RoomsModel {
     // what floats
     var card: String?
     var sheet: Sheet?
+    /// What is in the room's shared folder, read when its sheet opens; nil: not read yet.
+    private(set) var shared: RoomFiles?
     /// The sessions running on the node, for a sheet's list.
     private(set) var terminals: [TerminalInfo] = []
     var deleting = false
@@ -250,6 +252,42 @@ final class RoomsModel {
         act { try await $0.writeNotes(text, in: id) }
     }
 
+    // MARK: the room's work (§9)
+
+    func addTask(_ title: String, detail: String, owner: String?) {
+        guard let id = selected else { return }
+        act { try await $0.addTask(title, detail: detail, owner: owner, in: id) }
+    }
+
+    func setTask(_ n: Int, state: RoomTask.State) {
+        guard let id = selected else { return }
+        act { try await $0.setTask(n, state: state, in: id) }
+    }
+
+    /// Whose a task is; nil: nobody's.
+    func setTask(_ n: Int, owner: String?) {
+        guard let id = selected else { return }
+        act { try await $0.setTask(n, owner: .some(owner), in: id) }
+    }
+
+    func deleteTask(_ n: Int) {
+        guard let id = selected else { return }
+        act { try await $0.deleteTask(n, in: id) }
+    }
+
+    func loadShared() {
+        guard let id = selected, !demo else { return }
+        Task {
+            do { shared = try await client().roomFiles(id) } catch { problem = Self.say(error) }
+        }
+    }
+
+    /// The room's shared folder, or a file in it, in Finder.
+    func revealShared(_ path: String? = nil) {
+        guard let folder = shared?.folder ?? room?.folder else { return }
+        if let path { reveal(folder + "/" + path) } else if onThisMac { NSWorkspace.shared.open(URL(fileURLWithPath: folder)) }
+    }
+
     func setCanAdd(_ on: Bool, seat: String) {
         guard let id = selected else { return }
         act { try await $0.setCanAdd(on, seat: seat, in: id) }
@@ -273,6 +311,7 @@ final class RoomsModel {
     func open(_ sheet: Sheet) {
         self.sheet = sheet
         card = nil
+        if sheet == .files { shared = demo ? RoomsDemo.files : nil; loadShared() }
         guard sheet == .new || sheet == .add, !demo else { return }
         Task {
             if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
@@ -300,7 +339,7 @@ final class RoomsModel {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
-                case .notes: break
+                case .notes, .tasks, .files: break
                 case .edit:
                     guard let id else { break }
                     try await client().updateRoom(id, name: name, topic: topic)

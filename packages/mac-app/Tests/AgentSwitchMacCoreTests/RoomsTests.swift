@@ -212,4 +212,45 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(full["replyTo"] as? Int, 3)
         XCTAssertEqual(full["files"] as? [String], ["/w/a.md"])
     }
+
+    func testTheRoomsWorkIsReadAndAnOlderServiceHasNone() throws {
+        let room = try JSONDecoder().decode(Room.self, from: Data("""
+        {"room":{"id":"r","name":"R","topic":"","paused":false,"lastSeq":0,"readSeq":0},"seats":[],"messages":[],
+         "folder":"/h/room-files/r",
+         "tasks":[{"n":1,"title":"a","state":"done","owner":"api","by":"you","updatedAt":10.0,"note":"see a.md"},
+                  {"n":2,"title":"b","state":"doing","owner":"ui","by":"api","updatedAt":20,"after":[1]},
+                  {"n":3,"title":"c","state":"todo","by":"you","updatedAt":30,"after":[1,2]},
+                  {"n":4,"title":"d","state":"done","by":"you","updatedAt":40},
+                  {"n":5,"title":"e","state":"later","by":"you","updatedAt":50}],
+         "claims":[{"handle":"ui","paths":["/w/src/form.ts","/w/src/app.ts","/w/x"],"why":"T2","at":1,"until":1800000}]}
+        """.utf8))
+        XCTAssertEqual(room.folder, "/h/room-files/r")
+        XCTAssertEqual(room.tasks(.doing).map(\.n), [2])
+        XCTAssertEqual(room.tasks(.todo).map(\.n), [3, 5], "a state this app does not know is to do")
+        XCTAssertEqual(room.tasks(.done).map(\.n), [4, 1], "the last finished first")
+        XCTAssertEqual(room.waits(room.tasks[2]), [2], "T1 is done; T2 is not")
+        XCTAssertEqual(room.tasks[0].name, "T1")
+        XCTAssertEqual(room.tasks[0].note, "see a.md")
+        XCTAssertEqual(room.claim(of: "ui")?.names, "form.ts +2")
+        XCTAssertNil(room.claim(of: "api"))
+
+        let older = try self.room()
+        XCTAssertEqual(older.tasks, [])
+        XCTAssertEqual(older.claims, [])
+        XCTAssertNil(older.folder)
+
+        let files = try JSONDecoder().decode(RoomFiles.self, from: Data("""
+        {"folder":"/h/room-files/r","files":[{"path":"api/interface.md","size":2048,"modifiedAt":1700000000000.4}],"more":true}
+        """.utf8))
+        XCTAssertEqual(files.files.map(\.path), ["api/interface.md"])
+        XCTAssertEqual(files.files[0].size, 2048)
+        XCTAssertTrue(files.more)
+    }
+
+    func testATaskTheUserAddsCarriesOnlyWhatWasGiven() {
+        XCTAssertEqual(Set(DaemonClient.taskBody(title: "a", detail: "  ", owner: nil).keys), ["title"])
+        let full = DaemonClient.taskBody(title: "a", detail: "how", owner: "ui")
+        XCTAssertEqual(full["detail"] as? String, "how")
+        XCTAssertEqual(full["owner"] as? String, "ui")
+    }
 }

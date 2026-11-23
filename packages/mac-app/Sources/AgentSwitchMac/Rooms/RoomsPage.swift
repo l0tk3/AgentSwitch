@@ -26,6 +26,8 @@ struct RoomsPage: View {
                 model.onThisMac = node == nil
                 if let demo {
                     model.show(demo: demo.rooms, room: demo.room)
+                    if let sheet = RoomsDemo.opens { model.open(sheet) }
+                    if let card = RoomsDemo.card { model.card = card }
                     tell()
                     return
                 }
@@ -53,6 +55,9 @@ struct RoomsPage: View {
 
 /// A made-up room for the design preview.
 struct RoomsDemo {
+    /// The design preview: what floats over the made-up room when it is drawn.
+    @MainActor static var opens: RoomsModel.Sheet?
+    @MainActor static var card: String?
     let rooms: [RoomSummary]
     let room: Room
 }
@@ -102,7 +107,12 @@ private struct RoomsColumns: View {
     private var sheet: some View {
         ZStack {
             Color.black.opacity(0.45).contentShape(Rectangle()).onTapGesture { model.sheet = nil }
-            if model.sheet == .notes { RoomNotesSheet(model: model) } else { RoomSheet(model: model, kind: model.sheet ?? .new) }
+            switch model.sheet {
+            case .notes: RoomNotesSheet(model: model)
+            case .tasks: RoomTasksSheet(model: model)
+            case .files: RoomFilesSheet(model: model)
+            default: RoomSheet(model: model, kind: model.sheet ?? .new)
+            }
         }
     }
 }
@@ -198,6 +208,10 @@ private struct RoomView: View {
                 Text(room.room.name).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1).fixedSize()
                 Text(room.room.topic).font(.system(size: 12.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 8)
+                Button { model.open(.tasks) } label: { BracketLabel(word: room.tasks.isEmpty ? "Tasks" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)") }.buttonStyle(BracketButtonStyle(size: 12))
+                    .help("任务表：谁在做什么、做到哪了。成员和你都能加、能改。")
+                Button { model.open(.files) } label: { BracketLabel(word: "Files") }.buttonStyle(BracketButtonStyle(size: 12))
+                    .help("共享文件夹：成员把报告、方案这类长内容写在这里，消息里只放路径。")
                 Button { model.open(.notes) } label: { BracketLabel(word: "Notes") }.buttonStyle(BracketButtonStyle(size: 12))
                     .help(room.notes == nil ? "置顶笔记：成员都能读、能改的一份约定。" : "置顶笔记，\(room.notes!.who) 最后写于 \(TimeText.at(room.notes!.date))。")
                 Button { model.open(.edit) } label: { BracketLabel(word: "Edit") }.buttonStyle(BracketButtonStyle(size: 12))
@@ -217,7 +231,7 @@ private struct RoomView: View {
             if let handle = model.card, let seat = room.seat(handle), !seat.isUser {
                 ZStack(alignment: .topTrailing) {
                     Color.clear.contentShape(Rectangle()).onTapGesture { model.card = nil }
-                    RoomMemberCard(seat: seat, home: home, setCanAdd: { model.setCanAdd($0, seat: handle) },
+                    RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
                                    mention: { model.mention(handle) }, remove: { model.remove(seat: handle) })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
@@ -524,6 +538,8 @@ private struct RoomSheet: View {
         case .add: "Add Sessions"
         case .edit: "Edit Room"
         case .notes: "Notes"
+        case .tasks: "Tasks"
+        case .files: "Files"
         }
     }
 
@@ -537,7 +553,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
-        case .notes: false
+        case .notes, .tasks, .files: false
         }
     }
 
