@@ -121,7 +121,7 @@ try {
     $out = ThroughProxy $token
     Write-Host $out
     if ($out -notmatch [regex]::Escape('you sent: Bearer [REDACTED:echo/pass]')) { Fail 'the response was not redacted' }
-    if ((Get-Content $received)[-1] -ne "Bearer $value") { Fail 'the site did not receive the real value' }
+    if (@(Get-Content $received)[-1] -ne "Bearer $value") { Fail 'the site did not receive the real value' }
     if ($out -match [regex]::Escape($value)) { Fail 'the value came back to the client' }
 
     Step 'rotate-key: the old token stops working, a new one works without restarting the service'
@@ -136,7 +136,7 @@ try {
     if ($lines.Count -gt $count -and $lines[-1] -eq "Bearer $value") { Fail 'the old token still opened' }
     $new = ThroughProxy (Seal 'echo/pass')
     if ($new -notmatch [regex]::Escape('[REDACTED:echo/pass]')) { Write-Host $old; Write-Host $new; Fail 'a token sealed to the new key did not work' }
-    if ((Get-Content $received)[-1] -ne "Bearer $value") { Fail 'the site did not receive the real value after rotate-key' }
+    if (@(Get-Content $received)[-1] -ne "Bearer $value") { Fail 'the site did not receive the real value after rotate-key' }
     Stop-Process -Id $echo.Id -ErrorAction SilentlyContinue
 
     Step 'uninstall --delete-keys'
