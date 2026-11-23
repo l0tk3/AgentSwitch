@@ -34,8 +34,7 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 |---|---|
 | 多钥匙与旧钥匙（`keys new/use/retire/restore`、legacy、`keys.json` 多条） | 只剩一把。轮换走管理员操作：重新生成，旧密文作废，重新封装 |
 | 安装时的迁移（`migrate.py`、`user_dir.py`，用户目录里的 refs、模板、例外名单、旧私钥） | 用户现在没有密文；装服务时直接生成新钥匙，不从用户目录搬任何东西，root 也不再读用户目录 |
-| 凭据修复与重新签发（`credential.*`、`mcp.repair`、`secret_repair`、`totp_seed_import`） | 用得少，而且是第 3 条缺口所在 |
-| `exec` 命令模板（`mcp.exec`、`secret_exec`、`exec_templates`） | 子进程拿到明文后去向不可控，脱敏器管不到 |
+| 凭据修复与重新签发（`credential.*`、`mcp.repair`、`secret_repair`、`totp_seed_import`） | 用得少，而且是第 3 条缺口所在。网站需要种子本身时，用户在 Mac 或手机上把种子另封一份“密码类”密文（`fill` 用途，只给那个网站）（用户定，2026-11-23） |
 | 本地网关退路 | 装了服务就只走服务（今天已修，`48fa7df`）；没装服务的机器只用于测试和开发 |
 
 ## 2. 本机接口
@@ -47,11 +46,14 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 | `status` | 服务是否在、代理端口、钥匙指纹 | 否 |
 | `refs.register` / `refs.release` | daemon 为任务登记、释放短引用 | 否 |
 | `mcp.describe` / `mcp.otp` / `mcp.http` | agent 的网关工具：查看密文元信息、取 6 位验证码、经代理发请求（结果先脱敏） | 否（验证码 30 秒失效，推不出种子） |
+| `mcp.exec` | 按管理员配置的模板在服务里跑命令；值只经模板声明的环境变量或标准输入交给子进程，命令行里不许出现；调用方参数不许以 `-` 开头；输出过 §3 的脱敏器（用户定保留，2026-11-23；今天已改，`00f5253`） | 否 |
 | `browser.register` / `browser.config` | 浏览器组件登记引用、读遮罩配置 | 否 |
 | `browser.resolve` | 浏览器组件填网页时取值 | **是**，见 §4 |
 | `logs.tail` | Mac 应用看服务日志（已脱敏） | 否 |
 
-去掉的方法：`keys.new/use/retire/restore`、`keys.list`（改读公开的公钥文件）、`credential.info/reissue`、`mcp.exec`、`mcp.repair`。
+去掉的方法：`keys.new/use/retire/restore`、`keys.list`（改读公开的公钥文件）、`credential.info/reissue`、`mcp.repair`。
+
+`exec` 的已知限制：命令拿到值以后做什么（写文件、写自己的日志），网关管不到；能管的只是命令的输出。所以模板只由管理员配置，迁移时不从用户目录导入。
 
 ## 3. 脱敏器：一条规矩
 
@@ -121,7 +123,7 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 ## 7. 落地顺序
 
 1. **脱敏器补齐**（§3.1、§3.2）与**封装下限、长度填充**（§3.3、§3.4）。它直接对应“推不出”，与服务的去留无关，先做。
-2. **精简服务**（§1、§2）：删方法、删多钥匙、删迁移、删 exec 和 repair；daemon、Mac、iPhone、Android 同步改。
+2. **精简服务**（§1、§2）：删方法、删多钥匙、删迁移、删 repair；daemon、Mac、iPhone、Android 同步改。
 3. **Linux 服务账户**（§5）：安装脚本、systemd 单元、`SO_PEERCRED`。
 4. **Windows**（§5）：服务、命名管道、ACL，以及 Windows CI。
 5. 重写 `BOUNDARY.md`：按“出口 × 输出”列表，开头写明 §0 的“不防”。`gate-service-v0.md` 标为“已被本稿收窄”。
@@ -130,5 +132,5 @@ Linux 没有 sudo 权限时的退路：网关以登录用户身份运行，私�
 
 ## 8. 待用户定
 
-- **Q1**：删 `exec` 与凭据修复（§1）：有没有在用的场景？
+- ~~Q1~~：已定——`exec` 保留（环境变量或标准输入），凭据修复删除，种子需要填写时由用户另封一份密码类密文。
 - **Q2**：最短 8 个字符（§3.3）可以吗？
