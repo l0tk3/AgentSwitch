@@ -40,20 +40,22 @@ and the user does not expect you to.
 - If the site rejects the login (for example it hashes the password in the browser before sending,
   or logs in over a non-HTTP protocol), use the MCP tools `secret_http`, `secret_otp` (current
   2FA code) or `secret_exec` instead of raw shell commands.
+- `secret_exec(argv, env)` runs your own command with values in environment variables:
+  `argv` is the command (no shell; use `["sh", "-c", "..."]` for one) and must not contain any
+  `enc:` value; `env` maps upper-case names to exactly one `enc:v1:` / `enc:ref:` value each, e.g.
+  `{"PGPASSWORD": "enc:ref:…"}`, which the command reads as `$PGPASSWORD`. Only values the user
+  sealed for use `exec` work. The output is redacted, so printing the variable shows
+  `[REDACTED:label]`; there is no need to check it that way.
 - `secret_describe(value)` shows a value's label, allowed hosts and uses, so you can check you
   have the right one.
 - TOTP **seed import** and a current **verification code** are different operations. A token of
   kind `totp` produces a short-lived code, including when used over HTTP; never put that code
-  into a seed-storage field. A seed-storage field needs a `secret` / `http` token.
-- If a seed-storage fill fails because the TOTP token allows only `otp`, call
-  `secret_repair(token, host, purpose="totp_seed_import")` only when the original user task
-  explicitly requested importing that seed into that same destination. This asks the task
-  dispatcher to check the request and returns a replacement ciphertext, never plaintext.
-  The old ciphertext must already carry `seed_import_hosts` permission for this exact host;
-  the tool cannot add permission or targets. If the grant is absent, ask the user to submit
-  the field and its destination in a new message. Do not decode the token, change hosts,
-  call `credential-reissue` yourself, repeatedly retry the rejected fill, or skip the field
-  without the user's answer. A repair does not fill or submit anything automatically.
+  into a seed-storage field. A seed-storage field needs a `secret` token the user sealed for
+  that site with use `fill`.
+- If a seed-storage fill fails because the TOTP token allows only `otp`, stop and tell the user:
+  they seal the seed again as a password-type value for that site (on the Mac or the phone).
+  There is no tool that converts a token; do not decode it, change hosts, retry the fill, or
+  skip the field without the user's answer.
 - In the browser (Playwright tools): put the value into a field with `secret_fill(target, token)`,
   or pass it as the `text` of `browser_type` / a field `value` of `browser_fill_form`. The gate
   types the real value into the page for you; the page's own validation sees the real value.

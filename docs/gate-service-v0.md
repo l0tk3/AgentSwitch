@@ -1,5 +1,7 @@
 # gate-service-v0：凭据网关以独立服务账户运行
 
+> **已被 gate-simple-v0 收窄**（2026-11-23，`docs/gate-simple-v0.md`）：只剩一把钥匙（没有 `keys new/use/retire/restore`、legacy 钥匙和 `keys/` 目录），安装不再从用户目录迁移任何东西，凭据修复（`credential.*`、`mcp.repair`）删除，`secret_exec` 不再用模板、改由登录用户这边的 MCP 进程运行（服务只经 `exec.resolve` 交出 `exec` 用途的值）。下文凡与之冲突的，以 gate-simple-v0 为准。
+
 2026-09-27 用户要求：“改一下密钥生成的逻辑，当时说要新建一个用户，这样更保险”，并问 Mac 上有没有不用登录的轻量用户。这是 design-v0 §3“私钥隔离”一行、design-v0 M0 前置和 gate-next-v0 §3“未做”里一直欠着的一步。本文是 secret-gate、daemon、Mac 应用三边的共同约定。
 
 用户当场定下的三件事：旧密钥**迁入服务并新建当前密钥**；浏览器**仍以用户身份运行**；**先改文档再实现**，装到本机（建账户、装系统服务）前先停下来问。

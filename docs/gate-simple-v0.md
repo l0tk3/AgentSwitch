@@ -1,6 +1,6 @@
 # gate-simple-v0：凭据网关简化——最小服务账户、两处出口、一条规矩（草案）
 
-2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），其余未做。
+2026-11-23 安全审查之后定的（审查报告在房间“完善安全网关”共享目录的 `secret-gate-review-*.md`）。本稿收窄 `docs/gate-service-v0.md`：独立服务账户保留，只留最小的一部分。三个平台用同一个模型（macOS、Linux、Windows）。§3.1、§3.2 已做（`packages/secret-gate/secret_gate/redact.py`，测试 `tests/test_no_reconstruct.py`），§3.3、§3.4 已做，§1、§2（含 §2.1）在网关和 daemon 一侧已做（见各节末尾），其余未做。
 
 本稿只管网关，路由器的 sealer 不在本稿范围（用户定：先不管）。
 
@@ -37,6 +37,8 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 | 凭据修复与重新签发（`credential.*`、`mcp.repair`、`secret_repair`、`totp_seed_import`） | 用得少，而且是第 3 条缺口所在。网站需要种子本身时，用户在 Mac 或手机上把种子另封一份“密码类”密文（`fill` 用途，只给那个网站）（用户定，2026-11-23） |
 | 本地网关退路 | 装了服务就只走服务（今天已修，`48fa7df`）；没装服务的机器只用于测试和开发 |
 
+已做（2026-11-23，网关与 daemon）：一把钥匙，就是钥匙目录顶层的 `key.priv`、`key.pub`（`secret_gate/keyring.py`；旧的 `keys/`、`current` 不再读）。`secret-gate keys --json` 仍是数组，恰好一行 `{"name": "main", "public", "current": true, "legacy": false, "created"}`，没有钥匙时是 `[]`；`keys new/use/retire/restore` 删除。没装服务时 `secret-gate keygen` 生成这一把，已有时拒绝，`--force` 替换（旧密文作废，命令会提示）。装了服务时钥匙由 `system install` 在服务目录里生成（服务启动时没有也会自己生成），换钥匙是 `secret-gate system rotate-key`（root，与安装同一条管理员授权路径）：生成新钥匙、重写 `keys.json`、`launchctl kill SIGHUP` 让代理重新加载。安装不再迁移任何东西（`migrate.py`、`user_dir.py`、`--import-config`、`MOVED.txt` 删除；`--migrate-from`、`--user-home` 照收不用，给还在传它们的 App）。`credential-info`、`credential-reissue`、`secret_repair`、`totp_seed_import` 删除；旧密文里的 `seed_import_hosts` 照样能解开，字段忽略，新封装不再写它。daemon 去掉修复桥、sealer 的种子导入用途，TUI 的密钥页只显示这一把（没有时可 `keygen`）。
+
 ## 2. 本机接口
 
 只留下面这些方法。调用方按对端账户放行（与现在相同），每次调用记审计（不写值）：
@@ -63,6 +65,8 @@ agent 的账户（也就是登录用户）这边只有：公钥（公开文件�
 - 已知不防：agent 刻意变换后再输出（倒序、逐字拆开），或者把值发到别处、写进文件。这些属于“刻意去偷”，§0 已写明。正常使用中，`env`、`printenv`、`set -x` 这类调试输出都会被脱敏器遮住。
 
 原来的模板（`exec_templates.json`）删除。
+
+已做（2026-11-23）：`gate.sock` 只答上表的方法（`rpc_methods.METHODS`，测试 `tests/test_rpc.py::test_the_socket_answers_exactly_the_methods_of_gate_simple_v0`）。`exec.resolve {token, scope?}` → `{value, label}`，只认 `exec` 用途，审计只记 label。`secret_exec(argv, env)` 在 `secret_gate/gate_ops.py`：`argv` 里出现 `enc:`（任何大小写、URL 编码）就拒绝；`env` 1–32 个，名字须大写、不在加载器与解释器变量的拒绝名单里（`LD_*`、`DYLD_*`、`PATH`、`HOME`、`PYTHON*`、`NODE_*`、`BASH_ENV`、`GIT_*`、`LC_*` 等），每个值恰好一个密文或引用；子进程的 `PATH` 固定为 `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`，另有本进程的 `HOME`、`LANG`、`LC_ALL`、`TZ`、`TMPDIR`；标准输入为空，工作目录是 MCP 进程的，60 秒超时；输出过同一个 `Redactor`，超过 4 MiB 整段扣下。没装服务时 MCP 进程自己解密，装了服务时经 `exec.resolve` 取值，命令都在 MCP 进程里以登录用户身份跑（测试 `tests/test_secret_exec.py`）。
 
 ## 3. 脱敏器：一条规矩
 

