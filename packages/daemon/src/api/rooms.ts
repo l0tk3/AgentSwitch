@@ -28,6 +28,8 @@ export type SeatView = {
 };
 
 const TROUBLE_NOTICE = "trouble";
+/** Agents that list their tools once, at their start. */
+const LISTS_ONCE: ReadonlySet<string> = new Set(["codex", "opencode"]);
 
 /** A terminal's state in the room's words. What its screen says of reaching its service again comes first: it is at
  *  work or resting all the same, and can not answer. */
@@ -219,15 +221,18 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     const asked = body.data;
     if (asked.op === "wait") return c.json(await delivery.wait(id, c.req.raw.signal));
     kit.met(id);
-    if (asked.op === "tools") return c.json({ tools: kit.tools(id), version: kit.version(id) });
+    // Codex and OpenCode list an MCP server's tools when they start and do not list them again when told they
+    // changed (2026-11-23: a Codex session seated after it started had no room tools at all): theirs are always there.
+    const always = LISTS_ONCE.has(terminals.get(id)?.harness ?? "");
+    if (asked.op === "tools") return c.json({ tools: kit.tools(id, always), version: kit.version(id, always) });
     if (asked.op === "call") {
       const answer = await kit.call(id, asked.name, asked.args ?? {});
       return c.json(answer);
     }
     // Held until the tools this terminal has are others than the ones it knows of, or a while has passed.
     const until = Date.now() + (deps.roomWatchMs ?? WATCH_MS);
-    while (kit.version(id) === asked.version && Date.now() < until && !c.req.raw.signal.aborted) await new Promise((r) => setTimeout(r, Math.min(WATCH_STEP_MS, deps.roomWatchMs ?? WATCH_STEP_MS)));
-    return c.json({ version: kit.version(id) });
+    while (kit.version(id, always) === asked.version && Date.now() < until && !c.req.raw.signal.aborted) await new Promise((r) => setTimeout(r, Math.min(WATCH_STEP_MS, deps.roomWatchMs ?? WATCH_STEP_MS)));
+    return c.json({ version: kit.version(id, always) });
   });
 
   // The task list (§9): the user adds, changes and removes, as a session does with its tool.

@@ -108,6 +108,10 @@ enum MainWindowPreview {
         }
         RoomsDemo.opens = nil
         RoomsDemo.card = nil
+        // The names offered while an `@` is typed: over the box, not on it.
+        RoomsDemo.draft = "@"
+        try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name)-names.png"))
+        RoomsDemo.draft = nil
     }
 
     static func renderRail(model: AppModel, into directory: URL) async throws {

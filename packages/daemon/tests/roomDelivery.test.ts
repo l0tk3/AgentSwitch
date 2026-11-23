@@ -158,7 +158,7 @@ describe("a terminal's own programs", () => {
   it("are known by the terminal's hook token, and get the tools, the calls and the wake", async () => {
     const { kit, delivery, store, room } = made();
     const app = new Hono();
-    const host = { get: () => null, profileOf: (id: string, token: string) => { if (token !== `tok-${id}`) throw new Error("forbidden"); return { harness: "claude-code", profile: null }; } };
+    const host = { get: (id: string) => (id === "c9" ? { harness: "codex" } : null), profileOf: (id: string, token: string) => { if (token !== `tok-${id}`) throw new Error("forbidden"); return { harness: "claude-code", profile: null }; } };
     mountRooms(app, { rooms: store, roomKit: kit, roomDelivery: delivery, roomWatchMs: 30, terminals: { host } } as unknown as ApiDeps);
     const ask = async (id: string, body: unknown, token = `tok-${id}`) => {
       const res = await app.request("/terminals/room", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, body: JSON.stringify(body) });
@@ -171,6 +171,9 @@ describe("a terminal's own programs", () => {
     expect(tools.body.tools.map((t: any) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
     expect(kit.has("t1")).toBe(true);
     expect((await ask("t9", { op: "tools" })).body).toEqual({ tools: [], version: "" });
+    // Codex lists its tools once, at its start: it has them before it sits anywhere, and a call then says why not.
+    expect((await ask("c9", { op: "tools" })).body.tools.map((t: any) => t.name)).toEqual(tools.body.tools.map((t: any) => t.name));
+    expect((await ask("c9", { op: "call", name: "room_post", args: { text: "hi" } })).body).toMatchObject({ isError: true, text: expect.stringContaining("sits in no Chat Room") });
     // Unchanged: held its while, then the same; changed: told at once.
     expect((await ask("t1", { op: "watch", version: tools.body.version })).body.version).toBe(tools.body.version);
     expect((await ask("t9", { op: "watch", version: "room_post" })).body.version).toBe("");

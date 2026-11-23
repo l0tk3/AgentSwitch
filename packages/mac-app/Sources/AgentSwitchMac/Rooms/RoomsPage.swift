@@ -28,6 +28,7 @@ struct RoomsPage: View {
                     model.show(demo: demo.rooms, room: demo.room)
                     if let sheet = RoomsDemo.opens { model.open(sheet) }
                     if let card = RoomsDemo.card { model.card = card }
+                    if let draft = RoomsDemo.draft { model.draft = draft }
                     tell()
                     return
                 }
@@ -58,6 +59,7 @@ struct RoomsDemo {
     /// The design preview: what floats over the made-up room when it is drawn.
     @MainActor static var opens: RoomsModel.Sheet?
     @MainActor static var card: String?
+    @MainActor static var draft: String?
     let rooms: [RoomSummary]
     let room: Room
 }
@@ -386,10 +388,13 @@ private struct RoomWriter: View {
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 12)
-        .overlay(alignment: .topLeading) {
-            if !model.offered.isEmpty {
-                names.alignmentGuide(.top) { $0[.bottom] - 4 }.padding(.leading, 14)
-            }
+        // The names stand over the box, their foot on its top edge: hung from a line of no height there, so that
+        // nothing depends on an alignment guide (one set before the padding was lost, and the names lay over the box).
+        .overlay(alignment: .top) {
+            Color.clear.frame(maxWidth: .infinity).frame(height: 0)
+                .overlay(alignment: .bottomLeading) {
+                    if !model.offered.isEmpty { names.padding(.leading, 14).padding(.bottom, 4) }
+                }
         }
     }
 

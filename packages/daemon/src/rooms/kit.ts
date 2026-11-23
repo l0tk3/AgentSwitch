@@ -156,14 +156,16 @@ export class RoomKit {
   has(terminal: string): boolean { return this.seen.has(terminal); }
 
   /** The tools a terminal's session has now: none outside every room. */
-  tools(terminal: string): readonly KitTool[] {
-    if (!this.o.store.roomsOf(terminal).length) return [];
+  tools(terminal: string, always = false): readonly KitTool[] {
+    // `always`: for an agent that lists its tools once, when it starts, and never again (Codex): it is seated long
+    // after, and would sit in the room with no way to speak. Outside every room a call is answered with why not.
+    if (!this.o.store.roomsOf(terminal).length) return always ? TOOLS : [];
     return this.o.store.mayAdd(terminal) && this.o.org?.() ? [...TOOLS, ...ORG_TOOLS] : TOOLS;
   }
 
   /** What changes when the tools a terminal has change: a session's agent is told to list them again. */
-  version(terminal: string): string {
-    return this.tools(terminal).map((t) => t.name).join(",");
+  version(terminal: string, always = false): string {
+    return this.tools(terminal, always).map((t) => t.name).join(",");
   }
 
   /** One call of a tool by a terminal's session. The switch is looked at now, each time: turned off, the next call
