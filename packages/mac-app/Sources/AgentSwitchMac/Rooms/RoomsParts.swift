@@ -407,6 +407,7 @@ struct RoomMemberCard: View {
                 if seat.canAdd { line("Role", "Admin") }
                 if seat.muted { line("Muted", "by @" + (seat.mutedBy ?? "?"), color: .waiting) }
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
+                if let stats = seat.stats { line("Room Cost", stats.says, help: "这个成员在房间里的开销：被唤醒几次、送进去多少字、发了几条消息、调了几次房间工具。花了多少 token 要看它自己的用量。") }
                 if let claim { line("Changing", "\(claim.names) → \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }
             }
             .padding(.top, 10)

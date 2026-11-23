@@ -50,6 +50,8 @@ export class RoomDelivery {
   /** Terminals whose agent has a program that waits: they can be woken. */
   private readonly wakes = new Set<string>();
   private readonly pushing = new Set<string>();
+  /** Terminals that were told once what stays out of the room. */
+  private readonly told = new Set<string>();
   /** When a terminal's waiting program was last there. */
   private readonly seen = new Map<string, number>();
   private now(): number { return (this.o.now ?? Date.now)(); }
@@ -75,7 +77,7 @@ export class RoomDelivery {
     const waiting = this.waitingFor(terminal).filter((w) => w.message.from === YOU);
     if (!waiting.length) return null;
     for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
-    return this.textOf(waiting);
+    return this.given(terminal, waiting);
   }
 
   /** The agent's waiting program asks. One per terminal: a later one takes the place of the one before. */
@@ -138,7 +140,7 @@ export class RoomDelivery {
     const waiting = this.waitingFor(terminal);
     if (!waiting.length) return;
     this.pushing.add(terminal);
-    const text = this.textOf(waiting);
+    const text = this.given(terminal, waiting);
     void this.o.push(terminal, text).then((given) => {
       if (given) for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
     }, () => undefined).finally(() => this.pushing.delete(terminal));
@@ -149,7 +151,20 @@ export class RoomDelivery {
     const waiting = this.waitingFor(terminal);
     if (!waiting.length) return null;
     for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
-    return this.textOf(waiting);
+    return this.given(terminal, waiting);
+  }
+
+  /** The text a session is given, counted for its seat (§9 花费: how often a seat was woken and with how much), and
+   *  with what stays out of the room said the first time it is given anything. */
+  private given(terminal: string, waiting: readonly { room: Room; seat: Seat; message: Message }[]): string {
+    let text = this.textOf(waiting);
+    if (!this.told.has(terminal)) {
+      this.told.add(terminal);
+      text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
+    }
+    const last = waiting[waiting.length - 1]!;
+    this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length });
+    return text;
   }
 
   private waitingFor(terminal: string): { room: Room; seat: Seat; message: Message }[] {
@@ -206,7 +221,9 @@ export class RoomDelivery {
       const card = live?.card ?? seat?.was;
       if (!card) return `@${handle}`;
       const folder = this.o.home && (card.cwd === this.o.home || card.cwd.startsWith(`${this.o.home}/`)) ? `~${card.cwd.slice(this.o.home.length)}` : card.cwd;
-      return `@${handle} (${[agentName(card.agent), card.model, card.profile, folder].filter(Boolean).join(" · ")})`;
+      // Not its profile: a profile is often called by its account's address, and an account is nobody's business in
+      // the room but the user's (§8).
+      return `@${handle} (${[agentName(card.agent), card.model, folder].filter(Boolean).join(" · ")})`;
     };
     const lines = [
       `[Room ${room.name} · #${message.seq}]`,

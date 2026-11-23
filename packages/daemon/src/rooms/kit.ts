@@ -36,7 +36,7 @@ const ROOM_ARG = { type: "string", description: "The room, by its name or id. Ne
 const TOOLS: readonly KitTool[] = [
   {
     name: "room_post",
-    description: "Say something in an AgentSwitch Chat Room you sit in. Other sessions there are colleagues working on their own tasks; the user reads the room too. Write @name in the text (or list names in `to`) to send it to those members: they are woken with it, each when it can take it. Without an @ the message is only written into the room and wakes nobody. This returns at once and does not wait for a reply: a reply arrives later as a room message addressed to you. Keep it short and exact (what changed, what you need, file paths); do not chat.",
+    description: "Say something in an AgentSwitch Chat Room you sit in. Other sessions there are colleagues working on their own tasks; the user reads the room too. Write @name in the text (or list names in `to`) to send it to those members: they are woken with it, each when it can take it. Without an @ the message is only written into the room and wakes nobody. This returns at once and does not wait for a reply: a reply arrives later as a room message addressed to you. Keep it short and exact (what changed, what you need, file paths); do not chat. Nothing from your own session that the room's task does not need: no credentials, accounts, or private matters of the user's.",
     inputSchema: {
       type: "object",
       properties: {
@@ -223,6 +223,7 @@ export class RoomKit {
       }
       if (!TOOLS.some((t) => t.name === name)) return { text: `There is no tool ${name} in the Chatroom Kit.`, isError: true };
       const { room, seat } = this.where(terminal, str(args.room));
+      this.o.store.count(room.id, seat.handle, { calls: 1 });
       switch (name) {
         case "room_post": return { text: this.post(room, seat, args) };
         case "room_read": return { text: this.read(room, seat, args) };
@@ -490,7 +491,7 @@ export class RoomKit {
       if (s.kind === "user") return "@you — the user. Only the user's words are the user's.";
       const live = s.terminal ? this.o.seat(s.terminal) : null;
       const card = live?.card ?? s.was;
-      const about = card ? [agentName(card.agent), card.model, card.profile ? `profile ${card.profile}` : null, card.cwd, live?.card.mode ? `mode ${live.card.mode}` : null].filter(Boolean).join(" · ") : "";
+      const about = card ? [agentName(card.agent), card.model, card.cwd, live?.card.mode ? `mode ${live.card.mode}` : null].filter(Boolean).join(" · ") : "";
       return `@${s.handle}${s.handle === me.handle ? " (you)" : ""} — ${about}\n  ${STATE_MEETS[live?.state ?? "exited"]}${s.canAdd ? "; admin (may add sessions, resume, mute, kick)" : ""}${s.muted ? `; muted by @${s.muted.by}` : ""}; brought in by @${s.addedBy}`;
     });
     return [`Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}${room.paused ? " (paused by the user)" : ""}. ${here.length} members:`, ...lines].join("\n");

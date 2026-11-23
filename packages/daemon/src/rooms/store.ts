@@ -129,6 +129,8 @@ export type Claim = { readonly handle: string; readonly paths: readonly string[]
 
 export const MAX_TASKS = 200, MAX_TITLE = 200, MAX_DETAIL = 2000, MAX_NOTE = 1000, MAX_CLAIM_PATHS = 30, CLAIM_MINUTES = 30, MAX_CLAIM_MINUTES = 240;
 
+export type SeatStats = { readonly wakes: number; readonly chars: number; readonly posts: number; readonly calls: number };
+
 export type Room = {
   readonly id: string;
   readonly name: string;
@@ -152,6 +154,10 @@ export type Room = {
   readonly lastTask: number;
   /** As written; the ones past their time are left out when read (`claims`). */
   readonly claims: readonly Claim[];
+  /** What each seat has cost so far, as far as the rooms can count it (2026-11-23): how often it was woken and with
+   *  how many characters, how many messages it posted, how many tool calls it made here. The tokens are the agent's
+   *  own to say; these are what the room adds. */
+  readonly stats: Readonly<Record<string, SeatStats>>;
   /** What has not arrived: message number → handle → where it is. */
   readonly receipts: Readonly<Record<string, Readonly<Record<string, Receipt>>>>;
 };
@@ -281,7 +287,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, receipts: {} };
     this.save(room);
     return room;
   }
@@ -405,6 +411,16 @@ export class RoomStore {
     const { muted: _was, ...rest } = seat;
     this.save({ ...room, seats: room.seats.map((s) => (s === seat ? rest : s)) });
     return rest;
+  }
+
+  /** Adds to what a seat has cost. Kept in memory and written with the room's next change: a count is not worth a
+   *  write of its own, and one lost over a crash is no loss. */
+  count(id: string, handle: string, add: Partial<SeatStats>): void {
+    const room = this.all().get(id);
+    if (!room) return;
+    const was = room.stats[handle] ?? { wakes: 0, chars: 0, posts: 0, calls: 0 };
+    const now = { wakes: was.wakes + (add.wakes ?? 0), chars: was.chars + (add.chars ?? 0), posts: was.posts + (add.posts ?? 0), calls: was.calls + (add.calls ?? 0) };
+    this.all().set(id, { ...room, stats: { ...room.stats, [handle]: now } });
   }
 
   /** The agent's session behind a seat, as its terminal says it now: kept for when the terminal is gone. */
@@ -617,6 +633,7 @@ export class RoomStore {
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
     const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}) };
     const waiting = to.filter((h) => h !== YOU);
+    this.count(id, from.handle, { posts: 1 });
     this.messagesOf(id).push(message);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     appendFileSync(join(this.dir, `${id}.jsonl`), `${JSON.stringify(message)}\n`, { mode: 0o600 });
@@ -686,7 +703,9 @@ export class RoomStore {
     return list;
   }
 
-  private save(room: Room): Room {
+  private save(given: Room): Room {
+    // The counts are added to in memory between two writes (`count`): the newest are the ones kept.
+    const room: Room = { ...given, stats: this.all().get(given.id)?.stats ?? given.stats };
     this.all().set(room.id, room);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const file = join(this.dir, `${room.id}.json`), tmp = `${file}.${process.pid}.tmp`;
@@ -745,6 +764,11 @@ function roomFrom(v: unknown): Room | null {
     const after = Array.isArray(t.after) ? t.after.filter(num) : [];
     return [{ n: t.n, title: t.title, ...(str(t.detail) ? { detail: t.detail } : {}), state: t.state, ...(str(t.owner) ? { owner: t.owner } : {}), by: str(t.by) ? t.by : YOU, createdAt: num(t.createdAt) ? t.createdAt : 0, updatedAt: num(t.updatedAt) ? t.updatedAt : 0, ...(after.length ? { after } : {}), ...(str(t.note) ? { note: t.note } : {}) }];
   });
+  const stats: Record<string, SeatStats> = {};
+  for (const [handle, v] of Object.entries((o.stats ?? {}) as Record<string, unknown>)) {
+    const c = v as Record<string, unknown> | null;
+    if (c && typeof c === "object") stats[handle] = { wakes: num(c.wakes) ? c.wakes : 0, chars: num(c.chars) ? c.chars : 0, posts: num(c.posts) ? c.posts : 0, calls: num(c.calls) ? c.calls : 0 };
+  }
   const claims = (Array.isArray(o.claims) ? o.claims : []).flatMap((v): Claim[] => {
     const c = v as Record<string, unknown> | null;
     if (!c || typeof c !== "object" || !str(c.handle) || !Array.isArray(c.paths) || !num(c.until)) return [];
@@ -761,7 +785,7 @@ function roomFrom(v: unknown): Room | null {
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
-    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims,
+    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats,
   };
 }
 

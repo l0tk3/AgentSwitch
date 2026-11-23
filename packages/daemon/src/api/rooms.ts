@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Hono } from "hono";
 import { z } from "zod";
 import { contentType } from "../files/names.js";
-import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatSession, type SeatWas } from "../rooms/store.js";
+import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatSession, type SeatStats, type SeatWas } from "../rooms/store.js";
 import type { Running } from "../rooms/follow.js";
 import { resumeSeat } from "../rooms/kit.js";
 import { YOU } from "../rooms/names.js";
@@ -28,6 +28,8 @@ export type SeatView = {
   /** Muted by an admin or the user (§6.2): it reads and works but may not post or write the notes. */
   readonly muted: boolean; readonly mutedBy: string | null;
   readonly state: SeatState | null; readonly card: SeatCard | null;
+  /** What the seat has cost so far as the room counts it (store.ts `SeatStats`); null for the user. */
+  readonly stats: SeatStats | null;
   /** Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
    *  there was a Kit, until it is resumed; null for the user. */
   readonly kit: boolean | null;
@@ -69,12 +71,12 @@ export function seatLive(info: TerminalInfo | null): SeatLive | null {
   return info ? { state: seatState(info), card: { ...wasOf(info), mode: info.modeNow ?? info.mode, node: null } } : null;
 }
 
-export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean): SeatView {
+export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean, stats?: SeatStats): SeatView {
   const info = seat.terminal ? host?.get(seat.terminal) ?? null : null;
   const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null, muted: seat.muted !== undefined, mutedBy: seat.muted?.by ?? null };
-  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null };
+  if (seat.kind === "user") return { ...base, state: null, card: null, kit: null, stats: null };
   const was = info ? wasOf(info) : seat.was ?? null;
-  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false };
+  return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false, stats: stats ?? { wakes: 0, chars: 0, posts: 0, calls: 0 } };
 }
 
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
@@ -110,7 +112,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   };
 
   const seatsOf = (room: Room): SeatView[] => room.seats.map((seat) => {
-    const view = seatView(seat, host(), hasKit);
+    const view = seatView(seat, host(), hasKit, room.stats[seat.handle]);
     // What it is called now is kept for the day its terminal is gone.
     if (seat.terminal && view.card && seat.left === undefined && host()?.get(seat.terminal)) {
       const { mode: _mode, node: _node, ...was } = view.card;

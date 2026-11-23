@@ -122,6 +122,21 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     /// Muted by an admin or the user (docs/chatroom-v0.md §6.2): it reads and works but may not post or write the notes.
     public let muted: Bool
     public let mutedBy: String?
+    /// What the seat has cost so far, as the room counts it: woken how often, with how many characters, how many
+    /// messages it posted and tool calls it made here. The tokens are the agent's own to say.
+    public struct Stats: Decodable, Equatable, Sendable {
+        public let wakes: Int
+        public let chars: Int
+        public let posts: Int
+        public let calls: Int
+
+        /// `Woken 12× · 8.4K chars · 5 posts · 20 calls`.
+        public var says: String {
+            let size = chars < 1000 ? "\(chars)" : String(format: "%.1fK", Double(chars) / 1000)
+            return "Woken \(wakes)× · \(size) chars · \(posts) posts · \(calls) calls"
+        }
+    }
+    public let stats: Stats?
     /// The state as the service wrote it; one this app does not know reads as `error`.
     public let stateWord: String?
     public let card: SeatCard?
@@ -137,7 +152,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stateWord = "state" }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stats, stateWord = "state" }
 
     public init(handle: String, kind: String = "session", terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = Room.you,
                 canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, muted: Bool = false, mutedBy: String? = nil,
@@ -154,6 +169,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         self.left = left
         self.muted = muted
         self.mutedBy = mutedBy
+        self.stats = nil
         self.stateWord = state?.rawValue
         self.card = card
     }
@@ -171,6 +187,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         left = RoomJSON.int(c, .left)
         muted = (try? c.decodeIfPresent(Bool.self, forKey: .muted)) ?? false
         mutedBy = try? c.decodeIfPresent(String.self, forKey: .mutedBy)
+        stats = try? c.decodeIfPresent(Stats.self, forKey: .stats)
         stateWord = try? c.decodeIfPresent(String.self, forKey: .stateWord)
         card = try? c.decodeIfPresent(SeatCard.self, forKey: .card)
         kit = try? c.decodeIfPresent(Bool.self, forKey: .kit)

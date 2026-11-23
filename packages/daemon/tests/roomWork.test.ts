@@ -440,3 +440,24 @@ describe("what a session is given, and when", () => {
     expect(store.get(room.id).receipts).toEqual({});
   });
 });
+
+describe("what a seat has cost, and what stays out of the room", () => {
+  it("counts wakes, characters given, posts and tool calls per seat, and keeps them over a restart", async () => {
+    const { home, store, room, say, call } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: "me@example.com", mode: "default", node: null } }) });
+    await say("api", "room_post", { text: "@ui look" });
+    await say("api", "room_members");
+    const first = delivery.atTurnEnd("ui")!;
+    // No profile (it may be an account's address) in what another session reads; what stays out is said once.
+    expect(first).not.toContain("me@example.com");
+    expect(first).toContain("no credentials, accounts, or private matters");
+    expect((await say("ui", "room_members")).text).not.toContain("me@example.com");
+    await say("api", "room_post", { text: "@ui again" });
+    expect(delivery.atTurnEnd("ui")).not.toContain("no credentials, accounts");
+    const seats = (await call("GET", `/rooms/${room.id}`)).body.seats as { handle: string; stats: unknown }[];
+    expect(seats.find((s) => s.handle === "api")!.stats).toEqual({ wakes: 0, chars: 0, posts: 2, calls: 3 });
+    expect(seats.find((s) => s.handle === "ui")!.stats).toMatchObject({ wakes: 2, posts: 0, calls: 1 });
+    expect(seats.find((s) => s.handle === "you")!.stats).toBeNull();
+    expect(new RoomStore(home).get(room.id).stats.api).toMatchObject({ posts: 2 });
+  });
+});
