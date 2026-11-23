@@ -110,7 +110,7 @@ const TOOLS: readonly KitTool[] = [
   },
 ];
 
-/** For a session whose `Can Add Sessions` is on. */
+/** For an admin: a session whose `Admin` switch (the `canAdd` of its seat) is on. */
 const ORG_TOOLS: readonly KitTool[] = [
   { name: "rooms", description: "The Chat Rooms that exist in AgentSwitch: name, id, topic, how many members. (You may add sessions, so you can see them. A session sits in one room at a time: making a room is the user's.)", inputSchema: { type: "object", properties: {} } },
   {
@@ -132,7 +132,7 @@ const ORG_TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_manage",
-    description: "Admin actions in a Chat Room you sit in, if your Can Add Sessions is on (that switch makes you an admin): `resume` a member whose session has ended, bringing the same conversation back; `mute` a member that floods the room or does not do its work (it can still read and work, but not post or write the notes); `unmute` it; `kick` it out of the room (its session keeps running). Only the user can mute or kick another admin, and nobody can manage themselves or the user.",
+    description: "Admin actions in a Chat Room you sit in, if the user made you an admin of the room (the Admin switch on your card): `resume` a member whose session has ended, bringing the same conversation back; `mute` a member that floods the room or does not do its work (it can still read and work, but not post or write the notes); `unmute` it; `kick` it out of the room (its session keeps running). Only the user can mute or kick another admin, and nobody can manage themselves or the user.",
     inputSchema: {
       type: "object",
       properties: {
@@ -148,8 +148,8 @@ const ORG_TOOLS: readonly KitTool[] = [
   { name: "sessions", description: "Sessions that can be brought into a room: the ones running in AgentSwitch's terminals (with their terminal id and state), and recent ones that can be resumed (with their id, title, folder, time). Truncated: ask with `search` to narrow.", inputSchema: { type: "object", properties: { search: { type: "string", description: "Only sessions whose title or folder contains this." }, limit: { type: "integer", description: "How many resumable ones at most (default 20, up to 50)." } } } },
   { name: "profile_check", description: "Check again whether a profile can reach its service. For a Claude subscription profile this sends one real request and may use a little quota: use it only when the last result (in `profiles`) is old or you are about to start a session under it.", inputSchema: { type: "object", properties: { agent: { type: "string" }, profile: { type: "string", description: "The profile's id." } }, required: ["agent", "profile"] } },
 ];
-const NO_ROOM = "This session sits in no Chat Room now. The user (or a member who may add sessions) seats a session in a room.";
-const NOT_ALLOWED = "This session may not add sessions: the user has not turned on Can Add Sessions for it (the switch is on its card in the room).";
+const NO_ROOM = "This session sits in no Chat Room now. The user (or an admin of a room) seats a session in a room.";
+const NOT_ALLOWED = "This session is not an admin of the room: the user has not turned on Admin for it (the switch is on its card in the room).";
 const ago = (at: number, now: number): string => { const m = Math.round((now - at) / 60_000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 
 const hm = (at: number): string => { const t = new Date(at); return `${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };

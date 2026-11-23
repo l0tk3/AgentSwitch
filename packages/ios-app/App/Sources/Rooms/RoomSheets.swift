@@ -84,7 +84,7 @@ private struct RoomMemberRow: View {
                 Text("@\(seat.handle)").font(.system(size: 15, weight: .semibold, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Theme.ink).lineLimit(1)
                 HStack(spacing: 0) {
                     Text(seat.state?.word(in: look) ?? "—").foregroundStyle(seat.state?.wordColor ?? Theme.secondaryInk)
-                    if seat.canAdd { Text(" · Can Add").foregroundStyle(.secondary) }
+                    if seat.canAdd { Text(" · Admin").foregroundStyle(.secondary) }
                     // Its session has no Chatroom Kit (§6): it needs the user to resume it once.
                     if seat.needsResume { Text(" · No Kit").foregroundStyle(Theme.waiting) }
                 }
@@ -169,7 +169,7 @@ private struct SeatCardPage: View {
                 }
                 if seat.left == nil {
                     Section {
-                        Toggle("Can Add Sessions", isOn: Binding(get: { seat.canAdd }, set: { on in
+                        Toggle("Admin", isOn: Binding(get: { seat.canAdd }, set: { on in
                             Task { busy = true; await model.run(app.api) { try await $0.setSeat(handle, in: model.id, canAdd: on) }; busy = false }
                         }))
                         .disabled(seat.byAgent || busy)

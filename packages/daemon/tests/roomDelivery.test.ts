@@ -187,7 +187,7 @@ describe("a terminal's own programs", () => {
   });
 });
 
-describe("bringing sessions in (Can Add Sessions)", () => {
+describe("bringing sessions in (Admin)", () => {
   function org() {
     const { store, delivery, room, states } = made();
     const started: unknown[] = [];
@@ -210,7 +210,7 @@ describe("bringing sessions in (Can Add Sessions)", () => {
   it("has the organizing tools only with the switch on, and refuses a call the moment it is off", async () => {
     const { kit, store, room } = org();
     expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
-    expect(await kit.call("t1", "profiles", {})).toMatchObject({ isError: true, text: expect.stringContaining("may not add sessions") });
+    expect(await kit.call("t1", "profiles", {})).toMatchObject({ isError: true, text: expect.stringContaining("is not an admin of the room") });
     store.setCanAdd(room.id, "daemon", true);
     expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing", "rooms", "room_add", "room_manage", "profiles", "models", "sessions", "profile_check"]);
     expect((await kit.call("t1", "profiles", {})).text).toBe("2 profiles:\nclaude-code · default · \"Default\" · subscription · healthy, checked 2 h ago\ncodex · abc123 · \"Work\" · API key · not checked yet");

@@ -630,7 +630,9 @@ final class MainWindowController: NSObject {
             perform(action)
             return true
         }
-        return (state.dispatchShown || (state.page == .browser && state.editingText)) && edit(press, in: window)
+        // The Chat Room page's fields too (2026-11-23: ⌘V did nothing in a room's box — neither text nor a picture —
+        // because these keys were handed on only on Dispatch).
+        return (state.dispatchShown || state.page == .rooms || state.page == .clash || (state.page == .browser && state.editingText)) && edit(press, in: window)
     }
 
     private func perform(_ action: MainShortcut) {

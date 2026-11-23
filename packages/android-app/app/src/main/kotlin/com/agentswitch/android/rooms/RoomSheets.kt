@@ -129,7 +129,7 @@ private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat
         Text("@${seat.handle}", color = Theme.ink, style = if (classic) plain(15, FontWeight.SemiBold) else mono(15, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Row {
             Text(seat.state?.word(look) ?: "—", color = seat.state.wordColor(), style = mono(11), maxLines = 1)
-            if (seat.canAdd) Text(" · Can Add", color = Theme.secondaryInk, style = mono(11), maxLines = 1)
+            if (seat.canAdd) Text(" · Admin", color = Theme.secondaryInk, style = mono(11), maxLines = 1)
             // It can neither speak here nor be woken until it is resumed (§6): for the user to do.
             if (seat.noKit) Text(" · No Kit", color = Theme.waiting, style = mono(11), maxLines = 1)
         }
@@ -207,7 +207,7 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
                 val can = !seat.byAgent && !busy
                 fun set(on: Boolean) { scope.launch { busy = true; model.run(app.api) { it.setSeat(handle, model.id, on) }; busy = false } }
                 FormRow(Modifier.alpha(if (can) 1f else 0.4f), first = true, onClick = if (can) ({ set(!seat.canAdd) }) else null) {
-                    Text("Can Add Sessions", Modifier.weight(1f), color = Theme.ink, style = plain(16))
+                    Text("Admin", Modifier.weight(1f), color = Theme.ink, style = plain(16))
                     Switch(checked = seat.canAdd, onCheckedChange = if (can) ({ on: Boolean -> set(on) }) else null, enabled = can)
                 }
             }

@@ -415,7 +415,7 @@ struct RoomMemberCard: View {
                 HairRule(color: Look.line)
                 Button { setCanAdd(!seat.canAdd) } label: {
                     HStack(spacing: 10) {
-                        Text("Can Add Sessions").mono(12.5)
+                        Text("Admin").mono(12.5)
                         Spacer()
                         if look.isClassic {
                             Toggle("", isOn: .constant(seat.canAdd)).labelsHidden().toggleStyle(.switch).controlSize(.mini).allowsHitTesting(false)
