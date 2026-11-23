@@ -61,25 +61,22 @@ def test_client_mode_needs_a_socket_of_another_user(tmp_path):
             sock.close()
 
 
-def test_keys_list_new_use_retire_keep_the_output_format(service, capsys, monkeypatch):
+def test_keys_shows_the_one_key_from_keys_json_and_cannot_change_it(service, capsys):
     code, out, _ = _run(capsys, ["keys", "--json"])
     rows = json.loads(out)
-    assert code == 0 and rows == [{"name": "main", "public": rows[0]["public"], "current": True, "legacy": False}]
-    code, out, _ = _run(capsys, ["keys", "--json", "new", "work", "--use"])
-    assert code == 0 and [(r["name"], r["current"]) for r in json.loads(out)] == [("main", False), ("work", True)]
-    assert service.signals == ["HUP"]
-    code, out, _ = _run(capsys, ["keys", "use", "main"])
-    assert code == 0 and out.splitlines()[0].startswith("* main ")
-    from secret_gate.crypto import generate_keypair
-    from secret_gate.keystore import save_keypair
-
-    save_keypair(service.home / "keys" / "legacy" / "old", generate_keypair())
-    code, _, err = _run(capsys, ["keys", "use", "old"])
-    assert code == 2 and "已停用（仅解密）" in err
-    code, out, _ = _run(capsys, ["keys", "--json", "retire", "old"])
-    rows = json.loads(out)                                                  # the updated list, like new/use
-    assert code == 0 and [(r["name"], r["legacy"]) for r in rows] == [("main", False), ("work", False)]
-    assert all(set(r) == {"name", "public", "current", "legacy"} for r in rows)
+    public = json.loads((service.public / "keys.json").read_text())[0]["publicKey"]
+    created = json.loads((service.public / "keys.json").read_text())[0]["createdAt"]
+    assert code == 0 and rows == [{"name": "main", "public": public, "current": True, "legacy": False, "created": created}]
+    code, again, _ = _run(capsys, ["keys", "--json", "list"])
+    assert code == 0 and json.loads(again) == rows
+    code, out, _ = _run(capsys, ["keys"])
+    assert code == 0 and out == f"* main                 {public}\n"
+    for gone in (["keys", "new", "x"], ["keys", "use", "main"], ["keys", "retire", "main"], ["keys", "restore", "x"],
+                 ["credential-info"], ["credential-reissue"]):
+        with pytest.raises(SystemExit) as exc:
+            main(gone)
+        assert exc.value.code == 2
+    capsys.readouterr()
 
 
 def test_logs_tail_over_the_socket(service, capsys):
@@ -134,19 +131,6 @@ def test_refs_register_and_release_over_the_socket(service, capsys, monkeypatch)
     assert code == 2 and "refs request needs exactly" in err                # checked before anything is sent
 
 
-def test_credential_commands_over_the_socket(service, capsys, monkeypatch):
-    _, token, _ = _run(capsys, ["enc", "--label", "portal-a/totp", "--host", "portal-a.example.com", "--kind", "totp",
-                                "--use", "otp", "--seed-import-host", "portal-a.example.com", "--value", fs.TOTP_SECRET_B32])
-    code, out, _ = _run(capsys, ["credential-info"], stdin=json.dumps({"token": token.strip()}), monkeypatch=monkeypatch)
-    assert code == 0 and json.loads(out)["seed_import_hosts"] == ["portal-a.example.com"]
-    request = {"token": token.strip(), "host": "portal-a.example.com", "purpose": "totp_seed_import"}
-    code, out, _ = _run(capsys, ["credential-reissue"], stdin=json.dumps(request), monkeypatch=monkeypatch)
-    reissued = json.loads(out)
-    assert code == 0 and reissued["uses"] == ["fill", "http"] and fs.TOTP_SECRET_B32 not in out
-    code, _, err = _run(capsys, ["credential-info"], stdin="[]", monkeypatch=monkeypatch)
-    assert code == 2 and "unexpected fields" in err
-
-
 @pytest.mark.parametrize("argv", [["keygen"], ["check", "enc:v1:" + "A" * 30], ["proxy"], ["service", "status"],
                                   ["install-ca"], ["rpc"]])
 def test_commands_the_service_owns_are_refused(service, capsys, argv):
@@ -180,10 +164,11 @@ def test_bootstrap_checks_the_published_keys_and_ca(service, capsys, monkeypatch
 def test_unavailable_service_is_reported_not_bypassed(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
     monkeypatch.setattr("secret_gate.cli.client_socket", lambda: tmp_path / "gate.sock")
-    (tmp_path / "keys.json").write_text("[]")
-    code, _, err = _run(capsys, ["keys", "new", "x"])
+    request = json.dumps({"scope": SCOPE, "tokens": ["enc:v1:" + "A" * 30]})
+    monkeypatch.setattr("sys.stdin", io.StringIO(request))
+    code, _, err = _run(capsys, ["refs", "register"])
     assert code == 2 and "凭据网关服务无响应" in err
-    assert not (tmp_path / "keys").exists()                               # never a local keypair instead
+    assert not (tmp_path / "key.priv").exists()                           # never a local keypair instead
 
 
 # -- service mode is decided by gate-service.json, never by the socket (no local fallback) ---------------------
@@ -200,7 +185,7 @@ def stopped_service(monkeypatch, tmp_path):
     from secret_gate.keyring import create_keypair
 
     planted = tmp_path / "user-home"
-    create_keypair(planted, "planted")
+    create_keypair(planted)
     monkeypatch.setenv("SECRET_GATE_HOME", str(planted))
     with running_service() as svc:
         _installed(svc)
@@ -214,15 +199,13 @@ def stopped_service(monkeypatch, tmp_path):
 
 def test_installed_service_without_its_socket_is_unavailable_never_local(stopped_service, capsys, monkeypatch):
     svc, planted = stopped_service
-    keys_before = sorted(p.name for p in (planted / "keys").iterdir())
-    for argv in (["keys", "new", "x"], ["keys", "retire", "x"], ["keygen"], ["check", "enc:v1:" + "A" * 30]):
+    keys_before = sorted((p.name, p.read_bytes()) for p in planted.iterdir())
+    for argv in (["keygen"], ["keygen", "--force"], ["check", "enc:v1:" + "A" * 30]):
         code, out, err = _run(capsys, argv)
-        assert code == 2 and out == ""
-        assert "凭据网关服务无响应" in err or SERVICE_REFUSAL in err
-    code, _, err = _run(capsys, ["credential-info"], stdin=json.dumps({"token": "enc:v1:" + "A" * 30}),
-                        monkeypatch=monkeypatch)
+        assert code == 2 and out == "" and SERVICE_REFUSAL in err
+    code, _, err = _run(capsys, ["refs", "release"], stdin=json.dumps({"scope": SCOPE}), monkeypatch=monkeypatch)
     assert code == 2 and "凭据网关服务无响应" in err
-    assert sorted(p.name for p in (planted / "keys").iterdir()) == keys_before        # nothing made user-side
+    assert sorted((p.name, p.read_bytes()) for p in planted.iterdir()) == keys_before  # nothing made user-side
     # What only needs the service's keys.json keeps working, and seals to the service's key, not the planted one.
     service_key = json.loads((svc.public / "keys.json").read_text())[0]["publicKey"]
     code, out, _ = _run(capsys, ["pubkey"])
@@ -282,6 +265,9 @@ def test_without_gate_service_json_the_cli_is_a_local_gate(monkeypatch, capsys, 
         monkeypatch.setenv("SECRET_GATE_PUBLIC", str(root / "gate-public"))
         monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path / "home"))
         assert client_socket() is None
-        code, out, _ = _run(capsys, ["keys", "--json", "new", "mine", "--use"])
-        assert code == 0 and [r["name"] for r in json.loads(out)] == ["mine"]
-        assert (tmp_path / "home" / "keys" / "mine").is_dir()
+        code, out, _ = _run(capsys, ["keys", "--json"])
+        assert code == 0 and json.loads(out) == []
+        code, out, _ = _run(capsys, ["keygen"])
+        assert code == 0 and (tmp_path / "home" / "key.priv").is_file()
+        code, out, _ = _run(capsys, ["keys", "--json"])
+        assert code == 0 and [(r["name"], r["current"], r["legacy"]) for r in json.loads(out)] == [("main", True, False)]

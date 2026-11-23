@@ -9,9 +9,18 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from .credential_repair import REPAIR_PURPOSE
 from .errors import GateError
 from .mcp_backend import McpBackend, default_backend
+
+SECRET_EXEC_DESCRIPTION = (
+    "Run a command of your own with secret values in environment variables. `argv` is the command and its "
+    "arguments (no shell; use [\"sh\", \"-c\", \"...\"] for one) and must not contain any enc: value. `env` maps "
+    "upper-case variable names to exactly one enc:v1: token or enc:ref: reference each, e.g. "
+    "{\"PGPASSWORD\": \"enc:ref:...\"}; refer to them in the command as $PGPASSWORD. Only tokens made for use "
+    "'exec' work. The command runs as the user with a minimal environment (PATH, HOME, LANG, LC_ALL, TZ, TMPDIR plus "
+    "these variables), empty stdin, in the current directory, 60 s at most. stdout and stderr are redacted: a value "
+    "never appears in them, even via env, printenv or set -x."
+)
 
 
 def build_server(backend: McpBackend | None = None) -> FastMCP:
@@ -24,17 +33,6 @@ def build_server(backend: McpBackend | None = None) -> FastMCP:
         return _guard(lambda: gate.describe(token))
 
     @mcp.tool()
-    async def secret_repair(token: str, host: str, purpose: str = REPAIR_PURPOSE) -> dict:
-        """Ask the task dispatcher to authorize TOTP seed import at an already granted host.
-        Returns secret/http ciphertext (or a reference to it) only. Does not generate a code, fill a field, or add hosts."""
-        try:
-            return await gate.repair(token, host, purpose)
-        except GateError as exc:
-            raise RuntimeError(f"secret-gate: {exc}") from None
-        except Exception as exc:  # noqa: BLE001 - see _guard
-            raise RuntimeError(f"secret-gate: {type(exc).__name__}") from None
-
-    @mcp.tool()
     def secret_otp(token: str) -> str:
         """Return the current TOTP code for a token (or reference) of kind 'totp'."""
         return _guard(lambda: gate.otp(token))
@@ -45,12 +43,9 @@ def build_server(backend: McpBackend | None = None) -> FastMCP:
         The response is redacted before it is returned."""
         return _guard(lambda: gate.http(method, url, headers, body))
 
-    @mcp.tool()
-    def secret_exec(template: str, token: str, args: list[str] | None = None) -> dict:
-        """Run a whitelisted command template; the token's value reaches the command only through the template's
-        environment variables or stdin, never its arguments. `args` fill the template's {ARGn} slots and may not
-        start with "-". Output is redacted."""
-        return _guard(lambda: gate.exec(template, token, args))
+    @mcp.tool(description=SECRET_EXEC_DESCRIPTION)
+    def secret_exec(argv: list[str], env: dict[str, str]) -> dict:
+        return _guard(lambda: gate.exec(argv, env))
 
     return mcp
 

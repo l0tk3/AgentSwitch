@@ -34,7 +34,6 @@ class RunningService:
     socket: Path
     server: RpcServer
     service: GateService
-    signals: list[str]
 
     @property
     def client(self) -> RpcClient:
@@ -55,16 +54,14 @@ def short_dir() -> Iterator[Path]:
 
 
 @contextmanager
-def running_service(*, allowed: frozenset[int] | None = None, keys: tuple[str, ...] = ("main",),
+def running_service(*, allowed: frozenset[int] | None = None, key: bool = True,
                     **service_kwargs: Any) -> Iterator[RunningService]:
     with short_dir() as root:
         home, public = root / "gate", root / "pub"
         home.mkdir(mode=0o700)
         public.mkdir()
-        for name in keys:
-            create_keypair(home, name)
-        signals: list[str] = []
-        service_kwargs.setdefault("signal_proxy_fn", lambda: signals.append("HUP") or True)
+        if key:
+            create_keypair(home)
         service_kwargs.setdefault("proxy_running_fn", lambda: True)
         service = GateService(home, public, lambda: OWNER_CONFIG, **service_kwargs)
         service.publish()
@@ -73,7 +70,7 @@ def running_service(*, allowed: frozenset[int] | None = None, keys: tuple[str, .
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
         try:
-            yield RunningService(root, home, public, public / SOCKET_FILE, server, service, signals)
+            yield RunningService(root, home, public, public / SOCKET_FILE, server, service)
         finally:
             server.shutdown()
             server.server_close()

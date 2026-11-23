@@ -1,16 +1,14 @@
 """The methods of the gate service's `gate.sock` (gate-service-v0 §3.2).
 
 The daemon and an agent run as the same uid, so every method is written for a caller that may be an agent: no
-method returns a private key, and only `browser.resolve` returns a value (fill-only, host-checked; the gap §1
-documents). Each method checks its parameters exactly; the gate's own checks (policy, scope, references) are the
+method returns a private key, and only two return a value: `browser.resolve` (fill-only, host-checked) and
+`exec.resolve` (exec-only), the two exits gate-simple-v0 §2 names. The methods are exactly METHODS. Each method checks its parameters exactly; the gate's own checks (policy, scope, references) are the
 same code the local CLI and MCP servers use, with the same error text.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-import subprocess
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Iterable
@@ -23,21 +21,11 @@ import httpx
 
 from . import __version__
 from .browser_mask import MASK_CONFIG_FILE, MaskConfig
-from .constants import USE_FILL
-from .credential_repair import (
-    CREDENTIAL_INFO,
-    CREDENTIAL_REISSUE,
-    REPAIR_PURPOSE,
-    credential_call,
-    repair_scoped,
-)
+from .constants import USE_EXEC, USE_FILL
 from .errors import GateError, ValidationError
-from .exec_templates import load_templates
-from .gate_ops import op_describe, op_exec, op_http, op_otp
-from .keyring import create_keypair, restore_keypair, retire_keypair, set_current
-from .keystore import load_public_key
+from .gate_ops import op_describe, op_http, op_otp
 from .policy import normalize_host, split_host_port
-from .proxy_pid import proxy_running, signal_proxy
+from .proxy_pid import proxy_running
 from .publish import key_rows, publish_ca, publish_keys
 from .redact import Redactor, withheld
 from .refs import RefRegistry, check_scope
@@ -52,9 +40,9 @@ MAX_LOG_LINES = 500
 MAX_LOG_BYTES = 256 * 1024
 LOG_NAMES = ("proxy", "rpc")
 MAX_USED_VALUES = 256  # values this service used or handed out lately, redacted out of logs.tail
-# Keypairs the service holds besides legacy ones. A keypair that is not legacy can never be deleted, and every
-# decryption tries every key, so any caller of this uid could otherwise slow each one down or fill the disk.
-MAX_KEYPAIRS = 32
+# Every method gate.sock answers (gate-simple-v0 §2); nothing else.
+METHODS = ("status", "refs.register", "refs.release", "mcp.describe", "mcp.otp", "mcp.http", "exec.resolve",
+           "browser.register", "browser.config", "browser.resolve", "logs.tail")
 
 
 @dataclass(frozen=True)
@@ -105,34 +93,25 @@ class GateService:
         public: Path,
         config: Callable[[], ServiceConfig | None],
         *,
-        signal_proxy_fn: Callable[[], bool] | None = None,
         proxy_running_fn: Callable[[], bool] | None = None,
         http_client: Callable[[], httpx.Client | None] = lambda: None,
-        exec_runner: Callable[..., Any] = subprocess.run,
-        repair_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._home = Path(home)
         self._public = Path(public)
         self._config = config
-        self._signal_proxy = signal_proxy_fn or (lambda: signal_proxy(self._home))
         self._proxy_running = proxy_running_fn or (lambda: proxy_running(self._home))
         self._http_client = http_client
-        self._exec_runner = exec_runner
-        self._repair_transport = repair_transport
-        self._keys_lock = threading.Lock()
         self._used: OrderedDict[str, Resolution] = OrderedDict()
         self._used_lock = threading.Lock()
         self._methods: dict[str, Callable[[dict[str, Any]], Reply]] = {
-            "status": self._status, "keys.list": self._keys_list, "keys.new": self._keys_new,
-            "keys.use": self._keys_use, "keys.retire": self._keys_retire,
-            "keys.restore": self._keys_restore,
+            "status": self._status,
             "refs.register": self._refs_register, "refs.release": self._refs_release,
-            "credential.info": self._credential_info, "credential.reissue": self._credential_reissue,
             "mcp.describe": self._mcp_describe, "mcp.otp": self._mcp_otp, "mcp.http": self._mcp_http,
-            "mcp.exec": self._mcp_exec, "mcp.repair": self._mcp_repair,
-            "browser.resolve": self._browser_resolve, "browser.register": self._browser_register,
-            "browser.config": self._browser_config, "logs.tail": self._logs_tail,
+            "exec.resolve": self._exec_resolve,
+            "browser.register": self._browser_register, "browser.config": self._browser_config,
+            "browser.resolve": self._browser_resolve, "logs.tail": self._logs_tail,
         }
+        assert tuple(self._methods) == METHODS
 
     @property
     def methods(self) -> tuple[str, ...]:
@@ -145,7 +124,7 @@ class GateService:
         return handler(params)
 
     def publish(self) -> None:
-        """keys.json and ca.pem, at start and after every key change (§3.3)."""
+        """keys.json and ca.pem, at start (a key rotation republishes them itself, system_exec.py)."""
         publish_keys(self._home, self._public)
         publish_ca(self._home / MITMPROXY_DIR, self._public)
 
@@ -170,52 +149,7 @@ class GateService:
                       "runtimeVersion": config.runtime_version if config else None,
                       "keys": [r.to_json() for r in key_rows(self._home)], "proxyRunning": self._proxy_running()})
 
-    def _keys_list(self, params: dict[str, Any]) -> Reply:
-        fields(params, set())
-        return Reply([r.to_json() for r in key_rows(self._home)])
-
-    def _changed_keys(self, name: str) -> Reply:
-        rows = publish_keys(self._home, self._public)
-        self._signal_proxy()  # a proxy that is down loads every key when it starts
-        return Reply(next(r.to_json() for r in rows if r.name == name), labels=(name,))
-
-    def _keys_new(self, params: dict[str, Any]) -> Reply:
-        fields(params, {"name"}, {"use"})
-        use = params.get("use", False)
-        if not isinstance(use, bool):
-            raise ValidationError("参数无效：use 应为 true 或 false")
-        name = text(params, "name", 64)
-        with self._keys_lock:
-            if sum(1 for row in key_rows(self._home) if not row.legacy) >= MAX_KEYPAIRS:
-                raise ValidationError(f"密钥对已达上限（{MAX_KEYPAIRS} 个），无法再新建")
-            info = create_keypair(self._home, name)
-            if use:
-                set_current(self._home, info.name)
-            return self._changed_keys(info.name)
-
-    def _keys_use(self, params: dict[str, Any]) -> Reply:
-        name = text(fields(params, {"name"}), "name", 64)
-        with self._keys_lock:
-            set_current(self._home, name)
-            return self._changed_keys(name)
-
-    def _keys_retire(self, params: dict[str, Any]) -> Reply:
-        name = text(fields(params, {"name"}), "name", 64)
-        with self._keys_lock:
-            retire_keypair(self._home, name)
-            publish_keys(self._home, self._public)
-            self._signal_proxy()
-        return Reply({"retired": name}, labels=(name,))
-
-    def _keys_restore(self, params: dict[str, Any]) -> Reply:
-        name = text(fields(params, {"name"}), "name", 64)
-        with self._keys_lock:
-            restore_keypair(self._home, name)
-            publish_keys(self._home, self._public)
-            self._signal_proxy()
-        return Reply({"restored": name}, labels=(name,))
-
-    # -- dispatcher: references and credential repair --------------------------------------------
+    # -- dispatcher: references -------------------------------------------------------------------
 
     def _refs_register(self, params: dict[str, Any]) -> Reply:
         fields(params, {"scope", "tokens"})
@@ -228,16 +162,6 @@ class GateService:
     def _refs_release(self, params: dict[str, Any]) -> Reply:
         scope = check_scope(fields(params, {"scope"})["scope"])
         return Reply({"released": RefRegistry.from_home(self._home).release(scope)})
-
-    def _credential(self, command: str, params: dict[str, Any]) -> Reply:
-        result = credential_call(self._resolver(None), lambda: load_public_key(self._home), command, params)
-        return Reply(result, labels=(result["label"],))
-
-    def _credential_info(self, params: dict[str, Any]) -> Reply:
-        return self._credential(CREDENTIAL_INFO, params)
-
-    def _credential_reissue(self, params: dict[str, Any]) -> Reply:
-        return self._credential(CREDENTIAL_REISSUE, params)
 
     # -- MCP tools (the `secret-gate mcp` forwarder) ---------------------------------------------
 
@@ -276,31 +200,13 @@ class GateService:
         return Reply({"status": result.status, "headers": result.headers, "body": result.body},
                      labels=labels, host=urlsplit(url).hostname)
 
-    def _mcp_exec(self, params: dict[str, Any]) -> Reply:
-        fields(params, {"template", "token"}, {"scope", "args"})
-        args = params.get("args") or []
-        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
-            raise ValidationError("参数无效：args 应为字符串列表")
-        resolver, token = self._resolver(scope_of(params)), text(params, "token")
-        try:
-            result = op_exec(resolver, load_templates(self._home), template=text(params, "template", 64), token=token,
-                             args=tuple(args), runner=self._exec_runner)
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise GateError(f"command failed to run ({type(exc).__name__})") from None
-        self._note_used(result.used)
-        return Reply({"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
-                     labels=self._label(resolver, token))
-
-    def _mcp_repair(self, params: dict[str, Any]) -> Reply:
-        fields(params, {"token", "host"}, {"scope", "purpose", "repairUrl", "repairKey"})
-        bridge = {"SECRET_GATE_REPAIR_URL": params.get("repairUrl") or "",
-                  "SECRET_GATE_REPAIR_KEY": params.get("repairKey") or ""}
-        if not all(isinstance(v, str) for v in bridge.values()):
-            raise ValidationError("参数无效：repairUrl、repairKey 应为字符串")
-        resolver = self._resolver(scope_of(params))
-        result = asyncio.run(repair_scoped(resolver, params["token"], params["host"], params.get("purpose", REPAIR_PURPOSE),
-                                           env=bridge, transport=self._repair_transport))
-        return Reply(result, labels=(result.get("label", ""),), host=str(params["host"]))
+    def _exec_resolve(self, params: dict[str, Any]) -> Reply:
+        """The value of an `exec` token for `secret_exec`, which runs the command as the login user (gate-simple-v0
+        §2.1). Only a token sealed with use `exec` opens here; the audit line gets its label, never the value."""
+        fields(params, {"token"}, {"scope"})
+        resolution = self._resolver(scope_of(params)).resolve_exact(text(params, "token"), use=USE_EXEC)
+        self._note_used((resolution,))
+        return Reply({"value": resolution.value, "label": resolution.label}, labels=(resolution.label,))
 
     # -- browser component (runs as the login user) ----------------------------------------------
 

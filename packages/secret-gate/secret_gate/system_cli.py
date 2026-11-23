@@ -1,6 +1,6 @@
-"""`secret-gate system install|update|uninstall|status` (gate-service-v0 §4, §5).
+"""`secret-gate system install|update|rotate-key|uninstall|status` (gate-service-v0 §4, §5; gate-simple-v0 §1).
 
-install/update/uninstall run as root (the Mac app asks for an administrator once, through osascript) and print
+install/update/rotate-key/uninstall run as root (the Mac app asks for an administrator once, through osascript) and print
 the steps they did; `--dry-run` prints the plan and changes nothing; `--root <prefix>` moves every system path
 under a prefix and only lists the privileged commands (tests, inspection). `status --json` needs no root and is
 what the Mac app polls.
@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import pwd
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -20,9 +19,8 @@ from typing import Any
 
 from .constants import DEFAULT_PROXY_PORT
 from .errors import GateError, ValidationError
-from .migrate import IMPORT_CONFIG_FLAG, held_config
 from .rpc_client import RpcClient
-from .service import SERVICE_LABEL, Runner, port_arg, run_command
+from .service import Runner, port_arg, run_command
 from .service_paths import ServiceConfig, SystemLayout, read_service_config
 from .system_exec import SystemDeps, execute, local_status, read_runtime_versions
 from .system_ops import DSCL
@@ -32,13 +30,15 @@ from .system_plan import (
     choose_account,
     install_plan,
     render,
+    rotate_key_plan,
     runtime_version,
     uninstall_plan,
     update_plan,
 )
 
 NEED_ROOT = "需要管理员权限：请在 Mac 应用中操作（会请求一次管理员授权）。"
-INSTALL_FAILURE = "已执行的步骤不会回滚。原有密钥仅在最后一步、确认服务可用后删除；修正原因后可重新运行安装。"
+INSTALL_FAILURE = "已执行的步骤不会回滚；已有的密钥保留。修正原因后可重新运行安装。"
+ROTATE_FAILURE = "已执行的步骤不会回滚；如新密钥已生成，旧密文已失效。修正原因后可重新运行。"
 UPDATE_FAILURE = "已执行的步骤不会回滚；旧运行时如已移走，保留在 runtime.old。修正原因后可重新运行更新。"
 UNINSTALL_FAILURE = "已执行的步骤不会回滚；修正原因后可重新运行卸载。"
 STATUS_TIMEOUT_SECONDS = 5.0
@@ -57,17 +57,12 @@ def _ids(runner: Runner, path: str, attribute: str) -> dict[str, int]:
 
 
 def gather_install_facts(options: InstallOptions, runner: Runner, *, simulate: bool, now: datetime) -> InstallFacts:
-    """Read-only look at the machine: users and groups (dscl), the runtime's version, an old LaunchAgent."""
+    """Read-only look at the machine: users and groups (dscl), the runtime's version. Never the user's home."""
     users = {} if simulate else _ids(runner, "/Users", "UniqueID")
     groups = {} if simulate else _ids(runner, "/Groups", "PrimaryGroupID")
     version = runtime_version(read_runtime_versions(options.runtime))
-    agent = None
-    if options.user_home is not None:
-        candidate = options.user_home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
-        agent = candidate if os.path.lexists(candidate) else None
     return InstallFacts(account=choose_account(users, groups), runtime_version=version,
-                        installed_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"), old_agent_plist=agent,
-                        held_config=held_config(options.migrate_from, options.owner_uid))
+                        installed_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 def _layout(args: argparse.Namespace) -> SystemLayout:
@@ -95,34 +90,12 @@ def _print(lines: list[str] | tuple[str, ...]) -> None:
         print(line)
 
 
-def _owner_home(owner_uid: int) -> Path:
-    try:
-        return Path(pwd.getpwuid(owner_uid).pw_dir)
-    except KeyError:
-        raise ValidationError(f"uid {owner_uid} 不存在") from None
-
-
-def owner_path(text: str, owner_home: Path | None) -> Path:
-    """`~` and `~/…` mean the *owner's* home: install runs as root, often with HOME unset (`env -i`)."""
-    if text == "~" or text.startswith("~/"):
-        if owner_home is None:
-            raise ValidationError(f"无法确定 {text} 所在的用户目录；请给出绝对路径或 --user-home")
-        return owner_home / text[2:]
-    path = Path(text)
-    if not path.is_absolute():
-        raise ValidationError(f"{text} 应为绝对路径")
-    return path
-
-
 def _cmd_install(args: argparse.Namespace) -> int:
     _check_root(args)
     layout = _layout(args)
     if not 0 < args.owner_uid < 2**31:
         raise ValidationError("--owner-uid 应为登录用户的 uid（不可为 root）")
-    user_home = Path(args.user_home) if args.user_home else (None if args.root else _owner_home(args.owner_uid))
-    options = InstallOptions(owner_uid=args.owner_uid, port=args.port, runtime=Path(args.runtime).expanduser().resolve(),
-                             migrate_from=owner_path(args.migrate_from, user_home) if args.migrate_from else None,
-                             user_home=user_home, import_config=args.import_config)
+    options = InstallOptions(owner_uid=args.owner_uid, port=args.port, runtime=Path(args.runtime).expanduser().resolve())
     deps = _deps(args, layout)
     facts = gather_install_facts(options, deps.runner, simulate=deps.simulate, now=datetime.now(timezone.utc))
     plan = install_plan(layout, options, facts)
@@ -146,6 +119,19 @@ def _cmd_update(args: argparse.Namespace) -> int:
         _print(render(plan))
         return 0
     outcome = execute(plan, _deps(args, layout), on_failure=UPDATE_FAILURE)
+    _print(outcome.lines)
+    return 0 if outcome.ok else 1
+
+
+def _cmd_rotate_key(args: argparse.Namespace) -> int:
+    _check_root(args)
+    layout = _layout(args)
+    read_service_config(layout.config)  # only an installed service has a key to replace
+    plan = rotate_key_plan(layout)
+    if args.dry_run:
+        _print(render(plan))
+        return 0
+    outcome = execute(plan, _deps(args, layout), on_failure=ROTATE_FAILURE)
     _print(outcome.lines)
     return 0 if outcome.ok else 1
 
@@ -218,17 +204,16 @@ def _common(p: argparse.ArgumentParser, *, dry_run: bool = True) -> None:
 
 
 def add_system_parser(sub: argparse._SubParsersAction) -> None:
-    s = sub.add_parser("system", help="the gate as a system service: install | update | uninstall | status (gate-service-v0)")
+    s = sub.add_parser("system", help="the gate as a system service: install | update | rotate-key | uninstall | status "
+                                      "(gate-service-v0, gate-simple-v0)")
     ss = s.add_subparsers(dest="system_cmd", required=True)
-    i = ss.add_parser("install", help="root: service account, directories, runtime copy, migration, LaunchDaemons")
+    i = ss.add_parser("install", help="root: service account, directories, runtime copy, a new keypair, LaunchDaemons")
     i.add_argument("--owner-uid", type=int, required=True, help="the login user allowed on gate.sock")
     i.add_argument("--port", type=port_arg, default=DEFAULT_PROXY_PORT, help=f"proxy port (default {DEFAULT_PROXY_PORT})")
     i.add_argument("--runtime", required=True, help="the App bundle's Contents/Resources/runtime")
-    i.add_argument("--migrate-from", help="the owner's old gate home (~/.secret-gate)")
-    i.add_argument(IMPORT_CONFIG_FLAG, dest="import_config", action="store_true",
-                   help="also import exec_templates.json and upstream-insecure.txt from --migrate-from; only after the "
-                        "user saw them (the plan summarizes them): they were writable by the login user's processes")
-    i.add_argument("--user-home", help="the owner's home for the old ~/.mitmproxy CA key and LaunchAgent (default: from --owner-uid; none with --root)")
+    # Accepted and ignored, so an App that still passes them keeps installing: install reads nothing in the user's home.
+    i.add_argument("--migrate-from", help=argparse.SUPPRESS)
+    i.add_argument("--user-home", help=argparse.SUPPRESS)
     _common(i)
     i.set_defaults(fn=_cmd_install)
     u = ss.add_parser("update", help="root: replace runtime/ and restart both services (data stays)")
@@ -236,6 +221,10 @@ def add_system_parser(sub: argparse._SubParsersAction) -> None:
     u.add_argument("--port", type=port_arg, help="change the proxy port")
     _common(u)
     u.set_defaults(fn=_cmd_update)
+    rk = ss.add_parser("rotate-key", help="root: replace the gate's keypair; every existing token stops working "
+                                          "and must be sealed again")
+    _common(rk)
+    rk.set_defaults(fn=_cmd_rotate_key)
     un = ss.add_parser("uninstall", help="root: stop services, remove LaunchDaemons and runtime/ (keys stay)")
     un.add_argument("--delete-keys", action="store_true", help="also delete the gate home: existing tokens can no longer be opened")
     _common(un)

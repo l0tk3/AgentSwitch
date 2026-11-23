@@ -87,21 +87,48 @@ def test_install_ca_copies(tmp_path, monkeypatch, capsys):
     assert (tmp_path / "ca.pem").read_text() == "PEM"
 
 
-def test_named_keys_and_batch(tmp_path, monkeypatch, capsys):
+def test_one_key_contract_keys_json_and_keygen_force(tmp_path, monkeypatch, capsys):
+    """`keys --json` prints a list with exactly one row (or none); `keygen --force` replaces the key, and tokens
+    sealed to the old one stop opening (gate-simple-v0 §1)."""
     import json
 
     monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
-    assert main(["keys", "new", "work"]) == 0
-    assert main(["keys", "new", "home"]) == 0
-    capsys.readouterr()
+    assert main(["keys", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == []
+    assert main(["keygen"]) == 0
+    first = capsys.readouterr()
+    assert "warning" not in first.err
     assert main(["keys", "--json"]) == 0
     rows = json.loads(capsys.readouterr().out)
-    assert [(r["name"], r["current"]) for r in rows] == [("home", False), ("work", True)]
-    assert main(["keys", "use", "home"]) == 0
-    capsys.readouterr()
-    assert main(["keys", "--json"]) == 0
-    assert [r["name"] for r in json.loads(capsys.readouterr().out) if r["current"]] == ["home"]
+    assert rows == [{"name": "main", "public": rows[0]["public"], "current": True, "legacy": False,
+                     "created": rows[0]["created"]}] and rows[0]["created"].endswith("Z")
+    assert f"public key value: {rows[0]['public']}" in first.out
 
+    assert main(["enc", "--label", "a/pass", "--host", "a.example.com", "--value", "pw-a-1234"]) == 0
+    old_token = capsys.readouterr().out.strip()
+    assert main(["keygen"]) == 2
+    assert "已有密钥" in capsys.readouterr().err
+    assert main(["keygen", "--force"]) == 0
+    replaced = capsys.readouterr()
+    assert "no longer opens" in replaced.err
+    assert main(["keys", "--json"]) == 0
+    new_rows = json.loads(capsys.readouterr().out)
+    assert len(new_rows) == 1 and new_rows[0]["public"] != rows[0]["public"]
+    assert main(["check", old_token]) == 2
+    capsys.readouterr()
+    for gone in (["keys", "new", "x"], ["keys", "use", "main"], ["keys", "retire", "main"], ["keys", "restore", "x"],
+                 ["keygen", "--name", "x"], ["credential-info"], ["credential-reissue"],
+                 ["enc", "--label", "a/b", "--seed-import-host", "a.example.com", "--value", "12345678"]):
+        with pytest.raises(SystemExit) as exc:
+            main(gone)
+        assert exc.value.code == 2
+
+
+def test_batch_enc(tmp_path, monkeypatch, capsys):
+    import json
+
+    monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
+    main(["keygen"]); capsys.readouterr()
     batch = [
         {"label": "a/pass", "hosts": ["a.example.com"], "value": "pw-a-1234"},
         {"label": "a/totp", "kind": "totp", "uses": ["otp"], "value": "JBSWY3DPEHPK3PXP"},
@@ -112,7 +139,6 @@ def test_named_keys_and_batch(tmp_path, monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out[0]["token"].startswith("enc:v1:") and out[1]["token"].startswith("enc:v1:")
     assert "error" in out[2] and "pw-a-1234" not in json.dumps(out)
-    # tokens minted for the current keypair (home) resolve; the gate also still holds "work"
     assert main(["check", out[0]["token"]]) == 0
     assert "label: a/pass" in capsys.readouterr().out
 

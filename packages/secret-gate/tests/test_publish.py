@@ -13,7 +13,7 @@ import pytest
 from secret_gate.constants import USE_HTTP
 from secret_gate.crypto import generate_keypair
 from secret_gate.errors import KeyStoreError, TokenError
-from secret_gate.keyring import create_keypair, set_current
+from secret_gate.keyring import create_keypair
 from secret_gate.keystore import save_keypair
 from secret_gate.policy import SecretPayload
 from secret_gate.proxy_addon import SecretGateAddon
@@ -34,22 +34,21 @@ def _mode(path) -> int:
 def test_keys_json_is_published_atomically_with_public_keys_only(tmp_path):
     home, public = tmp_path / "gate", tmp_path / "pub"
     public.mkdir()
-    old = generate_keypair()
-    save_keypair(home / "keys" / "legacy" / "default", old)
-    main = create_keypair(home, "main")
+    assert publish_keys(home, public) == () and json.loads((public / "keys.json").read_text()) == []
+    save_keypair(home / "keys" / "legacy" / "default", generate_keypair())   # the old layout is not published
+    main = create_keypair(home)
     rows = publish_keys(home, public)
     data = json.loads((public / "keys.json").read_text())
-    assert [(r["name"], r["current"], r["legacy"]) for r in data] == [("main", True, False), ("default", False, True)]
+    assert [(r["name"], r["current"], r["legacy"]) for r in data] == [("main", True, False)]
     assert set(data[0]) == {"name", "publicKey", "current", "legacy", "createdAt"}
     assert data[0]["publicKey"] == main.public and _mode(public / "keys.json") == 0o644
     assert "key.priv" not in (public / "keys.json").read_text()
     assert read_rows(public) == rows
     assert current_public_key(rows) == current_public_key(read_rows(public))
     assert [p.name for p in public.iterdir()] == ["keys.json"]            # no temp file left behind
-    create_keypair(home, "next")
-    set_current(home, "next")
+    rotated = create_keypair(home, replace=True)
     publish_keys(home, public)
-    assert [r.name for r in read_rows(public) if r.current] == ["next"]
+    assert [r.public_key for r in read_rows(public)] == [rotated.public] != [main.public]
 
 
 @pytest.mark.parametrize("bad", [
@@ -57,6 +56,8 @@ def test_keys_json_is_published_atomically_with_public_keys_only(tmp_path):
     [{"name": "a", "publicKey": "short", "current": True, "legacy": False, "createdAt": ""}],
     [{"name": "a", "publicKey": "A" * 43, "current": True, "legacy": True, "createdAt": ""}],
     [{"name": "a", "publicKey": "A" * 43, "current": "yes", "legacy": False, "createdAt": ""}],
+    [{"name": "a", "publicKey": "A" * 43, "current": False, "legacy": False, "createdAt": ""}],
+    [{"name": n, "publicKey": "A" * 43, "current": True, "legacy": False, "createdAt": ""} for n in ("a", "b")],
 ])
 def test_keys_json_is_validated_as_untrusted_input(bad):
     with pytest.raises(KeyStoreError, match="keys.json"):
@@ -70,7 +71,7 @@ def test_reading_keys_json_errors(tmp_path):
     with pytest.raises(KeyStoreError, match="有效的 JSON"):
         read_rows(tmp_path)
     (tmp_path / "keys.json").write_text("[]")
-    with pytest.raises(KeyStoreError, match="无当前密钥"):
+    with pytest.raises(KeyStoreError, match="还没有密钥"):
         current_public_key(read_rows(tmp_path))
 
 
@@ -141,26 +142,27 @@ def _token(public: bytes) -> str:
     return make_token(public, SecretPayload.create(value="pw-reload-1", hosts=["a.example"], uses=[USE_HTTP], label="a/p"))
 
 
-def test_sighup_reloads_every_key_of_the_home(tmp_path):
-    first = create_keypair(tmp_path, "first")
+def test_sighup_reloads_the_rotated_key(tmp_path):
+    from secret_gate.keystore import load_public_key
+
+    create_keypair(tmp_path)
+    old_token = _token(load_public_key(tmp_path))
     gate = SecretGateAddon(Resolver.from_home(tmp_path))
     lines: list[str] = []
     reloader = InsecureHostsReloader(UpstreamTlsAddon(frozenset()), tmp_path, emit=lines.append, keys=gate)
-    create_keypair(tmp_path, "second")
-    set_current(tmp_path, "second")
-    from secret_gate.keystore import load_public_key
-
+    create_keypair(tmp_path, replace=True)                                 # system rotate-key
     token = _token(load_public_key(tmp_path))
     with pytest.raises(TokenError):
         gate.resolver.resolve(token, use=USE_HTTP, host="a.example:443")  # the running proxy has not seen it
     reloader.reload()
     assert gate.resolver.resolve(token, use=USE_HTTP, host="a.example:443").value == "pw-reload-1"
-    assert gate.resolver.key_count == 2 and first.public
-    assert lines[-1] == "secret-gate: keys reloaded: 2 private key(s)"
+    with pytest.raises(TokenError):
+        gate.resolver.resolve(old_token, use=USE_HTTP, host="a.example:443")  # sealed to the old key: gone
+    assert lines[-1] == "secret-gate: key reloaded"
 
 
 def test_a_failed_key_reload_keeps_the_previous_keys(tmp_path):
-    create_keypair(tmp_path, "only")
+    create_keypair(tmp_path)
     before = Resolver.from_home(tmp_path)
     gate = SecretGateAddon(before)
     lines: list[str] = []
@@ -172,19 +174,20 @@ def test_a_failed_key_reload_keeps_the_previous_keys(tmp_path):
 
 
 def test_real_sighup_reloads_keys_through_an_asyncio_loop(tmp_path):
-    create_keypair(tmp_path, "first")
-    gate = SecretGateAddon(Resolver.from_home(tmp_path))
+    create_keypair(tmp_path)
+    first = Resolver.from_home(tmp_path)
+    gate = SecretGateAddon(first)
     reloader = InsecureHostsReloader(UpstreamTlsAddon(frozenset()), tmp_path, emit=lambda _line: None, keys=gate)
 
-    async def scenario() -> int:
+    async def scenario() -> bool:
         reloader.running()
-        create_keypair(tmp_path, "second")
+        create_keypair(tmp_path, replace=True)
         os.kill(os.getpid(), signal.SIGHUP)
         for _ in range(100):
             await asyncio.sleep(0.01)
-            if gate.resolver.key_count == 2:
+            if gate.resolver is not first:
                 break
         reloader.done()
-        return gate.resolver.key_count
+        return gate.resolver is not first
 
-    assert asyncio.run(scenario()) == 2
+    assert asyncio.run(scenario())

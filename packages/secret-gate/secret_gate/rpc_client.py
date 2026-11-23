@@ -18,9 +18,8 @@ from .service_paths import SERVICE_UNAVAILABLE
 __all__ = ["RpcClient", "ServiceUnavailable"]
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
-# Calls that wait for a site, a command or the dispatcher: the service's own limits (30 s HTTP, 60 s exec,
-# 65 s repair) plus margin.
-SLOW_METHOD_TIMEOUTS = {"mcp.http": 60.0, "mcp.exec": 90.0, "mcp.repair": 90.0}
+# Calls that wait for a site: the service's own limit (30 s HTTP) plus margin.
+SLOW_METHOD_TIMEOUTS = {"mcp.http": 60.0}
 
 
 class RpcClient:

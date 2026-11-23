@@ -3,7 +3,7 @@
 #
 #   scripts/opencode_browser_demo.sh http://site.example.com:8400 [more-origins...]
 #
-# Prerequisites (see README "Setup"): a current keypair (UI or `secret-gate keys new work --use`)
+# Prerequisites (see README "Setup"): a current keypair (UI or `secret-gate keygen`)
 # and `secret-gate proxy` running on $GATE_PORT (default 8080) with the same SECRET_GATE_HOME.
 # OpenCode needs a DeepSeek credential already configured (`opencode auth login`).
 #
@@ -44,7 +44,7 @@ if ! nc -z 127.0.0.1 "$GATE_PORT" 2>/dev/null; then
   echo "gate proxy not listening on $PROXY; start it: $GATE proxy -p $GATE_PORT" >&2; exit 1
 fi
 if ! "$GATE" keys --json 2>/dev/null | grep -q '"current": true'; then
-  echo "no current keypair in $SECRET_GATE_HOME; create one in the UI or run: $GATE keys new work --use" >&2; exit 1
+  echo "no current keypair in $SECRET_GATE_HOME; create one in the UI or run: $GATE keygen" >&2; exit 1
 fi
 
 ORIGINS="$(IFS=';'; echo "$*")"

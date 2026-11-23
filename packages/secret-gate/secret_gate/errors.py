@@ -21,10 +21,6 @@ class KeyStoreError(GateError):
     """Key material is missing, unreadable, or has unsafe permissions."""
 
 
-class ExecTemplateError(GateError):
-    """Exec template is missing, malformed, or not whitelisted."""
-
-
 class ValidationError(GateError):
     """Caller-supplied input failed validation."""
 

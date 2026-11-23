@@ -16,14 +16,23 @@ from pathlib import Path
 
 from . import __version__
 from .bootstrap import add_bootstrap_parser
-from .constants import CA_CERT_FILE, DEFAULT_PROXY_PORT, KIND_SECRET, MITMPROXY_CA_PATH, USE_HTTP, VALID_KINDS, VALID_USES
-from .credential_repair import credential_call, read_credential_stdin
-from .crypto import b64url_encode, generate_keypair
+from .constants import (
+    CA_CERT_FILE,
+    DEFAULT_PROXY_PORT,
+    KIND_SECRET,
+    MITMPROXY_CA_PATH,
+    PRIVATE_KEY_FILE,
+    PUBLIC_KEY_FILE,
+    USE_HTTP,
+    VALID_KINDS,
+    VALID_USES,
+)
+from .crypto import b64url_encode
 from .enc_cli import run_enc
 from .errors import GateError
 from .fill_cli import add_fill_parser
-from .keyring import create_keypair, restore_keypair, retire_keypair, set_current
-from .keystore import gate_home, load_private_key, load_public_key, parse_public_key, save_keypair
+from .keyring import create_keypair, has_keypair
+from .keystore import gate_home, load_private_key, load_public_key, parse_public_key
 from .publish import key_rows
 from .refs_cli import add_refs_parser
 from .resolver import Resolver
@@ -35,38 +44,30 @@ from .service_paths import client_socket
 from .system_cli import add_system_parser
 
 
+REPLACED_WARNING = "the old keypair is gone: every token sealed to it no longer opens; seal those values again"
+
+
 def _cmd_keygen(args: argparse.Namespace) -> int:
+    """The gate's one keypair, without the gate service (with it, `system install` makes it, `system rotate-key`
+    replaces it). Refuses when there is one unless --force, which replaces it."""
     home = gate_home()
-    if args.name:
-        info = create_keypair(home, args.name)
-        print(f"keypair {info.name!r} created under {info.path} ({'current' if info.current else 'not current'})")
-        print(f"public key value: {info.public}")
-        return 0
-    priv, pub = save_keypair(home, generate_keypair(), overwrite=args.force)
-    print(f"private key: {priv} (0600, keep it away from agents)")
-    print(f"public key:  {pub}")
-    print(f"public key value: {pub.read_text().strip()}")
+    replaced = has_keypair(home)
+    info = create_keypair(home, replace=args.force)
+    print(f"private key: {info.path / PRIVATE_KEY_FILE} (0600, keep it away from agents)")
+    print(f"public key:  {info.path / PUBLIC_KEY_FILE}")
+    print(f"public key value: {info.public}")
+    if replaced:
+        print(f"warning: {REPLACED_WARNING}", file=sys.stderr)
     return 0
 
 
 def _cmd_keys(args: argparse.Namespace) -> int:
-    home = gate_home()
-    if args.keys_cmd == "new":
-        create_keypair(home, args.name)
-        if args.use:
-            set_current(home, args.name)
-    elif args.keys_cmd == "use":
-        set_current(home, args.name)
-    elif args.keys_cmd == "retire":
-        retire_keypair(home, args.name)
-    elif args.keys_cmd == "restore":
-        restore_keypair(home, args.name)
-    print_keys(key_rows(home), args.json)
+    print_keys(key_rows(gate_home()), args.json)
     return 0
 
 
 def _cmd_pubkey(_: argparse.Namespace) -> int:
-    """The *current* keypair's public key (an old home's top-level key.pub is its "default" keypair)."""
+    """The gate's public key."""
     print(b64url_encode(load_public_key(gate_home())))
     return 0
 
@@ -80,13 +81,6 @@ def _cmd_check(args: argparse.Namespace) -> int:
     info = resolver.describe(args.token)
     for key in ("label", "kind", "hosts", "uses"):
         print(f"{key}: {info[key]}")
-    return 0
-
-
-def _cmd_credential(args: argparse.Namespace) -> int:
-    data = read_credential_stdin(args.cmd)
-    home = gate_home()
-    print(json.dumps(credential_call(Resolver.from_home(home), lambda: load_public_key(home), args.cmd, data)))
     return 0
 
 
@@ -170,20 +164,10 @@ def _cmd_install_ca(_: argparse.Namespace) -> int:
 
 
 def _add_keys_parser(sub: argparse._SubParsersAction) -> None:
-    ks = sub.add_parser("keys", help="list / create / switch / retire named keypairs")
+    ks = sub.add_parser("keys", help="show the gate's keypair (one row, or none)")
     ks.add_argument("--json", action="store_true", help="machine-readable output")
     kss = ks.add_subparsers(dest="keys_cmd")
-    kss.add_parser("list", help="list keypairs (default)")
-    kn = kss.add_parser("new", help="create a named keypair")
-    kn.add_argument("name")
-    kn.add_argument("--use", action="store_true", help="also make it current")
-    ku = kss.add_parser("use", help="make a keypair current (not a legacy one)")
-    ku.add_argument("name")
-    kr = kss.add_parser("retire", help="retire a legacy (decrypt-only) keypair: its tokens stop working; "
-                                       "restorable for 30 days")
-    kr.add_argument("name")
-    kb = kss.add_parser("restore", help="bring back a keypair retired in the last 30 days (as legacy)")
-    kb.add_argument("name")
+    kss.add_parser("list", help="show the keypair (default)")
     ks.set_defaults(fn=_cmd_keys, keys_cmd="list")
 
 
@@ -193,7 +177,6 @@ def _add_enc_parser(sub: argparse._SubParsersAction) -> None:
     e.add_argument("--host", action="append", default=[], help="allowed host, repeatable; *.x.com ok; add :port to bind one port (host:8001)")
     e.add_argument("--use", action="append", default=[], choices=sorted(VALID_USES))
     e.add_argument("--kind", default=KIND_SECRET, choices=sorted(VALID_KINDS))
-    e.add_argument("--seed-import-host", action="append", default=[], help="explicitly authorize TOTP seed import to an existing exact host[:port]")
     e.add_argument("--pubkey", help="public key text (default: read from gate home)")
     e.add_argument("--value", help="secret value (prefer prompt or --stdin: avoids shell history)")
     e.add_argument("--stdin", action="store_true", help="read value from stdin")
@@ -227,9 +210,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    k = sub.add_parser("keygen", help="generate the gate keypair")
-    k.add_argument("--force", action="store_true", help="overwrite an existing (legacy, unnamed) key")
-    k.add_argument("--name", help="create a named keypair under <home>/keys/<name> instead")
+    k = sub.add_parser("keygen", help="generate the gate keypair (without the gate service)")
+    k.add_argument("--force", action="store_true", help="replace an existing keypair: every token sealed to the old one "
+                                                        "stops working")
     k.set_defaults(fn=_cmd_keygen)
     _add_keys_parser(sub)
     sub.add_parser("pubkey", help="print the current public key").set_defaults(fn=_cmd_pubkey)
@@ -239,8 +222,6 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("token")
     c.set_defaults(fn=_cmd_check)
 
-    sub.add_parser("credential-info", help="daemon: read token JSON on stdin, return policy metadata").set_defaults(fn=_cmd_credential)
-    sub.add_parser("credential-reissue", help="daemon: re-sign an authorized TOTP seed import request from stdin").set_defaults(fn=_cmd_credential)
     add_refs_parser(sub)
 
     pr = sub.add_parser("proxy", help="run the substituting HTTPS proxy")

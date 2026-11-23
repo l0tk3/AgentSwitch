@@ -1,12 +1,12 @@
-"""`secret-gate system install|update|uninstall`: the plan, as pure data (gate-service-v0 §2, §4, §5).
+"""`secret-gate system install|update|rotate-key|uninstall`: the plan, as pure data (gate-service-v0 §2, §4, §5).
 
 A plan is a list of steps; a step is a list of operations. Building a plan reads nothing and changes nothing:
 facts about the machine (free UIDs, the runtime's version, ...) come in as arguments, so the plan can be
 printed (`--dry-run`) and asserted in tests. system_exec.py carries it out; every privileged command (dscl,
 dseditgroup, sysadminctl, chown, launchctl) is a `Run` that goes through one injectable runner.
 
-Order matters for the keys: originals in the login user's home are deleted only in the last step, after the
-running service reported the migrated keys (`WaitForService`), and only where an identical copy exists.
+Nothing here reads or changes the login user's home (gate-simple-v0 §1, §6): install generates the service's one
+keypair inside the service's own home, and nothing is moved in from `~/.secret-gate`.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ValidationError
-from .service import SERVICE_LABEL as OLD_AGENT_LABEL
 from .service_paths import (
     PROXY_LABEL,
     RPC_LABEL,
@@ -34,18 +33,13 @@ from .system_ops import (
     LAUNCHCTL,
     NOT_LOADED_OK,
     SYSADMINCTL,
-    CleanupUserHome,
-    CreateCurrentKey,
-    DeleteOldCA,
+    CreateKey,
     GenerateCA,
     MakeDir,
-    MigrateFiles,
-    MigrateKeys,
     Op,
     Plan,
     Publish,
     RemovePath,
-    RemoveUserFile,
     Run,
     StageRuntime,
     Step,
@@ -56,7 +50,6 @@ from .system_ops import (
 
 ROLE_ID_RANGE = range(450, 500)
 SYSTEM_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
-NEW_KEY_NAME = "main"
 ROOT_OWNER = "root:wheel"
 PLIST_MODE = 0o644
 CONFIG_MODE = 0o644
@@ -97,9 +90,6 @@ class InstallOptions:
     owner_uid: int
     port: int
     runtime: Path
-    migrate_from: Path | None = None
-    user_home: Path | None = None  # the owner's home: old ~/.mitmproxy CA key, old LaunchAgent
-    import_config: bool = False    # also import exec_templates.json, upstream-insecure.txt (the user confirmed them)
 
 
 @dataclass(frozen=True)
@@ -107,8 +97,6 @@ class InstallFacts:
     account: Account
     runtime_version: str
     installed_at: str
-    old_agent_plist: Path | None = None  # present in the owner's ~/Library/LaunchAgents
-    held_config: tuple[str, ...] = ()    # summary of the old exec_templates.json / upstream-insecure.txt (migrate.py)
 
 
 def runtime_version(versions_text: str) -> str:
@@ -151,18 +139,6 @@ def plists(layout: SystemLayout, port: int) -> dict[str, bytes]:
     rpc = daemon_plist(layout, RPC_LABEL, ("rpc",), "rpc")
     return {label: plistlib.dumps(data, fmt=plistlib.FMT_XML, sort_keys=True)
             for label, data in ((RPC_LABEL, rpc), (PROXY_LABEL, proxy))}
-
-
-def moved_text(layout: SystemLayout, at: str) -> str:
-    return (
-        "凭据网关已改为系统服务（docs/gate-service-v0.md）。本目录原有的内容已迁移：\n"
-        f"- 密钥：{layout.gate}/keys/legacy/（仅解密，不再作为当前密钥）\n"
-        f"- 短引用库、screenshot-mask.json：{layout.gate}/\n"
-        "- exec_templates.json、upstream-insecure.txt：只在安装时确认过（--import-config）才迁入；未迁入的仍留在本目录\n"
-        f"- 公钥列表与 CA 证书：{layout.public}/keys.json、{layout.public}/ca.pem\n"
-        f"这些文件归服务账户 {SERVICE_USER} 所有，修改需要管理员权限；请在 Mac 应用里操作。\n"
-        f"迁移时间：{at}\n"
-    )
 
 
 # -- plans ---------------------------------------------------------------------------------------
@@ -211,42 +187,23 @@ def _account_step(account: Account) -> Step:
 
 
 def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFacts) -> Plan:
-    account, owner = facts.account, f"{SERVICE_USER}:{SERVICE_USER}"
+    account = facts.account
     config = ServiceConfig(owner_uid=options.owner_uid, proxy_port=options.port,
                            runtime_version=facts.runtime_version, installed_at=facts.installed_at)
-    source = options.migrate_from
     steps = [
         _account_step(account),
         Step("创建目录", (
             MakeDir(layout.root, PUBLIC_DIR_MODE), _chown(ROOT_OWNER, layout.root),
-            *(MakeDir(p, PRIVATE_DIR_MODE) for p in (layout.gate, layout.gate / "keys", layout.gate / "keys" / "legacy",
-                                                     layout.logs, layout.mitmproxy)),
+            *(MakeDir(p, PRIVATE_DIR_MODE) for p in (layout.gate, layout.logs, layout.mitmproxy)),
             MakeDir(layout.public, PUBLIC_DIR_MODE),
         )),
         Step("复制运行时", (StageRuntime(options.runtime, layout),
                           _chown(ROOT_OWNER, layout.runtime_staging, recursive=True))),
         Step("写入 gate-service.json", (_config_file(layout, config), _chown(ROOT_OWNER, layout.config))),
-    ]
-    if source is not None:
-        steps.append(Step("迁移旧密钥（仅解密）", (MigrateKeys(source, options.owner_uid, layout.gate),)))
-    steps.append(Step(f"新建当前密钥 {NEW_KEY_NAME}", (CreateCurrentKey(layout.gate, NEW_KEY_NAME),)))
-    if source is not None:
-        title = ("迁移短引用库、可信配置（已确认）和日志" if options.import_config
-                 else "迁移短引用库、截图遮挡配置和日志（exec 模板、上游证书例外不迁入）")
-        steps.append(Step(title, (MigrateFiles(source, options.owner_uid, layout.gate, options.import_config,
-                                               facts.held_config),)))
-    steps += [
+        Step("生成密钥", (CreateKey(layout.gate),)),
         Step("生成 mitmproxy CA", (GenerateCA(layout.mitmproxy),)),
         Step("发布 keys.json 和 ca.pem", (Publish(layout),)),
-        Step("设置属主和权限", (Run((CHMOD, "-R", "go-rwx", str(layout.gate))),   # 0700 / 0600 whatever root's umask was
-                            _chown(owner, layout.gate, recursive=True), _chown(owner, layout.public, recursive=True))),
-    ]
-    if facts.old_agent_plist is not None:
-        steps.append(Step("停用用户级网关服务（旧 LaunchAgent）", (
-            Run((LAUNCHCTL, "bootout", f"gui/{options.owner_uid}/{OLD_AGENT_LABEL}"), tolerate=NOT_LOADED_OK),
-            RemoveUserFile(facts.old_agent_plist, options.owner_uid),
-        )))
-    steps += [
+        _ownership(layout),
         _write_plists(layout, options.port),
         _stop(layout),
         Step("启用新运行时", (SwapRuntime(layout),)),
@@ -254,14 +211,27 @@ def install_plan(layout: SystemLayout, options: InstallOptions, facts: InstallFa
         Step("等待服务响应", (WaitForService(layout),)),
         Step("删除旧运行时", (RemovePath(layout.runtime_backup),)),
     ]
-    cleanup: list[Op] = []
-    if source is not None:
-        cleanup.append(CleanupUserHome(source, options.owner_uid, layout.gate, moved_text(layout, facts.installed_at)))
-    if options.user_home is not None:
-        cleanup.append(DeleteOldCA(options.user_home / ".mitmproxy", options.owner_uid))
-    if cleanup:
-        steps.append(Step("清理用户目录中的旧文件", tuple(cleanup)))
     return Plan("安装凭据网关服务", tuple(steps))
+
+
+def _ownership(layout: SystemLayout) -> Step:
+    owner = f"{SERVICE_USER}:{SERVICE_USER}"
+    return Step("设置属主和权限", (Run((CHMOD, "-R", "go-rwx", str(layout.gate))),   # 0700 / 0600 whatever root's umask was
+                               _chown(owner, layout.gate, recursive=True), _chown(owner, layout.public, recursive=True)))
+
+
+def rotate_key_plan(layout: SystemLayout) -> Plan:
+    """Replace the service's keypair (gate-simple-v0 §1): every token sealed to the old one stops opening and has to
+    be sealed again. keys.json is republished and the proxy reloads its key on SIGHUP (reload.py); the rpc service
+    reads the key on every call."""
+    return Plan("更换凭据网关密钥", (
+        Step("生成新密钥（旧密文全部失效）", (CreateKey(layout.gate, replace=True),)),
+        Step("发布 keys.json 和 ca.pem", (Publish(layout),)),
+        _ownership(layout),
+        Step("通知代理重新加载密钥", (Run((LAUNCHCTL, "kill", "SIGHUP", f"system/{PROXY_LABEL}"),
+                                        tolerate=NOT_LOADED_OK),)),
+        Step("等待服务响应", (WaitForService(layout),)),
+    ))
 
 
 def update_plan(layout: SystemLayout, runtime: Path, config: ServiceConfig) -> Plan:

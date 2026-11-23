@@ -2,8 +2,9 @@
 
 Runs as the service account. The socket is mode 0666 so any local process can connect, and the peer check lets
 only root and the `ownerUid` of gate-service.json stay: the uid comes from the kernel (LOCAL_PEERCRED), every
-other user is disconnected before a byte is read. One thread per connection, so a slow `mcp.http`, `mcp.exec` or
-`mcp.repair` never holds up another client; key changes are serialized inside the service.
+other user is disconnected before a byte is read. One thread per connection, so a slow `mcp.http` never holds up
+another client. A service started without a keypair generates one (a fresh install, or a home whose key was
+deleted); replacing it is `secret-gate system rotate-key` (root), never a call on this socket.
 
 Every call writes one line to `<gate home>/logs/rpc-audit.jsonl` (0600): time, method, peer uid, the scope's
 short hash, token labels, host, result. Never a value, a ciphertext or the scope itself.
@@ -26,6 +27,7 @@ from typing import Any
 
 from .audit import Audit
 from .errors import GateError, ValidationError
+from .keyring import create_keypair, has_keypair
 from .keystore import gate_home
 from .rpc_methods import GateService
 from .rpc_protocol import (
@@ -198,6 +200,9 @@ def prepare_socket_path(path: Path) -> None:
 
 def build_server(home: Path, public: Path, config_path: Path, **service_kwargs: Any) -> RpcServer:
     config = config_loader(config_path)
+    if not has_keypair(home):
+        create_keypair(home)
+        _log(f"no keypair in {home}: generated one")
     service = GateService(home, public, config, **service_kwargs)
     service.publish()
     return RpcServer(public / SOCKET_FILE, service, owner_uids(config), Path(home) / AUDIT_FILE)

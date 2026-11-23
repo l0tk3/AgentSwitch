@@ -7,8 +7,12 @@ the redactor fails on."""
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -17,14 +21,13 @@ from .constants import (
     EXEC_TIMEOUT_SECONDS,
     HTTP_TIMEOUT_SECONDS,
     MAX_BODY_BYTES,
-    USE_EXEC,
     USE_HTTP,
     USE_OTP,
 )
-from .errors import ValidationError
-from .exec_templates import ExecTemplate, get_template
+from .errors import GateError, ValidationError
 from .redact import Redactor, withheld
 from .resolver import Resolution, Resolver
+from .tokens import find_secrets, is_secret
 
 _ALLOWED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 try:
@@ -137,39 +140,109 @@ def _read_body(resp: httpx.Response, redactor: Redactor) -> str:
     return cleaned
 
 
+# -- secret_exec (gate-simple-v0 §2.1) ------------------------------------------------------------
+# The agent writes the command; values reach it only as environment variables. The command runs as the login user,
+# in the `secret-gate mcp` process, never as the gate service: an arbitrary command run as the service account could
+# read the service's private key.
+
+EXEC_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Besides PATH (always EXEC_PATH), the only variables the child takes from the MCP process.
+EXEC_INHERITED_ENV = ("HOME", "LANG", "LC_ALL", "TZ", "TMPDIR")
+MAX_EXEC_ARGS = 256
+MAX_EXEC_ARG_CHARS = 32768
+MAX_EXEC_ENV = 32
+_EXEC_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+# Variables that change how a program, its loader or its interpreter runs, or that the base environment sets.
+EXEC_DENIED_NAMES = frozenset({
+    "PATH", "HOME", "SHELL", "ENV", "BASH_ENV", "IFS", "CDPATH", "PS4", "PROMPT_COMMAND", "TMPDIR", "USER",
+    "LOGNAME", "LANG", "TZ", "NODE_OPTIONS", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "SSH_ASKPASS",
+    "EDITOR", "VISUAL", "PAGER", "GCONV_PATH", "HOSTALIASES", "RESOLV_HOST_CONF", "LOCALDOMAIN", "MALLOC_CHECK_",
+    "OPENSSL_CONF", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+})
+EXEC_DENIED_PREFIXES = ("LD_", "DYLD_", "PYTHON", "NODE_", "PERL", "RUBY", "BASH_FUNC_", "LC_", "GIT_",
+                        "SECRET_GATE_", "NPM_CONFIG_", "XDG_")
+
+
+def check_exec_argv(argv: object) -> tuple[str, ...]:
+    """The agent's own command line: 1–MAX_EXEC_ARGS non-empty strings, none holding a token or reference (a value
+    in argv would be visible to every process on the machine, `ps`; values go in `env`)."""
+    if not isinstance(argv, (list, tuple)) or not argv or len(argv) > MAX_EXEC_ARGS:
+        raise ValidationError(f"argv 应为 1–{MAX_EXEC_ARGS} 个字符串的列表")
+    for arg in argv:
+        if not isinstance(arg, str) or not arg or len(arg) > MAX_EXEC_ARG_CHARS or "\0" in arg:
+            raise ValidationError("argv 的每一项应为非空字符串")
+        lowered = arg.lower()
+        if "enc:" in lowered or "enc%3a" in lowered or find_secrets(arg):
+            raise ValidationError("argv 中不能有密文或引用（enc:…）：命令行对本机所有进程可见；"
+                                  "请把它放进 env，在命令里用 $变量名 引用")
+    return tuple(argv)
+
+
+def check_exec_env(env: object) -> dict[str, str]:
+    """`{NAME: token or reference}`: 1–MAX_EXEC_ENV upper-case names that are not loader, interpreter or base
+    variables; each value exactly one enc:v1: token or enc:ref: reference."""
+    if not isinstance(env, dict) or not env or len(env) > MAX_EXEC_ENV:
+        raise ValidationError(f"env 应为 1–{MAX_EXEC_ENV} 个 {{变量名: 密文或引用}}")
+    for name, value in env.items():
+        if not isinstance(name, str) or not _EXEC_ENV_NAME.fullmatch(name) or name != name.upper():
+            raise ValidationError(f"环境变量名 {name!r} 无效：只能用大写字母、数字和下划线，且不以数字开头")
+        if name in EXEC_DENIED_NAMES or name.startswith(EXEC_DENIED_PREFIXES):
+            raise ValidationError(f"环境变量 {name} 不允许：它会改变程序、加载器或解释器的行为")
+        if not isinstance(value, str) or value != value.strip() or not is_secret(value):
+            raise ValidationError(f"环境变量 {name} 的值应恰好是一个密文（enc:v1:…）或引用（enc:ref:…）")
+    return dict(env)
+
+
+def exec_child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The child's base environment: PATH = EXEC_PATH, and HOME, LANG, LC_ALL, TZ, TMPDIR of this process if set."""
+    source = os.environ if base is None else base
+    env = {name: source[name] for name in EXEC_INHERITED_ENV if source.get(name)}
+    env["PATH"] = EXEC_PATH
+    return env
+
+
 def op_exec(
-    resolver: Resolver,
-    templates: dict[str, ExecTemplate],
+    resolve: Callable[[str], Resolution],
     *,
-    template: str,
-    token: str,
-    args: tuple[str, ...] | list[str] = (),
-    runner=subprocess.run,
+    argv: object,
+    env: object,
+    runner: Callable[..., Any] = subprocess.run,
+    base_env: Mapping[str, str] | None = None,
+    cwd: str | None = None,
 ) -> ExecResult:
-    """Run a whitelisted template. The value reaches the child only through the template's `env` and/or `stdin`
-    (never argv, which every user of the machine can read); the child's environment is minimal (exec_templates
-    `child_env`); stdout and stderr are redacted before they return."""
-    tpl = get_template(templates, template)
-    resolution = resolver.resolve(token, use=USE_EXEC)
-    rendered = tpl.render(resolution.value, tuple(args))
-    stdin = {"input": rendered.stdin} if rendered.stdin is not None else {"stdin": subprocess.DEVNULL}
-    proc = runner(
-        list(rendered.argv),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=EXEC_TIMEOUT_SECONDS,
-        check=False,
-        env=rendered.env,
-        **stdin,
-    )
-    redactor = Redactor((resolution,))
+    """Run the agent's command with each `env` token resolved (`resolve` opens only `exec` tokens) into its variable.
+    stdin is empty, the environment minimal (exec_child_env), cwd this process's; stdout and stderr go through the
+    redactor, and a stream over MAX_BODY_BYTES is withheld whole."""
+    command = check_exec_argv(argv)
+    wanted = check_exec_env(env)
+    resolutions = {name: resolve(token) for name, token in wanted.items()}
+    child = exec_child_env(base_env)
+    child.update({name: r.value for name, r in resolutions.items()})
+    try:
+        proc = runner(
+            list(command),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=EXEC_TIMEOUT_SECONDS,
+            check=False,
+            env=child,
+            stdin=subprocess.DEVNULL,
+            cwd=cwd or os.getcwd(),
+        )
+    except subprocess.TimeoutExpired:
+        raise GateError(f"command timed out after {EXEC_TIMEOUT_SECONDS} s; its output is not returned") from None
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GateError(f"command failed to run ({type(exc).__name__})") from None
+    used = tuple(resolutions.values())
+    redactor = Redactor(used)
     return ExecResult(
         returncode=proc.returncode,
         stdout=_redacted_output(proc.stdout, redactor),
         stderr=_redacted_output(proc.stderr, redactor),
-        used=(resolution,),
+        used=used,
     )
 
 

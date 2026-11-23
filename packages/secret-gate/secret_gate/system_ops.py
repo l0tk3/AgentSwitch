@@ -87,40 +87,14 @@ class RemovePath:
 
 
 @dataclass(frozen=True)
-class MigrateKeys:
-    source: Path
-    owner_uid: int
+class CreateKey:
     gate: Path
+    replace: bool = False               # rotate-key: the old keypair goes, every token sealed to it stops opening
 
     def describe(self) -> str:
-        return f"copy every keypair of {self.source} → {self.gate}/keys/legacy/<name>/ (decrypt only), verify each"
-
-
-@dataclass(frozen=True)
-class CreateCurrentKey:
-    gate: Path
-    name: str
-
-    def describe(self) -> str:
-        return f"new keypair {self.name} in {self.gate}/keys/, made current (skipped if a current keypair exists)"
-
-
-@dataclass(frozen=True)
-class MigrateFiles:
-    source: Path
-    owner_uid: int
-    gate: Path
-    import_config: bool = False         # exec_templates.json, upstream-insecure.txt: only once the user confirmed them
-    held: tuple[str, ...] = ()          # their summary when the plan was made (shown by --dry-run)
-
-    def describe(self) -> str:
-        if self.import_config:
-            text = (f"rebuild refs.sqlite3 from its valid rows; copy exec_templates.json, upstream-insecure.txt "
-                    f"(confirmed), screenshot-mask.json, logs → {self.gate}")
-        else:
-            text = (f"rebuild refs.sqlite3 from its valid rows; copy screenshot-mask.json, logs → {self.gate}; "
-                    f"exec_templates.json, upstream-insecure.txt are NOT imported (need --import-config)")
-        return "\n     ".join((text, *self.held))
+        if self.replace:
+            return f"replace the keypair in {self.gate} (key.priv, key.pub) with a new one"
+        return f"new keypair in {self.gate} (key.priv, key.pub; skipped if one exists)"
 
 
 @dataclass(frozen=True)
@@ -144,40 +118,10 @@ class WaitForService:
     layout: SystemLayout
 
     def describe(self) -> str:
-        return f"wait for `status` on {self.layout.socket}: proxy running, the migrated keys listed"
+        return f"wait for `status` on {self.layout.socket}: proxy running, the key in {self.layout.gate} listed"
 
 
-@dataclass(frozen=True)
-class CleanupUserHome:
-    source: Path
-    owner_uid: int
-    gate: Path
-    moved_text: str
-
-    def describe(self) -> str:
-        return f"delete migrated originals in {self.source} (only with an identical copy in the service), write MOVED.txt"
-
-
-@dataclass(frozen=True)
-class DeleteOldCA:
-    mitmproxy_dir: Path
-    owner_uid: int
-
-    def describe(self) -> str:
-        return f"delete the old CA private key in {self.mitmproxy_dir} (mitmproxy-ca.pem, mitmproxy-ca.p12)"
-
-
-@dataclass(frozen=True)
-class RemoveUserFile:
-    path: Path
-    owner_uid: int
-
-    def describe(self) -> str:
-        return f"rm {_q(self.path)}"
-
-
-Op = (Run | MakeDir | WriteFile | StageRuntime | SwapRuntime | RemovePath | MigrateKeys | CreateCurrentKey
-      | MigrateFiles | GenerateCA | Publish | WaitForService | CleanupUserHome | DeleteOldCA | RemoveUserFile)
+Op = Run | MakeDir | WriteFile | StageRuntime | SwapRuntime | RemovePath | CreateKey | GenerateCA | Publish | WaitForService
 
 
 @dataclass(frozen=True)

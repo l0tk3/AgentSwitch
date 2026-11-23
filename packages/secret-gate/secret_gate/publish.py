@@ -1,8 +1,9 @@
 """The gate service's public files (gate-service-v0 §3.3): `keys.json` and `ca.pem` in `<root>/gate-public/`.
 
-The service writes them (atomically: temp file + rename, mode 0644) at start and after every key change; the
-login user's CLI, the daemon and the apps only read them. Nothing here ever holds a private key: `keys.json`
-lists public keys, `ca.pem` is the mitmproxy CA certificate without its key.
+The service writes them (atomically: temp file + rename, mode 0644) at start and after a key rotation; the
+login user's CLI, the daemon and the apps only read them. `keys.json` keeps its list format but holds at most one
+row: the gate has one keypair (gate-simple-v0 §1), always current, never legacy. Nothing here ever holds a private
+key: `keys.json` lists the public key, `ca.pem` is the mitmproxy CA certificate without its key.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import Any
 
 from .crypto import KEY_BYTES, b64url_decode
 from .errors import KeyStoreError, TokenError
-from .keyring import LEGACY_NAME, NAME_PATTERN, list_keypairs
+from .keyring import NAME_PATTERN, keypair_info
 from .service_paths import CA_PEM, KEYS_JSON
 
 PUBLIC_FILE_MODE = 0o644
@@ -38,13 +39,18 @@ class KeyRow:
                 "createdAt": self.created_at}
 
     def cli_json(self) -> dict[str, Any]:
-        """The row as `secret-gate keys --json` has always printed it (plus `legacy`)."""
-        return {"name": self.name, "public": self.public_key, "current": self.current, "legacy": self.legacy}
+        """The row as `secret-gate keys --json` has always printed it (`legacy` is always false now), plus `created`
+        (ISO 8601 UTC, the key file's time; empty when unknown)."""
+        return {"name": self.name, "public": self.public_key, "current": self.current, "legacy": self.legacy,
+                "created": self.created_at}
 
 
 def key_rows(home: Path) -> tuple[KeyRow, ...]:
-    return tuple(KeyRow(name=k.name, public_key=k.public, current=k.current, legacy=k.legacy, created_at=k.created_at)
-                 for k in list_keypairs(home))
+    """The one keypair as a row, or no row when there is no key yet."""
+    info = keypair_info(home)
+    if info is None:
+        return ()
+    return (KeyRow(name=info.name, public_key=info.public, current=True, legacy=False, created_at=info.created_at),)
 
 
 def write_public(path: Path, data: bytes) -> None:
@@ -96,7 +102,7 @@ def parse_rows(data: object) -> tuple[KeyRow, ...]:
         if not isinstance(item, dict) or set(item) != _ROW_KEYS:
             raise KeyStoreError("keys.json 格式无效")
         name, public = item["name"], item["publicKey"]
-        if not isinstance(name, str) or not (NAME_PATTERN.fullmatch(name) or name == LEGACY_NAME):
+        if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name):
             raise KeyStoreError("keys.json 格式无效：密钥名称")
         if not isinstance(public, str) or not _valid_public(public):
             raise KeyStoreError(f"keys.json 格式无效：密钥 {name} 的公钥")
@@ -104,8 +110,8 @@ def parse_rows(data: object) -> tuple[KeyRow, ...]:
             raise KeyStoreError("keys.json 格式无效")
         rows.append(KeyRow(name=name, public_key=public, current=item["current"], legacy=item["legacy"],
                            created_at=item["createdAt"]))
-    if sum(r.current for r in rows) > 1 or any(r.current and r.legacy for r in rows):
-        raise KeyStoreError("keys.json 格式无效：当前密钥")
+    if len(rows) > 1 or any(not r.current or r.legacy for r in rows):
+        raise KeyStoreError("keys.json 格式无效：应只有一个当前密钥")
     return tuple(rows)
 
 
@@ -137,4 +143,4 @@ def current_public_key(rows: tuple[KeyRow, ...]) -> bytes:
     for row in rows:
         if row.current:
             return b64url_decode(row.public_key)
-    raise KeyStoreError("凭据网关服务无当前密钥；请在 Mac 应用的「密钥」页新建或切换密钥。")
+    raise KeyStoreError("凭据网关服务还没有密钥；服务启动时会生成，请确认服务在运行。")

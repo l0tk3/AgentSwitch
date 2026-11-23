@@ -69,12 +69,6 @@ from .browser_probe import (
     result_json,
 )
 from .constants import REDACTED_FORMAT, USE_FILL
-from .credential_repair import (
-    REPAIR_DESCRIPTION,
-    REPAIR_PURPOSE,
-    REPAIR_SCHEMA,
-    REPAIR_TOOL,
-)
 from .errors import GateError, PolicyViolation, ValidationError
 from .pii import find_pii
 from .policy import SecretPayload
@@ -149,7 +143,6 @@ class BrowserGate:
         ]
         tools.append(types.Tool(name=SECRET_FILL_TOOL, description=SECRET_FILL_DESCRIPTION, inputSchema=SECRET_FILL_SCHEMA))
         tools.append(types.Tool(name=FIELD_STATE_TOOL, description=FIELD_STATE_DESCRIPTION, inputSchema=FIELD_STATE_SCHEMA))
-        tools.append(types.Tool(name=REPAIR_TOOL, description=REPAIR_DESCRIPTION, inputSchema=REPAIR_SCHEMA))
         return tools
 
     async def call_tool(self, name: str, args: dict[str, Any]) -> list[types.ContentBlock]:
@@ -159,25 +152,13 @@ class BrowserGate:
             except GateError as exc:
                 reason = self._shown(str(exc)) or "refused"
                 self._audit.record("refused", tool=name, reason=reason)
-                hint = ""
-                if isinstance(exc, PolicyViolation) and "does not allow use 'http'" in str(exc):
-                    hint = (" If the original task explicitly authorizes importing this TOTP seed into this same host, "
-                            "request secret_repair(token, host, purpose='totp_seed_import'). The original token must "
-                            "already grant seed import; otherwise ask for the field and destination in a new message. "
-                            "Do not change hosts, keep retrying the fill, or substitute a code for the seed.")
-                raise RuntimeError(f"secret-gate: {reason}{hint}") from None
+                raise RuntimeError(f"secret-gate: {reason}") from None
             except Exception as exc:  # noqa: BLE001 - never let a downstream message carry a value back
                 raise RuntimeError(self._shown(str(exc)) or "browser error") from None
             finally:
                 sweep_output_dir(self._output_dir)
 
     async def _call(self, name: str, args: dict[str, Any]) -> list[types.ContentBlock]:
-        if name == REPAIR_TOOL:
-            if set(args) - {"token", "host", "purpose"}:
-                raise PolicyViolation("credential repair request has unexpected fields")
-            result = await self._resolver.repair(args.get("token"), args.get("host"), args.get("purpose", REPAIR_PURPOSE))
-            self._audit.record("repair", host=args.get("host"), label=result.get("label"))
-            return [types.TextContent(type="text", text=json.dumps(result))]
         if name == FIELD_STATE_TOOL:
             if set(args) - {"target", "element"}:
                 raise PolicyViolation(f"{FIELD_STATE_TOOL} takes only target and element")

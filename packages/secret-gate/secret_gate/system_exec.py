@@ -19,32 +19,19 @@ from pathlib import Path
 from typing import Any
 
 from .errors import GateError, ValidationError
-from .keyring import create_keypair, current_name, list_keypairs, set_current
-from .migrate import (
-    cleanup_user_home,
-    delete_old_ca_keys,
-    migrate_files,
-    migrate_keys,
-    remove_user_file,
-    unique_name,
-)
+from .keyring import create_keypair, has_keypair
 from .publish import key_rows, publish_ca, publish_keys
 from .service import CommandResult, Runner, atomic_write, is_not_loaded
 from .service_paths import SystemLayout
 from .system_ops import (
     NOT_LOADED_OK,
-    CleanupUserHome,
-    CreateCurrentKey,
-    DeleteOldCA,
+    CreateKey,
     GenerateCA,
     MakeDir,
-    MigrateFiles,
-    MigrateKeys,
     Op,
     Plan,
     Publish,
     RemovePath,
-    RemoveUserFile,
     Run,
     StageRuntime,
     SwapRuntime,
@@ -360,22 +347,15 @@ def _swap(op: SwapRuntime, _deps: SystemDeps) -> list[str]:
 
 # -- keys, CA, public files ----------------------------------------------------------------------
 
-def _migrate_keys(op: MigrateKeys, _deps: SystemDeps) -> list[str]:
-    return list(migrate_keys(op.source, op.owner_uid, op.gate))
-
-
-def _migrate_files(op: MigrateFiles, _deps: SystemDeps) -> list[str]:
-    return list(migrate_files(op.source, op.owner_uid, op.gate, import_config=op.import_config))
-
-
-def _create_key(op: CreateCurrentKey, _deps: SystemDeps) -> list[str]:
-    existing = current_name(op.gate)
-    if existing is not None:
-        return [f"已有当前密钥 {existing}"]
-    name = unique_name(op.name, {k.name for k in list_keypairs(op.gate)})
-    create_keypair(op.gate, name)
-    set_current(op.gate, name)
-    return [f"当前密钥：{name}"]
+def _create_key(op: CreateKey, _deps: SystemDeps) -> list[str]:
+    for name in ("key.priv", "key.pub"):  # root writes here: never through a link planted in the service's home
+        if (op.gate / name).is_symlink():
+            raise ValidationError(f"{op.gate / name} 是符号链接，未处理")
+    if has_keypair(op.gate) and not op.replace:
+        return ["已有密钥，保留"]
+    info = create_keypair(op.gate, replace=op.replace)
+    note = "（旧密文全部失效，需要重新封装）" if op.replace else ""
+    return [f"公钥 {info.public}{note}"]
 
 
 def generate_ca(confdir: Path) -> bool:
@@ -402,28 +382,29 @@ def _generate_ca(op: GenerateCA, _deps: SystemDeps) -> list[str]:
 
 
 def _publish(op: Publish, _deps: SystemDeps) -> list[str]:
-    rows = publish_keys(op.layout.gate, op.layout.public)
+    if not publish_keys(op.layout.gate, op.layout.public):
+        raise ValidationError(f"{op.layout.gate} 中无密钥")
     if not publish_ca(op.layout.mitmproxy, op.layout.public):
         raise ValidationError(f"{op.layout.mitmproxy} 中无 CA 证书")
-    return [f"keys.json：{len(rows)} 个密钥；ca.pem 已发布"]
+    return ["keys.json、ca.pem 已发布"]
 
 
 def _wait(op: WaitForService, deps: SystemDeps) -> list[str]:
-    expected = {r.name for r in key_rows(op.layout.gate)}
+    expected = [r.public_key for r in key_rows(op.layout.gate)]
     last = "无响应"
     for attempt in range(deps.wait_tries):
         try:
             status = deps.status(op.layout.socket)
             rows = status["keys"]
-            names = {row["name"] for row in rows}
+            listed = [row["publicKey"] for row in rows]
             if not status["proxyRunning"]:
                 last = "代理未运行（端口可能被其他进程占用，例如 Mac 应用自行启动的网关进程）"
-            elif names != expected:
-                last = f"服务列出的密钥与文件不一致：{sorted(names)}"
-            elif not any(row["current"] for row in rows):
+            elif not expected or listed != expected:
+                last = "服务列出的密钥与文件不一致"
+            elif not all(row["current"] for row in rows):
                 last = "服务无当前密钥"
             else:
-                return [f"服务已就绪：版本 {status.get('version')}，代理端口 {status.get('proxyPort')}，密钥 {len(names)} 个"]
+                return [f"服务已就绪：版本 {status.get('version')}，代理端口 {status.get('proxyPort')}"]
         except GateError as exc:
             last = str(exc)
         except (KeyError, TypeError):
@@ -433,23 +414,9 @@ def _wait(op: WaitForService, deps: SystemDeps) -> list[str]:
     raise StepError(f"服务未就绪：{last}")
 
 
-def _cleanup(op: CleanupUserHome, _deps: SystemDeps) -> list[str]:
-    return list(cleanup_user_home(op.source, op.owner_uid, op.gate, op.moved_text))
-
-
-def _delete_old_ca(op: DeleteOldCA, _deps: SystemDeps) -> list[str]:
-    return list(delete_old_ca_keys(op.mitmproxy_dir, op.owner_uid))
-
-
-def _remove_user_file(op: RemoveUserFile, _deps: SystemDeps) -> list[str]:
-    return [f"已删除 {op.path}"] if remove_user_file(op.path, op.owner_uid) else []
-
-
 _HANDLERS: dict[type, Callable[[Any, SystemDeps], list[str] | None]] = {
     Run: _run, MakeDir: _make_dir, WriteFile: _write_file, StageRuntime: _stage, SwapRuntime: _swap,
-    RemovePath: _remove, MigrateKeys: _migrate_keys, CreateCurrentKey: _create_key, MigrateFiles: _migrate_files,
-    GenerateCA: _generate_ca, Publish: _publish, WaitForService: _wait, CleanupUserHome: _cleanup,
-    DeleteOldCA: _delete_old_ca, RemoveUserFile: _remove_user_file,
+    RemovePath: _remove, CreateKey: _create_key, GenerateCA: _generate_ca, Publish: _publish, WaitForService: _wait,
 }
 
 

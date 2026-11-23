@@ -1,73 +1,45 @@
-"""Named keypairs: several under SECRET_GATE_HOME/keys/<name>/, one marked current.
-
-A legacy home with key.priv at the root keeps working and is reported as "default".
-"""
+"""The gate's one keypair (gate-simple-v0 §1): <home>/key.priv and key.pub, nothing else."""
 import pytest
 
-from secret_gate.crypto import generate_keypair
 from secret_gate.errors import KeyStoreError
-from secret_gate.keyring import create_keypair, current_name, key_dir, list_keypairs, set_current
-from secret_gate.keystore import load_all_private_keys, load_private_key, load_public_key, save_keypair
+from secret_gate.keyring import KEY_NAME, create_keypair, has_keypair, keypair_info
+from secret_gate.keystore import load_private_key, load_public_key
+from secret_gate.publish import key_rows
+from secret_gate.crypto import b64url_encode
 
 
-def test_empty_home_has_no_keypairs(tmp_path):
-    assert list_keypairs(tmp_path) == ()
-    assert current_name(tmp_path) is None
+def test_empty_home_has_no_keypair(tmp_path):
+    assert keypair_info(tmp_path) is None and not has_keypair(tmp_path)
+    assert key_rows(tmp_path) == ()
     with pytest.raises(KeyStoreError, match="not found"):
         load_private_key(tmp_path)
 
 
-def test_create_sets_current_and_layout(tmp_path):
-    info = create_keypair(tmp_path, "work")
-    assert info.name == "work" and info.current is True and len(info.public) > 20
-    assert key_dir(tmp_path) == tmp_path / "keys" / "work"
-    assert (key_dir(tmp_path) / "key.priv").exists()
-    assert oct((key_dir(tmp_path) / "key.priv").stat().st_mode & 0o777) == "0o600"
-    assert load_public_key(tmp_path) == load_public_key(key_dir(tmp_path))
+def test_create_writes_the_one_keypair_at_the_top_of_the_home(tmp_path):
+    info = create_keypair(tmp_path)
+    assert info.name == KEY_NAME and info.path == tmp_path and len(info.public) > 20
+    assert oct((tmp_path / "key.priv").stat().st_mode & 0o777) == "0o600"
+    assert b64url_encode(load_public_key(tmp_path)) == info.public
+    assert [r.cli_json() for r in key_rows(tmp_path)] == [
+        {"name": KEY_NAME, "public": info.public, "current": True, "legacy": False, "created": info.created_at}]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["key.priv", "key.pub"]
 
 
-def test_second_keypair_not_current_until_switched(tmp_path):
-    create_keypair(tmp_path, "work")
-    create_keypair(tmp_path, "home")
-    assert current_name(tmp_path) == "work"
-    assert [k.name for k in list_keypairs(tmp_path)] == ["home", "work"]
-    set_current(tmp_path, "home")
-    assert current_name(tmp_path) == "home"
-    assert load_private_key(tmp_path) == load_private_key(tmp_path / "keys" / "home")
+def test_a_second_create_is_refused_and_replace_makes_a_new_key(tmp_path):
+    first = create_keypair(tmp_path)
+    old_private = load_private_key(tmp_path)
+    with pytest.raises(KeyStoreError, match="已有密钥"):
+        create_keypair(tmp_path)
+    assert load_private_key(tmp_path) == old_private
+    second = create_keypair(tmp_path, replace=True)
+    assert second.public != first.public and load_private_key(tmp_path) != old_private
+    assert len(key_rows(tmp_path)) == 1
 
 
-def test_all_private_keys_current_first(tmp_path):
-    a = create_keypair(tmp_path, "a")
-    b = create_keypair(tmp_path, "b")
-    set_current(tmp_path, "a")
-    keys = load_all_private_keys(tmp_path)
-    assert len(keys) == 2 and keys[0] == load_private_key(tmp_path / "keys" / "a")
-    assert a.public != b.public
-
-
-def test_legacy_root_key_is_default(tmp_path):
-    kp = generate_keypair()
-    save_keypair(tmp_path, kp)
-    assert [k.name for k in list_keypairs(tmp_path)] == ["default"]
-    assert current_name(tmp_path) == "default"
-    assert load_private_key(tmp_path) == kp.private
-    create_keypair(tmp_path, "new")  # legacy stays current; both remain loadable
-    assert current_name(tmp_path) == "default"
-    set_current(tmp_path, "new")
-    assert current_name(tmp_path) == "new"
-    assert kp.private in load_all_private_keys(tmp_path)
-    assert load_private_key(tmp_path) != kp.private
-
-
-@pytest.mark.parametrize("bad", ["", "../x", "a b", "x" * 40, "keys", "-dash"])
-def test_rejects_bad_names(tmp_path, bad):
-    with pytest.raises(KeyStoreError):
-        create_keypair(tmp_path, bad)
-
-
-def test_duplicate_and_unknown(tmp_path):
-    create_keypair(tmp_path, "work")
-    with pytest.raises(KeyStoreError, match="exists"):
-        create_keypair(tmp_path, "work")
-    with pytest.raises(KeyStoreError, match="no keypair"):
-        set_current(tmp_path, "nope")
+def test_directories_of_the_old_multi_key_layout_are_ignored(tmp_path):
+    (tmp_path / "keys" / "legacy" / "old").mkdir(parents=True)
+    (tmp_path / "keys" / "legacy" / "old" / "key.priv").write_text("x")
+    (tmp_path / "current").write_text("old\n")
+    assert keypair_info(tmp_path) is None
+    create_keypair(tmp_path)
+    assert [r.name for r in key_rows(tmp_path)] == [KEY_NAME]

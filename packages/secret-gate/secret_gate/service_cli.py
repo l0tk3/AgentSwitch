@@ -4,11 +4,12 @@ When the gate service is installed (`gate-service.json`, service_paths.client_so
 asks `route` for the service-mode version of the parsed command. Outputs and exit codes stay exactly what the
 daemon and the Mac app parse today; only where the answer comes from changes:
 
-* `keys [--json]`, `pubkey`, `enc`: the public keys in `keys.json`;
-* `keys new|use|retire`, `refs register|release`, `credential-info|reissue`, `logs tail`: calls on `gate.sock`;
+* `keys [--json]`, `pubkey`, `enc`: the public key in `keys.json`;
+* `refs register|release`, `logs tail`: calls on `gate.sock`;
 * `fill-value`: `browser.resolve` on `gate.sock`, once per frame host;
 * `mcp`, `browser`: unchanged here; they pick their remote backend themselves (mcp_backend, browser_mcp);
-* `keygen`, `check`, `proxy`, `service`, `install-ca`, `rpc`: refused, the service owns them.
+* `keygen`, `check`, `proxy`, `service`, `install-ca`, `rpc`: refused, the service owns them (its key is made by
+  `system install` and replaced by `system rotate-key`, both as root).
 """
 
 from __future__ import annotations
@@ -21,12 +22,11 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from .credential_repair import read_credential_stdin
 from .enc_cli import run_enc
 from .errors import ValidationError
 from .fill_cli import fill_value_remote
 from .keystore import parse_public_key
-from .publish import KeyRow, current_public_key, parse_rows, read_rows
+from .publish import KeyRow, current_public_key, read_rows
 from .refs_cli import check_tokens, print_register, read_request
 from .rpc_client import RpcClient
 from .service_paths import SERVICE_REFUSAL
@@ -41,7 +41,7 @@ def print_keys(rows: Sequence[KeyRow], as_json: bool) -> None:
         print(json.dumps([r.cli_json() for r in rows]))
         return
     for r in rows:
-        print(f"{'*' if r.current else ' '} {r.name:20} {r.public_key}" + ("  legacy" if r.legacy else ""))
+        print(f"{'*' if r.current else ' '} {r.name:20} {r.public_key}")
 
 
 def _refuse(_: argparse.Namespace) -> int:
@@ -50,18 +50,7 @@ def _refuse(_: argparse.Namespace) -> int:
 
 
 def _keys(args: argparse.Namespace, *, client: RpcClient, public: Path) -> int:
-    if args.keys_cmd == "list":
-        print_keys(read_rows(public), args.json)
-        return 0
-    if args.keys_cmd == "new":
-        client.call("keys.new", {"name": args.name, "use": bool(args.use)})
-    elif args.keys_cmd == "use":
-        client.call("keys.use", {"name": args.name})
-    elif args.keys_cmd == "restore":
-        client.call("keys.restore", {"name": args.name})
-    else:
-        client.call("keys.retire", {"name": args.name})
-    print_keys(parse_rows(client.call("keys.list")), args.json)
+    print_keys(read_rows(public), args.json)
     return 0
 
 
@@ -93,13 +82,6 @@ def _register_result(result: Any) -> dict[str, list[dict[str, Any]]]:
     return result
 
 
-def _credential(args: argparse.Namespace, *, client: RpcClient, public: Path) -> int:
-    data = read_credential_stdin(args.cmd)
-    method = "credential.info" if args.cmd == "credential-info" else "credential.reissue"
-    print(json.dumps(client.call(method, data)))
-    return 0
-
-
 def _logs(args: argparse.Namespace, *, client: RpcClient, public: Path) -> int:
     from .cli import print_log  # local import: cli imports this module
 
@@ -117,8 +99,7 @@ def _bootstrap(args: argparse.Namespace, *, client: RpcClient, public: Path) -> 
 
 
 _ROUTES: dict[str, Callable[..., int]] = {
-    "keys": _keys, "pubkey": _pubkey, "enc": _enc, "refs": _refs,
-    "credential-info": _credential, "credential-reissue": _credential, "bootstrap": _bootstrap, "logs": _logs,
+    "keys": _keys, "pubkey": _pubkey, "enc": _enc, "refs": _refs, "bootstrap": _bootstrap, "logs": _logs,
     "fill-value": fill_value_remote,
 }
 

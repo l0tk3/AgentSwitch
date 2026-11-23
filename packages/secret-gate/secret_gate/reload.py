@@ -16,10 +16,10 @@ Rules:
   the result. Host names are not secret; the added/removed patterns are printed because each addition switches
   verification off for a host and belongs in the log.
 
-Keys (gate-service-v0 §2): when given the proxy's `SecretGateAddon`, the same SIGHUP also reloads every private
-key of the gate home (current and legacy) and swaps the addon's resolver in one assignment. The gate service's rpc
-server sends it after `keys.new/use/retire`, so tokens made for a new current key work without a restart. A home
-whose keys cannot be loaded keeps the previous resolver (the failure is reported, never an empty key set).
+Key (gate-simple-v0 §1): when given the proxy's `SecretGateAddon`, the same SIGHUP also reloads the private key of
+the gate home and swaps the addon's resolver in one assignment. `secret-gate system rotate-key` sends it after
+replacing the keypair, so tokens sealed to the new key work without a restart. A home whose key cannot be loaded
+keeps the previous resolver (the failure is reported).
 
 Without this addon SIGHUP terminates mitmdump (default action); under launchd `KeepAlive` restarts it, which
 also re-reads the file, but drops every open connection.
@@ -195,7 +195,7 @@ class InsecureHostsReloader:
             self._emit(f"secret-gate: keys reload FAILED, keeping the previous keys: {exc}")
             return False
         self._keys.replace_resolver(resolver)
-        self._emit(f"secret-gate: keys reloaded: {resolver.key_count} private key(s)")
+        self._emit("secret-gate: key reloaded")
         return True
 
     # mitmproxy hooks -------------------------------------------------------------------------

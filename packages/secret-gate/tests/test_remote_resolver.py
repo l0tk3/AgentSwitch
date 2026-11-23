@@ -15,7 +15,7 @@ from secret_gate.constants import USE_FILL, USE_HTTP
 from secret_gate.errors import PolicyViolation, ValidationError
 from secret_gate.keystore import load_public_key
 from secret_gate.policy import SecretPayload
-from secret_gate.remote_resolver import RemoteResolver, repair_params
+from secret_gate.remote_resolver import RemoteResolver
 from secret_gate.rpc_protocol import RemoteError
 from secret_gate.tokens import make_token
 from tests.fixtures import fake_secrets as fs
@@ -33,7 +33,7 @@ def _token(home, uses, label="portal-a/pass") -> str:
 
 def test_remote_resolver_policy():
     with running_service() as svc:
-        resolver = RemoteResolver(svc.client, SCOPE, env={})
+        resolver = RemoteResolver(svc.client, SCOPE)
         fill = _token(svc.home, {USE_FILL})
         res = resolver.resolve(fill, use=USE_FILL, host="login.portal-a.example.com:443")
         assert res.value == fs.PORTAL.password and res.label == "portal-a/pass" and res.token == fill
@@ -50,14 +50,13 @@ def test_remote_resolver_policy():
         ref = resolver.register(fill)
         assert resolver.resolve(ref, use=USE_FILL, host="login.portal-a.example.com:443").value == fs.PORTAL.password
         with pytest.raises(ValidationError, match="no execution scope"):
-            RemoteResolver(svc.client, None, env={}).register(fill)
-    assert repair_params({"SECRET_GATE_REPAIR_URL": "u", "SECRET_GATE_REPAIR_KEY": "", "OTHER": "x"}) == {"repairUrl": "u"}
+            RemoteResolver(svc.client, None).register(fill)
 
 
 def test_browser_gate_fills_through_the_service_and_redacts():
     with running_service() as svc:
         pw = FakePlaywright(PAGE)
-        gate = BrowserGate(RemoteResolver(svc.client, SCOPE, env={}), pw)
+        gate = BrowserGate(RemoteResolver(svc.client, SCOPE), pw)
         fill = _token(svc.home, {USE_FILL})
         out = asyncio.run(gate.call_tool("secret_fill", {"target": "e7", "token": fill}))
         assert pw.typed["e7"] == fs.PORTAL.password
@@ -79,7 +78,7 @@ def test_transfer_sealing_registers_references_in_the_service():
     with running_service() as svc:
         pw = FakePlaywright("https://crm.example.com/customers/42")
         pw.echo = '- paragraph [ref=e9]: "Contact alice.demo@example.com"'
-        gate = BrowserGate(RemoteResolver(svc.client, SCOPE, env={}), pw, transfer=grant,
+        gate = BrowserGate(RemoteResolver(svc.client, SCOPE), pw, transfer=grant,
                            public_key=load_public_key(svc.home))
         out = texts(asyncio.run(gate.call_tool("browser_snapshot", {})))
         assert "alice.demo@example.com" not in out and "enc:ref:" in out

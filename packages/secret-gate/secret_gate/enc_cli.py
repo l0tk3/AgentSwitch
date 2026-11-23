@@ -20,7 +20,6 @@ def run_enc(args: argparse.Namespace, public: bytes) -> int:
     value = args.value if args.value is not None else _read_value(args.stdin)
     payload = SecretPayload.create(
         value=value, hosts=tuple(args.host), uses=set(args.use), label=args.label, kind=args.kind,
-        seed_import_hosts=args.seed_import_host,
     )
     check_seal_length(payload)
     print(make_token(public, payload))
@@ -52,7 +51,6 @@ def _enc_batch(public: bytes) -> int:
                 uses=set(entry.get("uses") or [USE_HTTP]),
                 label=label or "",
                 kind=entry.get("kind", KIND_SECRET),
-                seed_import_hosts=entry.get("seed_import_hosts", []),
             )
             check_seal_length(payload)
             results.append({"label": label, "token": make_token(public, payload)})

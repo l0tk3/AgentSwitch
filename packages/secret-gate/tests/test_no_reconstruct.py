@@ -27,7 +27,6 @@ from wsproto.frame_protocol import Opcode
 
 from secret_gate.browser_gate import BrowserGate
 from secret_gate.constants import MAX_BODY_BYTES, USE_EXEC, USE_FILL, USE_HTTP
-from secret_gate.exec_templates import ExecTemplate
 from secret_gate.gate_ops import op_exec, op_http
 from secret_gate.policy import SecretPayload
 from secret_gate.proxy_addon import SecretGateAddon
@@ -251,16 +250,19 @@ def test_secret_http_withholds_when_the_redactor_fails(resolver, keypair, monkey
     assert result.headers == {} and "withheld" in result.body and VALUES[0] not in result.body
 
 
+def _exec_resolve(resolver):
+    return lambda token: resolver.resolve_exact(token, use=USE_EXEC)
+
+
 @pytest.mark.parametrize("v", VALUES)
 def test_secret_exec_output(resolver, keypair, v):
     token = _token(keypair, v, uses=(USE_EXEC,))
-    templates = {"t": ExecTemplate("t", ("prog",), max_args=0, env={"PW": "{SECRET}"})}
     seen = []
     for out in [*echoes(v), "z" * MAX_BODY_BYTES + v]:
         def runner(argv, out=out, **kw):
             return subprocess.CompletedProcess(argv, 0, stdout=out, stderr=f"debug: {out}")
 
-        result = op_exec(resolver, templates, template="t", token=token, runner=runner)
+        result = op_exec(_exec_resolve(resolver), argv=["prog"], env={"PW": token}, runner=runner)
         seen += [result.stdout, result.stderr]
     assert "内容过大，已扣下" in seen[-1]
     assert_unrecoverable(seen, v)
@@ -271,9 +273,7 @@ def test_secret_exec_really_running_env_printenv_and_set_x(resolver, keypair):
     token = _token(keypair, v, uses=(USE_EXEC,))
     script = ('set -x; printenv PW; echo "${PW%??????}"; echo "${PW#????????}"; '
               'printf %s "$PW" | od -An -tx1 | tr -d " \\n"; echo; env')
-    templates = {"sh": ExecTemplate("sh", ("/bin/sh", "-c", script),
-                                    max_args=0, env={"PW": "{SECRET}"})}
-    result = op_exec(resolver, templates, template="sh", token=token)
+    result = op_exec(_exec_resolve(resolver), argv=["/bin/sh", "-c", script], env={"PW": token})
     assert result.returncode == 0
     assert_unrecoverable([result.stdout, result.stderr], v)
 
@@ -339,7 +339,7 @@ def test_tool_errors_name_only_the_kind_of_failure():
 
     server = build_server(Backend())
     seen = []
-    for tool, args in (("secret_http", {"method": "GET", "url": "https://x"}), ("secret_exec", {"template": "t", "token": "t"})):
+    for tool, args in (("secret_http", {"method": "GET", "url": "https://x"}), ("secret_exec", {"argv": ["t"], "env": {"T": "t"}})):
         with pytest.raises(Exception) as exc:
             asyncio.run(server.call_tool(tool, args))
         seen.append(str(exc.value))

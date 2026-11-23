@@ -16,7 +16,7 @@ own masked screenshots are still written into the gate's directory (by Playwrigh
 
 The dispatcher configures one execution through the environment of this process only:
 SECRET_GATE_SCOPE (its enc:ref: scope) and SECRET_GATE_TRANSFER (an authorized field transfer,
-transfer.py). Neither reaches the downstream: it gets no scope, no grant, no repair bridge.
+transfer.py). Neither reaches the downstream: it gets no scope and no grant.
 
 With the gate service installed (gate-service-v0 §4) this process still runs as the login user (Playwright and
 a visible Chrome), but holds no key: values come from `browser.resolve` (fill only), sealed page data is
@@ -61,7 +61,7 @@ OUTPUT_DIR_FLAG = "--output-dir"
 OUTPUT_SUBDIR = "browser-out"
 
 
-GATE_ONLY_VARS = ("SECRET_GATE_REPAIR_URL", "SECRET_GATE_REPAIR_KEY", SCOPE_ENV_VAR, TRANSFER_ENV_VAR)
+GATE_ONLY_VARS = (SCOPE_ENV_VAR, TRANSFER_ENV_VAR)
 
 
 def downstream_env(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -181,7 +181,7 @@ def service_setup(env: dict[str, str], client: RpcClient, out_dir: Path) -> Brow
     scope, grant, public_key = execution_config(env, public, public_key=lambda: current_public_key(read_rows(public)))
     config = client.call("browser.config")
     mask = MaskConfig.parse(config.get("screenshotMask") if isinstance(config, dict) else None)
-    return BrowserSetup(RemoteResolver(client, scope, env), grant, public_key, mask, Audit(None), out_dir)
+    return BrowserSetup(RemoteResolver(client, scope), grant, public_key, mask, Audit(None), out_dir)
 
 
 @contextmanager

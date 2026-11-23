@@ -20,17 +20,13 @@ from secret_gate.service_paths import (
 )
 from secret_gate.system_plan import (
     Account,
-    CleanupUserHome,
-    CreateCurrentKey,
-    DeleteOldCA,
+    CreateKey,
     GenerateCA,
     InstallFacts,
     InstallOptions,
-    MigrateFiles,
-    MigrateKeys,
+    MakeDir,
     Publish,
     RemovePath,
-    RemoveUserFile,
     Run,
     StageRuntime,
     SwapRuntime,
@@ -39,6 +35,7 @@ from secret_gate.system_plan import (
     install_plan,
     plists,
     render,
+    rotate_key_plan,
     runtime_version,
     uninstall_plan,
     update_plan,
@@ -47,11 +44,9 @@ from secret_gate.system_plan import (
 PREFIX = Path("/tmp/sg-prefix")
 LAYOUT = SystemLayout(PREFIX)
 ROOT = PREFIX / "Library/Application Support/AgentSwitch"
-OPTIONS = InstallOptions(owner_uid=501, port=9090, runtime=Path("/Apps/AgentSwitch.app/Contents/Resources/runtime"),
-                         migrate_from=Path("/Users/me/.secret-gate"), user_home=Path("/Users/me"))
+OPTIONS = InstallOptions(owner_uid=501, port=9090, runtime=Path("/Apps/AgentSwitch.app/Contents/Resources/runtime"))
 FACTS = InstallFacts(account=Account(450, 450, True, True), runtime_version="0.1.0+2026-09-27T00:00:00Z",
-                     installed_at="2026-09-27T01:02:03Z",
-                     old_agent_plist=Path("/Users/me/Library/LaunchAgents/com.agentswitch.secret-gate.proxy.plist"))
+                     installed_at="2026-09-27T01:02:03Z")
 
 
 def _ops(plan):
@@ -102,18 +97,31 @@ def test_account_commands():
 
 # -- install ------------------------------------------------------------------------------------
 
-def test_install_plan_orders_the_steps_so_no_key_is_ever_lost():
+def test_install_plan_generates_the_key_in_the_service_home_before_publishing():
     ops = _ops(install_plan(LAYOUT, OPTIONS, FACTS))
-    order = [_index(ops, kind) for kind in (StageRuntime, MigrateKeys, CreateCurrentKey, MigrateFiles, GenerateCA, Publish)]
+    order = [_index(ops, kind) for kind in (StageRuntime, CreateKey, GenerateCA, Publish)]
     assert order == sorted(order)
-    wait, cleanup = _index(ops, WaitForService), _index(ops, CleanupUserHome)
-    assert _index(ops, MigrateKeys) < wait < cleanup                       # originals go only after the service answered
-    assert cleanup >= len(ops) - 2 and isinstance(ops[-1], DeleteOldCA)    # the very end
+    key = ops[_index(ops, CreateKey)]
+    assert key == CreateKey(LAYOUT.gate) and not key.replace              # an existing key is kept on reinstall
+    wait = _index(ops, WaitForService)
     stop = next(i for i, op in enumerate(ops) if isinstance(op, Run) and op.argv[:2] == ("/bin/launchctl", "bootout")
                 and op.argv[2].startswith("system/"))
     start = next(i for i, op in enumerate(ops) if isinstance(op, Run) and op.argv[:2] == ("/bin/launchctl", "bootstrap"))
     assert stop < _index(ops, SwapRuntime) < start < wait
-    assert _index(ops, RemoveUserFile) < start                             # the old LaunchAgent is gone before the new proxy binds
+    assert isinstance(ops[-1], RemovePath) and ops[-1].path == LAYOUT.runtime_backup
+
+
+def test_install_never_touches_the_users_home():
+    """gate-simple-v0 §1, §6: nothing is migrated; no path of the plan lies outside the system layout."""
+    plan = install_plan(LAYOUT, OPTIONS, FACTS)
+    kinds = {type(op) for op in _ops(plan)}
+    assert kinds <= {Run, MakeDir, StageRuntime, CreateKey, GenerateCA, Publish, WaitForService, SwapRuntime,
+                     RemovePath, type(next(op for op in _ops(plan) if getattr(op, "data", None) is not None))}
+    text = "\n".join(render(plan)).replace(f"/Users/{SERVICE_USER}", "")   # the dscl record, not a directory
+    for gone in ("/Users", "~", ".secret-gate", "legacy", "MOVED.txt", ".mitmproxy", "LaunchAgents", "gui/501",
+                 "exec_templates", "migrat", "迁移"):
+        assert gone not in text, gone
+    assert not any(isinstance(op, MakeDir) and "keys" in op.path.parts for op in _ops(plan))
 
 
 def test_install_plan_commands_and_paths():
@@ -127,7 +135,6 @@ def test_install_plan_commands_and_paths():
     daemons = PREFIX / "Library/LaunchDaemons"
     assert ("/bin/launchctl", "bootstrap", "system", str(daemons / f"{RPC_LABEL}.plist")) in argvs
     assert ("/bin/launchctl", "bootstrap", "system", str(daemons / f"{PROXY_LABEL}.plist")) in argvs
-    assert ("/bin/launchctl", "bootout", "gui/501/com.agentswitch.secret-gate.proxy") in argvs
     every_path = " ".join(op.describe() for op in _ops(plan))
     assert "/Library/Application Support" not in every_path.replace(str(PREFIX / "Library"), "")   # all under --root
     config = next(op for op in _ops(plan) if getattr(op, "path", None) == ROOT / "gate-service.json")
@@ -138,12 +145,20 @@ def test_install_plan_commands_and_paths():
     assert config.mode == 0o644
 
 
-def test_install_without_migration_or_user_home():
-    plan = install_plan(LAYOUT, InstallOptions(owner_uid=501, port=8080, runtime=Path("/r")),
-                        InstallFacts(Account(450, 450, True, True), "v", "t"))
-    kinds = {type(op) for op in _ops(plan)}
-    assert not kinds & {MigrateKeys, MigrateFiles, CleanupUserHome, DeleteOldCA, RemoveUserFile}
-    assert CreateCurrentKey in kinds and WaitForService in kinds
+def test_rotate_key_plan_replaces_the_key_republishes_and_signals_the_proxy():
+    plan = rotate_key_plan(LAYOUT)
+    ops = _ops(plan)
+    assert plan.title == "更换凭据网关密钥" and "旧密文全部失效" in plan.steps[0].title
+    assert ops[0] == CreateKey(LAYOUT.gate, replace=True)
+    hup = next(i for i, op in enumerate(ops) if isinstance(op, Run) and op.argv[:2] == ("/bin/launchctl", "kill"))
+    assert ops[hup].argv == ("/bin/launchctl", "kill", "SIGHUP", f"system/{PROXY_LABEL}")
+    owner = f"{SERVICE_USER}:{SERVICE_USER}"
+    chown = next(i for i, op in enumerate(ops) if isinstance(op, Run) and op.argv == ("/usr/sbin/chown", "-R", owner, str(LAYOUT.gate)))
+    assert 0 < _index(ops, Publish) < chown < hup < _index(ops, WaitForService) == len(ops) - 1
+    kinds = {type(op) for op in ops}
+    assert not kinds & {StageRuntime, SwapRuntime, GenerateCA, RemovePath}  # nothing else changes
+    assert not any(Path(a[0]).name in ("sysadminctl", "dseditgroup", "dscl") for a in _argvs(plan))
+    assert any("replace the keypair" in line for line in render(plan))
 
 
 def test_launch_daemon_plists():
@@ -177,7 +192,7 @@ def test_update_plan_swaps_the_runtime_and_keeps_data():
     plan = update_plan(LAYOUT, Path("/new/runtime"), config)
     ops = _ops(plan)
     kinds = {type(op) for op in ops}
-    assert not kinds & {MigrateKeys, MigrateFiles, CreateCurrentKey, GenerateCA, CleanupUserHome}
+    assert not kinds & {CreateKey, GenerateCA}
     assert not any(Path(a[0]).name in ("sysadminctl", "dseditgroup", "dscl") for a in _argvs(plan))
     assert _index(ops, StageRuntime) < _index(ops, SwapRuntime) < _index(ops, WaitForService)
     proxy = next(op for op in ops if getattr(op, "path", None) == LAYOUT.plist(PROXY_LABEL))

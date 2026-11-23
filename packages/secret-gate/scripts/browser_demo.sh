@@ -39,7 +39,7 @@ if ! nc -z 127.0.0.1 "$GATE_PORT" 2>/dev/null; then
   echo "gate proxy not listening on $PROXY; start it: $GATE proxy -p $GATE_PORT" >&2; exit 1
 fi
 if ! "$GATE" keys --json 2>/dev/null | grep -q '"current": true'; then
-  echo "no current keypair in $SECRET_GATE_HOME; create one in the UI or run: $GATE keys new work --use" >&2; exit 1
+  echo "no current keypair in $SECRET_GATE_HOME; create one in the UI or run: $GATE keygen" >&2; exit 1
 fi
 
 ORIGINS="$(IFS=';'; echo "$*")"
