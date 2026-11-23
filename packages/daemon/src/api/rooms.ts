@@ -12,7 +12,7 @@ import { z } from "zod";
 import { contentType } from "../files/names.js";
 import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatSession, type SeatWas } from "../rooms/store.js";
 import type { Running } from "../rooms/follow.js";
-import { resumeOf } from "../rooms/kit.js";
+import { resumeSeat } from "../rooms/kit.js";
 import { YOU } from "../rooms/names.js";
 import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
 
@@ -52,7 +52,10 @@ function wasOf(info: TerminalInfo): SeatWas {
 /** The agent's session behind a terminal, as a seat keeps it (§6.2); null until the agent has said its id. */
 export function sessionOf(info: TerminalInfo): SeatSession | null {
   if (!info.agentSessionId) return null;
-  return { id: info.agentSessionId, cwd: info.cwd, mode: info.mode, ...(info.model ? { model: info.model } : {}), ...(info.effort ? { effort: info.effort } : {}), ...(info.profile?.id ? { profile: info.profile.id } : {}) };
+  // As it is now, where that is known: the model it said it is on last (a `/model` since its start), and bypass when
+  // it has gone there. Its other modes are the agent's own words, which a start does not take: the one it began in.
+  const model = info.modelNow ?? info.model, mode = /bypass/i.test(info.modeNow ?? "") ? "bypass" : info.mode;
+  return { id: info.agentSessionId, cwd: info.cwd, mode, ...(model ? { model } : {}), ...(info.effort ? { effort: info.effort } : {}), ...(info.profile?.id ? { profile: info.profile.id } : {}) };
 }
 
 /** A terminal as the rooms follow it (rooms/follow.ts). */
@@ -258,11 +261,10 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       // service has started again, and a seat must be resumable all the same.
       const kept = info?.agentSessionId ? { ...seat, session: sessionOf(info)! } : seat;
       if (!kept.session) throw new RoomError(409, "这个席位是在记下会话 id 之前入座的，找不回它的对话。把它移出房间，再从 Add 把会话重新拉进来。");
-      const started = await roomOrg(deps.callLocal).resume(resumeOf(kept));
-      const after = host()?.get(started.id) ?? null;
-      const back = rooms.rebind(id, handle, started.id, after ? wasOf(after) : seat.was!);
+      const done = await resumeSeat(rooms, roomOrg(deps.callLocal), id, kept, (terminal) => { const now = host()?.get(terminal); return now ? wasOf(now) : null; });
+      const after = host()?.get(done.terminal) ?? null;
       deps.roomsChanged?.(id);
-      return c.json({ seat: seatView(back, host(), hasKit), terminal: after ? { id: after.id, status: after.status } : { id: started.id } }, 201);
+      return c.json({ seat: seatView(done.seat, host(), hasKit), terminal: after ? { id: after.id, status: after.status } : { id: done.terminal } }, 201);
     } catch (err) { return refused(c, err); }
   });
 

@@ -7,7 +7,7 @@
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
-import { MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type Task } from "./store.js";
+import { MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
 
 /** What bringing sessions in needs of the rest of AgentSwitch (§6 开了“拉会话”才有的): the lists, a check, and
  *  starting a session. Given by the composition root; nothing here carries a credential or an account. */
@@ -23,6 +23,8 @@ export type KitOrg = {
    *  says why not. */
   start(req: { readonly agent: string; readonly cwd: string; readonly profile?: string; readonly model?: string; readonly mode?: string; readonly resume?: string }): Promise<string>;
   /** The session behind an ended terminal goes on in a new one (§6.2). Throws a RoomError that says why not. */
+  /** Ends a terminal started here that nothing sits in after all. */
+  stop(terminal: string): Promise<void>;
   resume(req: { readonly agent: string; readonly cwd: string; readonly session: string; readonly profile?: string; readonly model?: string; readonly effort?: string; readonly mode?: string }): Promise<{ readonly id: string }>;
 };
 
@@ -160,6 +162,28 @@ export function resumeOf(seat: Seat): { agent: string; cwd: string; session: str
   const s = seat.session;
   if (!s || !seat.was) throw new RoomError(409, `@${seat.handle} took its seat before session ids were kept, so its conversation can not be found again from here. Remove it from the room and add the session again (room_add with agent, resume, cwd — see \`sessions\`).`);
   return { agent: seat.was.agent, cwd: s.cwd, session: s.id, ...(s.profile ? { profile: s.profile } : {}), ...(s.model ? { model: s.model } : {}), ...(s.effort ? { effort: s.effort } : {}), ...(s.mode ? { mode: s.mode } : {}) };
+}
+
+const RESUMING = new Set<string>();
+
+/** The conversation behind an ended seat goes on in a new terminal, and the seat sits there (§6.2). One at a time per
+ *  seat. Should the seat be gone when the terminal is up — kicked meanwhile — that terminal is ended again: nothing is
+ *  left running that sits nowhere. `wasOf`: what the new terminal says of itself, when it is known. */
+export async function resumeSeat(store: RoomStore, org: Pick<KitOrg, "resume" | "stop">, roomId: string, seat: Seat, wasOf: (terminal: string) => SeatWas | null): Promise<{ readonly seat: Seat; readonly terminal: string }> {
+  const key = `${roomId}:${seat.handle}`;
+  if (RESUMING.has(key)) throw new RoomError(409, `@${seat.handle} is being resumed already.`);
+  RESUMING.add(key);
+  try {
+    const started = await org.resume(resumeOf(seat));
+    try {
+      const was = wasOf(started.id) ?? seat.was!;
+      return { seat: store.rebind(roomId, seat.handle, started.id, was), terminal: started.id };
+    } catch (err) {
+      await org.stop(started.id);
+      if (err instanceof RoomError) throw new RoomError(409, `@${seat.handle} could not take its seat again (${err.message}); the terminal started for it was ended.`);
+      throw err;
+    }
+  } finally { RESUMING.delete(key); }
 }
 
 export class RoomKit {
@@ -312,14 +336,13 @@ export class RoomKit {
         if (target.left !== undefined) throw new RoomError(403, `@${target.handle} has left the room.`);
         const live = target.terminal ? this.o.seat(target.terminal) : null;
         if (live && live.state !== "exited") throw new RoomError(409, `@${target.handle} has not ended (${live.state}).`);
-        const started = await org.resume(resumeOf(target));
-        const card = this.o.seat(started.id)?.card;
-        const was = card
-          ? { agent: card.agent, name: card.name, cwd: card.cwd, model: card.model, profile: card.profile, ...(card.color ? { color: card.color } : {}) }
-          : target.was;
-        if (!was) throw new RoomError(409, "The session was started, but the room does not know what it is; add it again with room_add.");
-        const back = this.o.store.rebind(room.id, target.handle, started.id, was);
+        const { seat: back } = await resumeSeat(this.o.store, org, room.id, target, (id) => {
+          const card = this.o.seat(id)?.card;
+          return card ? { agent: card.agent, name: card.name, cwd: card.cwd, model: card.model, profile: card.profile, ...(card.color ? { color: card.color } : {}) } : null;
+        });
+        const was = back.was!;
         this.o.changed?.(room.id);
+        this.o.delivery.look();
         return `@${back.handle} is back in "${room.name}" with the same conversation (${[agentName(was.agent), was.model, was.cwd].filter(Boolean).join(" · ")}). It knows nothing new of your task: room_post an @${back.handle} message if it should go on.`;
       }
       default: throw new RoomError(400, "room_manage: action is resume, mute, unmute or kick.");

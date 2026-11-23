@@ -118,7 +118,7 @@ describe("the Chatroom Kit", () => {
     expect(store.messages(room.id)[0]).toMatchObject({ from: "daemon", to: ["you", "mac-app", "ios"] });
     expect(receipts()).toEqual({ 1: { "mac-app": "queued", ios: "sent" } });
     expect((await kit.call("t1", "room_post", { text: "记一笔" })).text).toContain("addressed to nobody");
-    expect((await kit.call("t2", "room_post", { text: "@all hi" }))).toMatchObject({ isError: true });
+    expect((await kit.call("t2", "room_post", { text: "@all hi" })).text).toContain("addressed to nobody");
     expect((await kit.call("t1", "room_nope", {}))).toMatchObject({ isError: true });
 
     const read = (await kit.call("t2", "room_read", { from: "@daemon", limit: 5 })).text;
@@ -200,6 +200,7 @@ describe("bringing sessions in (Can Add Sessions)", () => {
         sessions: async () => ({ running: [{ terminal: "t1", agent: "claude-code", name: "daemon", cwd: "/w/d", state: "idle", profile: null }, { terminal: "t8", agent: "codex", name: "spare", cwd: "/w/s", state: "idle", profile: "Work" }], resumable: [{ agent: "codex", id: "sess-1", title: "fix login", cwd: "/w/l", updatedAt: 9 * 3_600_000, profile: null }] }),
         check: async (agent, profile) => ({ status: "unhealthy", checkedAt: 1, message: `${agent}/${profile} signed out` }),
         start: async (req) => { started.push(req); const id = `new${started.length}`; states.set(id, "idle"); return id; },
+        stop: async () => undefined,
         resume: async (terminal) => { const id = `back-${terminal}`; states.set(id, "idle"); return { id }; },
       }),
     });

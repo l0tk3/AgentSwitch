@@ -421,7 +421,11 @@ export class RoomStore {
     if (room.seats.some((s) => s !== seat && s.left === undefined && s.terminal === terminal)) throw new RoomError(409, "这个会话已经在房间里了");
     this.elsewhere(id, terminal);
     const next: Seat = { ...seat, terminal, was };
-    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? next : s)) });
+    // What its old terminal was given and never dealt with (it ended in the middle of a turn), and what came for it
+    // while nobody was there, waits for it again: the same seat is back to take it.
+    const receipts: Record<string, Record<string, Receipt>> = {};
+    for (const [seq, of] of Object.entries(room.receipts)) receipts[seq] = of[seat.handle] === "delivered" || of[seat.handle] === "ended" ? { ...of, [seat.handle]: "sent" } : of;
+    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? next : s)), receipts });
     return next;
   }
 
@@ -579,8 +583,9 @@ export class RoomStore {
     if (files.some((f) => !f.startsWith("/") || f.length > 4096 || /[\n\r\0]/.test(f))) throw new RoomError(400, "文件要写它在这个节点上的完整路径");
     const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase())];
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
-    if (named.includes(ALL) && from.kind !== "user") throw new RoomError(403, "@all 只有用户能用，请逐个 @ 需要的成员");
-    const to = named.includes(ALL)
+    // `@all` is the user's alone (§4). Written by a session it is words and calls nobody: refusing the whole message
+    // for it cost a session its report twice (2026-11-23), when it only spoke of the rule.
+    const to = named.includes(ALL) && from.kind === "user"
       ? here.filter((s) => s.kind === "session").map((s) => s.handle)
       : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.

@@ -142,7 +142,6 @@ describe("rooms as kept", () => {
     const m2 = store.post(room.id, { from: "daemon", text: "改完了 @you，另见附注", to: ["@ios"], replyTo: 1 });
     expect([...m2.to].sort()).toEqual(["ios", "you"]);
     expect(store.post(room.id, { from: "you", text: "@all 停一下" }).to).toEqual(["daemon", "ios"]);
-    expect(() => store.post(room.id, { from: "ios", text: "@all hi" })).toThrow(/只有用户/);
     expect(() => store.post(room.id, { from: "ios", text: "  " })).toThrow(RoomError);
     expect(() => store.post(room.id, { from: "ios", text: "x", replyTo: 9 })).toThrow(/#9/);
     expect(store.post(room.id, { from: "ios", text: "只是记一笔" }).to).toEqual([]);

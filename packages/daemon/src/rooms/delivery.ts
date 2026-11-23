@@ -103,6 +103,8 @@ export class RoomDelivery {
           const live = seat?.terminal ? this.o.seat(seat.terminal) : null;
           if (!seat?.terminal || !live || live.state === "exited" || live.state === "signed_out") { this.o.store.setReceipt(room.id, Number(seq), handle, "ended"); continue; }
           if (room.paused) continue;
+          // A muted seat is not woken to say nothing (§6.2): what is for it waits until it is unmuted.
+          if (seat.muted) { this.o.store.setReceipt(room.id, Number(seq), handle, "queued"); continue; }
           if (LATER.has(live.state)) { this.o.store.setReceipt(room.id, Number(seq), handle, "queued"); continue; }
           idle.add(seat.terminal);
         }
@@ -142,7 +144,7 @@ export class RoomDelivery {
   private waitingFor(terminal: string): { room: Room; seat: Seat; message: Message }[] {
     const found: { room: Room; seat: Seat; message: Message }[] = [];
     for (const { room, seat } of this.o.store.roomsOf(terminal)) {
-      if (room.paused) continue;
+      if (room.paused || seat.muted) continue;
       const seqs = Object.entries(room.receipts).filter(([, of]) => of[seat.handle] === "sent" || of[seat.handle] === "queued").map(([seq]) => Number(seq));
       if (!seqs.length) continue;
       const first = Math.min(...seqs), wanted = new Set(seqs);

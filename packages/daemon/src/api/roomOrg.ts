@@ -10,6 +10,7 @@ import { RoomError } from "../rooms/store.js";
 export type Ask = (method: string, path: string, body?: unknown) => Promise<{ readonly status: number; readonly body: unknown }>;
 
 type Obj = Record<string, unknown>;
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const obj = (v: unknown): Obj => (v && typeof v === "object" ? v as Obj : {});
 const list = (v: unknown): Obj[] => (Array.isArray(v) ? v.map(obj) : []);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -61,12 +62,21 @@ export function roomOrg(ask: Ask): KitOrg {
       return id;
     },
     async resume(req) {
+      // The same conversation in two terminals writes one record from both ends: never.
+      const all = await ask("GET", "/terminals");
+      const live = arr(obj(all.body).terminals).map(obj).find((t) => str(t.agentSessionId) === req.session && str(t.status) !== "exited");
+      if (live) throw new RoomError(409, `That conversation is already running in another terminal ("${str(live.name) || str(live.id)}"); its seat goes there by itself in a moment.`);
       const mode = req.mode === "manual" || req.mode === "auto" || req.mode === "bypass" ? req.mode : undefined;
-      const body = { harness: req.agent, cwd: req.cwd, agentSessionId: req.session, ...(req.profile ? { profile: req.profile } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(mode ? { mode } : {}) };
-      const res = await ask("POST", "/terminals/resume", body);
+      const body = (model: boolean) => ({ harness: req.agent, cwd: req.cwd, agentSessionId: req.session, ...(req.profile ? { profile: req.profile } : {}), ...(model && req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(mode ? { mode } : {}) });
+      let res = await ask("POST", "/terminals/resume", body(true));
+      // The model it said it was on last may not be one the start takes by that name: then its own default.
+      if (res.status === 400 && req.model) res = await ask("POST", "/terminals/resume", body(false));
       const id = str(obj(obj(res.body).terminal).id);
       if (res.status >= 300 || !id) refuse(res, "The session was not resumed");
       return { id };
+    },
+    async stop(terminal) {
+      await ask("DELETE", `/terminals/${encodeURIComponent(terminal)}`).catch(() => undefined);
     },
   };
 }

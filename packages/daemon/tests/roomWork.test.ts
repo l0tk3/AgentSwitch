@@ -9,7 +9,7 @@ import { mountRooms } from "../src/api/rooms.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RoomDelivery } from "../src/rooms/delivery.js";
 import { follow, type Running } from "../src/rooms/follow.js";
-import { RoomKit } from "../src/rooms/kit.js";
+import { resumeSeat, RoomKit } from "../src/rooms/kit.js";
 import type { SeatLive, SeatState } from "../src/rooms/state.js";
 import { filesRoot, RoomStore } from "../src/rooms/store.js";
 
@@ -24,11 +24,13 @@ function made() {
   const delivery = new RoomDelivery({ store, seat });
   const changed: string[] = [];
   const resumed: string[] = [];
+  const stopped: string[] = [];
   const org = {
     profiles: async () => [], models: async () => ({}), check: async () => ({ status: "healthy", checkedAt: 0, message: "" }),
     sessions: async () => ({ running: [], resumable: [] }),
     start: async () => "started",
     resume: async (req: { session: string; cwd: string }) => { resumed.push(`${req.session}@${req.cwd}`); states.set("t9", "idle"); return { id: "t9" }; },
+    stop: async (terminal: string) => { stopped.push(terminal); },
   };
   const kit = new RoomKit({ store, seat, delivery, now: () => now, changed: (id) => { changed.push(id); }, org: () => org });
   const room = store.create({ name: "login" });
@@ -40,7 +42,7 @@ function made() {
     const res = await app.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
     return { status: res.status, body: await res.json() as any };
   };
-  return { home, store, trashed, kit, room, say, call, changed, states, resumed, later: (minutes: number) => { now += minutes * 60_000; } };
+  return { home, store, trashed, kit, room, say, call, changed, states, resumed, stopped, kitOf: () => kit, later: (minutes: number) => { now += minutes * 60_000; } };
 }
 
 describe("a room's shared folder", () => {
@@ -316,5 +318,51 @@ describe("a session at rest whose waiting program has gone", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(pushed).toEqual(["t1: [Room r · #1]"]);
     expect(store.get(room.id).receipts).toEqual({ 1: { x: "delivered" } });
+  });
+});
+
+describe("the rest of what was found in use (2026-11-23)", () => {
+  it("does not take a name spoken of in a quotation or in code for a call, nor a session's @all for an address", () => {
+    const { store, room } = made();
+    expect(store.post(room.id, { from: "api", text: "I wrote `@ui` and “@ui 说过” — nobody is called" }).to).toEqual([]);
+    expect(store.post(room.id, { from: "api", text: "@all 默认只叫主持人 — @ui look" }).to).toEqual(["ui"]);
+    expect(store.post(room.id, { from: "you", text: "@all go" }).to).toEqual(["api", "ui"]);
+  });
+
+  it("leaves a muted seat unwoken, and gives it what waited once it may speak again", () => {
+    const { store, room } = made();
+    const delivery = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } }) });
+    store.setMuted(room.id, "you", "ui", true);
+    store.post(room.id, { from: "you", text: "@ui hello" });
+    delivery.look();
+    expect(store.get(room.id).receipts).toEqual({ 1: { ui: "queued" } });
+    expect(delivery.atTurnEnd("ui")).toBeNull();
+    store.setMuted(room.id, "you", "ui", false);
+    expect(delivery.atTurnEnd("ui")).toContain("@ui hello");
+  });
+
+  it("gives a seat back in a new terminal what its old one never dealt with, and what came while it was gone", () => {
+    const { store, room } = made();
+    store.post(room.id, { from: "you", text: "@ui one" });
+    store.setReceipt(room.id, 1, "ui", "delivered");   // given, and the terminal ended in that turn
+    store.post(room.id, { from: "you", text: "@ui two" });
+    store.setReceipt(room.id, 2, "ui", "ended");       // came while nobody was there
+    store.rebind(room.id, "ui", "ui-new", { agent: "claude-code", name: "ui", cwd: "/w", model: null, profile: null });
+    expect(store.get(room.id).receipts).toEqual({ 1: { ui: "sent" }, 2: { ui: "sent" } });
+  });
+
+  it("ends the terminal it started when the seat is gone by the time it is up, and resumes one seat once at a time", async () => {
+    const { store, room, stopped } = made();
+    store.note(room.id, "ui", { id: "sess-ui", cwd: "/start/ui" });
+    const seat = store.get(room.id).seats.find((s) => s.handle === "ui")!;
+    let release: () => void = () => undefined;
+    const org = { stop: async (t: string) => { stopped.push(t); }, resume: () => new Promise<{ id: string }>((r) => { release = () => r({ id: "t9" }); }) };
+    const first = resumeSeat(store, org, room.id, seat, () => null);
+    await expect(resumeSeat(store, org, room.id, seat, () => null)).rejects.toThrow("being resumed already");
+    store.unseat(room.id, "ui");                         // kicked while its terminal was starting
+    release();
+    await expect(first).rejects.toThrow("the terminal started for it was ended");
+    expect(stopped).toEqual(["t9"]);
+    expect(store.roomsOf("t9")).toEqual([]);
   });
 });

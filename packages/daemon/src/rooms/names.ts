@@ -29,7 +29,9 @@ const MENTION = /(^|[^\p{L}\p{N}_@.-])@([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
  *  the `@` stands at the start or after something that is not part of a word. */
 export function mentions(text: string): string[] {
   const found: string[] = [];
-  for (const m of text.matchAll(MENTION)) {
+  // A name written inside code or a quotation is spoken of, not called: "`@all` wakes everyone", “@bob 说过…”.
+  const said = text.replace(/`[^`\n]*`/g, " ").replace(/“[^”\n]*”|「[^」\n]*」|『[^』\n]*』|"[^"\n]*"/g, " ");
+  for (const m of said.matchAll(MENTION)) {
     const name = m[2]!.toLowerCase();
     if (!found.includes(name)) found.push(name);
   }
