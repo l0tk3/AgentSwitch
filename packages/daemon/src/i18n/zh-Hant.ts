@@ -125,6 +125,15 @@ export const zhHant: Messages = {
     created: "已建立金鑰對。",
     remote: "金鑰對屬於各節點自身，請在該節點上管理。",
   },
+  gateMode: {
+    user: "此節點的閘道以你的帳戶執行：只防誤看，不防順手讀取",
+    service: "閘道以系統服務執行，有自己的帳戶：此帳戶讀不到它的私鑰。",
+    install: "要讓它有自己的帳戶，執行一次（需要 sudo）：",
+    noRuntime: "閘道服務複製已安裝的執行環境：請先執行 packages/linux/scripts/install.sh。",
+    update: "閘道服務有更新，請執行：",
+    rotate: "更換金鑰對需要管理員：",
+    notAnswering: "閘道服務無回應。",
+  },
   environment: {
     ...en.environment,
     about: "此節點已有與缺少的項目，即 agentswitch doctor 的結果。不做任何變更。",

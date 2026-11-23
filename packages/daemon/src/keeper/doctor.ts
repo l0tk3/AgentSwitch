@@ -13,6 +13,8 @@ import { which } from "../util/which.js";
 import { homes, probeDaemon, probeGate, runningKeeper } from "./run.js";
 import { AGENT_BINS, layout, loginShellPath, mergedPath, portsOf, readSettings } from "./plan.js";
 import { lingers, unitPath } from "./systemd.js";
+import { gatePort, gateReport, reportLines } from "./gateService.js";
+import { messages, pickLocale, type Locale } from "../i18n/index.js";
 import { HOLDER_BINARY, SLICE } from "../terminals/held.js";
 
 const run = promisify(execFile);
@@ -24,7 +26,7 @@ async function version(bin: string, env: NodeJS.ProcessEnv): Promise<string | nu
 }
 
 /** `print` takes each line (`agentswitch config`'s Environment page collects them). */
-export async function doctor(env: NodeJS.ProcessEnv = process.env, print: (line: string) => void = console.log): Promise<number> {
+export async function doctor(env: NodeJS.ProcessEnv = process.env, print: (line: string) => void = console.log, locale?: Locale): Promise<number> {
   let bad = 0;
   const say = (mark: Mark, what: string, detail = "") => { if (mark === "no") bad++; print(`${MARK[mark]} ${what.padEnd(16)} ${detail}`); };
   const section = (title: string) => print(`\n// ${title}`);
@@ -46,7 +48,18 @@ export async function doctor(env: NodeJS.ProcessEnv = process.env, print: (line:
   try { ports = portsOf(readSettings(asHome)); } catch (e) { say("no", "node.json", (e as Error).message); }
   const keeper = runningKeeper(runDir);
   say(keeper ? "ok" : "no", "keeper", keeper ? `pid ${keeper}` : "not running: agentswitch service start (or agentswitch node run)");
-  say(await probeGate(ports.gate) ? "ok" : "no", "gate", `127.0.0.1:${ports.gate}; keys in ${gateHome}`);
+  const report = await gateReport({ env, layout: l, ports, uid: process.getuid?.() ?? 0 });
+  const gPort = gatePort(report.mode, ports);
+  const gateUp = await probeGate(gPort);
+  if (report.mode.kind === "service") {
+    say(gateUp ? "ok" : "no", "gate", `127.0.0.1:${gPort}; the system service, public files in ${report.mode.publicDir}`);
+    if (report.mode.error) say("warn", "gate-service", report.mode.error);
+  } else say(gateUp ? "ok" : "no", "gate", `127.0.0.1:${gPort}; keys in ${gateHome}`);
+  const t = messages(locale ?? pickLocale({ env, kept: (() => { try { return readSettings(asHome).language; } catch { return undefined; } })() })).gateMode;
+  const words = reportLines(report, t);
+  const warn = report.mode.kind === "user" || report.status?.updateAvailable || (report.status && !report.status.running);
+  if (words.length) say(warn ? "warn" : "ok", "gate account", words[0]!);
+  for (const line of words.slice(1)) print(`${" ".repeat(19)}${line}`);
   say(await probeDaemon(ports.local) ? "ok" : "no", "daemon", `127.0.0.1:${ports.local}; home ${asHome}`);
   const held = (() => { try { return readdirSync(join(asHome, "terminals")).filter((d) => existsSync(join(asHome, "terminals", d, "meta.json"))).length; } catch { return 0; } })();
   say("ok", "terminals", held ? `${held} held, in ${SLICE}` : "none held now");

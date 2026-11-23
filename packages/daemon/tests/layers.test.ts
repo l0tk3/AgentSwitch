@@ -49,8 +49,9 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   nodes: [...UPPER, "executors", "engine", "remote"],
   /** mesh-v0 §4.2: the keeper of a node without the Mac app (`agentswitch node run`, the systemd service, `doctor`);
    *  it starts the daemon as a process, so it imports none of it but the checks it reuses, and the profiles' shapes and
-   *  rules for `agentswitch profiles`. Only the CLI imports it. */
-  keeper: [...UPPER, "terminals", "profiles"],
+   *  rules for `agentswitch profiles`. Only the CLI imports it. Where the gate runs (gate-simple-v0 §5) is said in the
+   *  node's language (i18n, a leaf), and the gate service's public directory is the one the executors' deny list names. */
+  keeper: [...UPPER, "terminals", "profiles", "executors", "i18n"],
   /** tui-v0 §5: the languages AgentSwitch's own words come in; a leaf. */
   i18n: [],
   /** tui-v0: `agentswitch config`, one more face of the HTTP API (given its client by the CLI), node.json through the

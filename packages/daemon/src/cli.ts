@@ -26,6 +26,8 @@
  *                               app does on a Mac); `name` names it; `restart` restarts the daemon with node.json
  *   service install | uninstall | status | start | stop | restart | logs   the systemd user service that runs `node run`
  *   doctor                      what this node has and lacks: runtime, service, agents and their sign-ins, tools
+ *   gate [--lang l]             where this node's gate runs (gate-simple-v0 §5): as you, or as the system service under
+ *                               its own account, and the exact `sudo secret-gate system …` command to run (never run here)
  *   profiles [new | api | color | rm …]   the agents' profiles (docs/profiles-v0.md), what the Mac's Settings › Agents
  *                               does: `new <agent> "<name>" [--api] [--base-url u] [--model m]`, `api <agent> <profile>
  *                               [--base-url u] [--model m] [--key]` (a key asked for, never echoed, sealed by this
@@ -64,6 +66,8 @@ import { service } from "./keeper/systemd.js";
 import { profilesCommand, readKey, sealWithGate } from "./keeper/profiles.js";
 import { localeOf, messages, pickLocale } from "./i18n/index.js";
 import { GateKeys, gateRunner } from "./keeper/gateKeys.js";
+import { gateReport, reportLines } from "./keeper/gateService.js";
+import { portsOf } from "./keeper/plan.js";
 
 const cfg = defaultConfig();
 // A node without the Mac app keeps its ports in node.json (keeper/plan.ts); the commands find its service there too.
@@ -185,7 +189,7 @@ async function watchInteractive(id: string): Promise<void> {
   }
 }
 
-const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | leftovers [end] | profiles [new|api|color|rm] | config [page] [--lang l] | console; --on <node>";
+const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | gate | leftovers [end] | profiles [new|api|color|rm] | config [page] [--lang l] | console; --on <node>";
 
 const ago = (ts: number | null): string => {
   if (ts === null) return "never";
@@ -370,6 +374,18 @@ async function main(): Promise<number> {
     }
     case "service": return service(a1, layout());
     case "doctor": return doctor();
+    case "gate": {
+      // Where the gate runs and the command to change that (gate-simple-v0 §5); sudo is the user's to run.
+      const { home } = homes();
+      let settings = {} as ReturnType<typeof readSettings>;
+      try { settings = readSettings(home); } catch { /* defaults */ }
+      const locale = pickLocale({ asked: values.lang, kept: settings.language });
+      const report = await gateReport({ layout: layout(), ports: portsOf(settings), uid: process.getuid?.() ?? 0 });
+      const lines = reportLines(report, messages(locale).gateMode);
+      if (values.json) { out({ mode: report.mode, status: report.status, commands: report.commands }); return 0; }
+      console.log(lines.length ? lines.join("\n") : report.mode.kind);
+      return 0;
+    }
     case "leftovers": {
       // What the terminals left running (docs/terminal-v0.md §11); `leftovers end` ends them now.
       const { on, leftovers } = await client.leftovers();
@@ -412,7 +428,8 @@ async function main(): Promise<number> {
         },
         edit: async (text, name) => editText(text, name),
         keys: new GateKeys(gateRunner(gate)),
-        doctor: async () => { const lines: string[] = []; await doctor(process.env, (l) => lines.push(l)); return lines; },
+        gate: () => gateReport({ layout: layout(), ports: portsOf(readSettings(home)), uid: process.getuid?.() ?? 0 }),
+        doctor: async () => { const lines: string[] = []; await doctor(process.env, (l) => lines.push(l), locale); return lines; },
       }, locale, a1);
     }
     case "console": {

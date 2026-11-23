@@ -429,6 +429,21 @@ describe("agentswitch config", { timeout: 30_000 }, () => {
     await ui.until("NEWPUBLIC0123456789");
   });
 
+  it("says plainly when the gate runs as this account, with the sudo command that gives it its own (gate-simple-v0 §5)", async () => {
+    const w = world();
+    const commands = { install: "sudo /rt/python/bin/secret-gate system install --owner-uid 1000 --port 8080 --runtime /rt", update: "u", rotateKey: "sudo /rt/python/bin/secret-gate system rotate-key", uninstall: "x" };
+    const user = { ...w.deps, gate: async () => ({ mode: { kind: "user" as const }, status: null, commands, platform: "linux" as const }) };
+    const zh = open(user, "keys", "zh-Hans");
+    await zh.until("此节点的网关以你的账户运行：只防误看，不防顺手读取");
+    expect(zh.frame()).toContain("system install --owner-uid 1000");
+    const service = { ...w.deps, gate: async () => ({ mode: { kind: "service" as const, publicDir: "/var/lib/agentswitch/gate-public", ca: "/c", proxyPort: 8080, ownerUid: 1000 }, status: { installed: true, running: true, updateAvailable: false, error: null }, commands, platform: "linux" as const }) };
+    w.setKeys([]);
+    const en = open(service, "keys");
+    await en.until("The gate runs as a system service under its own account");
+    expect(en.frame()).toContain("system rotate-key");
+    expect(en.frame()).not.toContain("Create Key Pair");                 // the service's key is made by the install
+  });
+
   it("shows doctor's lines marked, and asks again", async () => {
     const w = world();
     const ui = open(w.deps, "environment");

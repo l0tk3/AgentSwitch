@@ -4,6 +4,7 @@
 
 import type { DiscoveredSkill, McpServer, Skill } from "../extensions/types.js";
 import type { Keypair } from "../keeper/gateKeys.js";
+import type { GateReport } from "../keeper/gateService.js";
 import type { NodeSettings } from "../keeper/plan.js";
 import type { ModelProbe } from "../profiles/apiKeys.js";
 import type { AgentProfiles, Profile, ProfileAgent, ProfileKind } from "../profiles/store.js";
@@ -74,6 +75,9 @@ export type ConfigDeps = {
   readonly edit: (text: string, name: string) => Promise<string>;
   /** This node's gate key pair (keeper/gateKeys.ts): at most one row; `create` runs `secret-gate keygen`. */
   readonly keys: { list(): Promise<Keypair[]>; create(): Promise<Keypair[]> };
+  /** Where this node's gate runs (keeper/gateService.ts): as the login user, or as the system service, with the `sudo`
+   *  command for the user to run. Absent: nothing to say (tests, another kind of node). */
+  readonly gate?: () => Promise<GateReport>;
   /** `agentswitch doctor`'s lines. */
   readonly doctor: () => Promise<string[]>;
 };

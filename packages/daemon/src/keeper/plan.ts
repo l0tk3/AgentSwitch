@@ -8,6 +8,7 @@ import { homedir, userInfo } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { which } from "../util/which.js";
+import { gatePort, type GateMode } from "./gateService.js";
 
 export const DEFAULT_PORTS = { local: 4711, opencode: 4712, remote: 4713, gate: 8080 } as const;
 export type Ports = { local: number; opencode: number; remote: number; gate: number };
@@ -105,8 +106,11 @@ export function agentBins(path: string): Record<string, string> {
 
 export type Plan = { readonly gateEnv: Record<string, string>; readonly daemonEnv: Record<string, string> };
 
-export function plan(input: { env: NodeJS.ProcessEnv; home: string; gateHome: string; settings: NodeSettings; ports: Ports; layout: Layout; path: string }): Plan {
+/** `gate`: where the gate runs (keeper/gateService.ts). With the system service the daemon gets its public directory and
+ *  CA (as the Mac app gives them, gate-service-v0 §4) and its proxy port; the gate's environment is then unused. */
+export function plan(input: { env: NodeJS.ProcessEnv; home: string; gateHome: string; settings: NodeSettings; ports: Ports; layout: Layout; path: string; gate?: GateMode }): Plan {
   const { env, home, gateHome, settings, ports, layout: l, path } = input;
+  const gate: GateMode = input.gate ?? { kind: "user" };
   const gateEnv = { ...base(env), PATH: `${dirname(l.gate)}:/usr/bin:/bin`, SECRET_GATE_HOME: gateHome, PYTHONDONTWRITEBYTECODE: "1", PYTHONNOUSERSITE: "1" };
   const remote = settings.remote !== false;
   const daemonEnv: Record<string, string> = {
@@ -127,7 +131,8 @@ export function plan(input: { env: NodeJS.ProcessEnv; home: string; gateHome: st
     ...(settings.router === "echo" ? { AGENTSWITCH_ROUTER: "echo" } : {}),
     SECRET_GATE_HOME: gateHome,
     SECRET_GATE_BIN: l.gate,
-    SECRET_GATE_PROXY: `http://127.0.0.1:${ports.gate}`,
+    SECRET_GATE_PROXY: `http://127.0.0.1:${gatePort(gate, ports)}`,
+    ...(gate.kind === "service" ? { SECRET_GATE_PUBLIC: gate.publicDir, SECRET_GATE_CA: gate.ca } : {}),
     PYTHONDONTWRITEBYTECODE: "1",
     ...agentBins(path),
   };

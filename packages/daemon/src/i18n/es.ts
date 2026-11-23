@@ -234,6 +234,15 @@ export const es: Messages = {
     created: "Se creó el par de claves.",
     remote: "El par de claves es de cada nodo: se gestiona en el propio nodo.",
   },
+  gateMode: {
+    user: "La pasarela de este nodo se ejecuta con tu cuenta: solo evita que un valor se vea por error, no que se lea de pasada.",
+    service: "La pasarela se ejecuta como servicio del sistema con su propia cuenta: esta cuenta no puede leer sus claves.",
+    install: "Para darle su propia cuenta, ejecuta una vez (con sudo):",
+    noRuntime: "El servicio de la pasarela copia un entorno instalado: ejecuta antes packages/linux/scripts/install.sh.",
+    update: "Hay una actualización del servicio de la pasarela; ejecuta:",
+    rotate: "El par de claves lo sustituye un administrador:",
+    notAnswering: "El servicio de la pasarela no responde.",
+  },
   environment: {
     about: "Lo que este nodo tiene y le falta, según agentswitch doctor. No se cambia nada.",
     checkAgain: "Comprobar de nuevo",

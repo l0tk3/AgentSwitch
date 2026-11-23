@@ -1,7 +1,14 @@
 /** `agentswitch node run`: the keeper of a node without the Mac app (docs/mesh-v0.md §4.2). In the foreground, logs on
  *  standard output (systemd's journal): the gate first and, once it answers, the daemon; both kept running. SIGTERM or
  *  SIGINT stops the daemon, then the gate; SIGHUP reads node.json again and restarts the daemon (`agentswitch node
- *  restart`, after a setting changed). */
+ *  restart`, after a setting changed).
+ *
+ *  With the gate installed as the system service (gate-simple-v0 §5, keeper/gateService.ts) the keeper starts no gate:
+ *  it only watches the service's proxy and hands the daemon the service's public directory, CA and port. It never
+ *  starts a gate of the user's own beside the service, not even when the service does not answer (that would quietly
+ *  undo the isolation). The mode is looked at on every probe: once `sudo secret-gate system install` wrote
+ *  gate-service.json the keeper stops its own gate (freeing the port for the service) and restarts the daemon; once
+ *  `uninstall` removed it, it starts its own gate again. */
 
 import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,6 +17,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Child, reap, startTime, type ChildSpec } from "./child.js";
+import { gateMode, gatePort, type GateMode } from "./gateService.js";
 import { layout, loginShellPath, mergedPath, plan, portsOf, readSettings, type Layout, type Ports } from "./plan.js";
 
 const run = promisify(execFile);
@@ -71,12 +79,25 @@ export async function probeDaemon(port: number, timeoutMs = 2_000): Promise<bool
   } catch { return false; }
 }
 
-/** The gate's keypair, made on the first run (mac-app `GateCLI.ensureKeypair`): `proxy` will not start without one. */
+/** The gate's keypair, made on the first run (mac-app `GateCLI.ensureKeypair`): `proxy` will not start without one.
+ *  The gate has one keypair (gate-simple-v0 §1), made by `secret-gate keygen`. */
 async function ensureKeypair(gate: string, env: Record<string, string>, log: (s: string) => void): Promise<void> {
   const list = JSON.parse((await run(gate, ["keys", "--json"], { env, timeout: 30_000 })).stdout) as unknown[];
   if (Array.isArray(list) && list.length) return;
-  await run(gate, ["keys", "--json", "new", "default", "--use"], { env, timeout: 30_000 });
-  log("made the gate's keypair `default`");
+  await run(gate, ["keygen"], { env, timeout: 30_000 });
+  log("made the gate's keypair");
+}
+
+/** Whether the keeper has to hand the gate over or restart the daemon: the mode changed, or the service's port did. */
+export function modeChanged(was: GateMode, now: GateMode): boolean {
+  if (was.kind !== now.kind) return true;
+  return was.kind === "service" && now.kind === "service" && (was.proxyPort !== now.proxyPort || was.publicDir !== now.publicDir);
+}
+
+/** What the keeper's log says about where the gate runs (doctor and `agentswitch gate` say it in the node's language). */
+export function modeLine(mode: GateMode): string {
+  if (mode.kind === "user") return "the gate runs as this account: it guards against values being seen by mistake, not against them being read on purpose (sudo secret-gate system install: agentswitch gate)";
+  return `the gate runs as the system service (${mode.publicDir}); not starting one${mode.error ? ` (${mode.error})` : ""}`;
 }
 
 /** mitmproxy's CA as `<gate home>/ca.pem`, where the executors' trust is pointed (mac-app `syncCA`). */
@@ -103,10 +124,11 @@ export async function runNode(env: NodeJS.ProcessEnv = process.env, out: (line: 
   if (!shellPath) log("the login shell gave no PATH; using the usual folders");
 
   let ports: Ports;
+  let mode: GateMode = gateMode(env);
   const specs = () => {
     const settings = readSettings(home);
     ports = portsOf(settings);
-    const p = plan({ env, home, gateHome, settings, ports, layout: l, path: mergedPath(shellPath, env.HOME ?? homedir(), l.nodeBin) });
+    const p = plan({ env, home, gateHome, settings, ports, layout: l, path: mergedPath(shellPath, env.HOME ?? homedir(), l.nodeBin), gate: mode });
     const gate: ChildSpec = { name: "gate", command: [l.gate, "proxy", "--port", String(ports.gate)], env: p.gateEnv, cwd: dirname(gateHome), pidFile: join(runDir, "gate.pid"), stopSignal: "SIGTERM", stopTimeoutMs: 5_000 };
     const daemon: ChildSpec = { name: "daemon", command: [...l.daemon, "serve"], env: p.daemonEnv, cwd: home, pidFile: join(runDir, "daemon.pid"), stopSignal: "SIGINT", stopTimeoutMs: 10_000 };
     return { gate, daemon, p };
@@ -114,37 +136,59 @@ export async function runNode(env: NodeJS.ProcessEnv = process.env, out: (line: 
   let s = specs();
   const agents = Object.keys(s.p.daemonEnv).filter((k) => k.endsWith("_BIN") && k !== "SECRET_GATE_BIN").map((k) => `${k}=${s.p.daemonEnv[k]}`);
   log(`home ${home}; gate ${l.gate}; ${l.runtime ? `runtime ${l.runtime}` : "from a checkout"}; agents: ${agents.join(" ") || "none found"}`);
+  log(modeLine(mode));
 
   await reap(s.daemon.pidFile, "SIGINT", 10_000, log);
   await reap(s.gate.pidFile, "SIGTERM", 5_000, log);
-  await ensureKeypair(l.gate, s.p.gateEnv, log);
 
-  const gate = new Child(s.gate, out), daemon = new Child(s.daemon, out);
-  // A gate already answering on the port (started by hand, or by another tool) is used as it is, until it stops answering.
-  let external = await probeGate(ports!.gate);
-  if (external) log(`a gate already answers on ${ports!.gate}; using it`);
-  else {
+  let gate = new Child(s.gate, out);
+  const daemon = new Child(s.daemon, out);
+  const port = () => gatePort(mode, ports!);
+  let external = false;
+  /** This account's gate, unless one already answers on the port (started by hand, or by another tool): that one is
+   *  used as it is, until it stops answering. */
+  const startOwnGate = async () => {
+    await ensureKeypair(l.gate, s.p.gateEnv, log);
+    external = await probeGate(port());
+    if (external) { log(`a gate already answers on ${port()}; using it`); return; }
     gate.start();
     const until = Date.now() + GATE_WAIT_MS;
-    while (Date.now() < until && !(await probeGate(ports!.gate))) await new Promise((r) => setTimeout(r, 300));
-  }
-  syncCA(gateHome, s.p.gateEnv, log);
+    while (Date.now() < until && !(await probeGate(port()))) await new Promise((r) => setTimeout(r, 300));
+    syncCA(gateHome, s.p.gateEnv, log);
+  };
+  if (mode.kind === "user") await startOwnGate();
+  else if (!(await probeGate(port()))) log(`the gate service does not answer on ${port()} yet`);
   daemon.start();
 
-  let gateMisses = 0, daemonMisses = 0, busy = false;
+  /** gate-service.json appeared or went (or `system update --port` moved the service): the gate changes hands, and
+   *  the daemon starts again with the new places. */
+  const switchMode = async (next: GateMode) => {
+    mode = next;
+    log(modeLine(mode));
+    s = specs();
+    if (mode.kind === "service") await gate.stop();       // frees the port for the service's proxy
+    else { gate = new Child(s.gate, out); await startOwnGate(); }
+    daemon.update(s.daemon);
+    await daemon.restart();
+  };
+
+  let gateMisses = 0, daemonMisses = 0, busy = false, said = false;
   const tick = setInterval(() => {
     if (busy) return;
     busy = true;
     void (async () => {
-      if (await probeGate(ports!.gate)) { gateMisses = 0; syncCA(gateHome, s.p.gateEnv, log); }
-      else if (++gateMisses >= (external ? EXTERNAL_GATE_MISSES : GATE_MISSES)) {
+      const next = gateMode(env);
+      if (modeChanged(mode, next)) { gateMisses = 0; said = false; await switchMode(next); return; }
+      if (await probeGate(port())) { gateMisses = 0; said = false; if (mode.kind === "user") syncCA(gateHome, s.p.gateEnv, log); }
+      else if (++gateMisses >= (external || mode.kind === "service" ? EXTERNAL_GATE_MISSES : GATE_MISSES)) {
         gateMisses = 0;
-        if (external) { external = false; log("the gate that was there stopped answering; starting one"); gate.start(); }
+        if (mode.kind === "service") { if (!said) log(`the gate service does not answer on ${port()}; not starting one (agentswitch doctor)`); said = true; }
+        else if (external) { external = false; log("the gate that was there stopped answering; starting one"); gate.start(); }
         else if (gate.running && gate.uptime() > GRACE_MS) gate.failed("does not answer");
       }
       if (await probeDaemon(ports!.local)) daemonMisses = 0;
       else if (++daemonMisses >= DAEMON_MISSES) { daemonMisses = 0; if (daemon.running && daemon.uptime() > GRACE_MS) daemon.failed("does not answer"); }
-    })().finally(() => { busy = false; });
+    })().catch((e: unknown) => log(`probe: ${(e as Error).message}`)).finally(() => { busy = false; });
   }, PROBE_EVERY_MS);
 
   return new Promise<number>((done) => {

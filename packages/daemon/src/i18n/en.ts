@@ -233,6 +233,15 @@ export const en = {
     created: "Created the key pair.",
     remote: "The key pair is each node's own: it is managed on the node itself.",
   },
+  gateMode: {
+    user: "This node's gate runs as your account: it only keeps values from being seen by mistake, not from being read in passing.",
+    service: "The gate runs as a system service under its own account: this account cannot read its keys.",
+    install: "To give it its own account, run once (needs sudo):",
+    noRuntime: "The gate service copies an installed runtime: run packages/linux/scripts/install.sh first.",
+    update: "The gate service has an update; run:",
+    rotate: "The key pair is replaced by an administrator:",
+    notAnswering: "The gate service does not answer.",
+  },
   environment: {
     about: "What this node has and lacks, as agentswitch doctor says it. Nothing is changed.",
     checkAgain: "Check Again",

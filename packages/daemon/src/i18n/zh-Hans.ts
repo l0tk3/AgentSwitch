@@ -126,6 +126,15 @@ export const zhHans: Messages = {
     created: "已创建密钥对。",
     remote: "密钥对属于各节点自身，请在该节点上管理。",
   },
+  gateMode: {
+    user: "此节点的网关以你的账户运行：只防误看，不防顺手读取",
+    service: "网关以系统服务运行，有自己的账户：此账户读不到它的私钥。",
+    install: "要让它有自己的账户，运行一次（需要 sudo）：",
+    noRuntime: "网关服务复制已安装的运行时：请先运行 packages/linux/scripts/install.sh。",
+    update: "网关服务有更新，请运行：",
+    rotate: "更换密钥对需要管理员：",
+    notAnswering: "网关服务无响应。",
+  },
   environment: {
     ...en.environment,
     about: "此节点已有与缺少的项目，即 agentswitch doctor 的结果。不做任何改动。",
