@@ -151,7 +151,7 @@ struct RoomFilesSheet: View {
                                 Text("文件夹是空的。").font(.system(size: 12.5)).foregroundStyle(Look.faint).padding(.vertical, 24).frame(maxWidth: .infinity)
                             }
                             ForEach(shared.files) { file in
-                                Button { model.revealShared(file.path) } label: {
+                                Button { if model.onThisMac, let folder { model.preview(file: folder + "/" + file.path) } } label: {
                                     HStack(spacing: 10) {
                                         Text(file.path).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
                                         Spacer(minLength: 8)
@@ -162,7 +162,7 @@ struct RoomFilesSheet: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .help(model.onThisMac ? "在 Finder 里显示" : file.path)
+                                .help(model.onThisMac ? "预览" : file.path)
                                 HairRule(color: Look.line)
                             }
                             if shared.more { Text("还有更多文件没有列出。").font(.system(size: 12)).foregroundStyle(Look.faint).padding(.top, 8) }

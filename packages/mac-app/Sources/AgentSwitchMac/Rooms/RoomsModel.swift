@@ -54,6 +54,8 @@ final class RoomsModel {
     private(set) var offeredIndex = 0
 
     // what floats
+    /// The file shown in a preview (Quick Look) now.
+    var previewing: URL?
     var card: String?
     var sheet: Sheet?
     /// What is in the room's shared folder, read when its sheet opens; nil: not read yet.
@@ -220,6 +222,13 @@ final class RoomsModel {
         panel.canChooseFiles = true
         panel.prompt = "Attach"
         if panel.runModal() == .OK { attach(urls: panel.urls) }
+    }
+
+    /// A file a message came with, in a preview (Quick Look); one that is gone is said so.
+    func preview(file path: String) {
+        guard onThisMac else { return }
+        guard FileManager.default.fileExists(atPath: path) else { problem = "文件不在了：\(path)"; return }
+        previewing = URL(fileURLWithPath: path)
     }
 
     func reveal(_ path: String) {

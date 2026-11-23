@@ -1,7 +1,22 @@
 import AgentSwitchMacCore
+import AppKit
 import Foundation
 
 extension RoomsDemo {
+    /// Files for the made-up room's message: a picture drawn for the purpose and a file that is on every Mac, so the
+    /// preview shows a picture and a file's card.
+    static let demoFiles: String = {
+        let picture = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-rooms-demo.png")
+        let image = NSImage(size: NSSize(width: 480, height: 270), flipped: false) { rect in
+            NSColor(calibratedRed: 0.13, green: 0.16, blue: 0.24, alpha: 1).setFill(); rect.fill()
+            NSColor(calibratedRed: 0.98, green: 0.36, blue: 0.55, alpha: 1).setFill(); NSRect(x: 40, y: 60, width: 150, height: 150).fill()
+            NSColor(calibratedRed: 0.45, green: 0.85, blue: 0.65, alpha: 1).setFill(); NSBezierPath(ovalIn: NSRect(x: 250, y: 70, width: 170, height: 130)).fill()
+            return true
+        }
+        if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: picture) }
+        return "[\"\(picture.path)\",\"/etc/hosts\"]"
+    }()
+
     /// A made-up room for the design preview (`MainWindowPreview`): four sessions in their states, a reply, a message
     /// for the user not yet seen, and receipts still open.
     static let demo: RoomsDemo = {
@@ -22,7 +37,7 @@ extension RoomsDemo {
          "messages":[
           {"seq":1,"from":"you","to":["daemon"],"text":"@daemon 登录接口的返回里加一个 `expiresAt`，改完告诉另外两边。","at":\(at(42))},
           {"seq":2,"from":"daemon","to":["mac-app","ios-app"],"text":"@mac-app @ios-app 接口我改完了，`/login` 的返回多了一个 `expiresAt` 字段，你们两边的模型要跟着加。","at":\(at(30))},
-          {"seq":3,"from":"daemon","to":[],"text":"测试也补上了，三个用例。","at":\(at(29)),"files":["/Users/you/Projects/AgentSwitch/packages/daemon/tests/login.test.ts"]},
+          {"seq":3,"from":"daemon","to":[],"text":"测试也补上了，三个用例。","at":\(at(29)),"files":\(RoomsDemo.demoFiles)},
           {"seq":4,"from":"mac-app","to":["daemon"],"replyTo":2,"text":"@daemon 收到。是毫秒还是秒？","at":\(at(12))},
           {"seq":5,"from":"daemon","to":["mac-app","web"],"text":"@mac-app 毫秒。@web 你那边的类型也要改。","at":\(at(10))},
           {"seq":6,"from":"mac-app","to":["you"],"text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}],

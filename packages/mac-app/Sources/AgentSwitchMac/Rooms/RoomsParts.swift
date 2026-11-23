@@ -115,6 +115,8 @@ struct RoomRowActions {
     var reply: (Int) -> Void = { _ in }
     /// Shows a message's file in Finder; nil where the room is another node's (the path is that node's).
     var reveal: ((String) -> Void)?
+    /// Opens a message's file in a preview (Quick Look); nil where the room is another node's.
+    var preview: ((String) -> Void)?
 }
 
 /// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
@@ -201,34 +203,54 @@ struct RoomMessageRow: View {
         .foregroundStyle(Look.ink2)
     }
 
-    /// The files a message comes with (§3 附件): each by its name, its whole path on hover; a click shows it in Finder
-    /// when the room is this Mac's.
+    /// The files a message comes with (§3 附件), as in a chat: a picture is shown, any other file is a card with its
+    /// icon, name and size. A click opens it in a preview; the menu shows it in Finder. Where the room is another
+    /// node's the path is that node's: a name only.
     private var files: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(message.files, id: \.self) { path in
-                Button { actions.reveal?(path) } label: {
+                if actions.preview == nil {
                     HStack(spacing: 6) {
                         LookGlyph(glyph: "⎘", symbol: "paperclip", size: 12)
                         Text((path as NSString).lastPathComponent).mono(12).lineLimit(1).truncationMode(.middle)
                     }
                     .foregroundStyle(Look.ink2)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(path)
-                // A picture on this Mac is shown, small, under its name.
-                if actions.reveal != nil, let image = RoomPictures.thumb(path) {
-                    Button { actions.reveal?(path) } label: {
-                        Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 320, maxHeight: 180, alignment: .leading)
-                            .framed(Look.line, radius: Look.controlRadius)
+                    .help(path)
+                } else {
+                    Button { actions.preview?(path) } label: {
+                        if let image = RoomPictures.thumb(path) {
+                            Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
+                                .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0))
+                                .framed(Look.line, radius: look.isClassic ? 8 : 0)
+                        } else {
+                            HStack(spacing: 9) {
+                                Image(nsImage: RoomPictures.icon(path)).resizable().frame(width: 30, height: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text((path as NSString).lastPathComponent).font(.system(size: 12.5)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
+                                    Text(RoomPictures.note(path)).mono(11).foregroundStyle(Look.faint).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .frame(width: 300, alignment: .leading)
+                            .grounded(Look.raised, radius: look.isClassic ? 8 : 0)
+                            .framed(Look.line, radius: look.isClassic ? 8 : 0)
+                            .contentShape(Rectangle())
+                        }
                     }
                     .buttonStyle(.plain)
-                    .padding(.vertical, 3)
+                    .help(path)
+                    .contextMenu {
+                        Button("Quick Look") { actions.preview?(path) }
+                        Button("Show in Finder") { actions.reveal?(path) }
+                        Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path, forType: .string) }
+                    }
                 }
             }
         }
-        .padding(.top, 2)
+        .padding(.top, 4)
     }
 
     @ViewBuilder
@@ -452,6 +474,18 @@ enum RoomPictures {
         let image = NSImage(cgImage: small, size: NSSize(width: small.width / 2, height: small.height / 2))
         kept.setObject(image, forKey: path as NSString)
         return image
+    }
+
+    /// The file's own icon, as Finder shows it.
+    static func icon(_ path: String) -> NSImage { NSWorkspace.shared.icon(forFile: path) }
+
+    /// `12 KB · Markdown`, a folder's word, or that the file is not there any more.
+    static func note(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey, .localizedTypeDescriptionKey]) else { return "Not Found" }
+        if values.isDirectory == true { return "Folder" }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)
+        return [size, values.localizedTypeDescription].compactMap { $0 }.joined(separator: " · ")
     }
 }
 

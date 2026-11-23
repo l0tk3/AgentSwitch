@@ -1,4 +1,5 @@
 import AgentSwitchMacCore
+import QuickLook
 import SwiftUI
 
 /// The main window's Chat Room page (docs/chatroom-v0.md §10; concept `docs/design/concepts/chatroom.html`): the rooms
@@ -20,6 +21,7 @@ struct RoomsPage: View {
             .background(Look.ground)
             .tint(.brand)
             .followsWindow()
+            .quickLookPreview($model.previewing)
             .task(id: "\(shown)|\(state.nodeId ?? "")") {
                 let node = state.nodeId
                 model.client = { [app] in app.client(on: node) }
@@ -296,7 +298,7 @@ private struct RoomView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
-                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil))
+                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil))
                                 .id(row.id)
                         }
                     }
@@ -338,7 +340,12 @@ private struct RoomWriter: View {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(model.files, id: \.self) { path in
                         HStack(spacing: 6) {
-                            LookGlyph(glyph: "⎘", symbol: "paperclip", size: 12)
+                            if let image = RoomPictures.thumb(path) {
+                                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).frame(width: 28, height: 28).clipped()
+                                    .framed(Look.line, radius: 0).onTapGesture { model.preview(file: path) }
+                            } else {
+                                LookGlyph(glyph: "⎘", symbol: "paperclip", size: 12)
+                            }
                             Text((path as NSString).lastPathComponent).mono(12).lineLimit(1).truncationMode(.middle).help(path)
                             Button { model.detach(path) } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 12) }.buttonStyle(.plain).help("Remove")
                         }
