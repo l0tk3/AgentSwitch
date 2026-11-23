@@ -18,8 +18,10 @@ import { issues, limitParam, type ApiDeps } from "./shared.js";
 import { NewTaskBody } from "./tasks.js";
 import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
 import { defaultWorkdir, expandWorkdir, loadWorkdir, saveWorkdir } from "../files/workdir.js";
+import { loadTrustedFolders, saveTrustedFolders } from "../terminals/trustedFolders.js";
 
 const WorkdirBody = z.object({ path: z.string().min(1).max(1024) });
+const TrustedFoldersBody = z.object({ folders: z.array(z.string().min(1).max(4096)).max(500) });
 
 const ContextBody = z.object({ text: z.string() });
 export function mountSettings(app: Hono, deps: ApiDeps): void {
@@ -54,6 +56,23 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
       }
       saveWorkdir(home, path);
       return c.json(view(path));
+    });
+
+    // Folders trusted once in AgentSwitch (terminals/trustedFolders.ts): an agent started in one, or below one, does
+    // not ask whether to trust it. Read and set on the Mac only (not in the remote list): a phone's say over which
+    // folders an agent runs in unasked stays a step it takes on the Mac. The whole list is sent; `~/x` is the home's.
+    app.get("/settings/trusted-folders", (c) => c.json({ folders: loadTrustedFolders(home) }));
+    app.put("/settings/trusted-folders", async (c) => {
+      const body = TrustedFoldersBody.safeParse(await c.req.json().catch(() => ({})));
+      if (!body.success) return c.json({ error: issues(body.error) }, 400);
+      const folders: string[] = [];
+      for (const raw of body.data.folders) {
+        const path = expandWorkdir(raw.trim());
+        if (!path) return c.json({ error: `${raw}: a trusted folder must be an absolute path` }, 400);
+        folders.push(path);
+      }
+      try { return c.json({ folders: saveTrustedFolders(home, folders) }); }
+      catch (err) { return c.json({ error: (err as Error).message }, 400); }
     });
   }
 

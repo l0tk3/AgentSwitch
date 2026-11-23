@@ -236,7 +236,7 @@ describe("bringing sessions in (Admin)", () => {
     expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true });
   });
 
-  it("seats a running session, starts new ones one level deep and four at most, and never in bypass from a session that is not", async () => {
+  it("seats a running session, starts new ones one level deep and four at most, in bypass unless told otherwise", async () => {
     const { kit, store, room, states, started } = org();
     store.setCanAdd(room.id, "daemon", true);
     states.set("t8", "idle");
@@ -244,10 +244,10 @@ describe("bringing sessions in (Admin)", () => {
     expect(store.get(room.id).seats.find((s) => s.handle === "t8")).toMatchObject({ addedBy: "daemon", byAgent: false, canAdd: false });
     expect(await kit.call("t1", "room_add", { terminal: "t1" })).toMatchObject({ isError: true });
     expect(await kit.call("t1", "room_add", { terminal: "nope" })).toMatchObject({ isError: true });
-    expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w", mode: "bypass" })).toMatchObject({ isError: true, text: expect.stringContaining("bypass") });
     const added = await kit.call("t1", "room_add", { agent: "codex", cwd: "/w/x", model: "gpt", resume: "sess-1" });
     expect(added.text).toContain("@new1 now sits in");
-    expect(started).toEqual([{ agent: "codex", cwd: "/w/x", model: "gpt", resume: "sess-1" }]);
+    // Resumed or new, a session started for a room runs in bypass unless the caller gives a mode.
+    expect(started).toEqual([{ agent: "codex", cwd: "/w/x", model: "gpt", mode: "bypass", resume: "sess-1" }]);
     const child = store.get(room.id).seats.find((s) => s.handle === "new1")!;
     expect(child).toMatchObject({ byAgent: true, starter: "t1", canAdd: false, addedBy: "daemon" });
     // One level: the session it started has no organizing tools, and its switch can not be turned on.
@@ -255,8 +255,9 @@ describe("bringing sessions in (Admin)", () => {
     expect(() => store.setCanAdd(room.id, "new1", true)).toThrow();
     for (let i = 0; i < 3; i++) expect((await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).isError).toBeUndefined();
     expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true, text: expect.stringContaining("the most one session may") });
-    // A session in bypass itself may start one in bypass.
+    // A mode given is kept; bypass needs no bypass of the caller's own.
     store.setCanAdd(room.id, "ios", true);
-    expect((await kit.call("t3", "room_add", { agent: "codex", cwd: "/w", mode: "bypass" })).isError).toBeUndefined();
+    expect((await kit.call("t3", "room_add", { agent: "codex", cwd: "/w", mode: "manual" })).isError).toBeUndefined();
+    expect(started.at(-1)).toMatchObject({ mode: "manual" });
   });
 });

@@ -368,7 +368,7 @@ describe("remote route allowlist", () => {
       ["PUT", "/context"], ["GET", "/context/example"], ["DELETE", "/tasks/abc"], ["DELETE", "/threads/t1"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
     for (const [m, p] of [["PUT", "/memory"], ["DELETE", "/platform-memory/x"], ["DELETE", "/mcp/x"], ["DELETE", "/skills/x"], ["DELETE", "/tasks/a/b"], ["DELETE", "/threads/"],
       ["POST", "/context"], ["DELETE", "/context"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
-      ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
+      ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["GET", "/settings/trusted-folders"], ["PUT", "/settings/trusted-folders"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
       ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/tasks/"], ["GET", "/tasks/a/b"], ["GET", "/tasks/a/files/"], ["POST", "/route/preview"],
       ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"],
       // Proxies are a phone's to manage; making, removing and colouring a profile, what Clash Verge fetches, and a profile browser's identity are not.

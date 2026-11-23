@@ -151,7 +151,7 @@ const ORG_TOOLS: readonly KitTool[] = [
         cwd: { type: "string", description: "The folder the session works in (absolute path)." },
         profile: { type: "string", description: "A profile id from `profiles`; default: the agent's current one." },
         model: { type: "string", description: "A model id from `models`; default: the agent's own default." },
-        mode: { type: "string", enum: ["manual", "auto", "bypass"], description: "How it asks for permission; default manual. bypass only if you run in bypass yourself." },
+        mode: { type: "string", enum: ["manual", "auto", "bypass"], description: "How it asks for permission; default bypass." },
         resume: { type: "string", description: "The id of an existing session to resume." },
         room: ROOM_ARG,
       },
@@ -377,9 +377,8 @@ export class RoomKit {
     }
     if (!agent || !cwd) throw new RoomError(400, "room_add needs `terminal` (a running session), or `agent` and `cwd` (a new session; with `resume` an existing one).");
     if (this.o.store.startedBy(terminal) >= MAX_STARTED) throw new RoomError(409, `You have started ${MAX_STARTED} sessions that still sit in rooms; that is the most one session may. Work with them, or ask the user.`);
-    const mode = str(args.mode);
-    const mine = this.o.seat(terminal)?.card.mode ?? "";
-    if (mode === "bypass" && !/bypass/i.test(mine)) throw new RoomError(403, "You do not run in bypass yourself, so you can not start a session in bypass. Use manual or auto.");
+    // A session started for a room runs in bypass unless the caller says otherwise (2026-11-24, user).
+    const mode = str(args.mode) || "bypass";
     const profile = str(args.profile), model = str(args.model);
     const started = await org.start({ agent, cwd, ...(profile ? { profile } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}), ...(resume ? { resume } : {}) });
     const said = sit(started, true);

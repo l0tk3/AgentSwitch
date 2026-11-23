@@ -10,6 +10,7 @@ import { CodexCompanion } from "./codexTerminal.js";
 import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
+import { pretrust } from "./trustedFolders.js";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { which } from "../util/which.js";
@@ -83,6 +84,9 @@ export type LauncherOptions = {
   readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => BridgeCommand | null;
   /** Terminals that outlive the service (docs/terminal-v0.md §10): companions' servers run on held ptys too. */
   readonly holding?: Holding | null;
+  /** The folders trusted in AgentSwitch (trustedFolders.ts): an agent started in one, or below one, finds it already
+   *  trusted in its own configuration (its profile's), and does not ask. Absent: none. */
+  readonly trustedFolders?: () => readonly string[];
 };
 
 /** The bridge's command line; with the session it was made for, which a held terminal keeps for the next daemon. */
@@ -336,6 +340,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
       case "claude-code": {
         // A profile other than the Mac's own: its sign-in and its identifiers are in a folder of its own.
         if (req.configHome) env.CLAUDE_CONFIG_DIR = req.configHome;
+        if (opts.trustedFolders) pretrust("claude-code", req.cwd, env, opts.trustedFolders());
         const settings = join(dir, "settings.json");
         // In the settings laid over the user's too: an `env` of the user's own settings would win over the process's.
         // A profile that pays by a key (§3.6): Claude Code runs the hook program for it (`apiKeyHelper`, sent as both
@@ -373,6 +378,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // A profile that signs in with an account (docs/profiles-v0.md §6.2): a folder of its own, its sign-in kept in
         // a file there, and OpenAI's own provider whatever the user's config.toml (linked in) names.
         if (req.configHome) env.CODEX_HOME = req.configHome;
+        if (opts.trustedFolders) pretrust("codex", req.cwd, env, opts.trustedFolders());
         // What is selected on Codex's screen goes to whoever is looking (docs/terminal-v0.md §1 "Codex 里选中的字"):
         // Codex writes the clipboard of the machine it runs on and tells the terminal (OSC 52) only where it takes
         // itself to be reached over SSH — which, seen from another node or a phone, it is.
