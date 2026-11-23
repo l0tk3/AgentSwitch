@@ -95,7 +95,7 @@ describe("giving a room's messages to sessions", () => {
 describe("the Chatroom Kit", () => {
   it("is there only while the session sits in a room", async () => {
     const { kit, store, room } = made();
-    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes"]);
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
     expect(kit.tools("t9")).toEqual([]);
     expect((await kit.call("t9", "room_post", { text: "hi" }))).toMatchObject({ isError: true, text: expect.stringContaining("sits in no Chat Room") });
     const before = kit.version("t1");
@@ -168,7 +168,7 @@ describe("a terminal's own programs", () => {
     expect((await ask("t1", { op: "nope" })).status).toBe(400);
     expect(kit.has("t1")).toBe(false);
     const tools = await ask("t1", { op: "tools" });
-    expect(tools.body.tools.map((t: any) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes"]);
+    expect(tools.body.tools.map((t: any) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
     expect(kit.has("t1")).toBe(true);
     expect((await ask("t9", { op: "tools" })).body).toEqual({ tools: [], version: "" });
     // Unchanged: held its while, then the same; changed: told at once.
@@ -200,10 +200,10 @@ describe("bringing sessions in (Can Add Sessions)", () => {
 
   it("has the organizing tools only with the switch on, and refuses a call the moment it is off", async () => {
     const { kit, store, room } = org();
-    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes"]);
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
     expect(await kit.call("t1", "profiles", {})).toMatchObject({ isError: true, text: expect.stringContaining("may not add sessions") });
     store.setCanAdd(room.id, "daemon", true);
-    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "rooms", "room_create", "room_add", "profiles", "models", "sessions", "profile_check"]);
+    expect(kit.tools("t1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing", "rooms", "room_create", "room_add", "profiles", "models", "sessions", "profile_check"]);
     expect((await kit.call("t1", "profiles", {})).text).toBe("2 profiles:\nclaude-code · default · \"Default\" · subscription · healthy, checked 2 h ago\ncodex · abc123 · \"Work\" · API key · not checked yet");
     expect((await kit.call("t1", "models", { agent: "claude-code" })).text).toBe("claude-code:\n  opus — Opus · Opus 5.5");
     const sessions = (await kit.call("t1", "sessions", {})).text;
@@ -230,7 +230,7 @@ describe("bringing sessions in (Can Add Sessions)", () => {
     const child = store.get(room.id).seats.find((s) => s.handle === "new1")!;
     expect(child).toMatchObject({ byAgent: true, starter: "t1", canAdd: false, addedBy: "daemon" });
     // One level: the session it started has no organizing tools, and its switch can not be turned on.
-    expect(kit.tools("new1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes"]);
+    expect(kit.tools("new1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_members", "room_notes", "room_files", "room_tasks", "room_changing"]);
     expect(() => store.setCanAdd(room.id, "new1", true)).toThrow();
     for (let i = 0; i < 3; i++) expect((await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).isError).toBeUndefined();
     expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true, text: expect.stringContaining("the most one session may") });

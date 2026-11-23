@@ -7,7 +7,7 @@
  *  the receipt goes: a room shows only what has not arrived. */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { faceOf, type Face } from "./face.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
@@ -17,6 +17,14 @@ export const MAX_ROOMS = 100, MAX_SEATS = 16, MAX_NAME = 60, MAX_TOPIC = 300, MA
 export const MAX_NOTES = 20_000, MAX_FILES = 10;
 /** §7: the rounds between sessions the user is told of, and how many sessions one session may start. */
 export const ROUNDS_LIMIT = 6, MAX_STARTED = 4;
+/** §9: a room's shared folder is listed this far (files, and folders deep). */
+export const MAX_LISTED = 500, MAX_DEPTH = 6;
+/** Where every room's shared folder is, under the home: apart from what the rooms themselves are kept in, so that a
+ *  session let into the folders is let into nothing else. */
+export const filesRoot = (home: string): string => join(home, "room-files");
+
+/** A file in a room's shared folder: its path under the folder. */
+export type RoomFile = { readonly path: string; readonly size: number; readonly modifiedAt: number };
 
 export type Receipt = "sent" | "queued" | "delivered" | "ended";
 
@@ -62,6 +70,30 @@ export type Message = {
 /** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
 export type Notes = { readonly text: string; readonly at: number; readonly by: string };
 
+/** One piece of the room's work (§9 任务表): who does what, and how far it is, where every member sees it. */
+export type TaskState = "todo" | "doing" | "done";
+export type Task = {
+  /** Its number in this room: `T3`. Never reused. */
+  readonly n: number;
+  readonly title: string;
+  readonly detail?: string;
+  readonly state: TaskState;
+  /** The seat doing it (done it). */
+  readonly owner?: string;
+  readonly by: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  /** Tasks that come first, by number. */
+  readonly after?: readonly number[];
+  /** How it ended, in a line: the result, or the file that holds it. */
+  readonly note?: string;
+};
+
+/** A member saying which files it is changing (§9): a word to the others, not a lock, and gone by itself at `until`. */
+export type Claim = { readonly handle: string; readonly paths: readonly string[]; readonly why?: string; readonly at: number; readonly until: number };
+
+export const MAX_TASKS = 200, MAX_TITLE = 200, MAX_DETAIL = 2000, MAX_NOTE = 1000, MAX_CLAIM_PATHS = 30, CLAIM_MINUTES = 30, MAX_CLAIM_MINUTES = 240;
+
 export type Room = {
   readonly id: string;
   readonly name: string;
@@ -80,6 +112,11 @@ export type Room = {
   /** The message up to which the user has seen the rounds go by (`OK`): counted from there again. */
   readonly roundsFrom: number;
   readonly notes: Notes | null;
+  readonly tasks: readonly Task[];
+  /** The last task's number; 0 before the first. */
+  readonly lastTask: number;
+  /** As written; the ones past their time are left out when read (`claims`). */
+  readonly claims: readonly Claim[];
   /** What has not arrived: message number → handle → where it is. */
   readonly receipts: Readonly<Record<string, Readonly<Record<string, Receipt>>>>;
 };
@@ -95,7 +132,38 @@ export class RoomStore {
   private rooms: Map<string, Room> | null = null;
   private readonly said = new Map<string, Message[]>();
 
-  constructor(home: string, private readonly now: () => number = Date.now) { this.dir = join(home, "rooms"); }
+  private readonly filesDir: string;
+  constructor(home: string, private readonly now: () => number = Date.now) { this.dir = join(home, "rooms"); this.filesDir = filesRoot(home); }
+
+  /** A room's shared folder (§9), made when first asked for: what members hand each other as files — a report, a
+   *  plan, an interface — is written here and a message only points at it. */
+  folder(id: string): string {
+    const dir = join(this.filesDir, this.get(id).id);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return dir;
+  }
+
+  /** What is in a room's shared folder, the newest first. Links are not followed and names that begin with a dot are
+   *  left out; `more`: there is more than is listed. */
+  files(id: string): { readonly folder: string; readonly files: readonly RoomFile[]; readonly more: boolean } {
+    const folder = this.folder(id);
+    const found: RoomFile[] = [];
+    let more = false;
+    const walk = (dir: string, under: string, depth: number): void => {
+      let names: string[];
+      try { names = readdirSync(dir).sort(); } catch { return; }
+      for (const name of names) {
+        if (name.startsWith(".")) continue;
+        let stat;
+        try { stat = lstatSync(join(dir, name)); } catch { continue; }
+        const path = under ? `${under}/${name}` : name;
+        if (stat.isDirectory()) { if (depth < MAX_DEPTH) walk(join(dir, name), path, depth + 1); else more = true; }
+        else if (stat.isFile()) { if (found.length < MAX_LISTED) found.push({ path, size: stat.size, modifiedAt: Math.round(stat.mtimeMs) }); else more = true; }
+      }
+    };
+    walk(folder, "", 1);
+    return { folder, files: found.sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path)), more };
+  }
 
   // ---- reading
 
@@ -150,7 +218,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], receipts: {} };
     this.save(room);
     return room;
   }
@@ -192,6 +260,8 @@ export class RoomStore {
     this.said.delete(id);
     rmSync(join(this.dir, `${id}.json`), { force: true });
     rmSync(join(this.dir, `${id}.jsonl`), { force: true });
+    // Its shared folder goes with it only when nothing is in it: what members wrote there may be the only copy.
+    try { rmdirSync(join(this.filesDir, id)); } catch { /* not there, or not empty: it stays */ }
   }
 
   // ---- seats
@@ -221,7 +291,102 @@ export class RoomStore {
     const room = this.get(id);
     const seat = this.seatOf(room, handle);
     if (seat.kind === "user") throw new RoomError(400, "你自己的席位不能移出");
-    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? { ...s, left: this.now() } : s)), receipts: without(room.receipts, handle) });
+    // What it was doing is free again, and it changes no files any more.
+    const tasks = room.tasks.map((t) => (t.owner === handle && t.state === "doing" ? (({ owner: _owner, ...rest }) => ({ ...rest, state: "todo" as const, updatedAt: this.now() }))(t) : t));
+    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? { ...s, left: this.now() } : s)), receipts: without(room.receipts, handle), tasks, claims: room.claims.filter((c) => c.handle !== handle) });
+  }
+
+  // ---- tasks
+
+  private member(room: Room, handle: string): Seat {
+    const seat = this.seatOf(room, handle);
+    if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    return seat;
+  }
+
+  private taskOf(room: Room, n: number): Task {
+    const task = room.tasks.find((t) => t.n === n);
+    if (!task) throw new RoomError(404, `There is no task T${n} in this room.`);
+    return task;
+  }
+
+  /** A member adds a task. `owner`: whose it is from the start (it stays to do until that seat takes it). */
+  addTask(id: string, by: string, o: { readonly title: string; readonly detail?: string; readonly after?: readonly number[]; readonly owner?: string }): Task {
+    const room = this.get(id);
+    const seat = this.member(room, by);
+    const title = clean(o.title, MAX_TITLE);
+    if (!title) throw new RoomError(400, "任务要有标题");
+    if (room.tasks.length >= MAX_TASKS) throw new RoomError(409, `一个房间最多 ${MAX_TASKS} 个任务，先删掉做完的`);
+    const detail = (o.detail ?? "").replace(/\r\n?/g, "\n").trim().slice(0, MAX_DETAIL);
+    const after = [...new Set(o.after ?? [])].filter((n) => room.tasks.some((t) => t.n === n));
+    const owner = o.owner === undefined ? undefined : this.member(room, o.owner.replace(/^@/, "").toLowerCase()).handle;
+    const task: Task = { n: room.lastTask + 1, title, ...(detail ? { detail } : {}), state: "todo", ...(owner ? { owner } : {}), by: seat.handle, createdAt: this.now(), updatedAt: this.now(), ...(after.length ? { after } : {}) };
+    this.save({ ...room, tasks: [...room.tasks, task], lastTask: task.n });
+    return task;
+  }
+
+  /** A member changes a task. Taking it (`state: "doing"`) makes it that member's; one another member is doing is not
+   *  taken from it by a session — the user may. `owner: null` gives it up. */
+  setTask(id: string, by: string, n: number, o: { readonly state?: TaskState; readonly owner?: string | null; readonly title?: string; readonly detail?: string; readonly note?: string }): Task {
+    const room = this.get(id);
+    const seat = this.member(room, by);
+    const task = this.taskOf(room, n);
+    const held = task.state === "doing" && task.owner !== undefined && task.owner !== seat.handle;
+    if (held && seat.kind !== "user" && (o.state !== undefined || o.owner !== undefined)) throw new RoomError(409, `T${n} is being done by @${task.owner}. Take another, or ask @${task.owner} in the room.`);
+    let owner: string | undefined = task.owner;
+    if (o.owner === null) owner = undefined;
+    else if (o.owner !== undefined) owner = this.member(room, o.owner.replace(/^@/, "").toLowerCase()).handle;
+    let state = o.state ?? task.state;
+    // A session that takes a task, or ends one nobody had, is its owner; one that puts it back gives it up. The
+    // user changes the state and leaves whose it is alone.
+    if (o.owner === undefined && seat.kind !== "user") {
+      if (o.state === "doing" || (o.state === "done" && !owner)) owner = seat.handle;
+      if (o.state === "todo") owner = undefined;
+    }
+    if (o.owner === null && state === "doing") state = "todo";
+    const title = o.title === undefined ? task.title : clean(o.title, MAX_TITLE);
+    if (!title) throw new RoomError(400, "任务要有标题");
+    const detail = o.detail === undefined ? task.detail : o.detail.replace(/\r\n?/g, "\n").trim().slice(0, MAX_DETAIL) || undefined;
+    const note = o.note === undefined ? task.note : o.note.replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE) || undefined;
+    const next: Task = { n: task.n, title, ...(detail ? { detail } : {}), state, ...(owner ? { owner } : {}), by: task.by, createdAt: task.createdAt, updatedAt: this.now(), ...(task.after ? { after: task.after } : {}), ...(note ? { note } : {}) };
+    this.save({ ...room, tasks: room.tasks.map((t) => (t === task ? next : t)) });
+    return next;
+  }
+
+  /** The user, or the member that added it, takes a task off the list. */
+  removeTask(id: string, by: string, n: number): void {
+    const room = this.get(id);
+    const seat = this.member(room, by);
+    const task = this.taskOf(room, n);
+    if (seat.kind !== "user" && task.by !== seat.handle) throw new RoomError(403, `Only the user or @${task.by}, who added it, removes T${n}. Mark it done instead.`);
+    this.save({ ...room, tasks: room.tasks.filter((t) => t !== task) });
+  }
+
+  // ---- who is changing which files
+
+  /** The words that still stand: not past their time. */
+  claims(id: string): readonly Claim[] {
+    const now = this.now();
+    return this.get(id).claims.filter((c) => c.until > now);
+  }
+
+  /** A member says which files (or folders) it is changing for the next while, in place of what it said before; no
+   *  paths: it changes none any more. `overlaps`: what others said about the same files — it is told, not stopped. */
+  claim(id: string, by: string, o: { readonly paths: readonly string[]; readonly minutes?: number; readonly why?: string }): { readonly claim: Claim | null; readonly overlaps: readonly Claim[] } {
+    const room = this.get(id);
+    const seat = this.member(room, by);
+    const now = this.now();
+    const paths = [...new Set(o.paths.map((p) => p.trim().replace(/(.)\/+$/, "$1")).filter(Boolean))];
+    if (paths.length > MAX_CLAIM_PATHS) throw new RoomError(400, `At most ${MAX_CLAIM_PATHS} paths; name a folder instead of its files.`);
+    if (paths.some((p) => !p.startsWith("/") || p.length > 4096 || /[\n\r\0]/.test(p))) throw new RoomError(400, "Give absolute paths.");
+    const others = room.claims.filter((c) => c.handle !== seat.handle && c.until > now);
+    if (!paths.length) { this.save({ ...room, claims: others }); return { claim: null, overlaps: [] }; }
+    const minutes = Math.min(Math.max(Math.round(o.minutes ?? CLAIM_MINUTES), 1), MAX_CLAIM_MINUTES);
+    const why = o.why ? clean(o.why, MAX_TITLE) : "";
+    const claim: Claim = { handle: seat.handle, paths, ...(why ? { why } : {}), at: now, until: now + minutes * 60_000 };
+    this.save({ ...room, claims: [...others, claim] });
+    const meets = (a: string, b: string): boolean => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+    return { claim, overlaps: others.map((c) => ({ ...c, paths: c.paths.filter((p) => paths.some((q) => meets(p, q))) })).filter((c) => c.paths.length) };
   }
 
   setCanAdd(id: string, handle: string, on: boolean): Seat {
@@ -393,6 +558,17 @@ function roomFrom(v: unknown): Room | null {
   const seats = o.seats.flatMap((s) => { const seat = seatFrom(s); return seat ? [seat] : []; });
   if (!seats.some((s) => s.kind === "user")) return null;
   const n = o.notes as Record<string, unknown> | null | undefined;
+  const tasks = (Array.isArray(o.tasks) ? o.tasks : []).flatMap((v): Task[] => {
+    const t = v as Record<string, unknown> | null;
+    if (!t || typeof t !== "object" || !num(t.n) || !str(t.title) || (t.state !== "todo" && t.state !== "doing" && t.state !== "done")) return [];
+    const after = Array.isArray(t.after) ? t.after.filter(num) : [];
+    return [{ n: t.n, title: t.title, ...(str(t.detail) ? { detail: t.detail } : {}), state: t.state, ...(str(t.owner) ? { owner: t.owner } : {}), by: str(t.by) ? t.by : YOU, createdAt: num(t.createdAt) ? t.createdAt : 0, updatedAt: num(t.updatedAt) ? t.updatedAt : 0, ...(after.length ? { after } : {}), ...(str(t.note) ? { note: t.note } : {}) }];
+  });
+  const claims = (Array.isArray(o.claims) ? o.claims : []).flatMap((v): Claim[] => {
+    const c = v as Record<string, unknown> | null;
+    if (!c || typeof c !== "object" || !str(c.handle) || !Array.isArray(c.paths) || !num(c.until)) return [];
+    return [{ handle: c.handle, paths: c.paths.filter(str), ...(str(c.why) ? { why: c.why } : {}), at: num(c.at) ? c.at : 0, until: c.until }];
+  });
   const receipts: Record<string, Record<string, Receipt>> = {};
   for (const [seq, of] of Object.entries((o.receipts ?? {}) as Record<string, unknown>)) {
     if (!/^\d+$/.test(seq) || !of || typeof of !== "object") continue;
@@ -404,6 +580,7 @@ function roomFrom(v: unknown): Room | null {
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
+    tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims,
   };
 }
 

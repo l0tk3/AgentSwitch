@@ -7,7 +7,7 @@
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
-import { MAX_STARTED, RoomError, type Message, type Room, type RoomStore, type Seat } from "./store.js";
+import { MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type Task } from "./store.js";
 
 /** What bringing sessions in needs of the rest of AgentSwitch (§6 开了“拉会话”才有的): the lists, a check, and
  *  starting a session. Given by the composition root; nothing here carries a credential or an account. */
@@ -68,6 +68,41 @@ const TOOLS: readonly KitTool[] = [
     name: "room_notes",
     description: "The pinned notes of an AgentSwitch Chat Room you sit in: one shared text all members read and write — what was agreed (conventions, interfaces, who does what, what is left). Without `text` this reads them. With `text` it replaces the whole notes with that text: read first, then write back everything that should stay plus your change. Use it for what must outlast the conversation, not for chatting.",
     inputSchema: { type: "object", properties: { text: { type: "string", description: "The whole new notes. Omit to read." }, room: ROOM_ARG } },
+  },
+  {
+    name: "room_files",
+    description: "The shared folder of an AgentSwitch Chat Room you sit in: its absolute path and the files in it, newest first. Every member reads and writes this folder directly, with its own file tools. Hand over anything longer than a few lines as a file here — a report, a plan, an interface, a diff, a log — and room_post only its path and one sentence of what it says: nothing is lost in retelling and nobody pays to read it twice. Give a file a name that says what it is, and write a new file rather than changing another member's.",
+    inputSchema: { type: "object", properties: { room: ROOM_ARG } },
+  },
+  {
+    name: "room_tasks",
+    description: "The task list of an AgentSwitch Chat Room you sit in: who does what and how far it is, seen by every member and the user. Without `action` it lists the tasks. `add` a task for work that is not on the list yet (a title that says what is done when it is done; `after` for tasks that must come first; `owner` to give it to a member). `take` a task before you start on it — one another member is doing can not be taken, so two never do the same work. `done` when it is finished, with `note`: the result in one line, or the path of the file that holds it. `release` gives back one you can not finish. Look here before you start something, and keep your own tasks true: others plan by them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "add", "take", "done", "release", "edit", "remove"], description: "Default: list." },
+        n: { type: "integer", description: "The task's number (the 3 of T3), for take, done, release, edit, remove." },
+        title: { type: "string", description: "For add (and edit)." },
+        detail: { type: "string", description: "For add (and edit): what exactly, where, how it is checked." },
+        after: { type: "array", items: { type: "integer" }, description: "For add: numbers of the tasks that must be done first." },
+        owner: { type: "string", description: "For add or edit: the member whose task it is (@name)." },
+        note: { type: "string", description: "For done (or edit): the result in a line, or the file that holds it." },
+        room: ROOM_ARG,
+      },
+    },
+  },
+  {
+    name: "room_changing",
+    description: "Tell the members of an AgentSwitch Chat Room you sit in which files or folders you are about to change, so that two sessions do not change the same file unknowingly. Give `paths` (absolute; a folder covers what is in it) before you edit; it replaces what you said before and lapses by itself after `minutes` (default " + 30 + "). You are told at once if another member said it is changing the same files: then talk to it in the room before you touch them. It is a word to the others, not a lock: nothing is blocked. `paths: []` when you are done. Without `paths` it lists what everyone is changing now.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        paths: { type: "array", items: { type: "string" }, description: "Absolute paths of the files or folders you are changing. Empty: none any more. Omit to list." },
+        minutes: { type: "integer", description: "For how long (default 30, up to 240). Say it again to go on." },
+        why: { type: "string", description: "What for, in a few words (or the task: T3)." },
+        room: ROOM_ARG,
+      },
+    },
   },
 ];
 
@@ -147,6 +182,9 @@ export class RoomKit {
         case "room_post": return { text: this.post(room, seat, args) };
         case "room_read": return { text: this.read(room, args) };
         case "room_notes": return { text: this.notes(room, seat, args) };
+        case "room_files": return { text: this.files(room) };
+        case "room_tasks": return { text: this.tasks(room, seat, args) };
+        case "room_changing": return { text: this.changing(room, seat, args) };
         default: return { text: this.members(room, seat) };
       }
     } catch (err) {
@@ -244,6 +282,80 @@ export class RoomKit {
     }
     if (sits.length > 1) throw new RoomError(400, `You sit in ${sits.length} rooms; say which with \`room\`: ${sits.map((s) => `"${s.room.name}" (${s.room.id})`).join(", ")}.`);
     return sits[0]!;
+  }
+
+  private tasks(room: Room, seat: Seat, args: Record<string, unknown>): string {
+    const action = str(args.action) ?? "list", n = int(args.n);
+    const store = this.o.store;
+    const need = (): number => { if (n === undefined) throw new RoomError(400, `room_tasks ${action} needs \`n\`, the task's number.`); return n; };
+    const line = (t: Task, all: readonly Task[]): string => {
+      const waits = (t.after ?? []).filter((a) => all.some((o) => o.n === a && o.state !== "done"));
+      return `T${t.n} [${t.state === "todo" ? "to do" : t.state}${t.owner ? ` · @${t.owner}${t.owner === seat.handle ? " (you)" : ""}` : ""}] ${t.title}${waits.length ? ` — waits for ${waits.map((a) => `T${a}`).join(", ")}` : ""}${t.detail ? `\n    ${t.detail.replace(/\n/g, "\n    ")}` : ""}${t.note ? `\n    → ${t.note.replace(/\n/g, "\n    ")}` : ""}`;
+    };
+    const told = (text: string): string => { this.o.changed?.(room.id); return text; };
+    switch (action) {
+      case "add": {
+        const owner = str(args.owner), detail = str(args.detail);
+        const after = Array.isArray(args.after) ? args.after.flatMap((v) => { const i = int(v); return i === undefined ? [] : [i]; }) : [];
+        const task = store.addTask(room.id, seat.handle, { title: typeof args.title === "string" ? args.title : "", ...(detail ? { detail } : {}), ...(after.length ? { after } : {}), ...(owner ? { owner } : {}) });
+        return told(`Added: ${line(task, store.get(room.id).tasks)}${task.owner && task.owner !== seat.handle ? `\n@${task.owner} is not woken by this: room_post an @${task.owner} message if it should start now.` : ""}`);
+      }
+      case "take": {
+        const before = store.get(room.id).tasks;
+        const task = store.setTask(room.id, seat.handle, need(), { state: "doing" });
+        const waits = (task.after ?? []).filter((a) => before.some((o) => o.n === a && o.state !== "done"));
+        return told(`T${task.n} is yours now: ${task.title}${waits.length ? `\nNote: it waits for ${waits.map((a) => `T${a}`).join(", ")}, not done yet.` : ""}`);
+      }
+      case "done": {
+        const note = str(args.note);
+        const task = store.setTask(room.id, seat.handle, need(), { state: "done", ...(note ? { note } : {}) });
+        const freed = store.get(room.id).tasks.filter((t) => t.state === "todo" && t.after?.includes(task.n) && t.after.every((a) => store.get(room.id).tasks.find((o) => o.n === a)?.state !== "todo" && store.get(room.id).tasks.find((o) => o.n === a)?.state !== "doing"));
+        return told(`T${task.n} is done.${note ? "" : " (No note given: say the result in one line with action edit, or post it.)"}${freed.length ? `\nNow free to start: ${freed.map((t) => `T${t.n}${t.owner ? ` (@${t.owner})` : ""}`).join(", ")}.` : ""}`);
+      }
+      case "release": { const task = store.setTask(room.id, seat.handle, need(), { state: "todo" }); return told(`T${task.n} is to do again, nobody's.`); }
+      case "edit": {
+        const title = str(args.title), owner = str(args.owner);
+        const task = store.setTask(room.id, seat.handle, need(), { ...(title ? { title } : {}), ...(typeof args.detail === "string" ? { detail: args.detail } : {}), ...(typeof args.note === "string" ? { note: args.note } : {}), ...(owner ? { owner } : {}) });
+        return told(`Now: ${line(task, store.get(room.id).tasks)}`);
+      }
+      case "remove": { store.removeTask(room.id, seat.handle, need()); return told(`T${n} is off the list.`); }
+      default: {
+        const all = room.tasks;
+        if (!all.length) return `"${room.name}" has no tasks yet. Add one with action add.`;
+        const count = (s: string): number => all.filter((t) => t.state === s).length;
+        const done = all.filter((t) => t.state === "done").sort((a, b) => b.updatedAt - a.updatedAt);
+        return [
+          `Tasks of "${room.name}": ${count("doing")} doing · ${count("todo")} to do · ${count("done")} done`,
+          ...all.filter((t) => t.state === "doing").map((t) => line(t, all)),
+          ...all.filter((t) => t.state === "todo").map((t) => line(t, all)),
+          ...done.slice(0, 10).map((t) => line(t, all)),
+          ...(done.length > 10 ? [`(${done.length - 10} older done tasks not shown)`] : []),
+        ].join("\n");
+      }
+    }
+  }
+
+  private changing(room: Room, seat: Seat, args: Record<string, unknown>): string {
+    const until = (at: number): string => { const t = new Date(at); return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
+    const said = (c: Claim): string => `@${c.handle}${c.handle === seat.handle ? " (you)" : ""} until ${until(c.until)}${c.why ? ` — ${c.why}` : ""}:\n${c.paths.map((p) => `    ${p}`).join("\n")}`;
+    if (!Array.isArray(args.paths)) {
+      const all = this.o.store.claims(room.id);
+      return all.length ? [`Being changed in "${room.name}" now:`, ...all.map(said)].join("\n") : `Nobody in "${room.name}" has said it is changing files now.`;
+    }
+    const minutes = int(args.minutes), why = str(args.why);
+    const { claim, overlaps } = this.o.store.claim(room.id, seat.handle, { paths: args.paths.filter((v): v is string => typeof v === "string"), ...(minutes === undefined ? {} : { minutes }), ...(why ? { why } : {}) });
+    this.o.changed?.(room.id);
+    if (!claim) return "Noted: you are changing no files now.";
+    const mine = `Noted until ${until(claim.until)}: the others see you are changing ${claim.paths.length} path${claim.paths.length === 1 ? "" : "s"}.`;
+    return overlaps.length ? `${mine}\n\nCareful — said before you about the same files:\n${overlaps.map(said).join("\n")}\nTalk to ${overlaps.map((c) => `@${c.handle}`).join(", ")} in the room (room_post) before you change them.` : mine;
+  }
+
+  private files(room: Room): string {
+    const { folder, files, more } = this.o.store.files(room.id);
+    const now = (this.o.now ?? Date.now)();
+    const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+    if (!files.length) return `The shared folder of "${room.name}" is ${folder}\nIt is empty. Write files there with your own file tools; room_post their path.`;
+    return [`The shared folder of "${room.name}" is ${folder}`, `${files.length} file${files.length === 1 ? "" : "s"}${more ? " (more are not listed)" : ""}, newest first:`, ...files.map((f) => `  ${f.path} · ${size(f.size)} · ${ago(f.modifiedAt, now)}`)].join("\n");
   }
 
   private post(room: Room, seat: Seat, args: Record<string, unknown>): string {

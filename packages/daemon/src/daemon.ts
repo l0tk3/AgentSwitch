@@ -29,7 +29,7 @@ import { proxyPlace } from "./browser/identity.js";
 import { ClashIntegration } from "./clash/integration.js";
 import { ClashSources } from "./clash/sources.js";
 import { ClashStore } from "./clash/store.js";
-import { RoomStore } from "./rooms/store.js";
+import { filesRoot, RoomStore } from "./rooms/store.js";
 import { RoomDelivery } from "./rooms/delivery.js";
 import { RoomKit } from "./rooms/kit.js";
 import type { SeatLookup } from "./rooms/state.js";
@@ -519,6 +519,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // Chat Room (docs/chatroom-v0.md): the rooms as kept, how their messages reach the sessions they are for, and what
   // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
   const rooms = new RoomStore(cfg.home);
+  const roomFilesDir = filesRoot(cfg.home);
+  mkdirSync(roomFilesDir, { recursive: true, mode: 0o700 });
   let roomSeat: SeatLookup = () => null;
   let roomSay: (terminal: string, text: string) => Promise<boolean> = async () => false;
   // Only a session that has the Kit is given anything: one that could not answer in the room is not spoken to.
@@ -535,7 +537,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       // The list of sessions is made after the terminals: asked through it once it is there.
       saidTitle: (harness, sessionId) => saidTitle(harness, sessionId),
       onRename: (harness, sessionId, title) => sessionTitles.rename(harness, sessionId, title),
-      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
+      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), roomFiles: roomFilesDir, protected: termProt,
         // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
         node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
         codexHooks: (home) => codexTrust(home)?.trusted ?? false, opencodeServer: true,

@@ -110,12 +110,14 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       // Sessions have been talking among themselves for this many messages with no word from the user (§7); null
       // under the room's limit.
       rounds: roundsOf(room),
+      // §9: how the room's work stands.
+      tasks: { todo: room.tasks.filter((t) => t.state === "todo").length, doing: room.tasks.filter((t) => t.state === "doing").length, done: room.tasks.filter((t) => t.state === "done").length },
     };
   };
 
   const whole = (room: Room, messages: readonly Message[]) => ({
     room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
-    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes,
+    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, claims: rooms.claims(room.id),
   });
 
   const seat = (roomId: string, terminal: string, canAdd: boolean | undefined): Seat => {
@@ -147,6 +149,11 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const messages = Number.isInteger(after) && after >= 0 ? rooms.messages(room.id, { after, limit: PAGE * 5 }) : rooms.messages(room.id, { limit: PAGE });
       return versionedJson(c, whole(room, messages));
     } catch (err) { return refused(c, err); }
+  });
+
+  // §9: what is in the room's shared folder.
+  app.get("/rooms/:id/files", (c) => {
+    try { return c.json(rooms.files(c.req.param("id"))); } catch (err) { return refused(c, err); }
   });
 
   app.patch("/rooms/:id", async (c) => {
@@ -221,6 +228,33 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     const until = Date.now() + (deps.roomWatchMs ?? WATCH_MS);
     while (kit.version(id) === asked.version && Date.now() < until && !c.req.raw.signal.aborted) await new Promise((r) => setTimeout(r, Math.min(WATCH_STEP_MS, deps.roomWatchMs ?? WATCH_STEP_MS)));
     return c.json({ version: kit.version(id) });
+  });
+
+  // The task list (§9): the user adds, changes and removes, as a session does with its tool.
+  app.post("/rooms/:id/tasks", async (c) => {
+    const body = await parseBody(c, z.object({ title: z.string(), detail: z.string().optional(), owner: z.string().optional(), after: z.array(z.number().int()).optional() }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try {
+      const o = body.data, id = c.req.param("id");
+      const task = rooms.addTask(id, YOU, { title: o.title, ...(o.detail === undefined ? {} : { detail: o.detail }), ...(o.owner === undefined ? {} : { owner: o.owner }), ...(o.after === undefined ? {} : { after: o.after }) });
+      deps.roomsChanged?.(id);
+      return c.json({ task }, 201);
+    } catch (err) { return refused(c, err); }
+  });
+
+  app.patch("/rooms/:id/tasks/:n", async (c) => {
+    const body = await parseBody(c, z.object({ state: z.enum(["todo", "doing", "done"]).optional(), owner: z.string().nullable().optional(), title: z.string().optional(), detail: z.string().optional(), note: z.string().optional() }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try {
+      const o = body.data, id = c.req.param("id");
+      const task = rooms.setTask(id, YOU, Number(c.req.param("n")), { ...(o.state === undefined ? {} : { state: o.state }), ...(o.owner === undefined ? {} : { owner: o.owner }), ...(o.title === undefined ? {} : { title: o.title }), ...(o.detail === undefined ? {} : { detail: o.detail }), ...(o.note === undefined ? {} : { note: o.note }) });
+      deps.roomsChanged?.(id);
+      return c.json({ task });
+    } catch (err) { return refused(c, err); }
+  });
+
+  app.delete("/rooms/:id/tasks/:n", (c) => {
+    try { const id = c.req.param("id"); rooms.removeTask(id, YOU, Number(c.req.param("n"))); deps.roomsChanged?.(id); return c.json({ ok: true }); } catch (err) { return refused(c, err); }
   });
 
   // The pinned notes (§9): the user writes the whole text, as a session does with its tool.

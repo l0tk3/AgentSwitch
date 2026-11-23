@@ -1,0 +1,125 @@
+/** A room's shared folder, task list, and who is changing which files (docs/chatroom-v0.md §9). */
+
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Hono } from "hono";
+import { describe, expect, it } from "vitest";
+import { mountRooms } from "../src/api/rooms.js";
+import type { ApiDeps } from "../src/api/shared.js";
+import { RoomDelivery } from "../src/rooms/delivery.js";
+import { RoomKit } from "../src/rooms/kit.js";
+import type { SeatLive } from "../src/rooms/state.js";
+import { filesRoot, RoomStore } from "../src/rooms/store.js";
+
+function made() {
+  const home = mkdtempSync(join(tmpdir(), "as-roomw-"));
+  let now = new Date(2026, 10, 23, 10, 0).getTime();
+  const store = new RoomStore(home, () => now);
+  const seat = (terminal: string): SeatLive | null => ({ state: "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: "default", node: null } });
+  const delivery = new RoomDelivery({ store, seat });
+  const changed: string[] = [];
+  const kit = new RoomKit({ store, seat, delivery, now: () => now, changed: (id) => { changed.push(id); } });
+  const room = store.create({ name: "login" });
+  for (const t of ["api", "ui"]) store.seat(room.id, { terminal: t, was: seat(t)!.card });
+  const say = async (terminal: string, name: string, args: Record<string, unknown> = {}) => kit.call(terminal, name, args);
+  const app = new Hono();
+  mountRooms(app, { rooms: store, roomsChanged: (id: string) => { changed.push(id); }, terminals: { host: { get: () => null } } } as unknown as ApiDeps);
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await app.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
+    return { status: res.status, body: await res.json() as any };
+  };
+  return { home, store, kit, room, say, call, changed, later: (minutes: number) => { now += minutes * 60_000; } };
+}
+
+describe("a room's shared folder", () => {
+  it("is a folder of its own under the home, listed newest first without links or hidden files, and kept when the room goes if something is in it", async () => {
+    const { home, store, room, say, call } = made();
+    const folder = store.folder(room.id);
+    expect(folder).toBe(join(filesRoot(home), room.id));
+    expect((await say("api", "room_files")).text).toContain("It is empty");
+    writeFileSync(join(folder, "plan.md"), "the plan");
+    mkdirSync(join(folder, "api"));
+    writeFileSync(join(folder, "api", "interface.md"), "x".repeat(2048));
+    writeFileSync(join(folder, ".hidden"), "");
+    symlinkSync("/etc", join(folder, "link"));
+    const listed = store.files(room.id);
+    expect(listed.files.map((f) => f.path).sort()).toEqual(["api/interface.md", "plan.md"]);
+    const told = (await say("ui", "room_files")).text;
+    expect(told).toContain(folder);
+    expect(told).toContain("api/interface.md · 2.0 KB");
+    const got = await call("GET", `/rooms/${room.id}/files`);
+    expect(got.body.folder).toBe(folder);
+    expect(got.body.files).toHaveLength(2);
+    expect((await call("GET", `/rooms/${room.id}`)).body.folder).toBe(folder);
+    store.remove(room.id);
+    expect(existsSync(join(folder, "plan.md"))).toBe(true);
+    const empty = store.create({ name: "empty" });
+    const gone = store.folder(empty.id);
+    store.remove(empty.id);
+    expect(existsSync(gone)).toBe(false);
+  });
+});
+
+describe("a room's task list", () => {
+  it("lets a member add, take and finish, keeps two from the same task, and says what is free next", async () => {
+    const { store, room, say, changed } = made();
+    expect((await say("api", "room_tasks")).text).toContain("no tasks yet");
+    expect((await say("api", "room_tasks", { action: "add", title: "Define the login interface", detail: "POST /login" })).text).toContain("T1 [to do]");
+    expect((await say("api", "room_tasks", { action: "add", title: "Build the form", after: [1], owner: "@ui" })).text).toContain("@ui is not woken");
+    expect(changed).toContain(room.id);
+    expect((await say("api", "room_tasks", { action: "take", n: 1 })).text).toContain("T1 is yours now");
+    const refused = await say("ui", "room_tasks", { action: "take", n: 1 });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("being done by @api");
+    expect((await say("ui", "room_tasks", { action: "take", n: 2 })).text).toContain("waits for T1");
+    const list = (await say("ui", "room_tasks")).text;
+    expect(list).toContain("1 doing".replace("1", "2"));
+    expect(list).toContain("T2 [doing · @ui (you)] Build the form — waits for T1");
+    expect((await say("ui", "room_tasks", { action: "release", n: 2 })).text).toContain("to do again");
+    const done = (await say("api", "room_tasks", { action: "done", n: 1, note: "see interface.md" })).text;
+    expect(done).toContain("Now free to start: T2");
+    expect(store.get(room.id).tasks.map((t) => [t.n, t.state, t.owner, t.note])).toEqual([[1, "done", "api", "see interface.md"], [2, "todo", undefined, undefined]]);
+    expect((await say("ui", "room_tasks", { action: "remove", n: 1 })).isError).toBe(true);
+    expect((await say("api", "room_tasks", { action: "remove", n: 1 })).text).toContain("off the list");
+    expect((await say("api", "room_tasks", { action: "take" })).isError).toBe(true);
+  });
+
+  it("is the user's to change from the screens, survives a restart, and frees what a leaving member was doing", async () => {
+    const { home, store, room, call, say } = made();
+    const added = await call("POST", `/rooms/${room.id}/tasks`, { title: "Write the tests", owner: "api" });
+    expect(added.status).toBe(201);
+    expect(added.body.task).toMatchObject({ n: 1, state: "todo", owner: "api", by: "you" });
+    await say("api", "room_tasks", { action: "take", n: 1 });
+    // The user takes it from a session and gives it to another.
+    expect((await call("PATCH", `/rooms/${room.id}/tasks/1`, { owner: "ui" })).body.task).toMatchObject({ state: "doing", owner: "ui" });
+    expect((await call("GET", `/rooms/${room.id}`)).body.tasks).toHaveLength(1);
+    expect((await call("GET", "/rooms")).body.rooms[0].tasks).toEqual({ todo: 0, doing: 1, done: 0 });
+    expect(new RoomStore(home).get(room.id).tasks[0]).toMatchObject({ n: 1, owner: "ui", state: "doing" });
+    store.unseat(room.id, "ui");
+    expect(store.get(room.id).tasks[0]).toMatchObject({ state: "todo" });
+    expect(store.get(room.id).tasks[0]!.owner).toBeUndefined();
+    expect((await call("PATCH", `/rooms/${room.id}/tasks/9`, { state: "done" })).status).toBe(404);
+    expect((await call("DELETE", `/rooms/${room.id}/tasks/1`)).body.ok).toBe(true);
+    expect((await call("POST", `/rooms/${room.id}/tasks`, { title: "again" })).body.task.n).toBe(2);
+  });
+});
+
+describe("who is changing which files", () => {
+  it("is said for a while, tells the one who says the same files after, and lapses by itself", async () => {
+    const { store, room, say, call, later } = made();
+    expect((await say("api", "room_changing")).text).toContain("Nobody");
+    expect((await say("api", "room_changing", { paths: ["/w/src/login/"], why: "T1" })).text).toContain("Noted until 10:30");
+    const second = (await say("ui", "room_changing", { paths: ["/w/src/login/form.ts", "/w/src/app.ts"], minutes: 60 })).text;
+    expect(second).toContain("Careful");
+    expect(second).toContain("@api until 10:30 — T1");
+    expect(second).toContain("/w/src/login");
+    expect(second).not.toContain("blocked");
+    expect((await call("GET", `/rooms/${room.id}`)).body.claims.map((c: { handle: string }) => c.handle)).toEqual(["api", "ui"]);
+    expect((await say("api", "room_changing", { paths: ["relative.ts"] })).isError).toBe(true);
+    later(31);
+    expect(store.claims(room.id).map((c) => c.handle)).toEqual(["ui"]);
+    expect((await say("ui", "room_changing", { paths: [] })).text).toContain("no files now");
+    expect(store.claims(room.id)).toEqual([]);
+  });
+});

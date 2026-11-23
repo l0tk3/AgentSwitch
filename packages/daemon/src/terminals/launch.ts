@@ -75,6 +75,9 @@ export type LauncherOptions = {
    *  Codex, Claude Code and OpenCode; absent or null: no browser tool. */
   /** Tests: the Chatroom Kit's tool server (default ROOM_KIT_SCRIPT). */
   readonly roomKitScript?: string;
+  /** Where the rooms' shared folders are (docs/chatroom-v0.md §9): Claude Code and Codex are let read and write there
+   *  from the start, as in their own folder — a session is seated in a room long after it started. Absent: not. */
+  readonly roomFiles?: string;
   readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => BridgeCommand | null;
   /** Terminals that outlive the service (docs/terminal-v0.md §10): companions' servers run on held ptys too. */
   readonly holding?: Holding | null;
@@ -328,6 +331,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}) };
         writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
         const args = ["--settings", settings, ...(req.isolated ? ["--setting-sources", "user"] : [])];
+        if (opts.roomFiles) args.push("--add-dir", opts.roomFiles);
         {
           // The Chatroom Kit (docs/chatroom-v0.md §6): its tools are there only while this session sits in a room.
           const kit = { type: "stdio", command: node, args: [opts.roomKitScript ?? ROOM_KIT_SCRIPT], env: { AGENTSWITCH_TERMINAL_ID: req.id, AGENTSWITCH_TERMINAL_URL: opts.hookUrl(), AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken } };
@@ -373,6 +377,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (browser) args.push(...codexBrowserArgs(browser));
         const kitScript = opts.roomKitScript ?? ROOM_KIT_SCRIPT;
         args.push(...codexRoomArgs(node, kitScript));
+        if (opts.roomFiles) args.push("--add-dir", opts.roomFiles);
         // The same server once more in a file of AgentSwitch's own, so Codex's hidden thread that names the session can
         // start (codexLayer.ts): without it no Codex session started here got a name.
         const codexHome = env.CODEX_HOME || (env.HOME ? join(env.HOME, ".codex") : "");
