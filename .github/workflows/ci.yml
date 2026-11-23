@@ -96,7 +96,9 @@ jobs:
       - run: .venv\Scripts\pytest --cov-fail-under=0 -vv -rfE --timeout=120 --timeout-method=thread
         env:
           PYTHONUTF8: "1"
+      # Runs even when a test failed: the two say different things (the job fails either way).
       - name: windows_service_smoke.ps1 (install, status, enc, proxy, rotate-key, uninstall)
+        if: ${{ !cancelled() }}
         run: scripts\windows_service_smoke.ps1 -Venv .venv
 
   linux-runtime:

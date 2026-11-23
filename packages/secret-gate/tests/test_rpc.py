@@ -394,7 +394,11 @@ def test_pipe_name_is_claimed_once():
 
 @pytest.mark.windows
 def test_secret_gate_rpc_process_end_to_end_on_windows():
-    """`secret-gate rpc` as the Windows service host runs it: env only, config next to the public dir, a pipe."""
+    """`secret-gate rpc` as the Windows service host runs it: env only, the config, a pipe.
+
+    With gate-service.json next to the public directory only the service's account (NT SERVICE\\AgentSwitchGate) is
+    the service; anyone else, this test's user included, is a client and is refused. So the server runs here with the
+    config passed by --config from elsewhere, which leaves this process out of service mode."""
     import sys
 
     from secret_gate.fsacl import current_user_sid
@@ -409,8 +413,14 @@ def test_secret_gate_rpc_process_end_to_end_on_windows():
                                installed_at="t")
         (root / "gate-service.json").write_text(json.dumps(config.to_json()))
         env = {**os.environ, "SECRET_GATE_HOME": str(home), "SECRET_GATE_PUBLIC": str(public)}
-        proc = subprocess.Popen([sys.executable, "-m", "secret_gate.cli", "rpc"], env=env,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        refused = subprocess.run([sys.executable, "-m", "secret_gate.cli", "rpc"], env=env, capture_output=True,
+                                 timeout=60)
+        assert refused.returncode == 2 and "系统服务管理" in refused.stderr.decode("utf-8"), refused
+        elsewhere = root / "config"
+        elsewhere.mkdir()
+        config_path = (root / "gate-service.json").replace(elsewhere / "gate-service.json")
+        proc = subprocess.Popen([sys.executable, "-m", "secret_gate.cli", "rpc", "--config", str(config_path)],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             stream = None
             for _ in range(200):
