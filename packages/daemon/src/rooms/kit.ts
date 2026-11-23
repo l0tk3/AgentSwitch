@@ -80,7 +80,7 @@ const TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_tasks",
-    description: "The task list of an AgentSwitch Chat Room you sit in: who does what and how far it is, seen by every member and the user. Without `action` it lists the tasks. `add` a task for work that is not on the list yet (a title that says what is done when it is done; `after` for tasks that must come first; `owner` to give it to a member). `take` a task before you start on it — one another member is doing can not be taken, so two never do the same work. `done` when it is finished, with `note`: the result in one line, or the path of the file that holds it. `release` gives back one you can not finish. Look here before you start something, and keep your own tasks true: others plan by them.",
+    description: "The task list of an AgentSwitch Chat Room you sit in: who does what and how far it is, seen by every member and the user. Without `action` it lists the tasks. `add` a task for work that is not on the list yet (a title that says what is done when it is done; `after` for tasks that must come first; `owner` to give it to a member). Whoever a task is given to, and whoever waits for one that is done, is told in the room by itself: do not post that again. `take` a task before you start on it — one another member is doing can not be taken, so two never do the same work. `done` when it is finished, with `note`: the result in one line, or the path of the file that holds it. `release` gives back one you can not finish. Look here before you start something, and keep your own tasks true: others plan by them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -376,7 +376,7 @@ export class RoomKit {
         const owner = str(args.owner), detail = str(args.detail);
         const after = Array.isArray(args.after) ? args.after.flatMap((v) => { const i = int(v); return i === undefined ? [] : [i]; }) : [];
         const task = store.addTask(room.id, seat.handle, { title: typeof args.title === "string" ? args.title : "", ...(detail ? { detail } : {}), ...(after.length ? { after } : {}), ...(owner ? { owner } : {}) });
-        return told(`Added: ${line(task, store.get(room.id).tasks)}${task.owner && task.owner !== seat.handle ? `\n@${task.owner} is not woken by this: room_post an @${task.owner} message if it should start now.` : ""}`);
+        return told(`Added: ${line(task, store.get(room.id).tasks)}${task.owner && task.owner !== seat.handle ? `\n@${task.owner} was told in the room.` : ""}`);
       }
       case "take": {
         const before = store.get(room.id).tasks;
@@ -388,7 +388,7 @@ export class RoomKit {
         const note = str(args.note);
         const task = store.setTask(room.id, seat.handle, need(), { state: "done", ...(note ? { note } : {}) });
         const freed = store.get(room.id).tasks.filter((t) => t.state === "todo" && t.after?.includes(task.n) && t.after.every((a) => store.get(room.id).tasks.find((o) => o.n === a)?.state !== "todo" && store.get(room.id).tasks.find((o) => o.n === a)?.state !== "doing"));
-        return told(`T${task.n} is done.${note ? "" : " (No note given: say the result in one line with action edit, or post it.)"}${freed.length ? `\nNow free to start: ${freed.map((t) => `T${t.n}${t.owner ? ` (@${t.owner})` : ""}`).join(", ")}.` : ""}`);
+        return told(`T${task.n} is done.${note ? "" : " (No note given: say the result in one line with action edit, or post it.)"}${freed.length ? `\nNow free to start: ${freed.map((t) => `T${t.n}${t.owner ? ` (@${t.owner}, told)` : ""}`).join(", ")}.` : ""}`);
       }
       case "release": { const task = store.setTask(room.id, seat.handle, need(), { state: "todo" }); return told(`T${task.n} is to do again, nobody's.`); }
       case "edit": {

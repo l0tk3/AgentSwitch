@@ -468,7 +468,18 @@ export class RoomStore {
     const owner = o.owner === undefined ? undefined : this.member(room, o.owner.replace(/^@/, "").toLowerCase()).handle;
     const task: Task = { n: room.lastTask + 1, title, ...(detail ? { detail } : {}), state: "todo", ...(owner ? { owner } : {}), by: seat.handle, createdAt: this.now(), updatedAt: this.now(), ...(after.length ? { after } : {}) };
     this.save({ ...room, tasks: [...room.tasks, task], lastTask: task.n });
+    if (owner && owner !== seat.handle) this.tell(id, seat.handle, [owner], `T${task.n} 给你：${title}`);
     return task;
+  }
+
+  /** The task list speaks for itself (2026-11-23): whoever is given a task, and whoever waits for one that is now
+   *  done, is told in the room by the one that did it — no second message has to be written. A muted member's act
+   *  tells nobody (it may not post). */
+  private tell(id: string, from: string, to: readonly string[], text: string): void {
+    const here = new Set(this.get(id).seats.filter((s) => s.left === undefined && s.kind === "session").map((s) => s.handle));
+    const whom = [...new Set(to)].filter((h) => h !== from && here.has(h));
+    if (!whom.length) return;
+    try { this.post(id, { from, text: `〔任务表〕${whom.map((h) => `@${h}`).join(" ")} ${text}`, to: whom }); } catch { /* muted, or the room is full of words: the list itself still says it */ }
   }
 
   /** A member changes a task. Taking it (`state: "doing"`) makes it that member's; one another member is doing is not
@@ -495,7 +506,16 @@ export class RoomStore {
     const detail = o.detail === undefined ? task.detail : o.detail.replace(/\r\n?/g, "\n").trim().slice(0, MAX_DETAIL) || undefined;
     const note = o.note === undefined ? task.note : o.note.replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE) || undefined;
     const next: Task = { n: task.n, title, ...(detail ? { detail } : {}), state, ...(owner ? { owner } : {}), by: task.by, createdAt: task.createdAt, updatedAt: this.now(), ...(task.after ? { after: task.after } : {}), ...(note ? { note } : {}) };
-    this.save({ ...room, tasks: room.tasks.map((t) => (t === task ? next : t)) });
+    const tasks = room.tasks.map((t) => (t === task ? next : t));
+    this.save({ ...room, tasks });
+    if (next.owner && next.owner !== task.owner) this.tell(id, seat.handle, [next.owner], `T${next.n} 给你：${next.title}`);
+    if (next.state === "done" && task.state !== "done") {
+      // Those whose task waited for this one and waits for nothing now, and the member that asked for it.
+      const freed = tasks.filter((t) => t.state !== "done" && t.owner && t.after?.includes(next.n) && t.after.every((a) => tasks.find((o) => o.n === a)?.state === "done"));
+      const result = next.note ? `（${next.note}）` : "";
+      for (const t of freed) this.tell(id, seat.handle, [t.owner!], `T${next.n} 做完了${result}，T${t.n} 可以开始：${t.title}`);
+      if (!freed.some((t) => t.owner === next.by)) this.tell(id, seat.handle, [next.by], `T${next.n} 做完了${result}：${next.title}`);
+    }
     return next;
   }
 

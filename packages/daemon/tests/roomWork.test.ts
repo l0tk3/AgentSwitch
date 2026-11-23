@@ -118,7 +118,9 @@ describe("a room's task list", () => {
     const { store, room, say, changed } = made();
     expect((await say("api", "room_tasks")).text).toContain("no tasks yet");
     expect((await say("api", "room_tasks", { action: "add", title: "Define the login interface", detail: "POST /login" })).text).toContain("T1 [to do]");
-    expect((await say("api", "room_tasks", { action: "add", title: "Build the form", after: [1], owner: "@ui" })).text).toContain("@ui is not woken");
+    expect((await say("api", "room_tasks", { action: "add", title: "Build the form", after: [1], owner: "@ui" })).text).toContain("@ui was told in the room");
+    // The list said it itself: a message from the one that gave it, to the one it was given to.
+    expect(store.last(room.id)).toMatchObject({ from: "api", to: ["ui"], text: "〔任务表〕@ui T2 给你：Build the form" });
     expect(changed).toContain(room.id);
     expect((await say("api", "room_tasks", { action: "take", n: 1 })).text).toContain("T1 is yours now");
     const refused = await say("ui", "room_tasks", { action: "take", n: 1 });
@@ -364,5 +366,24 @@ describe("the rest of what was found in use (2026-11-23)", () => {
     await expect(first).rejects.toThrow("the terminal started for it was ended");
     expect(stopped).toEqual(["t9"]);
     expect(store.roomsOf("t9")).toEqual([]);
+  });
+});
+
+describe("the task list speaks for itself", () => {
+  it("tells whoever waited for a task that is done, and the member that asked for it — unless the doer is muted", () => {
+    const { store, room } = made();
+    store.addTask(room.id, "api", { title: "Interface" });                                   // T1, asked for by api
+    store.addTask(room.id, "you", { title: "Form", owner: "ui", after: [1] });               // T2 waits for T1
+    expect(store.last(room.id)).toMatchObject({ from: "you", to: ["ui"], text: "〔任务表〕@ui T2 给你：Form" });
+    store.setTask(room.id, "ui", 1, { state: "done", note: "interface.md" });
+    expect(store.messages(room.id).map((m) => m.text)).toContain("〔任务表〕@api T1 做完了（interface.md）：Interface");
+    // ui did T1 and T2 is ui's own: it is not told of its own work.
+    expect(store.messages(room.id).some((m) => m.text.includes("T2 可以开始"))).toBe(false);
+    store.setTask(room.id, "you", 2, { owner: "api" });
+    expect(store.last(room.id)).toMatchObject({ from: "you", to: ["api"], text: "〔任务表〕@api T2 给你：Form" });
+    const before = store.messages(room.id).length;
+    store.setMuted(room.id, "you", "api", true);
+    store.setTask(room.id, "api", 2, { state: "done" });
+    expect(store.messages(room.id).length).toBe(before);
   });
 });
