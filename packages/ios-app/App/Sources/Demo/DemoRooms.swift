@@ -1,6 +1,7 @@
 #if DEBUG
 import AgentSwitchKit
 import Foundation
+import UIKit
 
 /// The sample screens' rooms (`-uiDemo YES -uiDemoScreen rooms|room|roompaused|roomrounds|roomnotes|roomtasks|roomtaskadd|roomfiles|roommembers|roomcard|roomadd|roomnew`):
 /// made up, as the Mac would give them.
@@ -49,12 +50,12 @@ enum DemoRooms {
          "messages":[
           {"seq":31,"from":"you","to":["daemon"],"text":"@daemon 手机的订阅接口定了吗？","at":\(now - 86_400_000 - 600_000)},
           {"seq":32,"from":"daemon","to":["mac-app","ios-app"],"replyTo":31,"text":"接口定了：`GET /clash` 多一个 `phone`，里面是 `on`、`listening`、`links`、`problem`。@mac-app @ios-app 可以开始了。","at":\(now - 86_400_000 - 540_000)},
-          {"seq":33,"from":"mac-app","to":[],"text":"收到，卡片今天做完。","at":\(now - 1_500_000)},
+          {"seq":33,"from":"mac-app","to":[],"text":"收到，卡片今天做完。先看一眼样子：","at":\(now - 1_500_000),"files":["\(folder)/shots/stash-profile.png"]},
           {"seq":34,"from":"mac-app","to":["daemon"],"text":"@daemon `links` 里局域网和 Tailscale 的顺序固定吗？","at":\(now - 1_440_000)},
           {"seq":35,"from":"daemon","to":["mac-app"],"replyTo":34,"text":"固定，局域网在前。","at":\(now - 1_380_000)},
           {"seq":36,"from":"you","to":["web","gate"],"text":"@web @gate 文档里的地址也要跟着改","at":\(now - 900_000),"files":["/Users/me/Projects/AgentSwitch/docs/clash-v0.md","/Users/me/Projects/AgentSwitch/packages/daemon/src/clash/phone.ts"]},
           {"seq":37,"from":"daemon","to":["android","ios-app"],"text":"@android @ios-app `PROCESS-NAME` 的规则手机上都去掉了，重新拉一次配置。","at":\(now - 300_000)},
-          {"seq":38,"from":"daemon","to":["you"],"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)}],
+          {"seq":38,"from":"daemon","to":["you"],"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000),"files":["\(folder)/mihomo-check.md","\(folder)/shots/clash-rules.png"]}],
          "receipts":{"36":{"web":"ended","gate":"queued"},"37":{"android":"queued","ios-app":"delivered"}},
          "notes":{"text":"接口\\n- GET /clash 多一个 phone：on、listening、links、problem\\n- links 里局域网在前，Tailscale 在后\\n\\n待办\\n- [ ] 文档里的地址跟着改（@web）\\n- [x] 手机上去掉 PROCESS-NAME 规则","at":\(now - 1_300_000),"by":"daemon"},
          "folder":"\(folder)",
@@ -87,6 +88,14 @@ enum DemoRooms {
           {"path":"api-notes.md","size":731,"modifiedAt":\(now - 86_400_000 - 500_000)},
           {"path":"old/process-name-rules.patch","size":212,"modifiedAt":\(now - 4 * 86_400_000)}],"more":false}
         """)
+    }
+
+    /// A file of the sample room's shared folder as the room's file route would give it: a made-up screenshot for a
+    /// picture, a few lines for the rest; nil for a file elsewhere on the Mac.
+    static func bytes(_ path: String) -> Data? {
+        guard let under = RoomFiles.relative(path, in: folder) else { return nil }
+        if RoomMessage.isPicture(path) { return DemoData.picture(under.contains("clash") ? 1 : 0) }
+        return Data("# \(RoomMessage.fileName(path))\n\nStash 和 Clash 各拉了一次配置，都用真的 mihomo 内核验过：规则 412 条，没有 PROCESS-NAME。\n".utf8)
     }
 
     private static func decode<T: Decodable>(_ text: String) -> T {

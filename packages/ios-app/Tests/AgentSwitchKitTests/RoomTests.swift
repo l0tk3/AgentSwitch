@@ -421,4 +421,89 @@ final class RoomTests: XCTestCase {
             XCTAssertEqual(error.errorDescription, "There is no task T9 in this room.")
         }
     }
+
+    func testAFileOfTheSharedFolderIsToldFromOneElsewhere() {
+        let folder = "/h/room-files/a1b2c3d4e5"
+        XCTAssertEqual(RoomFiles.relative("/h/room-files/a1b2c3d4e5/photo.jpg", in: folder), "photo.jpg")
+        XCTAssertEqual(RoomFiles.relative("/h/room-files/a1b2c3d4e5/shots/主 页.png", in: folder), "shots/主 页.png")
+        XCTAssertEqual(RoomFiles.relative("/h/room-files/a1b2c3d4e5/a.md", in: folder + "/"), "a.md")
+        // Elsewhere on the Mac, a folder whose name only begins the same, the folder itself.
+        XCTAssertNil(RoomFiles.relative("/w/docs/a.md", in: folder))
+        XCTAssertNil(RoomFiles.relative("/h/room-files/a1b2c3d4e5-old/a.md", in: folder))
+        XCTAssertNil(RoomFiles.relative(folder, in: folder))
+        XCTAssertNil(RoomFiles.relative(folder + "/", in: folder))
+        // What the room's route would not give: out of the folder again, a hidden part, an empty one.
+        XCTAssertNil(RoomFiles.relative(folder + "/../x/a.md", in: folder))
+        XCTAssertNil(RoomFiles.relative(folder + "/.git/config", in: folder))
+        XCTAssertNil(RoomFiles.relative(folder + "/a//b.md", in: folder))
+        // A Mac that gave no folder has nothing in it.
+        XCTAssertNil(RoomFiles.relative("/a.md", in: ""))
+        XCTAssertNil(RoomFiles.relative("/a.md", in: "/"))
+
+        XCTAssertTrue(["/a/b.png", "/a/B.JPG", "c.jpeg", "/x/d.gif", "/x/e.heic", "/x/f.webp"].allSatisfy(RoomMessage.isPicture))
+        XCTAssertFalse(["/a/b.md", "/a/png", "/a/b.png.txt", "/a/b.pdf", "/a/b.svg"].contains(where: RoomMessage.isPicture))
+        XCTAssertEqual(RoomMessage.maxFiles, 10)
+    }
+
+    func testRoomFileCallsAreAsTheServiceTakesThem() async throws {
+        let picture = Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0xFF])
+        let transport = FakeTransport { req, _ in
+            let path = req.url?.path ?? "", method = req.httpMethod ?? ""
+            switch (method, path) {
+            case ("GET", "/rooms/a1b2c3d4e5/files/content"):
+                if req.url?.query?.contains("big") == true { return (Data(#"{"error":"too-large","size":30000000,"limit":26214400}"#.utf8), httpResponse(req.url, status: 413)) }
+                return (picture, httpResponse(req.url, contentType: "image/png"))
+            case ("PUT", "/rooms/a1b2c3d4e5/files/content"):
+                if req.httpBody?.isEmpty != false { return (Data(#"{"error":"empty file"}"#.utf8), httpResponse(req.url, status: 400)) }
+                return (Data(#"{"path":"/h/room-files/a1b2c3d4e5/photo 1-2.jpg","name":"photo 1-2.jpg","size":6}"#.utf8), httpResponse(req.url, status: 201))
+            case ("POST", "/rooms/a1b2c3d4e5/messages"):
+                return (Data(#"{"message":{"seq":5,"from":"you","to":["daemon"],"text":"@daemon 看图","at":9,"files":["/h/room-files/a1b2c3d4e5/photo 1-2.jpg"]},"receipts":{"daemon":"queued"}}"#.utf8), httpResponse(req.url, status: 201))
+            default: return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url, status: 200))
+            }
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+
+        // A file of the folder, by where it is under it: the bytes as they are.
+        let got = try await api.roomFile("a1b2c3d4e5", path: "shots/主 页+1&2.png")
+        XCTAssertEqual(got, picture)
+        let get = transport.requests[0]
+        XCTAssertEqual(get.httpMethod, "GET")
+        XCTAssertEqual(get.url?.path, "/rooms/a1b2c3d4e5/files/content")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(get.url), resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "path", value: "shots/主 页+1&2.png")])
+        // Written so the service reads it back the same: no bare `+` (a space to it), no bare `&`, no raw space.
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(get.url), resolvingAgainstBaseURL: false)?.percentEncodedQuery)
+        XCTAssertTrue(query.hasPrefix("path=shots/"))
+        XCTAssertTrue(query.contains("%2B1%262.png"))
+        XCTAssertFalse(query.contains("+") || query.contains(" "))
+        XCTAssertEqual(get.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+        XCTAssertNil(get.httpBody)
+
+        // A picture picked here: its bytes as the body, its name in the query; where it landed comes back.
+        let put = try await api.putRoomFile("a1b2c3d4e5", name: "photo 1.jpg", data: picture)
+        XCTAssertEqual(put, MacUploaded(path: "/h/room-files/a1b2c3d4e5/photo 1-2.jpg", name: "photo 1-2.jpg", size: 6))
+        let sent = transport.requests[1]
+        XCTAssertEqual(sent.httpMethod, "PUT")
+        XCTAssertEqual(sent.url?.path, "/rooms/a1b2c3d4e5/files/content")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(sent.url), resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "name", value: "photo 1.jpg")])
+        XCTAssertEqual(sent.httpBody, picture)
+        XCTAssertEqual(sent.value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
+
+        // The message then comes with where the file is; one with no files says nothing of files.
+        let said = try await api.say("@daemon 看图", in: "a1b2c3d4e5", files: [put.path])
+        XCTAssertEqual(said.message.files, ["/h/room-files/a1b2c3d4e5/photo 1-2.jpg"])
+        func body(_ n: Int) throws -> NSDictionary { try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(transport.requests[n].httpBody)) as? NSDictionary) }
+        XCTAssertEqual(try body(2), ["text": "@daemon 看图", "files": ["/h/room-files/a1b2c3d4e5/photo 1-2.jpg"]])
+        try await api.say("没有附件", in: "a1b2c3d4e5", replyTo: 5)
+        XCTAssertEqual(try body(3), ["text": "没有附件", "replyTo": 5])
+
+        // The service's refusals come back as they are.
+        do { _ = try await api.roomFile("a1b2c3d4e5", path: "big.mov"); XCTFail("read a file the Mac refused") } catch APIError.http(let status, let message) {
+            XCTAssertEqual(status, 413)
+            XCTAssertEqual(message, "too-large")
+        }
+        do { _ = try await api.putRoomFile("a1b2c3d4e5", name: "empty.png", data: Data()); XCTFail("put an empty file") } catch APIError.http(let status, let message) {
+            XCTAssertEqual(status, 400)
+            XCTAssertEqual(message, "empty file")
+        }
+    }
 }

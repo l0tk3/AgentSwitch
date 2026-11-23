@@ -164,8 +164,9 @@ private fun PicturePage(file: File, n: Int) {
     }
 }
 
+/** A picture that fills its place: pinch to zoom, drag to move it, double tap to zoom in and back. Also a room's (RoomFileViews). */
 @Composable
-private fun ZoomableImage(bitmap: Bitmap) {
+internal fun ZoomableImage(bitmap: Bitmap) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var box by remember { mutableStateOf(IntSize.Zero) }

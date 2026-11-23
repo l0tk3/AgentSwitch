@@ -1,4 +1,5 @@
 import AgentSwitchKit
+import PhotosUI
 import SwiftUI
 
 /// One room (docs/chatroom-v0.md §10): its timeline and the box the user writes in; its members from the bar. The
@@ -18,7 +19,7 @@ struct RoomPage: View {
     @State private var notes = false
     @State private var tasks = false
     @State private var files = false
-    /// A file picked on the shared folder's sheet: shown on the Files page once the sheet is gone.
+    /// A file of the shared folder's sheet asked for on the Files page (`Show in Files`): shown there once the sheet is gone.
     @State private var fileToShow: String?
     @FocusState private var writing: Bool
 
@@ -227,8 +228,8 @@ struct RoomPage: View {
         .padding(.top, 120)
     }
 
-    /// A file by where it is on the Mac — one a message came with, one of the shared folder: the folder it is in, on
-    /// the Files page.
+    /// A file by where it is on the Mac — one a message came with from outside the shared folder, or any `Show in
+    /// Files`: the folder it is in, on the Files page.
     private func showFile(_ path: String) { app.showInFiles(MacPath.parent(path) ?? path) }
 
     /// The sample screen asked for; nil with a real Mac.
@@ -284,7 +285,7 @@ private struct RoomMessageRow: View {
                         .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
-                    if !m.files.isEmpty { files(m.files) }
+                    if !m.files.isEmpty { RoomMessageFiles(room: detail.room.id, folder: detail.folder, paths: m.files, showInFiles: openFile) }
                     receipts(m)
                 }
             }
@@ -337,32 +338,6 @@ private struct RoomMessageRow: View {
         .padding(.bottom, 1)
     }
 
-    /// The files it came with (§3 附件), by name; a tap shows the folder one is in on the Files page.
-    private func files(_ paths: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(paths, id: \.self) { path in
-                Button { openFile(path) } label: {
-                    HStack(spacing: 6) {
-                        if look.isClassic { Image(systemName: "doc").font(.system(size: 12)) } else { PixelSprite(rows: RoomArt.file, pixel: 2, color: Theme.secondaryInk) }
-                        Text(RoomMessage.fileName(path)).lineLimit(1).truncationMode(.middle)
-                    }
-                    .mono(12)
-                    .foregroundStyle(Theme.ink)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).stroke(Theme.line, lineWidth: look.isClassic ? 0 : 1))
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button("Show in Files", systemImage: "folder") { openFile(path) }
-                    Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = path }
-                }
-                .accessibilityLabel(path)
-            }
-        }
-        .padding(.top, 3)
-    }
-
     /// Said only while it matters: who it has not reached, and where it is; one that can not be handed over, in red.
     @ViewBuilder private func receipts(_ m: RoomMessage) -> some View {
         let lines = RoomReceiptLine.lines(m, in: detail)
@@ -378,13 +353,16 @@ private struct RoomMessageRow: View {
     }
 }
 
-/// The box the user writes in: the `@name` being typed offers the members, a reply says what it answers.
+/// The box the user writes in: the `@name` being typed offers the members, a reply says what it answers. Beside it,
+/// the pictures of this phone: picked in the system's picker, they wait above the box and go with the message.
 private struct RoomWriter: View {
     let model: RoomPageModel
     let seats: [RoomSeat]
     var writing: FocusState<Bool>.Binding
     let send: () -> Void
     @Environment(\.interfaceLook) private var look
+    @State private var pickingPhotos = false
+    @State private var photoItems: [PhotosPickerItem] = []
 
     var body: some View {
         @Bindable var model = model
@@ -392,7 +370,16 @@ private struct RoomWriter: View {
         VStack(alignment: .leading, spacing: 6) {
             if !offers.isEmpty { picker(offers) }
             if let n = model.replyTo { replying(n) }
+            if model.sendError != nil { ErrorText(message: $model.sendError) }
+            RoomAttachmentStrip(model: model)
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                Button { pickingPhotos = true } label: {
+                    if look.isClassic { Image(systemName: "photo").font(.system(size: 16, weight: .medium)) } else { PixelSprite(rows: RoomArt.picture, pixel: 2, color: Theme.secondaryInk) }
+                }
+                .buttonStyle(SquareIconButtonStyle(active: false))
+                .disabled(model.sending || model.preparing || model.attachmentRoom == 0)
+                .opacity(model.attachmentRoom == 0 ? 0.4 : 1)
+                .accessibilityLabel("Add Photos")
                 TextField("Message", text: $model.draft, axis: .vertical)
                     .lineLimit(1...6)
                     .autocorrectionDisabled()
@@ -420,6 +407,12 @@ private struct RoomWriter: View {
         .padding(.vertical, Theme.Space.s)
         .background(alignment: .top) {
             VStack(spacing: 0) { Theme.line.frame(height: 1); Theme.base }.ignoresSafeArea(.container, edges: .bottom)
+        }
+        .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: max(1, model.attachmentRoom), matching: .images)
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            Task { await model.attach(await PickedFiles.photos(items)) }
         }
     }
 

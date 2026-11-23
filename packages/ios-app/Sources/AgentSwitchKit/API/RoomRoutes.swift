@@ -12,7 +12,7 @@ private struct CreateRoomBody: Encodable { let name: String; let topic: String?;
 private struct UpdateRoomBody: Encodable { let name: String?; let topic: String?; let paused: Bool? }
 private struct AddSeatBody: Encodable { let terminal: String; let canAdd: Bool? }
 private struct SetSeatBody: Encodable { let canAdd: Bool }
-private struct SayBody: Encodable { let text: String; let replyTo: Int? }
+private struct SayBody: Encodable { let text: String; let replyTo: Int?; let files: [String]? }
 private struct ReadBody: Encodable { let seq: Int }
 private struct NotesBody: Encodable { let text: String }
 private struct NotesReply: Decodable { let notes: RoomNotes? }
@@ -114,10 +114,11 @@ extension AgentSwitchAPI {
         let _: Done = try await perform("DELETE", ["rooms", room, "seats", handle], query: [], body: nil)
     }
 
-    /// The user speaks; who it is for is read from the `@names` in the text.
+    /// The user speaks; who it is for is read from the `@names` in the text. `files`: what it comes with, by where
+    /// each is on the Mac (`RoomMessage.maxFiles` at most).
     @discardableResult
-    public func say(_ text: String, in room: String, replyTo: Int? = nil) async throws -> RoomSaid {
-        try await post(["rooms", room, "messages"], body: SayBody(text: text, replyTo: replyTo))
+    public func say(_ text: String, in room: String, replyTo: Int? = nil, files: [String] = []) async throws -> RoomSaid {
+        try await post(["rooms", room, "messages"], body: SayBody(text: text, replyTo: replyTo, files: files.isEmpty ? nil : files))
     }
 
     /// The user has seen up to `seq`.
@@ -158,5 +159,19 @@ extension AgentSwitchAPI {
     /// What is in the room's shared folder (§9), the newest first.
     public func roomFiles(_ room: String) async throws -> RoomFiles {
         try await get(["rooms", room, "files"])
+    }
+
+    /// A file of the room's shared folder as its bytes, by where it is under the folder (`RoomFiles.relative`): the
+    /// room's own folder only, whatever this phone may see of the Mac's other files. One over
+    /// `RoomFiles.maxFileBytes` is refused (413).
+    public func roomFile(_ room: String, path: String) async throws -> Data {
+        try await bytes(["rooms", room, "files", "content"], query: [URLQueryItem(name: "path", value: path)])
+    }
+
+    /// A file of this phone's put into the room's shared folder (a picture picked here), as its bytes: where it is on
+    /// the Mac now — under its name, or that name with a number when one was there — is what a message then comes with.
+    public func putRoomFile(_ room: String, name: String, data: Data) async throws -> MacUploaded {
+        try await perform("PUT", ["rooms", room, "files", "content"], query: [URLQueryItem(name: "name", value: name)], body: data,
+                          timeout: Self.uploadTimeout, contentType: "application/octet-stream")
     }
 }

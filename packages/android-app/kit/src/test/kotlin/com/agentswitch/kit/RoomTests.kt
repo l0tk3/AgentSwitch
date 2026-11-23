@@ -289,4 +289,75 @@ class RoomTests {
         assertEquals("/rooms/a/files", transport.paths.last())
         assertEquals("/r/a/report.md", files.whole(files.files[0]))
     }
+
+    @Test
+    fun testAFileOfTheSharedFolderIsNamedByItsPathUnderIt() {
+        val folder = "/Users/x/.agentswitch/room-files/ab12"
+        assertEquals("api.md", RoomFilePath.under(folder, "$folder/api.md"))
+        assertEquals("screens/登录 页.png", RoomFilePath.under(folder, "$folder/screens/登录 页.png"))
+        // The folder as written with its slash is the same folder.
+        assertEquals("a.png", RoomFilePath.under("$folder/", "$folder/a.png"))
+        // Elsewhere on the Mac, a folder whose name only begins the same, the folder itself: not in it.
+        assertNull(RoomFilePath.under(folder, "/Users/x/proj/api.md"))
+        assertNull(RoomFilePath.under(folder, "${folder}34/a.png"))
+        assertNull(RoomFilePath.under(folder, folder))
+        assertNull(RoomFilePath.under(folder, "$folder/"))
+        // What the room's route would refuse is not asked of it.
+        assertNull(RoomFilePath.under(folder, "$folder/../other/a.png"))
+        assertNull(RoomFilePath.under(folder, "$folder/.hidden/a.png"))
+        assertNull(RoomFilePath.under(folder, "$folder/a//b.png"))
+        // A Mac from before the shared folder.
+        assertNull(RoomFilePath.under("", "/a.png"))
+
+        assertEquals("b.PNG", RoomFilePath.name("/a/b.PNG"))
+        for (name in listOf("/a/b.PNG", "shot.jpg", "x.jpeg", "a.gif", "p.heic", "w.webp")) assertTrue(RoomFilePath.isPicture(name), name)
+        for (name in listOf("/a/api.md", "/a/png", "/a/.png", "a.pdf", "a.svg", "/a.png/notes")) assertFalse(RoomFilePath.isPicture(name), name)
+        assertEquals(10, RoomFilePath.maxPerMessage)
+    }
+
+    @Test
+    fun testAPictureIsPutIntoTheSharedFolderReadFromItAndSentWithAMessage() = runTest {
+        val transport = FakeTransport({ req, _ ->
+            when {
+                req.method == "PUT" && req.path == "/rooms/a/files/content" -> """{"path":"/r/a/photo 1-2.jpg","name":"photo 1-2.jpg","size":3}""".toByteArray() to httpResponse(req.url, status = 201)
+                req.method == "GET" && req.path == "/rooms/a/files/content" && req.query == "path=big.bin" -> """{"error":"too-large","size":30000000,"limit":26214400}""".toByteArray() to httpResponse(req.url, status = 413)
+                req.method == "GET" && req.path == "/rooms/a/files/content" -> byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 7) to httpResponse(req.url, contentType = "image/jpeg")
+                req.method == "POST" && req.path == "/rooms/a/messages" -> """{"message":{"seq":4,"from":"you","to":["daemon"],"text":"@daemon 看图","at":5,"files":["/r/a/photo 1-2.jpg"]},"receipts":{"daemon":"queued"}}""".toByteArray() to httpResponse(req.url, status = 201)
+                else -> """{"error":"not found"}""".toByteArray() to httpResponse(req.url, status = 404)
+            }
+        })
+        val api = api(transport)
+
+        val bytes = byteArrayOf(1, 2, 3)
+        val put = api.putRoomFile("a", "photo 1&2.jpg", bytes)
+        assertEquals(RoomPut(path = "/r/a/photo 1-2.jpg", name = "photo 1-2.jpg", size = 3), put)
+        val sent = transport.requests.last()
+        assertEquals("PUT", sent.method)
+        assertEquals("/rooms/a/files/content", sent.path)
+        // The name goes in the query, its `&` and space kept from the query's own.
+        assertEquals("name=photo%201%262.jpg", java.net.URI(sent.url).rawQuery)
+        assertEquals("application/octet-stream", sent.headers["Content-Type"])
+        assertTrue(bytes.contentEquals(sent.body!!))
+
+        val got = api.roomFileContent("a", "screens/登录 页+1.png")
+        assertEquals(3, got.size)
+        val asked = transport.requests.last()
+        assertEquals("GET", asked.method)
+        assertEquals("/rooms/a/files/content", asked.path)
+        assertEquals("path=screens/登录 页+1.png", java.net.URI(asked.url).query)
+        assertTrue(java.net.URI(asked.url).rawQuery.endsWith("%2B1.png"))
+        assertNull(asked.body)
+        // Too large for a phone: said as the Files routes say it.
+        val refused = assertFailsWith<APIError.Http> { api.roomFileContent("a", "big.bin") }
+        assertEquals(413, refused.status)
+        assertEquals(FileRefusal.TooLarge, FileRefusal.of(refused))
+
+        val said = api.say("@daemon 看图", "a", files = listOf(put.path))
+        assertEquals(listOf("/r/a/photo 1-2.jpg"), said.message.files)
+        assertEquals(mapOf("daemon" to RoomReceipt.Queued), said.reach)
+        assertEquals("""{"text":"@daemon 看图","files":["/r/a/photo 1-2.jpg"]}""", String(transport.requests.last().body!!))
+        // With nothing: no `files` at all, as before.
+        api.say("好", "a", replyTo = 2)
+        assertEquals("""{"text":"好","replyTo":2}""", String(transport.requests.last().body!!))
+    }
 }

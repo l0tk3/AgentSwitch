@@ -1,5 +1,9 @@
 package com.agentswitch.android.demo
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import com.agentswitch.kit.api.RoomClaim
 import com.agentswitch.kit.api.RoomDetail
 import com.agentswitch.kit.api.RoomFace
@@ -18,7 +22,8 @@ import com.agentswitch.kit.api.SeatCard
 /**
  * The Rooms tab's sample rooms (docs/chatroom-v0.md §9, §10), for looking at the screens with no Mac: `rooms` (the
  * list), `room` (one room's page), `roommembers` and `roomcard` (who is changing which files), `roomtasks`, `roomtask`
- * and `roomtasknew` (the task list, one task, a new one), `roomfiles` (the shared folder).
+ * and `roomtasknew` (the task list, one task, a new one), `roomfiles` (the shared folder). The room's messages come
+ * with files: two pictures (one the user's, one a session's) and two text files, read from [bytes].
  */
 object DemoRooms {
     const val room = "ab12cd34ef"
@@ -62,9 +67,9 @@ object DemoRooms {
     )
 
     private val messages = listOf(
-        RoomMessage(seq = 1, from = RoomSeat.you, to = listOf("daemon", "web"), text = "@daemon @web 这周把登录做完。先定接口，任务我写在任务表里了。", at = ago(280)),
+        RoomMessage(seq = 1, from = RoomSeat.you, to = listOf("daemon", "web"), text = "@daemon @web 这周把登录做完。先定接口，任务我写在任务表里了，页面草图见图。", at = ago(280), files = listOf("$folder/sketch.jpg")),
         RoomMessage(seq = 2, from = "daemon", to = listOf("web", RoomSeat.you), replyTo = 1, text = "接口定好了 @web @you，见 `api.md`。T1 已完成，我接着做 T2。", at = ago(200), files = listOf("$folder/api.md")),
-        RoomMessage(seq = 3, from = "web", to = listOf("daemon"), text = "@daemon 收到。我领了 T3，在改 `Login.tsx`。", at = ago(50)),
+        RoomMessage(seq = 3, from = "web", to = listOf("daemon"), text = "@daemon 收到。我领了 T3，在改 `Login.tsx`，现在的样子见截图。", at = ago(50), files = listOf("$folder/screens/login.png")),
         RoomMessage(seq = 4, from = "daemon", text = "我在改 `src/auth/` 和 `login.ts`，改完之前先别动这两处。", at = ago(30)),
         RoomMessage(seq = 5, from = "docs", to = listOf(RoomSeat.you), text = "@you 旧 cookie 逻辑已标成废弃（T7），清单在共享文件夹的 `deprecations.md`。", at = ago(8), files = listOf("$folder/deprecations.md")),
     )
@@ -83,9 +88,43 @@ object DemoRooms {
             RoomFile("screens/login-error.png", size = 284_112, modifiedAt = ago(48)),
             RoomFile("screens/login.png", size = 301_577, modifiedAt = ago(52)),
             RoomFile("api.md", size = 4_206, modifiedAt = ago(201)),
+            RoomFile("sketch.jpg", size = 96_420, modifiedAt = ago(281)),
             RoomFile("data/users-sample.json", size = 12_403_200, modifiedAt = ago(60 * 26)),
         ),
     )
+
+    /** A made-up picture: a page with a form on it — a title, two fields, a button in `accent`. */
+    private fun picture(width: Int, height: Int, ground: Int, accent: Int, format: Bitmap.CompressFormat): ByteArray {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bitmap)
+        val paint = Paint()
+        fun fill(color: Int, x: Float, y: Float, w: Float, h: Float) { paint.color = color; c.drawRect(x, y, x + w, y + h, paint) }
+        val light = Color.red(ground) > 128
+        val ink = if (light) Color.rgb(40, 40, 46) else Color.rgb(232, 232, 236)
+        val field = if (light) Color.rgb(226, 226, 232) else Color.rgb(52, 52, 60)
+        fill(ground, 0f, 0f, width.toFloat(), height.toFloat())
+        val left = width * 0.14f
+        val wide = width * 0.72f
+        fill(ink, left, height * 0.14f, wide * 0.45f, height * 0.05f)
+        fill(field, left, height * 0.3f, wide, height * 0.1f)
+        fill(field, left, height * 0.46f, wide, height * 0.1f)
+        fill(accent, left, height * 0.66f, wide, height * 0.11f)
+        val out = java.io.ByteArrayOutputStream()
+        bitmap.compress(format, 85, out)
+        bitmap.recycle()
+        return out.toByteArray()
+    }
+
+    /** The room's files as their bytes, by where each would be on the Mac: the timeline's pictures and what a tap opens. */
+    val bytes: Map<String, ByteArray> by lazy {
+        mapOf(
+            "$folder/sketch.jpg" to picture(640, 480, Color.rgb(246, 244, 238), Color.rgb(60, 60, 68), Bitmap.CompressFormat.JPEG),
+            "$folder/screens/login.png" to picture(390, 720, Color.rgb(22, 22, 26), Color.rgb(255, 45, 85), Bitmap.CompressFormat.PNG),
+            "$folder/screens/login-error.png" to picture(390, 720, Color.rgb(22, 22, 26), Color.rgb(255, 159, 10), Bitmap.CompressFormat.PNG),
+            "$folder/api.md" to "# 登录接口\n\n## POST /login\n\n请求：`{ \"name\": string, \"password\": string }`\n\n返回：`{ \"token\": string, \"expiresAt\": number }`\n\n- 密码错误五次后锁十分钟。\n- 刷新 token 只能用一次。\n".toByteArray(),
+            "$folder/deprecations.md" to "# 废弃清单\n\n- `session` cookie：改用 token，下个版本删除。\n- `GET /whoami`：改用 `GET /me`。\n".toByteArray(),
+        )
+    }
 
     val list = RoomList(listOf(
         RoomSummary(

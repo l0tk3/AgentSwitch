@@ -73,6 +73,15 @@ final class RoomPageModel {
     /// The message being answered.
     var replyTo: Int?
     private(set) var sending = false
+    /// The pictures picked here to go with the next message (`RoomMessage.maxFiles` at most).
+    private(set) var attachments: [RoomAttachment] = []
+    /// Picked pictures are being read and shrunk.
+    private(set) var preparing = false
+    /// Which of the pictures is being put into the room's shared folder, counted from 1.
+    private(set) var uploading: Int?
+    /// Why the last message, or a picture for it, did not go: said above the box until the next try (the page's own
+    /// error is cleared by the next good read of the room).
+    var sendError: String?
     /// What the user had seen when the page opened: later messages that name the user are marked until it closes.
     private(set) var seenAtOpen: Int?
     @ObservationIgnored private var etag: String?
@@ -86,7 +95,35 @@ final class RoomPageModel {
         seenAtOpen = detail?.room.readSeq
     }
 
-    var canSend: Bool { !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// Words, or pictures alone.
+    var canSend: Bool { !sending && !preparing && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty) }
+    /// How many more pictures the next message may take.
+    var attachmentRoom: Int { max(0, RoomMessage.maxFiles - attachments.count) }
+
+    /// Pictures picked here join what waits above the box, as far as a message takes them.
+    func attach(_ files: [UploadFile]) async {
+        guard !files.isEmpty else { return }
+        preparing = true
+        defer { preparing = false }
+        let made = await Task.detached(priority: .userInitiated) { RoomAttachment.prepared(files) }.value
+        let taken = Array(made.ready.prefix(attachmentRoom))
+        attachments += taken
+        if made.unread > 0 {
+            sendError = "有 \(made.unread) 张图片读不出来或超过 25 MB，没有加上。"
+        } else if taken.count < made.ready.count {
+            sendError = "一条消息最多带 \(RoomMessage.maxFiles) 个文件，多出的没有加上。"
+        } else {
+            sendError = nil
+        }
+    }
+
+    func removeAttachment(_ id: UUID) {
+        guard !sending else { return }
+        attachments.removeAll { $0.id == id }
+    }
+
+    /// The words a message of pictures alone is written with: the service takes no message without words.
+    static func wordsForPictures(_ n: Int) -> String { n == 1 ? "[图片]" : "[图片 × \(n)]" }
 
     func refresh(_ api: AgentSwitchAPI?) async {
         guard let api, !gone else { return }
@@ -114,21 +151,40 @@ final class RoomPageModel {
         _ = try? await api.markRoomRead(id, upTo: room.lastSeq)
     }
 
-    /// The user's words go; the box is emptied once the Mac has them, and the room is read again at once.
+    /// The user's words go — the pictures picked first, each put into the room's shared folder, and the message then
+    /// comes with where they are. The box is emptied once the Mac has it, and the room is read again at once; when
+    /// something fails the words and the pictures stay, and one already on the Mac is not put there again.
     func send(_ api: AgentSwitchAPI?) async {
         guard let api, canSend else { return }
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = words.isEmpty ? Self.wordsForPictures(attachments.count) : words
         sending = true
-        defer { sending = false }
+        sendError = nil
+        defer { sending = false; uploading = nil }
         do {
-            try await api.say(text, in: id, replyTo: replyTo)
+            var paths: [String] = []
+            for (n, item) in attachments.enumerated() {
+                if let path = item.path { paths.append(path); continue }
+                uploading = n + 1
+                let put = try await api.putRoomFile(id, name: item.name, data: item.data)
+                if let i = attachments.firstIndex(where: { $0.id == item.id }) { attachments[i].path = put.path }
+                paths.append(put.path)
+            }
+            uploading = nil
+            try await api.say(text, in: id, replyTo: replyTo, files: paths)
             draft = ""
+            attachments = []
             replyTo = nil
             etag = nil
             await refresh(api)
         } catch {
-            self.error = error.localizedDescription
+            sendError = Self.sendSentence(error)
         }
+    }
+
+    private static func sendSentence(_ error: Error) -> String {
+        if case APIError.http(let status, _) = error, status == 413 { return "图片超过 25 MB，没有发出。" }
+        return "没有发出：\(error.localizedDescription)"
     }
 
     /// Something done to the room or one of its seats, then the room read again; false and why when the Mac refuses.

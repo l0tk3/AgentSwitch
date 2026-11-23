@@ -77,6 +77,7 @@ import com.agentswitch.android.design.plain
 import com.agentswitch.android.files.MoreGlyph
 import com.agentswitch.android.terminals.ProfileDot
 import com.agentswitch.kit.api.RoomDetail
+import com.agentswitch.kit.api.RoomFilePath
 import com.agentswitch.kit.api.RoomMention
 import com.agentswitch.kit.api.RoomMessage
 import com.agentswitch.kit.api.RoomReceiptLine
@@ -100,7 +101,7 @@ fun RoomPage(id: String) {
     val nav = LocalNav.current
     val classic = LocalLook.current.isClassic
     // A sample screen's room (no Mac) opens with what the demo holds for it.
-    val model = remember(id) { RoomPageModel(id, app.rooms.demoDetails[id], app.rooms.demoFiles[id]) }
+    val model = remember(id) { RoomPageModel(id, app.rooms.demoDetails[id], app.rooms.demoFiles[id], app.rooms.demoBytes) }
     val scope = rememberCoroutineScope()
     val detail = model.detail
     val focus = remember { FocusRequester() }
@@ -114,6 +115,13 @@ fun RoomPage(id: String) {
             delay(RoomPageModel.pollIntervalMs)
         }
     }
+    // How large the files the messages come with are is what the shared folder's list says: read when there are such
+    // files, and again when a message brings another.
+    val shared = remember(detail?.messages, detail?.folder) {
+        val folder = detail?.folder ?: ""
+        detail?.messages?.flatMap { it.files }?.filter { RoomFilePath.under(folder, it) != null }?.toSet() ?: emptySet()
+    }
+    LaunchedEffect(shared, app.api) { if (shared.isNotEmpty()) model.loadFiles(app.api) }
     // Deleted, here or from another screen: back to the list.
     LaunchedEffect(model.gone) {
         if (model.gone) { nav.dismiss("room:$id"); app.rooms.refresh(app.api) }
@@ -251,6 +259,10 @@ private fun Timeline(
     val last = detail.messages.lastOrNull()?.seq
     // The newest is at the bottom, and stays in sight as more come.
     LaunchedEffect(last, rows.size) { if (rows.isNotEmpty()) state.scrollToItem(rows.size + 1) }
+    // A picture that comes after its message was drawn makes it taller: the end stays in sight when it was.
+    LaunchedEffect(model.picturesShown) {
+        if (model.picturesShown > 0 && rows.isNotEmpty() && (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= rows.size) state.scrollToItem(rows.size + 1)
+    }
     if (rows.isEmpty()) {
         val first = detail.sessions.firstOrNull()?.handle
         Column(Modifier.fillMaxWidth().padding(horizontal = 40.dp).padding(top = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -268,7 +280,7 @@ private fun Timeline(
         }
         items(rows, key = { it.message.seq }) { row ->
             MessageRow(
-                row, detail, handles,
+                row, detail, model, handles,
                 forMe = RoomSeat.you in row.message.to && row.message.seq > (model.seenAtOpen ?: Int.MAX_VALUE),
                 openCard = openCard, reply = { reply(row.message.seq) }, mention = mention, showMenu = showMenu,
             )
@@ -283,7 +295,7 @@ private val faceSide = 26.dp
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
-    row: RoomRow, detail: RoomDetail, handles: Set<String>, forMe: Boolean,
+    row: RoomRow, detail: RoomDetail, model: RoomPageModel, handles: Set<String>, forMe: Boolean,
     openCard: (String) -> Unit, reply: () -> Unit, mention: (String) -> Unit, showMenu: (PixelBox) -> Unit,
 ) {
     val classic = LocalLook.current.isClassic
@@ -338,10 +350,8 @@ private fun MessageRow(
                         RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code),
                         Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
                     )
-                    // The files it comes with, by name (they are on the Mac).
-                    for (file in m.files) {
-                        Text("▸ ${RoomWords.fileName(file)}", color = Theme.secondaryInk, style = mono(12), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                    }
+                    // The files it comes with (they are on the Mac): a picture shown, another file as a card; a tap opens one.
+                    MessageFiles(model, m.files)
                     Receipts(m, detail)
                 }
             }
@@ -380,11 +390,15 @@ private fun Receipts(m: RoomMessage, detail: RoomDetail) {
     )
 }
 
-/** The box the user writes in: the `@name` being typed offers the members, a reply says what it answers. */
+/**
+ * The box the user writes in: the `@name` being typed offers the members, a reply says what it answers. The button
+ * before the field picks photos; they wait above it, and go with the message (RoomFileViews).
+ */
 @Composable
 private fun RoomWriter(model: RoomPageModel, seats: List<RoomSeat>, focus: FocusRequester, send: () -> Unit) {
     val classic = LocalLook.current.isClassic
     val offers = RoomMention.query(model.draft)?.let { RoomMention.offers(it, seats) } ?: emptyList()
+    var preparing by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(Theme.base)) {
         HairRule()
         Column(
@@ -400,7 +414,9 @@ private fun RoomWriter(model: RoomPageModel, seats: List<RoomSeat>, focus: Focus
                     Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "Close") { model.replyTo = null }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
                 }
             }
+            RoomAttachmentStrip(model, preparing)
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Theme.Space.s)) {
+                RoomPhotosButton(model) { preparing = it }
                 Box(
                     Modifier.weight(1f).grounded(if (classic) Theme.panel else androidx.compose.ui.graphics.Color.Transparent, 18.dp).framed(Theme.line, 18.dp)
                         .padding(horizontal = if (classic) 14.dp else 12.dp, vertical = 9.dp),

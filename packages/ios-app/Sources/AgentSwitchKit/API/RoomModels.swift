@@ -219,6 +219,14 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         return name.isEmpty ? path : name
     }
 
+    /// The most files one message comes with (the service's own count).
+    public static let maxFiles = 10
+
+    /// A file the timeline draws as a picture, by its name.
+    public static func isPicture(_ path: String) -> Bool {
+        ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains((fileName(path) as NSString).pathExtension.lowercased())
+    }
+
     private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files }
 
     public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = []) {
@@ -450,6 +458,21 @@ public struct RoomFiles: Decodable, Sendable, Hashable {
 
     /// Where a file of the folder is on the Mac.
     public static func whole(_ path: String, in folder: String) -> String { folder.hasSuffix("/") ? folder + path : folder + "/" + path }
+
+    /// The most of one file the room's own routes give or take.
+    public static let maxFileBytes: Int64 = 25 * 1024 * 1024
+
+    /// Where a file is under the room's shared folder, as the room's own file route takes it; nil for one that is
+    /// not in the folder — or is not one the route would give (a part that is `..` or begins with a dot) — which is
+    /// then asked of the Mac's Files routes instead.
+    public static func relative(_ path: String, in folder: String) -> String? {
+        let base = folder.hasSuffix("/") ? String(folder.dropLast()) : folder
+        guard !base.isEmpty, path.hasPrefix(base + "/") else { return nil }
+        let under = String(path.dropFirst(base.count + 1))
+        let parts = under.split(separator: "/", omittingEmptySubsequences: false)
+        guard !under.isEmpty, !parts.contains(where: { $0.isEmpty || $0.hasPrefix(".") }) else { return nil }
+        return under
+    }
 }
 
 /// Where a message is on its way to a seat (§5). Dealt with, there is no receipt.

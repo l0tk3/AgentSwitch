@@ -200,3 +200,11 @@ describe("whose words a delivered message is", () => {
     expect(delivery.atTurnEnd("api")).toContain("Those From @you are the user's own words");
   });
 });
+
+describe("a message of files alone", () => {
+  it("is taken without words, and one with neither is not", () => {
+    const { store, room } = made();
+    expect(store.post(room.id, { from: "you", text: "  ", files: ["/w/a.png"], to: ["api"] })).toMatchObject({ text: "", files: ["/w/a.png"], to: ["api"] });
+    expect(() => store.post(room.id, { from: "you", text: "  ", files: [" "] })).toThrow();
+  });
+});

@@ -40,6 +40,8 @@ import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.code
 import com.agentswitch.android.design.mono
 import com.agentswitch.android.design.plain
+import com.agentswitch.android.files.FileGlyph
+import com.agentswitch.android.files.FileKinds
 import com.agentswitch.android.terminals.LookSymbol
 import com.agentswitch.android.terminals.LookSymbolIcon
 import com.agentswitch.android.terminals.relativeTime
@@ -263,8 +265,8 @@ private fun NewTaskPage(model: RoomPageModel, back: () -> Unit) {
 
 /**
  * The room's shared folder (§9): where it is on the Mac, and what the members have put in it, the newest first — its
- * path under the folder, its size, when it was last changed. Listed when the sheet opens. Only listed: a room's page
- * does not open files (a message's files are names too).
+ * path under the folder, its size, when it was last changed. Listed when the sheet opens. A tap opens a file as a
+ * message's file is opened (RoomFileViews).
  */
 @Composable
 fun RoomFilesSheet(model: RoomPageModel) {
@@ -285,7 +287,8 @@ fun RoomFilesSheet(model: RoomPageModel) {
         }
         FormSection("${listed.files.size} ${if (listed.files.size == 1) "File" else "Files"}", footer = if (listed.more) "还有更多文件没有列出。" else null) {
             listed.files.forEachIndexed { i, file ->
-                FormRow(first = i == 0) {
+                FormRow(first = i == 0, onClick = { nav.openRoomFile(model, listed.whole(file)) }) {
+                    FileGlyph(FileKinds.of(file.path.substringAfterLast('/')), Theme.secondaryInk)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(file.path, color = Theme.ink, style = code(13), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
                         Text("${FileSize.short(file.size)} · ${relativeTime(file.modifiedAt)}", color = Theme.secondaryInk, style = mono(11), maxLines = 1)

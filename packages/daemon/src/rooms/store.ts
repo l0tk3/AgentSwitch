@@ -492,7 +492,8 @@ export class RoomStore {
     const from = this.seatOf(room, o.from);
     if (from.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
     const text = o.text.replace(/\r\n?/g, "\n").trim();
-    if (!text) throw new RoomError(400, "消息是空的");
+    // A picture alone says enough: words are needed only when nothing comes with them.
+    if (!text && !(o.files ?? []).some((f) => f.trim())) throw new RoomError(400, "消息是空的");
     if (text.length > MAX_TEXT) throw new RoomError(400, `消息太长（最多 ${MAX_TEXT} 字）`);
     if (o.replyTo !== undefined && !(Number.isInteger(o.replyTo) && o.replyTo >= 1 && o.replyTo <= room.lastSeq)) throw new RoomError(400, `没有 #${o.replyTo} 这条消息`);
     const files = [...new Set((o.files ?? []).map((f) => f.trim()).filter(Boolean))];

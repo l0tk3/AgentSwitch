@@ -1,4 +1,5 @@
 import AgentSwitchKit
+import QuickLook
 import SwiftUI
 
 // A room's work (docs/chatroom-v0.md §9), over its page as the pinned notes are: the task list every member reads and
@@ -221,19 +222,23 @@ private struct RoomTaskAddPage: View {
     }
 }
 
-/// The room's shared folder: where it is on the Mac and what is in it, the newest first. A tap on a file shows it on
-/// the Files page, as a file a message came with is shown.
+/// The room's shared folder: where it is on the Mac and what is in it, the newest first. A tap on a file opens it
+/// whole with the system's Quick Look, as a file a message came with is opened; `Show in Files` shows the folder it
+/// is in on the Files page.
 struct RoomFilesSheet: View {
     let room: String
     /// Where the folder is, as the room said it; what the listing says comes in its place.
     let folder: String
-    /// A file by where it is on the Mac: the sheet closes and the Files page shows it.
+    /// A file by where it is on the Mac (`Show in Files`): the sheet closes and the Files page shows it.
     let open: (String) -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.interfaceLook) private var look
     @Environment(\.dismiss) private var dismiss
     @State private var files: RoomFiles?
     @State private var error: String?
+    @State private var preview: URL?
+    /// The file being fetched for the viewer, by where it is under the folder.
+    @State private var opening: String?
 
     private var place: String { files.map(\.folder).flatMap { $0.isEmpty ? nil : $0 } ?? folder }
 
@@ -256,9 +261,10 @@ struct RoomFilesSheet: View {
                             Text("共享文件夹里还没有文件。成员把要交给别人的文件（报告、截图、补丁）放在这里。").font(.subheadline).foregroundStyle(.secondary).padding(Theme.Space.l)
                         }
                         ForEach(files.files) { file in
-                            Button { dismiss(); open(RoomFiles.whole(file.path, in: files.folder)) } label: { row(file) }
+                            Button { show(file, in: files.folder) } label: { row(file) }
                                 .buttonStyle(.plain)
                                 .contextMenu {
+                                    Button("Open Preview", systemImage: "eye") { show(file, in: files.folder) }
                                     Button("Show in Files", systemImage: "folder") { dismiss(); open(RoomFiles.whole(file.path, in: files.folder)) }
                                     Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = RoomFiles.whole(file.path, in: files.folder) }
                                 }
@@ -282,20 +288,39 @@ struct RoomFilesSheet: View {
                 }
             }
             .refreshable { await load() }
+            .quickLookPreview($preview)
+            .onChange(of: preview) { old, new in if new == nil, let old { RoomFileStore.forget(old) } }
         }
         .presentationDetents([.medium, .large])
         .task { await load() }
     }
 
+    /// The file whole, for the system's viewer; one too big for the room's route is said so.
+    private func show(_ file: RoomFile, in folder: String) {
+        guard opening == nil else { return }
+        guard file.size <= RoomFiles.maxFileBytes else { error = "文件超过 25 MB，手机上不预览。"; return }
+        opening = file.path
+        Task {
+            defer { opening = nil }
+            let ref = RoomFileRef(room: room, path: RoomFiles.whole(file.path, in: folder), folder: folder)
+            do {
+                preview = try await RoomFileStore.shared.file(ref, api: app.api, files: app.fileSource)
+                error = nil
+            } catch {
+                self.error = RoomFileStore.sentence(error, mac: app.profile?.name ?? "Mac")
+            }
+        }
+    }
+
     private func row(_ file: RoomFile) -> some View {
         HStack(spacing: 12) {
-            if look.isClassic { Image(systemName: "doc").font(.system(size: 17)).foregroundStyle(.secondary).frame(width: 22) } else { PixelSprite(rows: RoomArt.file, pixel: 2, color: Theme.secondaryInk).frame(width: 22) }
+            if look.isClassic { Image(systemName: FileIcon.symbol(for: file.path)).font(.system(size: 17)).foregroundStyle(.secondary).frame(width: 22) } else { PixelSprite(rows: RoomArt.file, pixel: 2, color: Theme.secondaryInk).frame(width: 22) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.path).code(13).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
                 Text("\(FileSize.short(file.size)) · \(file.modified.relative)").mono(11.5).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 6)
-            LookGlyph.onward().foregroundStyle(Theme.inkDim)
+            if opening == file.path { BrailleSpinner(color: Theme.secondaryInk) } else { LookGlyph.onward().foregroundStyle(Theme.inkDim) }
         }
         .padding(.horizontal, Theme.Space.l)
         .padding(.vertical, 10)

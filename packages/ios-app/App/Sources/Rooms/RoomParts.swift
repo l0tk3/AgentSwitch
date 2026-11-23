@@ -92,6 +92,8 @@ enum RoomArt {
     static let dither = ["#.#.", ".#.#", "#.#.", ".#.#"]
     /// A sheet of paper, its corner folded: a file a message came with.
     static let file = ["####..", "#..##.", "#...##", "#....#", "#....#", "#....#", "######"]
+    /// A framed view — a sun, two hills: the pictures of this phone, beside the box.
+    static let picture = ["##########", "#......#.#", "#........#", "#...#....#", "#..#.#.#.#", "#.#...#.##", "##########"]
 
     static func agentName(_ harness: String) -> String {
         NewTerminalSheet.agents.first { $0.id == harness }?.name ?? harness

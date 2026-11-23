@@ -67,7 +67,8 @@ final class RoomsModel {
     @ObservationIgnored private var listVersion: String?
     @ObservationIgnored private var roomVersion: String?
 
-    var canSend: Bool { !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && room != nil }
+    /// Words, or files alone: a picture says enough.
+    var canSend: Bool { !sending && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty) && room != nil }
     var summary: RoomSummary? { rooms.first { $0.id == selected } }
 
     // MARK: reading

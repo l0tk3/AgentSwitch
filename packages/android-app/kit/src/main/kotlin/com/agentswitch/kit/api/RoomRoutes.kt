@@ -18,7 +18,7 @@ class RoomsUnsupported : Exception("这台 Mac 上的 AgentSwitch 还没有 Chat
 @Serializable private class UpdateRoomBody(val name: String? = null, val topic: String? = null, val paused: Boolean? = null)
 @Serializable private class AddSeatBody(val terminal: String, val canAdd: Boolean? = null)
 @Serializable private class SetSeatBody(val canAdd: Boolean)
-@Serializable private class SayBody(val text: String, val replyTo: Int? = null)
+@Serializable private class SayBody(val text: String, val replyTo: Int? = null, val files: List<String>? = null)
 @Serializable private class ReadBody(val seq: Int)
 @Serializable private class NotesBody(val text: String)
 @Serializable private class SeatReply(val seat: RoomSeat)
@@ -71,9 +71,12 @@ suspend fun AgentSwitchAPI.unseat(handle: String, room: String) {
     perform("DELETE", listOf("rooms", room, "seats", handle), emptyList(), null, Done.serializer())
 }
 
-/** The user speaks; who it is for is read from the `@names` in the text. */
-suspend fun AgentSwitchAPI.say(text: String, room: String, replyTo: Int? = null): RoomSaid =
-    post(listOf("rooms", room, "messages"), SayBody(text, replyTo), SayBody.serializer(), RoomSaid.serializer())
+/**
+ * The user speaks; who it is for is read from the `@names` in the text. `files`: what it comes with, by where each is
+ * on the Mac (a picture from the phone is put into the shared folder first, [putRoomFile]).
+ */
+suspend fun AgentSwitchAPI.say(text: String, room: String, replyTo: Int? = null, files: List<String> = emptyList()): RoomSaid =
+    post(listOf("rooms", room, "messages"), SayBody(text, replyTo, files.ifEmpty { null }), SayBody.serializer(), RoomSaid.serializer())
 
 /** The user has seen up to `seq`. */
 suspend fun AgentSwitchAPI.markRoomRead(room: String, seq: Int): Int =
@@ -116,3 +119,19 @@ suspend fun AgentSwitchAPI.deleteRoomTask(room: String, n: Int) {
 
 /** What is in the room's shared folder (§9), the newest first. */
 suspend fun AgentSwitchAPI.roomFiles(room: String): RoomFiles = get(listOf("rooms", room, "files"), RoomFiles.serializer())
+
+/** A file put into a room's shared folder: where it is on the Mac now, and under which name (another, when one was there). */
+@Serializable
+data class RoomPut(val path: String, val name: String = "", val size: Long = 0)
+
+/**
+ * A file of the room's shared folder as its bytes, by its path under the folder ([RoomFilePath.under]). The room's own
+ * folder only, whatever the phone may see of the Mac's other files; over 25 MB the Mac answers 413 (`too-large`).
+ */
+suspend fun AgentSwitchAPI.roomFileContent(room: String, path: String): ByteArray =
+    bytes(listOf("rooms", room, "files", "content"), listOf(URLQueryItem("path", path)))
+
+/** A file from this phone (a picture picked here) put into the room's shared folder, as its bytes; sent once. */
+suspend fun AgentSwitchAPI.putRoomFile(room: String, name: String, data: ByteArray): RoomPut =
+    perform("PUT", listOf("rooms", room, "files", "content"), listOf(URLQueryItem("name", name)), data, RoomPut.serializer(),
+        timeout = AgentSwitchAPI.uploadTimeout, contentType = "application/octet-stream")

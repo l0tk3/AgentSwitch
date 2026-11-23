@@ -242,6 +242,41 @@ data class RoomFiles(val folder: String = "", val files: List<RoomFile> = emptyL
     fun whole(file: RoomFile): String = "${folder.trimEnd('/')}/${file.path}"
 }
 
+/**
+ * A message's file as a room's page takes it (§9): what it is named, whether it is a picture the page shows, and —
+ * when it is in the room's shared folder — its path under that folder, which is how the room's own route is asked for
+ * it (`GET /rooms/:id/files/content?path=`). A file anywhere else on the Mac is asked for as the Files pages ask.
+ */
+object RoomFilePath {
+    /** The most files one message comes with (the Mac's own limit). */
+    const val maxPerMessage = 10
+
+    /** The pictures a room's page shows in the timeline, by their extension. */
+    val pictureExtensions = setOf("png", "jpg", "jpeg", "gif", "heic", "webp")
+
+    /** Its last part. */
+    fun name(path: String): String = path.trimEnd('/').substringAfterLast('/').ifEmpty { path }
+
+    fun isPicture(path: String): Boolean {
+        val name = name(path)
+        val dot = name.lastIndexOf('.')
+        return dot > 0 && name.substring(dot + 1).lowercase() in pictureExtensions
+    }
+
+    /**
+     * `path` as it is under `folder`, or null when it is not in it — or is one the room's route would not give (a part
+     * that begins with a dot, `..`, an empty part).
+     */
+    fun under(folder: String, path: String): String? {
+        val base = folder.trimEnd('/')
+        if (base.isEmpty() || !path.startsWith("$base/")) return null
+        val rest = path.substring(base.length + 1)
+        if (rest.isEmpty() || rest.any { it == '\u0000' || it == '\n' || it == '\r' }) return null
+        if (rest.split("/").any { it.isEmpty() || it.startsWith(".") }) return null
+        return rest
+    }
+}
+
 @Serializable
 data class RoomInfo(
     val id: String,
