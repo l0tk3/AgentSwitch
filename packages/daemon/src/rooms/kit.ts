@@ -222,7 +222,11 @@ export class RoomKit {
 
   /** What changes when the tools a terminal has change: a session's agent is told to list them again. */
   version(terminal: string, always = false): string {
-    return this.tools(terminal, always).map((t) => t.name).join(",");
+    // The names, and how much is said of them: a tool whose description or arguments changed with a new version of
+    // the service is listed again too (2026-11-23: `room_manage` had two new actions and a session's agent still
+    // showed the old ones, the names being the same).
+    const tools = this.tools(terminal, always);
+    return tools.length ? `${tools.map((t) => t.name).join(",")}#${JSON.stringify(tools).length}` : "";
   }
 
   /** One call of a tool by a terminal's session. The switch is looked at now, each time: turned off, the next call
