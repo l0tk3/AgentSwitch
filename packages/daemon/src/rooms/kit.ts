@@ -110,12 +110,7 @@ const TOOLS: readonly KitTool[] = [
 
 /** For a session whose `Can Add Sessions` is on. */
 const ORG_TOOLS: readonly KitTool[] = [
-  { name: "rooms", description: "The Chat Rooms that exist in AgentSwitch: name, id, topic, how many members. (You may add sessions, so you can see them.)", inputSchema: { type: "object", properties: {} } },
-  {
-    name: "room_create",
-    description: "Make a new AgentSwitch Chat Room and take a seat in it. Give it a short name and a one-sentence topic: members read the topic first. Then bring sessions in with room_add.",
-    inputSchema: { type: "object", properties: { name: { type: "string" }, topic: { type: "string", description: "One sentence: what this room is for." } }, required: ["name"] },
-  },
+  { name: "rooms", description: "The Chat Rooms that exist in AgentSwitch: name, id, topic, how many members. (You may add sessions, so you can see them. A session sits in one room at a time: making a room is the user's.)", inputSchema: { type: "object", properties: {} } },
   {
     name: "room_add",
     description: "Bring a session into a Chat Room you sit in. One of three: (1) a session that is running — give `terminal` (from `sessions`); (2) a new session — give `agent` and `cwd`, and optionally `profile`, `model`, `mode`; (3) an existing session resumed — give `agent`, `resume` (its id from `sessions`) and `cwd`, optionally `profile` to continue it under another profile. A session you start can not start sessions itself, and you may start at most " + MAX_STARTED + ". It joins idle and knows nothing of your task: after adding it, room_post an @message that says exactly what you need from it.",
@@ -225,16 +220,6 @@ export class RoomKit {
         const mine = new Set(this.o.store.roomsOf(terminal).map((s) => s.room.id));
         const all = this.o.store.list();
         return [`${all.length} room${all.length === 1 ? "" : "s"}:`, ...all.map((r) => `"${r.name}" (${r.id})${mine.has(r.id) ? " — you sit here" : ""} · ${r.seats.filter((s) => s.left === undefined).length} members${r.paused ? " · paused" : ""}${r.topic ? `\n  ${r.topic}` : ""}`)].join("\n");
-      }
-      case "room_create": {
-        const me = this.o.store.roomsOf(terminal).find((s) => s.seat.canAdd)!;
-        const live = this.o.seat(terminal);
-        const { mode: _mode, node: _node, ...was } = live?.card ?? { ...me.seat.was!, mode: null, node: null };
-        const topic = str(args.topic);
-        const room = this.o.store.create({ name: typeof args.name === "string" ? args.name : "", ...(topic ? { topic } : {}), by: me.seat.handle });
-        const seat = this.o.store.seat(room.id, { terminal, was, canAdd: true, by: me.seat.handle });
-        this.o.changed?.(room.id);
-        return `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you). Bring sessions in with room_add (room: "${room.id}").`;
       }
       case "room_add": return this.add(org, terminal, args);
       case "room_manage": return this.manage(org, terminal, args);

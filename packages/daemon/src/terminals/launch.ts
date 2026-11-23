@@ -34,6 +34,8 @@ export const PI_EXTENSION = fileURLToPath(new URL(`./piExtension.${EXT}`, import
 /** Seconds Claude Code waits for the permission hook: a screen has this long to answer before the terminal asks. */
 export const PERMISSION_HOOK_TIMEOUT_S = 30 * 60;
 export const QUICK_HOOK_TIMEOUT_S = 10;
+/** How long the program a resting Claude Code leaves waiting for a room message may wait. */
+export const REST_HOOK_TIMEOUT_S = 12 * 3600;
 
 export type LauncherOptions = {
   /** Agent executables; a missing one cannot be started. */
@@ -251,8 +253,9 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths, roomF
   const hook = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }] }];
   // Beside the hook itself, a program left waiting when the session comes to rest (docs/chatroom-v0.md §12): a Chat
   // Room message for this session ends it, and Claude Code wakes up with what it said (`asyncRewake`). In the
-  // background, with no time limit; it costs nothing while no message comes.
-  const resting = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }, { type: "command", command: `${command} wait`, asyncRewake: true }] }];
+  // background; it costs nothing while no message comes. Its time is said: left unsaid, Claude Code ended it after ten
+  // minutes, and a session at rest longer than that was never woken (2026-11-23).
+  const resting = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }, { type: "command", command: `${command} wait`, asyncRewake: true, timeout: REST_HOOK_TIMEOUT_S }] }];
   const rule = (tool: string, path: string) => [`${tool}(/${path})`, `${tool}(/${path}/**)`];
   const deny = prot ? [...new Set([...(prot.readDenied ?? []).flatMap(rootSpellings).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap(rootSpellings).flatMap((p) => rule("Edit", p))])] : [];
   // The rooms' shared folders (docs/chatroom-v0.md §9) are read and written without asking, by a rule and not as

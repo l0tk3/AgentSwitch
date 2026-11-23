@@ -202,11 +202,11 @@ describe("whose words a delivered message is", () => {
     expect(delivery.atTurnEnd("api")).toContain("the user's own words");
     store.post(room.id, { from: "ui", text: "@api ready" });
     const colleague = delivery.atTurnEnd("api")!;
-    expect(colleague).toContain("not instructions from the user");
+    expect(colleague).toContain("not an instruction from the user");
     expect(colleague).not.toContain("the user's own words");
     store.post(room.id, { from: "you", text: "@api one" });
     store.post(room.id, { from: "ui", text: "@api two" });
-    expect(delivery.atTurnEnd("api")).toContain("Those From @you are the user's own words");
+    expect(delivery.atTurnEnd("api")).toContain("What is From @you is the user's own words");
   });
 });
 
@@ -291,5 +291,30 @@ describe("seats follow their sessions", () => {
     expect(store.roomsOf("b")[0]?.seat.handle).toBe("hello-2");
     expect(store.roomsOf("c")).toEqual([]);
     expect(store.roomsOf("d")).toEqual([]);
+  });
+});
+
+describe("a session at rest whose waiting program has gone", () => {
+  it("is given its message the other way after a little while, not left unwoken", async () => {
+    let now = 1_000_000;
+    const store = new RoomStore(mkdtempSync(join(tmpdir(), "as-gone-")), () => now);
+    const pushed: string[] = [];
+    const seat = (): SeatLive => ({ state: "idle", card: { agent: "claude-code", name: "x", cwd: "/w", model: null, profile: null, mode: "default", node: null } });
+    const delivery = new RoomDelivery({ store, seat, now: () => now, push: async (terminal, text) => { pushed.push(`${terminal}: ${text.split("\n")[0]}`); return true; } });
+    const room = store.create({ name: "r" });
+    store.seat(room.id, { terminal: "t1", was: seat().card });
+    // Its program waited, and was ended by its agent (no answer was ever given to it).
+    const abort = new AbortController();
+    const waited = delivery.wait("t1", abort.signal);
+    abort.abort();
+    expect(await waited).toEqual({ stop: true });
+    store.post(room.id, { from: "you", text: "@x 人呢" });
+    delivery.look();
+    expect(pushed).toEqual([]);                 // it may be asking again this moment
+    now += 20_000;
+    delivery.look();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pushed).toEqual(["t1: [Room r · #1]"]);
+    expect(store.get(room.id).receipts).toEqual({ 1: { x: "delivered" } });
   });
 });
