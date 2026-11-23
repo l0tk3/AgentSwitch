@@ -19,7 +19,7 @@ struct RoomTasksSheet: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("Tasks").mono(look.isClassic ? 14 : 12.5, weight: .semibold).foregroundStyle(Look.ink)
                 if let room, !room.tasks.isEmpty {
-                    Text("\(room.tasks(.doing).count) doing · \(room.tasks(.todo).count) to do · \(room.tasks(.done).count) done").mono(11.5).foregroundStyle(Look.faint)
+                    Text("\(room.tasks(.blocked).isEmpty ? "" : "\(room.tasks(.blocked).count) blocked · ")\(room.tasks(.doing).count) doing · \(room.tasks(.todo).count) to do · \(room.tasks(.done).count) done").mono(11.5).foregroundStyle(Look.faint)
                 }
                 Spacer()
             }
@@ -40,6 +40,7 @@ struct RoomTasksSheet: View {
                             if room.tasks.isEmpty {
                                 Text("还没有任务。").font(.system(size: 12.5)).foregroundStyle(Look.faint).padding(.vertical, 24).frame(maxWidth: .infinity)
                             }
+                            group("Blocked", room.tasks(.blocked), in: room)
                             group("Doing", room.tasks(.doing), in: room)
                             group("To Do", room.tasks(.todo), in: room)
                             group("Done", room.tasks(.done), in: room)

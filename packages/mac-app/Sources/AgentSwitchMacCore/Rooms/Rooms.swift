@@ -346,7 +346,8 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
 
 /// One piece of the room's work (§9 任务表): who does what, and how far it is.
 public struct RoomTask: Decodable, Equatable, Sendable, Identifiable {
-    public enum State: String, Sendable, CaseIterable { case doing, todo, done }
+    /// `blocked`: its owner can not go on; its note says why (2026-11-24).
+    public enum State: String, Sendable, CaseIterable { case blocked, doing, todo, done }
 
     public let n: Int
     public let title: String
