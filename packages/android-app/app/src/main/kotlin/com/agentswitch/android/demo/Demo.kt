@@ -99,6 +99,8 @@ object Demo {
         // The Browser tab's sample tabs (held by this phone as the screen `phoneScreen`, `PhoneScreen.id`).
         model.browser.setDemo(DemoBrowser.list(screen, phoneScreen), DemoBrowser.servers, DemoBrowser.recent, DemoBrowser.zoom(screen),
             browsers = if (screen == "browserprofiles") DemoBrowser.profileBrowsers else null)
+        // The Rooms tab's sample rooms: one with its tasks, its shared folder and who is changing which files.
+        model.rooms.setDemo(DemoRooms.list, mapOf(DemoRooms.room to DemoRooms.detail), mapOf(DemoRooms.room to DemoRooms.files))
         model.setDemo(macs, connection, progress, report)
         open(model, screen, phoneScreen)
         return model
@@ -109,6 +111,9 @@ object Demo {
         when {
             screen == null -> Unit
             screen in settingsScreens -> model.tab = MainTab.Settings
+            // The Rooms tab (docs/chatroom-v0.md §10); `room…`: the sample room's page, and the sheet its name says (RoomPage).
+            screen == "rooms" -> model.tab = MainTab.Rooms
+            screen.startsWith("room") -> { model.tab = MainTab.Rooms; model.openRoomRequest = DemoRooms.room }
             screen == "task" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t2" }
             screen == "done" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t3" }
             screen == "running" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t1" }

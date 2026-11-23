@@ -7,12 +7,14 @@ import androidx.compose.runtime.setValue
 import com.agentswitch.kit.api.APIError
 import com.agentswitch.kit.api.AgentSwitchAPI
 import com.agentswitch.kit.api.RoomDetail
+import com.agentswitch.kit.api.RoomFiles
 import com.agentswitch.kit.api.RoomList
 import com.agentswitch.kit.api.RoomSummary
 import com.agentswitch.kit.api.RoomsUnsupported
 import com.agentswitch.kit.api.deleteRoom
 import com.agentswitch.kit.api.markRoomRead
 import com.agentswitch.kit.api.room
+import com.agentswitch.kit.api.roomFiles
 import com.agentswitch.kit.api.rooms
 import com.agentswitch.kit.api.say
 import kotlinx.coroutines.CancellationException
@@ -66,6 +68,18 @@ class RoomsStore {
         }
     }
 
+    /** The sample screens' rooms (no Mac): what a room's page opens with, by the room's id. */
+    var demoDetails: Map<String, RoomDetail> = emptyMap()
+        private set
+    var demoFiles: Map<String, RoomFiles> = emptyMap()
+        private set
+
+    fun setDemo(list: RoomList, details: Map<String, RoomDetail>, files: Map<String, RoomFiles>) {
+        this.list = list
+        demoDetails = details
+        demoFiles = files
+    }
+
     fun reset() {
         generation += 1
         list = null
@@ -83,7 +97,7 @@ class RoomsStore {
 
 /** One room's page: the room as the Mac last gave it, what is being written, and what the user does in it. */
 @Stable
-class RoomPageModel(val id: String, detail: RoomDetail? = null) {
+class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles? = null) {
     var detail: RoomDetail? by mutableStateOf(detail)
         private set
 
@@ -100,6 +114,12 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null) {
 
     /** What the user had seen when the page opened: later messages that name the user are marked until it closes. */
     var seenAtOpen: Int? by mutableStateOf(detail?.room?.readSeq)
+        private set
+
+    /** What is in the room's shared folder (§9), as the Mac last listed it: read when its sheet opens. */
+    var files: RoomFiles? by mutableStateOf(files)
+        private set
+    var filesError: String? by mutableStateOf(null)
         private set
 
     private var etag: String? = null
@@ -124,6 +144,19 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null) {
             if (e.status == 404) gone = true else error = e.message
         } catch (e: Exception) {
             error = e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    /** The shared folder listed again; what was listed stays when the Mac can not be asked. */
+    suspend fun loadFiles(api: AgentSwitchAPI?) {
+        if (api == null) return
+        try {
+            files = api.roomFiles(id)
+            filesError = null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            filesError = e.message ?: e.javaClass.simpleName
         }
     }
 

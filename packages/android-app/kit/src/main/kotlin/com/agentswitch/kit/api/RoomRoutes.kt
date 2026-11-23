@@ -1,9 +1,13 @@
 package com.agentswitch.kit.api
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // Chat Room's routes a paired phone may use (docs/chatroom-v0.md §10; the daemon's remote allowlist): the rooms on the
-// Mac asked, and the user in them — making a room, seating sessions that run there, speaking, the pinned notes. The
+// Mac asked, and the user in them — making a room, seating sessions that run there, speaking, the pinned notes, the task list, the shared folder. The
 // lists are sent with the version the page has (`If-None-Match`): an unchanged one is a 304, nothing new. A Mac from
 // before Chat Room answers 403 or 404 for `/rooms`: read as "not there" ([RoomsUnsupported]).
 
@@ -21,6 +25,8 @@ class RoomsUnsupported : Exception("这台 Mac 上的 AgentSwitch 还没有 Chat
 @Serializable private class SummaryReply(val room: RoomSummary)
 @Serializable private class ReadReply(val readSeq: Int = 0)
 @Serializable private class NotesReply(val notes: RoomNotes? = null)
+@Serializable private class NewTaskBody(val title: String, val detail: String? = null, val owner: String? = null, val after: List<Int>? = null)
+@Serializable private class TaskReply(val task: RoomTask)
 @Serializable private class Done(val ok: Boolean? = null)
 
 /** What the Mac says of a message just taken: the message, and who it still has to reach. */
@@ -81,3 +87,32 @@ suspend fun AgentSwitchAPI.roundsSeen(room: String) {
 /** The pinned notes written whole (§9); empty: none. */
 suspend fun AgentSwitchAPI.setRoomNotes(room: String, text: String): RoomNotes? =
     send("PUT", listOf("rooms", room, "notes"), NotesBody(text), NotesBody.serializer(), NotesReply.serializer()).notes
+
+/** The user adds a task (§9); `owner`: whose it is from the start, by handle — it stays to do until that seat takes it. */
+suspend fun AgentSwitchAPI.addRoomTask(room: String, title: String, detail: String? = null, owner: String? = null, after: List<Int>? = null): RoomTask =
+    post(listOf("rooms", room, "tasks"), NewTaskBody(title, detail?.ifEmpty { null }, owner, after?.ifEmpty { null }), NewTaskBody.serializer(), TaskReply.serializer()).task
+
+/**
+ * The user changes a task. Only what is given is sent; `clearOwner` sends `owner: null` — nobody's any more (one being
+ * done goes back to do).
+ */
+suspend fun AgentSwitchAPI.setRoomTask(
+    room: String, n: Int, state: RoomTaskState? = null, owner: String? = null, clearOwner: Boolean = false,
+    title: String? = null, detail: String? = null, note: String? = null,
+): RoomTask {
+    val body = buildJsonObject {
+        state?.let { put("state", it.rawValue) }
+        if (clearOwner) put("owner", JsonNull) else owner?.let { put("owner", it) }
+        title?.let { put("title", it) }
+        detail?.let { put("detail", it) }
+        note?.let { put("note", it) }
+    }
+    return send("PATCH", listOf("rooms", room, "tasks", n.toString()), body, JsonObject.serializer(), TaskReply.serializer()).task
+}
+
+suspend fun AgentSwitchAPI.deleteRoomTask(room: String, n: Int) {
+    perform("DELETE", listOf("rooms", room, "tasks", n.toString()), emptyList(), null, Done.serializer())
+}
+
+/** What is in the room's shared folder (§9), the newest first. */
+suspend fun AgentSwitchAPI.roomFiles(room: String): RoomFiles = get(listOf("rooms", room, "files"), RoomFiles.serializer())

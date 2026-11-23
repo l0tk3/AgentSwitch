@@ -170,6 +170,78 @@ enum class RoomReceipt(val rawValue: String, val word: String, val tick: String)
 @Serializable
 data class RoomNotes(val text: String = "", val at: Long = 0, val by: String = RoomSeat.you)
 
+/** How far a task is (§9 任务表). */
+enum class RoomTaskState(val rawValue: String, val word: String) {
+    Todo("todo", "To Do"), Doing("doing", "Doing"), Done("done", "Done");
+
+    companion object {
+        fun of(raw: String?): RoomTaskState? = entries.firstOrNull { it.rawValue == raw }
+    }
+}
+
+/** One piece of the room's work (§9 任务表): who does what, and how far it is, where every member sees it. */
+@Serializable
+data class RoomTask(
+    /** Its number in this room (`T3`); never used again. */
+    val n: Int,
+    val title: String = "",
+    val detail: String? = null,
+    @SerialName("state") val stateName: String = "todo",
+    /** The seat doing it (done it), by handle. */
+    val owner: String? = null,
+    /** Who added it. */
+    val by: String = RoomSeat.you,
+    val createdAt: Long = 0,
+    val updatedAt: Long = 0,
+    /** Tasks that come first, by number. */
+    val after: List<Int> = emptyList(),
+    /** How it ended, in a line: the result, or the file that holds it. */
+    val note: String? = null,
+) {
+    /** A state this app does not know is one still to do. */
+    val state: RoomTaskState get() = RoomTaskState.of(stateName) ?: RoomTaskState.Todo
+
+    /** As it is called in the room: `T3`. */
+    val label: String get() = "T$n"
+}
+
+/** How a room's work stands, in the list: how many tasks of each state. */
+@Serializable
+data class RoomTaskCounts(val todo: Int = 0, val doing: Int = 0, val done: Int = 0)
+
+/** A member saying which files it is changing (§9): a word to the others, not a lock, and gone by itself at `until`. */
+@Serializable
+data class RoomClaim(
+    val handle: String,
+    /** Files or folders, as the member named them. */
+    val paths: List<String> = emptyList(),
+    val why: String? = null,
+    val at: Long = 0,
+    /** Milliseconds since 1970. */
+    val until: Long = 0,
+) {
+    /** The paths by their last part; a folder keeps its `/`. */
+    val names: List<String>
+        get() = paths.map { p -> p.trimEnd('/').substringAfterLast('/').ifEmpty { p } + if (p.length > 1 && p.endsWith("/")) "/" else "" }
+
+    /** The first few names in one line, and how many more there are (`api.ts, store.ts +2`). */
+    fun summary(most: Int = 3): String {
+        val names = names
+        return names.take(most).joinToString(", ") + if (names.size > most) " +${names.size - most}" else ""
+    }
+}
+
+/** A file in a room's shared folder (§9): its path under the folder. */
+@Serializable
+data class RoomFile(val path: String, val size: Long = 0, /** Milliseconds since 1970. */ val modifiedAt: Long = 0)
+
+/** What is in a room's shared folder, the newest first; `more`: there is more than is listed. */
+@Serializable
+data class RoomFiles(val folder: String = "", val files: List<RoomFile> = emptyList(), val more: Boolean = false) {
+    /** Where a listed file is on the Mac. */
+    fun whole(file: RoomFile): String = "${folder.trimEnd('/')}/${file.path}"
+}
+
 @Serializable
 data class RoomInfo(
     val id: String,
@@ -192,6 +264,12 @@ data class RoomDetail(
     val messages: List<RoomMessage> = emptyList(),
     @SerialName("receipts") private val rawReceipts: Map<String, Map<String, String>> = emptyMap(),
     val notes: RoomNotes? = null,
+    /** The room's shared folder (§9), by where it is on the Mac; empty from a Mac that has none. */
+    val folder: String = "",
+    /** The task list (§9), in the order the tasks were added. */
+    val tasks: List<RoomTask> = emptyList(),
+    /** Who is changing which files (§9): only what is still in force. */
+    val claims: List<RoomClaim> = emptyList(),
     /** Why a session named when the room was made could not be seated. */
     val problems: List<String> = emptyList(),
 ) {
@@ -209,6 +287,20 @@ data class RoomDetail(
     val sessions: List<RoomSeat> get() = seats.filter { !it.isUser && it.here }
 
     fun message(seq: Int): RoomMessage? = messages.firstOrNull { it.seq == seq }
+
+    fun task(n: Int): RoomTask? = tasks.firstOrNull { it.n == n }
+
+    /** The tasks of one state: by number, the ones done the last-finished first. */
+    fun tasks(state: RoomTaskState): List<RoomTask> =
+        tasks.filter { it.state == state }.let { of -> if (state == RoomTaskState.Done) of.sortedByDescending { it.updatedAt } else of.sortedBy { it.n } }
+
+    /** The tasks this one waits for: those that come first and are not done. One taken off the list holds nothing up. */
+    fun waitsFor(task: RoomTask): List<Int> =
+        if (task.state == RoomTaskState.Done) emptyList() else task.after.filter { n -> task(n)?.let { it.state != RoomTaskState.Done } ?: false }
+
+    /** What a seat says it is changing now; null when nothing, or when its time has passed. */
+    fun claim(handle: String, now: Long = System.currentTimeMillis()): RoomClaim? =
+        claims.firstOrNull { it.handle == handle && it.until > now && it.paths.isNotEmpty() }
 }
 
 /** A room as the list has it. */
@@ -228,6 +320,8 @@ data class RoomSummary(
     val forYou: Boolean = false,
     /** The sessions have been talking among themselves this long (§7); null under the room's limit. */
     val rounds: Int? = null,
+    /** How the room's work stands (§9). */
+    val tasks: RoomTaskCounts = RoomTaskCounts(),
 ) {
     @Serializable
     data class Last(val seq: Int = 0, val from: String = "", val text: String = "", val at: Long = 0)

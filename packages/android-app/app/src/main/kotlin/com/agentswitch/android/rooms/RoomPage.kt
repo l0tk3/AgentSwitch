@@ -53,6 +53,7 @@ import com.agentswitch.android.LocalAppModel
 import com.agentswitch.android.LocalNav
 import com.agentswitch.android.WhileStarted
 import com.agentswitch.android.components.ErrorText
+import com.agentswitch.android.demo.LocalDemoScreen
 import com.agentswitch.android.design.BarBack
 import com.agentswitch.android.design.BrailleSpinner
 import com.agentswitch.android.design.ClassicIcon
@@ -98,7 +99,8 @@ fun RoomPage(id: String) {
     val app = LocalAppModel.current
     val nav = LocalNav.current
     val classic = LocalLook.current.isClassic
-    val model = remember(id) { RoomPageModel(id) }
+    // A sample screen's room (no Mac) opens with what the demo holds for it.
+    val model = remember(id) { RoomPageModel(id, app.rooms.demoDetails[id], app.rooms.demoFiles[id]) }
     val scope = rememberCoroutineScope()
     val detail = model.detail
     val focus = remember { FocusRequester() }
@@ -131,6 +133,17 @@ fun RoomPage(id: String) {
         RoomMembersSheet(model, card, add = { nav.present("roomadd:$id") { RoomSessionsSheet(RoomSessionsPurpose.Add(id, model.detail?.sessions?.mapNotNull { it.terminal }?.toSet() ?: emptySet()), onDone = { act { } }) } }, mention = ::mention)
     }
 
+    // The sample screens that open on one of the room's sheets (`roomtasks`, `roomfiles`, `roommembers`).
+    val demoScreen = LocalDemoScreen.current
+    LaunchedEffect(demoScreen) {
+        when (demoScreen) {
+            "roomtasks", "roomtask", "roomtasknew" -> nav.present("roomtasks:$id") { RoomTasksSheet(model, opening = if (demoScreen == "roomtask") 2 else null, adding = demoScreen == "roomtasknew") }
+            "roomfiles" -> nav.present("roomfiles:$id") { RoomFilesSheet(model) }
+            "roommembers" -> members()
+            "roomcard" -> members(model.detail?.sessions?.firstOrNull()?.handle)
+        }
+    }
+
     fun moreMenu() {
         val d = model.detail ?: return
         menu = PixelBox(
@@ -141,6 +154,8 @@ fun RoomPage(id: String) {
                 PixelBox.Action("Add Sessions…") { nav.present("roomadd:$id") { RoomSessionsSheet(RoomSessionsPurpose.Add(id, model.detail?.sessions?.mapNotNull { it.terminal }?.toSet() ?: emptySet()), onDone = { act { } }) } },
                 PixelBox.Action("Rename…") { nav.present("roomedit:$id") { RoomEditSheet(model) } },
                 PixelBox.Action("Notes…") { nav.present("roomnotes:$id") { RoomNotesSheet(model) } },
+                PixelBox.Action("Tasks…") { nav.present("roomtasks:$id") { RoomTasksSheet(model) } },
+                PixelBox.Action("Files…") { nav.present("roomfiles:$id") { RoomFilesSheet(model) } },
                 PixelBox.Action("Delete Room…", PixelBox.Action.Role.Destructive, icon = "trash") { confirmDelete = true },
             ),
         )

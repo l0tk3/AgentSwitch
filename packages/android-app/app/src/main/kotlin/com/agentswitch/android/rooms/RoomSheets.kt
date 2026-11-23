@@ -56,6 +56,7 @@ import com.agentswitch.android.terminals.LookSymbol
 import com.agentswitch.android.terminals.LookSymbolIcon
 import com.agentswitch.android.terminals.ProfileDot
 import com.agentswitch.android.terminals.TerminalStatusMark
+import com.agentswitch.kit.api.RoomClaim
 import com.agentswitch.kit.api.RoomSeat
 import com.agentswitch.kit.api.SeatState
 import com.agentswitch.kit.api.TerminalInfo
@@ -72,9 +73,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 // What comes up over a room (docs/chatroom-v0.md §10): its members and a member's card, the sessions to bring in (and
-// a new room's name with them), its name and topic, and its pinned notes. The iPhone's `RoomSheets.swift`.
+// a new room's name with them), its name and topic, and its pinned notes (its tasks and files: RoomWorkSheets.kt). The iPhone's `RoomSheets.swift`.
 
-private val agentInk @Composable get() = if (LocalLook.current.isClassic) Theme.signal else Theme.ink
+internal val agentInk @Composable get() = if (LocalLook.current.isClassic) Theme.signal else Theme.ink
 
 /**
  * The members, by the node they run on: face with the state at its corner, `@name`, the state's word, the agent's
@@ -107,14 +108,14 @@ fun RoomMembersSheet(model: RoomPageModel, opening: String?, add: () -> Unit, me
         if (seats.isEmpty()) Text("房间里还没有会话。点 Add 把正在运行的会话拉进来。", Modifier.padding(Theme.Space.l), color = Theme.secondaryInk, style = plain(15))
         for ((node, of) in nodes) {
             FormSection(node.ifEmpty { app.profile?.name ?: "Mac" }) {
-                of.forEachIndexed { i, seat -> FormRow(first = i == 0, onClick = { card = seat.handle }) { MemberRow(seat) } }
+                of.forEachIndexed { i, seat -> FormRow(first = i == 0, onClick = { card = seat.handle }) { MemberRow(seat, model.detail?.claim(seat.handle)) } }
             }
         }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat) {
+private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat, claim: RoomClaim?) {
     val classic = LocalLook.current.isClassic
     val look = LocalLook.current
     Box {
@@ -132,6 +133,8 @@ private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat
             // It can neither speak here nor be woken until it is resumed (§6): for the user to do.
             if (seat.noKit) Text(" · No Kit", color = Theme.waiting, style = mono(11), maxLines = 1)
         }
+        // What it says it is changing (§9), until when: a word to the others, not a lock.
+        claim?.let { Text("▸ ${it.summary()} · until ${RoomWords.time(it.until)}", color = Theme.secondaryInk, style = mono(11), maxLines = 1, overflow = TextOverflow.MiddleEllipsis) }
     }
     seat.card?.agent?.takeIf { it.isNotEmpty() }?.let { RoomAgentMark(it) }
     seat.card?.color?.let { ProfileDot(it) }
@@ -186,6 +189,18 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
             line("State", if (gone) "Left" else seat.state?.word(look) ?: "—", color = if (gone) Theme.secondaryInk else seat.state.wordColor())
             if (seat.noKit) line("Kit", "No Kit", color = Theme.waiting)
             line("Seated By", RoomWords.who(seat.addedBy))
+        }
+        // What it says it is changing (§9): every path it named, and until when.
+        if (!gone) model.detail?.claim(handle)?.let { claim ->
+            FormSection("Changing", footer = "${claim.why?.let { "原因：$it。" } ?: ""}这是它告诉其他成员的话，不是锁；到 ${RoomWords.time(claim.until)} 自动失效。") {
+                claim.paths.forEachIndexed { i, path ->
+                    FormRow(first = i == 0) { Text(path, Modifier.weight(1f), color = Theme.ink, style = code(13), maxLines = 1, overflow = TextOverflow.MiddleEllipsis) }
+                }
+                FormRow {
+                    Text("Until", color = Theme.ink, style = plain(16), maxLines = 1)
+                    Text(RoomWords.time(claim.until), Modifier.weight(1f), color = Theme.secondaryInk, style = plain(16), textAlign = TextAlign.End, maxLines = 1)
+                }
+            }
         }
         if (!gone) {
             FormSection(footer = if (seat.byAgent) "由别的会话拉起来的会话不能再拉人。" else "打开后，这个会话可以新建房间、拉会话进来，并读取拉人要用的清单。") {

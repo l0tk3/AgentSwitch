@@ -169,4 +169,124 @@ class RoomTests {
         val old = api(FakeTransport({ req, _ -> """{"error":"not allowed"}""".toByteArray() to httpResponse(req.url, status = 403) }))
         assertFailsWith<RoomsUnsupported> { old.rooms(null) }
     }
+
+    private val workJson = """
+        {"room":{"id":"ab12cd34ef","name":"登录"},
+         "seats":[{"handle":"you","kind":"user"},{"handle":"daemon","kind":"session","terminal":"t1","state":"busy"},{"handle":"web","kind":"session","terminal":"t2","state":"idle"}],
+         "messages":[],"receipts":{},"notes":null,
+         "folder":"/Users/x/.agentswitch/room-files/ab12cd34ef",
+         "tasks":[
+          {"n":1,"title":"定接口","state":"done","owner":"daemon","by":"you","createdAt":10,"updatedAt":50,"note":"见 api.md"},
+          {"n":2,"title":"登录页","detail":"按 api.md","state":"doing","owner":"web","by":"daemon","createdAt":20,"updatedAt":40,"after":[1]},
+          {"n":3,"title":"联调","state":"todo","by":"you","createdAt":30,"updatedAt":30,"after":[1,2,9]},
+          {"n":4,"title":"上线","state":"later","by":"you","createdAt":31,"updatedAt":31,"after":[3]},
+          {"n":5,"title":"写文档","state":"done","by":"web","createdAt":32,"updatedAt":60,"after":[3]}],
+         "claims":[
+          {"handle":"daemon","paths":["src/api/rooms.ts","src/rooms/","a.ts","b.ts"],"why":"加任务表","at":1000,"until":5000},
+          {"handle":"web","paths":["web/login.tsx"],"at":1000,"until":2000}]}
+    """.trimIndent()
+
+    @Test
+    fun testTheTaskListTheSharedFolderAndWhoIsChangingWhatDecode() {
+        val d = KitJson.decodeFromString(RoomDetail.serializer(), workJson)
+        assertEquals("/Users/x/.agentswitch/room-files/ab12cd34ef", d.folder)
+        assertEquals(listOf(2), d.tasks(RoomTaskState.Doing).map { it.n })
+        // A state this app does not know is one still to do.
+        assertEquals(listOf(3, 4), d.tasks(RoomTaskState.Todo).map { it.n })
+        // The ones done: the last-finished first.
+        assertEquals(listOf(5, 1), d.tasks(RoomTaskState.Done).map { it.n })
+        val two = d.task(2)!!
+        assertEquals("T2", two.label)
+        assertEquals("web", two.owner)
+        assertEquals("按 api.md", two.detail)
+        assertEquals("见 api.md", d.task(1)!!.note)
+        assertNull(d.task(3)!!.owner)
+        // Waiting only for what is not done; a task taken off the list holds nothing up, and one done waits for nothing.
+        assertEquals(emptyList(), d.waitsFor(two))
+        assertEquals(listOf(2), d.waitsFor(d.task(3)!!))
+        assertEquals(listOf(3), d.waitsFor(d.task(4)!!))
+        assertEquals(emptyList(), d.waitsFor(d.task(5)!!))
+        val claim = d.claim("daemon", now = 1500)!!
+        assertEquals(listOf("rooms.ts", "rooms/", "a.ts", "b.ts"), claim.names)
+        assertEquals("rooms.ts, rooms/, a.ts +1", claim.summary())
+        assertEquals("加任务表", claim.why)
+        assertEquals("login.tsx", d.claim("web", now = 1500)!!.summary())
+        // Past its time it is said no more, also before the Mac is asked again.
+        assertNull(d.claim("web", now = 2000))
+        assertNull(d.claim("you", now = 1500))
+
+        val list = KitJson.decodeFromString(RoomList.serializer(), """{"rooms":[{"id":"a","tasks":{"todo":2,"doing":1,"done":4}},{"id":"b"}]}""")
+        assertEquals(RoomTaskCounts(todo = 2, doing = 1, done = 4), list.rooms[0].tasks)
+        assertEquals(RoomTaskCounts(), list.rooms[1].tasks)
+
+        val files = KitJson.decodeFromString(RoomFiles.serializer(), """{"folder":"/r/ab","files":[{"path":"out/report.md","size":2150,"modifiedAt":1700000000000},{"path":"a.txt"}],"more":true}""")
+        assertEquals("/r/ab/out/report.md", files.whole(files.files[0]))
+        assertEquals(2150L, files.files[0].size)
+        assertEquals(0L, files.files[1].size)
+        assertTrue(files.more)
+    }
+
+    @Test
+    fun testAMacFromBeforeTheTaskListDecodesWithNoneOfIt() {
+        // The room as it was sent before tasks, the folder and the claims: none, not a failure.
+        val d = detail()
+        assertEquals("", d.folder)
+        assertEquals(emptyList(), d.tasks)
+        assertEquals(emptyList(), d.claims)
+        assertNull(d.claim("daemon"))
+        // Sent as null: the same.
+        val nulls = KitJson.decodeFromString(RoomDetail.serializer(), """{"room":{"id":"a"},"folder":null,"tasks":null,"claims":null}""")
+        assertEquals("", nulls.folder)
+        assertEquals(emptyList(), nulls.tasks)
+        assertEquals(emptyList(), nulls.claims)
+        val files = KitJson.decodeFromString(RoomFiles.serializer(), "{}")
+        assertEquals(emptyList(), files.files)
+        assertFalse(files.more)
+    }
+
+    @Test
+    fun testTaskAndFileRoutesSendOnlyWhatIsNamed() = runTest {
+        val task = """{"task":{"n":3,"title":"联调","state":"todo","owner":"daemon","by":"you","createdAt":1,"updatedAt":2}}"""
+        val transport = FakeTransport({ req, _ ->
+            when {
+                req.method == "POST" && req.path == "/rooms/a/tasks" -> task.toByteArray() to httpResponse(req.url, status = 201)
+                req.method == "PATCH" && req.path == "/rooms/a/tasks/3" -> """{"task":{"n":3,"title":"联调","state":"done","by":"you"}}""".toByteArray() to httpResponse(req.url)
+                req.method == "PATCH" && req.path == "/rooms/a/tasks/9" -> """{"error":"There is no task T9 in this room."}""".toByteArray() to httpResponse(req.url, status = 404)
+                req.method == "GET" && req.path == "/rooms/a/files" -> """{"folder":"/r/a","files":[{"path":"report.md","size":10,"modifiedAt":5}],"more":false}""".toByteArray() to httpResponse(req.url)
+                else -> """{"ok":true}""".toByteArray() to httpResponse(req.url)
+            }
+        })
+        val api = api(transport)
+        val made = api.addRoomTask("a", "联调", detail = "", owner = "daemon")
+        assertEquals(3, made.n)
+        assertEquals("daemon", made.owner)
+        assertEquals("POST", transport.requests.last().method)
+        assertEquals("""{"title":"联调","owner":"daemon"}""", String(transport.requests.last().body!!))
+        api.addRoomTask("a", "联调", detail = "按 api.md", after = listOf(1, 2))
+        assertEquals("""{"title":"联调","detail":"按 api.md","after":[1,2]}""", String(transport.requests.last().body!!))
+
+        assertEquals(RoomTaskState.Done, api.setRoomTask("a", 3, state = RoomTaskState.Done).state)
+        assertEquals("""{"state":"done"}""", String(transport.requests.last().body!!))
+        api.setRoomTask("a", 3, owner = "web")
+        assertEquals("""{"owner":"web"}""", String(transport.requests.last().body!!))
+        // Nobody's any more: a null the Mac reads, not a field left out.
+        api.setRoomTask("a", 3, clearOwner = true)
+        assertEquals("""{"owner":null}""", String(transport.requests.last().body!!))
+        api.setRoomTask("a", 3, state = RoomTaskState.Todo, title = "t", detail = "d", note = "n")
+        assertEquals("""{"state":"todo","title":"t","detail":"d","note":"n"}""", String(transport.requests.last().body!!))
+        assertEquals("/rooms/a/tasks/3", transport.paths.last())
+        // What the Mac refuses is said in its own words.
+        val refused = assertFailsWith<APIError.Http> { api.setRoomTask("a", 9, state = RoomTaskState.Done) }
+        assertEquals(404, refused.status)
+        assertTrue(refused.message!!.contains("T9"))
+
+        api.deleteRoomTask("a", 3)
+        assertEquals("DELETE", transport.requests.last().method)
+        assertEquals("/rooms/a/tasks/3", transport.paths.last())
+
+        val files = api.roomFiles("a")
+        assertEquals("GET", transport.requests.last().method)
+        assertEquals("/rooms/a/files", transport.paths.last())
+        assertEquals("/r/a/report.md", files.whole(files.files[0]))
+    }
 }
