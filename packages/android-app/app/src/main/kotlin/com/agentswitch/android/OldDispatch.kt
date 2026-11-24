@@ -24,8 +24,10 @@ import com.agentswitch.kit.live.ShadedSprite
 /**
  * The old dispatch (the Dispatch tab: the compose box the router sends to an executor, the assistant, task pages,
  * threads, approvals and answers from a task, History and Models in Settings) is off (2026-11-24, the repo owner's
- * decision): disabled, not deleted, until the new dispatch built on Chat Rooms replaces it. The Mac refuses its routes
- * with 410 `old_dispatch_off`. Every entry into it in the app reads [OFF]; set it to false to bring it all back.
+ * decision): disabled, not deleted. The Dispatch tab now shows the new dispatch instead — the Chat Room the Mac flags
+ * as the dispatch desk (调度台; rooms/DispatchDesk.kt) — while Settings' rows for the old one stay dithered. The Mac
+ * refuses its routes with 410 `old_dispatch_off`. Every entry into it in the app reads [OFF]; set it to false to bring
+ * it all back (the tab then shows the old dispatch again).
  */
 object OldDispatch {
     const val OFF = true

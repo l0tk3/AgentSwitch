@@ -114,10 +114,11 @@ import kotlinx.coroutines.launch
  * (`T3 登录接口 ▾`) — or a swipe from the left — pulls out the task drawer: `# 全部`, the tasks being done, blocked and
  * to do, the done ones folded, `+ 新任务`; a task picked shows its messages alone, and what is written there is about
  * it. ⌕ searches, the people open the members. The room is read again every few seconds while the page is on screen,
- * and what is in it is then seen. `openTask`, `openSeq`, `openCard`: what 等你处理 opens it on.
+ * and what is in it is then seen. `openTask`, `openSeq`, `openCard`: what 等你处理 opens it on. `desk`: the page is the
+ * Dispatch tab's own (the dispatch desk, 调度台) — titled `Dispatch`, no `Back`, nothing to go back to when deleted.
  */
 @Composable
-fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: String? = null) {
+fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: String? = null, desk: Boolean = false) {
     val app = LocalAppModel.current
     val nav = LocalNav.current
     val classic = LocalLook.current.isClassic
@@ -152,7 +153,7 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
     LaunchedEffect(shared, app.api) { if (shared.isNotEmpty()) model.loadFiles(app.api) }
     // Deleted, here or from another screen: back to the list.
     LaunchedEffect(model.gone) {
-        if (model.gone) { nav.dismiss("room:$id"); app.rooms.refresh(app.api) }
+        if (model.gone) { if (!desk) nav.dismiss("room:$id"); app.rooms.refresh(app.api) }
     }
 
     fun act(work: suspend (com.agentswitch.kit.api.AgentSwitchAPI) -> Unit) { scope.launch { model.run(app.api, work) } }
@@ -236,7 +237,7 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
     ) {
         Column(Modifier.fillMaxSize().background(Theme.base).imePadding()) {
             val task = model.taskFilter?.let { detail?.task(it) }
-            val title = task?.let { RoomTask.word(it.n, it.title) } ?: detail?.room?.name ?: "Room"
+            val title = task?.let { RoomTask.word(it.n, it.title) } ?: if (desk) "Dispatch" else detail?.room?.name ?: "Room"
             NavBar(
                 title,
                 titleContent = {
@@ -258,7 +259,7 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
                         Text("$n ${if (n == 1) "Session" else "Sessions"}${if (detail.room.paused) " · Paused" else ""}", color = Theme.secondaryInk, style = mono(11), maxLines = 1)
                     }
                 },
-                leading = { BarBack({ nav.pop(); scope.launch { app.rooms.refresh(app.api) } }, "Rooms") },
+                leading = { if (!desk) BarBack({ nav.pop(); scope.launch { app.rooms.refresh(app.api) } }, "Rooms") },
                 trailing = {
                     Box(
                         Modifier.heightIn(min = 44.dp).width(34.dp).clickable(detail != null, role = Role.Button, onClickLabel = "搜索") { search() },
