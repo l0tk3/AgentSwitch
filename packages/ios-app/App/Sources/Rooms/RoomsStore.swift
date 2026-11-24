@@ -375,6 +375,20 @@ final class RoomPageModel {
         if !missed.isEmpty { self.error = missed.joined(separator: "\n") }
     }
 
+    /// 删除消息 (user #278): its words and files go, its place stays as 「这条消息已删除」; `tell`: the members who had it
+    /// already are told to leave it aside. The room read again.
+    func deleteMessage(_ seq: Int, tell: Bool, api: AgentSwitchAPI?) async {
+        guard let api else { return }
+        do {
+            try await api.deleteRoomMessage(room: id, seq: seq, tell: tell)
+            if replyTo == seq { replyTo = nil }
+        } catch {
+            self.error = error.localizedDescription
+        }
+        etag = nil
+        await refresh(api)
+    }
+
     func delete(_ api: AgentSwitchAPI?) async {
         guard let api else { return }
         do { try await api.deleteRoom(id); gone = true } catch { self.error = error.localizedDescription }

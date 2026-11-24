@@ -165,6 +165,17 @@ class RoomTests {
     }
 
     @Test
+    fun testDeletedMessagesAndFolding() {
+        val gone = KitJson.decodeFromString(RoomMessage.serializer(), """{"seq":3,"from":"you","to":[],"text":"","at":1,"deleted":{"at":2,"by":"you"}}""")
+        assertTrue(gone.deleted)
+        assertFalse(KitJson.decodeFromString(RoomMessage.serializer(), """{"seq":3,"from":"you","text":"x","deleted":null}""").deleted)
+        assertFalse(KitJson.decodeFromString(RoomMessage.serializer(), """{"seq":3,"from":"you","text":"x"}""").deleted)
+        assertFalse(RoomText.isLong("短"))
+        assertFalse(RoomText.isLong(List(12) { "x" }.joinToString("\n")))
+        assertTrue(RoomText.isLong(List(13) { "x" }.joinToString("\n")))
+        assertTrue(RoomText.isLong("长".repeat(800)))
+    }
+
     fun testRoutesSendOnlyWhatIsNamedAndReadAnOldMacAsNoRooms() = runTest {
         val transport = FakeTransport({ req, _ ->
             when {
@@ -192,6 +203,13 @@ class RoomTests {
         assertEquals("/rooms/a/rounds/ok", transport.paths.last())
         api.unseat("daemon", "a")
         assertEquals("DELETE", transport.requests.last().method)
+        // 删除消息 (user #278): `tell=1` only when asked for.
+        api.deleteRoomMessage("a", 7)
+        assertEquals("DELETE", transport.requests.last().method)
+        assertEquals("/rooms/a/messages/7", transport.paths.last())
+        assertTrue(transport.requests.last().url.contains("tell=1").not())
+        api.deleteRoomMessage("a", 7, tell = true)
+        assertTrue(transport.requests.last().url.contains("tell=1"))
 
         val old = api(FakeTransport({ req, _ -> """{"error":"not allowed"}""".toByteArray() to httpResponse(req.url, status = 403) }))
         assertFailsWith<RoomsUnsupported> { old.rooms(null) }

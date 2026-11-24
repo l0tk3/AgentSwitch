@@ -22,6 +22,7 @@ import com.agentswitch.kit.api.RoomsUnsupported
 import com.agentswitch.kit.api.deleteRoom
 import com.agentswitch.kit.api.markRoomRead
 import com.agentswitch.kit.api.pokeRoom
+import com.agentswitch.kit.api.deleteRoomMessage
 import com.agentswitch.kit.api.putRoomFile
 import com.agentswitch.kit.api.room
 import com.agentswitch.kit.api.roomAttention
@@ -553,6 +554,22 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
         refresh(api)
         poking = null
         if (missed.isNotEmpty()) error = missed.joinToString("\n")
+    }
+
+    /** The message the user asked to delete, while its confirmation is open. */
+    var deleting: RoomMessage? by mutableStateOf(null)
+
+    /**
+     * 删除消息 (user #278): its words and files gone, its place kept; `tell`: the members who had it already are told to
+     * leave it aside. The room read again; why not in [error].
+     */
+    suspend fun deleteMessage(api: AgentSwitchAPI?, seq: Int, tell: Boolean) {
+        deleting = null
+        // One further up than the room's last messages is not read again: marked here.
+        if (run(api) { it.deleteRoomMessage(id, seq, tell) }) {
+            kept[seq]?.let { keep(listOf(it.asDeleted())) }
+            taskMessages = taskMessages?.map { if (it.seq == seq) it.asDeleted() else it }
+        }
     }
 
     /** The message being poked (戳一下), while it is. */

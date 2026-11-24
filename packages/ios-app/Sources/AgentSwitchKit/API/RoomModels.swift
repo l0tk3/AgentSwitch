@@ -224,6 +224,8 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
     public let task: Int?
     /// `answer`: its sender waits for one (a question, a request); `none`: told for knowledge; nil: not said.
     public let expects: String?
+    /// Deleted by the user (user #278): its words and files are gone; drawn as 「这条消息已删除」 in its place.
+    public let deleted: Bool
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
@@ -242,10 +244,11 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains((fileName(path) as NSString).pathExtension.lowercased())
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, expects }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, expects, deleted }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, expects: String? = nil) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, expects: String? = nil, deleted: Bool = false) {
         self.expects = expects
+        self.deleted = deleted
         self.files = files
         self.task = task
         self.seq = seq
@@ -267,6 +270,14 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         files = (try? c.decode([String].self, forKey: .files)) ?? []
         task = (try? c.decodeIfPresent(Int.self, forKey: .task)).flatMap { $0 }
         expects = (try? c.decodeIfPresent(String.self, forKey: .expects)).flatMap { $0 }
+        deleted = c.contains(.deleted) && !((try? c.decodeNil(forKey: .deleted)) ?? true)
+    }
+
+    /// Folded in the timeline (user #280): more than `lines` lines, or more characters than that many wide lines hold.
+    public static func isLong(_ text: String, lines: Int = 12) -> Bool {
+        var n = 1
+        for c in text where c == "\n" { n += 1; if n > lines { return true } }
+        return text.count > lines * 60
     }
 
     /// A task's label (2026-11-24): `T3 登录接口`, the title cut to what fits beside a name.

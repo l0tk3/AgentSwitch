@@ -18,6 +18,8 @@ struct RoomPage: View {
     @State private var adding = false
     @State private var editing = false
     @State private var confirmDelete = false
+    /// The message the user asked to delete, while its confirmation is open (user #278).
+    @State private var deletingMessage: RoomMessage?
     @State private var notes = false
     @State private var tasks = false
     /// The tasks sheet opens on a new task (`+ 新任务` in the drawer).
@@ -184,6 +186,16 @@ struct RoomPage: View {
             }
         }
         #endif
+        .confirmationDialog("删除 #\(deletingMessage?.seq ?? 0)？", isPresented: Binding(get: { deletingMessage != nil }, set: { if !$0 { deletingMessage = nil } }),
+                            titleVisibility: .visible, presenting: deletingMessage) { m in
+            Button("删除", role: .destructive) { deletingMessage = nil; Task { await model.deleteMessage(m.seq, tell: false, api: app.api) } }
+            if m.to.contains(where: { $0 != RoomSeat.you }) {
+                Button("删除并告诉成员", role: .destructive) { deletingMessage = nil; Task { await model.deleteMessage(m.seq, tell: true, api: app.api) } }
+            }
+            Button("Cancel", role: .cancel) { deletingMessage = nil }
+        } message: { _ in
+            Text("文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到；已经收到的成员看过了，删不掉它记得的内容")
+        }
         .pixelBox(isPresented: $confirmDelete) {
             PixelBox(head: "Dissolve Room", tone: .red, message: "解散“\(detail?.room.name ?? "")”？房间、消息和共享文件夹一并删除。为这个房间新开的会话一起结束，对话记录留着可以恢复；原本就在跑的会话不受影响。",
                      actions: [.init(label: "Dissolve", role: .destructive) { Task { await model.delete(app.api) } }])
@@ -287,7 +299,8 @@ struct RoomPage: View {
                                        openFile: { showFile($0) },
                                        openTask: { n in withAnimation(.easeOut(duration: 0.15)) { model.taskFilter = n } },
                                        jump: { seq in Task { await model.reveal(seq, api: app.api) } },
-                                       poke: { handles in Task { await model.poke(handles, api: app.api) } })
+                                       poke: { handles in Task { await model.poke(handles, api: app.api) } },
+                                       delete: { deletingMessage = $0 })
                             .id(row.id)
                     }
                     Color.clear.frame(height: 8).id("end").reportsListEnd(in: "roomTimeline")
@@ -403,9 +416,15 @@ private struct RoomMessageRow: View {
     let jump: (Int) -> Void
     /// 戳一下: what still waits for these busy members given to them now.
     let poke: ([String]) -> Void
+    /// 删除消息 (user #278): asks first.
+    let delete: (RoomMessage) -> Void
     @Environment(\.interfaceLook) private var look
+    /// A long message opened whole (user #280: 发送的消息太长的话可以折叠).
+    @State private var expanded = false
 
     private static let faceSide: CGFloat = 30
+    /// Folded to this many lines when longer.
+    private static let foldLines = 12
 
     var body: some View {
         let m = row.message
@@ -422,11 +441,25 @@ private struct RoomMessageRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     if !row.continues { head(m, seat) }
                     if let n = m.replyTo { quote(n) }
-                    Text(RoomWords.text(m.text, handles: handles, look: look))
-                        .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                    if !m.files.isEmpty { RoomMessageFiles(room: detail.room.id, folder: detail.folder, paths: m.files, showInFiles: openFile) }
+                    if m.deleted {
+                        Text("这条消息已删除").font(.system(size: 14)).italic().foregroundStyle(Theme.inkDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        let long = RoomMessage.isLong(m.text, lines: Self.foldLines)
+                        Text(RoomWords.text(m.text, handles: handles, look: look))
+                            .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
+                            .lineLimit(long && !expanded ? Self.foldLines : nil)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                        if long {
+                            Button { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } } label: {
+                                Text(expanded ? "收起" : "展开全文").font(.system(size: 13)).foregroundStyle(Theme.signal)
+                                    .padding(.vertical, 2).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    if !m.files.isEmpty, !m.deleted { RoomMessageFiles(room: detail.room.id, folder: detail.folder, paths: m.files, showInFiles: openFile) }
                     readers(m)
                 }
             }
@@ -437,10 +470,14 @@ private struct RoomMessageRow: View {
             .overlay(alignment: .leading) { if forMe { Theme.waiting.frame(width: 3) } }
             .contentShape(Rectangle())
             .contextMenu {
-                Button("Reply", systemImage: "arrowshape.turn.up.left") { reply() }
+                if !m.deleted { Button("Reply", systemImage: "arrowshape.turn.up.left") { reply() } }
                 if m.from != RoomSeat.you, seat?.here == true { Button("Mention", systemImage: "at") { mention(m.from) } }
                 if tagTask, let n = m.task { Button("只看 T\(n)", systemImage: "number") { openTask(n) } }
-                Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = m.text }
+                if !m.deleted {
+                    Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = m.text }
+                    Divider()
+                    Button("删除消息…", systemImage: "trash", role: .destructive) { delete(m) }
+                }
             }
         }
     }
@@ -498,7 +535,10 @@ private struct RoomMessageRow: View {
         Button { jump(n) } label: {
             HStack(spacing: 6) {
                 if look.isClassic { Theme.line.frame(width: 2, height: 14) } else { Text("┌").font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.inkDim) }
-                if let quoted {
+                if let quoted, quoted.deleted {
+                    (Text(RoomWords.who(quoted.from) + "：").font(.system(size: 12.5, weight: .semibold)) + Text("已删除").font(.system(size: 12.5)).italic())
+                        .foregroundStyle(.secondary).lineLimit(1)
+                } else if let quoted {
                     (Text(RoomWords.who(quoted.from) + "：").font(.system(size: 12.5, weight: .semibold)) + Text(RoomWords.inline(RoomRow.quoteLine(quoted.text), size: 12.5)))
                         .foregroundStyle(.secondary).lineLimit(1)
                 } else {

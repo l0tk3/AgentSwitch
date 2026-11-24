@@ -8,6 +8,9 @@ import java.time.ZoneId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 
 // Chat Room as the Mac gives it (docs/chatroom-v0.md; the service's `api/rooms.ts`): the rooms, a room with its seats
 // and what was said, and what the pages make of them — a seat's state in the room's words, who a message still has to
@@ -193,7 +196,15 @@ data class RoomMessage(
     val task: Int? = null,
     /** `answer`: its sender waits for an answer; `none`: told for knowing; null: the reader judges. */
     val expects: String? = null,
-)
+    /** `{at, by}` when the user deleted it (user #278): its text is empty and its files gone; its place stays. */
+    @SerialName("deleted") private val deletion: JsonElement? = null,
+) {
+    /** Deleted by the user: drawn as 「这条消息已删除」 in its place. */
+    val deleted: Boolean get() = deletion != null && deletion !is JsonNull
+
+    /** As the Mac keeps it once deleted: no words, no files, its place. */
+    fun asDeleted(): RoomMessage = copy(text = "", files = emptyList(), deletion = JsonPrimitive(true))
+}
 
 /** Where a message is on its way to a seat (§5). Dealt with, there is no receipt. */
 enum class RoomReceipt(val rawValue: String, val word: String, val tick: String) {
@@ -637,6 +648,16 @@ data class RoomRow(
 
 /** A message's text in pieces: plain words, `code` between backticks, and the `@names` that are seats of the room. */
 object RoomText {
+    /** A message folded in the timeline (user #280): more than `lines` lines, or more than 60 characters a line of them. */
+    fun isLong(text: String, lines: Int = foldLines): Boolean {
+        var n = 1
+        for (c in text) if (c == '\n') { n += 1; if (n > lines) return true }
+        return text.codePointCount(0, text.length) > lines * 60
+    }
+
+    /** How many lines a long message shows folded. */
+    const val foldLines = 12
+
     sealed class Piece {
         data class Text(val text: String) : Piece()
         data class Code(val text: String) : Piece()

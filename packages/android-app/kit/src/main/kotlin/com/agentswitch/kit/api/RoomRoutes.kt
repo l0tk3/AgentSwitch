@@ -138,6 +138,18 @@ suspend fun AgentSwitchAPI.endSeat(handle: String, room: String, now: Boolean = 
 suspend fun AgentSwitchAPI.pokeRoom(room: String, handle: String? = null): List<RoomPoke> =
     post(listOf("rooms", room, "poke"), PokeBody(handle), PokeBody.serializer(), PokeReply.serializer()).results
 
+/**
+ * What deleting a message did (user #278): `reached` — the members who had it already (they read it; that can not be
+ * taken back); `withdrawn` — those it was still on its way to, who will not get it now; `told` — the line telling
+ * `reached` to leave it aside, when asked for.
+ */
+@Serializable
+data class RoomMessageDeleted(val ok: Boolean = false, val reached: List<String> = emptyList(), val withdrawn: List<String> = emptyList(), val told: Int? = null)
+
+/** A message deleted (user #278): its words and files gone, its place kept; `tell`: those who had it are told to leave it aside. */
+suspend fun AgentSwitchAPI.deleteRoomMessage(room: String, seq: Int, tell: Boolean = false): RoomMessageDeleted =
+    perform("DELETE", listOf("rooms", room, "messages", seq.toString()), if (tell) listOf(URLQueryItem("tell", "1")) else emptyList(), null, RoomMessageDeleted.serializer())
+
 /** The user has seen up to `seq`. */
 suspend fun AgentSwitchAPI.markRoomRead(room: String, seq: Int): Int =
     post(listOf("rooms", room, "read"), ReadBody(seq), ReadBody.serializer(), ReadReply.serializer()).readSeq

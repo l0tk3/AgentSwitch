@@ -820,4 +820,26 @@ final class RoomTests: XCTestCase {
         try await api.deleteRoomSecret("s2", in: "r")
         XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["GET /rooms/r/secrets", "DELETE /rooms/r/secrets/s2"])
     }
+
+    /// 删除消息 (user #278) and folding (user #280): a deleted message reads as such; the call as the service takes it.
+    func testMessageIsDeletedAndLongOnesFold() async throws {
+        let gone = try JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":3,"from":"you","to":[],"text":"","at":1,"deleted":{"at":2,"by":"you"}}"#.utf8))
+        XCTAssertTrue(gone.deleted)
+        XCTAssertFalse(try JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":3,"from":"you","text":"x","deleted":null}"#.utf8)).deleted)
+        XCTAssertFalse(try JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":3,"from":"you","text":"x"}"#.utf8)).deleted)
+        XCTAssertFalse(RoomMessage.isLong("短"))
+        XCTAssertFalse(RoomMessage.isLong(Array(repeating: "x", count: 12).joined(separator: "\n")))
+        XCTAssertTrue(RoomMessage.isLong(Array(repeating: "x", count: 13).joined(separator: "\n")))
+        XCTAssertTrue(RoomMessage.isLong(String(repeating: "长", count: 800)))
+
+        let transport = FakeTransport { req, _ in
+            (Data(#"{"ok":true,"reached":["daemon"],"withdrawn":["web"],"told":9}"#.utf8), httpResponse(req.url, status: 200))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let told = try await api.deleteRoomMessage(room: "r", seq: 4, tell: true)
+        XCTAssertEqual(told, RoomMessageDeleted(reached: ["daemon"], withdrawn: ["web"], told: 9))
+        try await api.deleteRoomMessage(room: "r", seq: 5)
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "") \($0.url?.query ?? "")" },
+                       ["DELETE /rooms/r/messages/4 tell=1", "DELETE /rooms/r/messages/5 "])
+    }
 }

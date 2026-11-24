@@ -51,6 +51,29 @@ private struct Done: Decodable { let ok: Bool? }
 private struct PokeBody: Encodable { let handle: String? }
 private struct PokeReply: Decodable { let results: [RoomPoke] }
 
+/// What came of deleting a message (user #278): the members it had reached, those it was withdrawn from before it
+/// reached them, and the line telling those who had it to leave it aside (its seq), when asked for.
+public struct RoomMessageDeleted: Decodable, Sendable, Hashable {
+    public let reached: [String]
+    public let withdrawn: [String]
+    public let told: Int?
+
+    private enum CodingKeys: String, CodingKey { case reached, withdrawn, told }
+
+    public init(reached: [String] = [], withdrawn: [String] = [], told: Int? = nil) {
+        self.reached = reached
+        self.withdrawn = withdrawn
+        self.told = told
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reached = (try? c.decode([String].self, forKey: .reached)) ?? []
+        withdrawn = (try? c.decode([String].self, forKey: .withdrawn)) ?? []
+        told = (try? c.decodeIfPresent(Int.self, forKey: .told)).flatMap { $0 }
+    }
+}
+
 /// What came of 戳一下 for one member: the user's message still waiting for it was given to it now, or why not.
 public struct RoomPoke: Decodable, Sendable, Hashable {
     public let handle: String
@@ -186,6 +209,13 @@ extension AgentSwitchAPI {
     /// nil: to every member something waits for.
     public func pokeRoom(_ room: String, handle: String? = nil) async throws -> [RoomPoke] {
         (try await post(["rooms", room, "poke"], body: PokeBody(handle: handle)) as PokeReply).results
+    }
+
+    /// 删除消息 (user #278): its words, files and search entry go, its place and number stay. Still on its way it is
+    /// withdrawn; `tell`: the members who had it already are told to leave it aside.
+    @discardableResult
+    public func deleteRoomMessage(room: String, seq: Int, tell: Bool = false) async throws -> RoomMessageDeleted {
+        try await perform("DELETE", ["rooms", room, "messages", String(seq)], query: tell ? [URLQueryItem(name: "tell", value: "1")] : [], body: nil)
     }
 
     /// The user has seen the sessions' rounds go by (`OK`): counted from here again. Nothing was stopped.

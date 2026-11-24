@@ -53,6 +53,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -313,6 +314,21 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
             head = "Dissolve Room", tone = PixelBox.Tone.Red,
             message = "解散“${detail?.room?.name ?: ""}”？房间、消息和共享文件夹一并删除。为这个房间新开的会话一起结束，对话记录留着可以恢复；原本就在跑的会话不受影响。",
             actions = listOf(PixelBox.Action("Dissolve", PixelBox.Action.Role.Destructive) { scope.launch { model.delete(app.api) } }),
+        )
+    }
+    // 删除消息 (user #278): asks first; to members, it may also tell those who had it to leave it aside.
+    val doomed = model.deleting
+    PixelBoxEffect(doomed != null, { model.deleting = null }) {
+        val m = doomed!!
+        val toMembers = m.to.any { it != RoomSeat.you }
+        PixelBox(
+            head = "删除 #${m.seq}", tone = PixelBox.Tone.Red, cancel = "取消",
+            message = "文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到；已经收到的成员看过了，删不掉它记得的内容" +
+                if (toMembers) "——选「删除并告诉成员」会发一句让它们忽略这条。" else "。",
+            actions = listOfNotNull(
+                PixelBox.Action("删除", PixelBox.Action.Role.Destructive) { scope.launch { model.deleteMessage(app.api, m.seq, tell = false) } },
+                if (toMembers) PixelBox.Action("删除并告诉成员", PixelBox.Action.Role.Destructive) { scope.launch { model.deleteMessage(app.api, m.seq, tell = true) } } else null,
+            ),
         )
     }
 }
@@ -605,6 +621,9 @@ private fun MessageRow(
     val lit = model.lit == m.seq
     val api = LocalAppModel.current.api
     val scope = rememberCoroutineScope()
+    // A long message folded to 12 lines (user #280), opened whole by the reader.
+    val long = remember(m.text) { !m.deleted && RoomText.isLong(m.text) }
+    var expanded by remember(m.seq) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         if (row.newDay) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -625,11 +644,13 @@ private fun MessageRow(
                 .combinedClickable(
                     remember { MutableInteractionSource() }, null,
                     onLongClick = {
-                        // A long press: answer it, name who said it, take its words.
-                        showMenu(PixelBox(anchor = bounds, cancel = null, actions = listOfNotNull(
+                        // A long press: answer it, name who said it, take its words, delete it (asks first). A deleted
+                        // one has nothing left to do.
+                        if (!m.deleted) showMenu(PixelBox(anchor = bounds, cancel = null, actions = listOfNotNull(
                             PixelBox.Action("Reply") { reply() },
                             if (m.from != RoomSeat.you && seat?.here == true) PixelBox.Action("Mention") { mention(m.from) } else null,
                             PixelBox.Action("Copy", icon = "doc.on.clipboard") { clipboard.setText(AnnotatedString(m.text)) },
+                            PixelBox.Action("删除消息…", PixelBox.Action.Role.Destructive, icon = "trash") { model.deleting = m },
                         )))
                     },
                     onClick = { },
@@ -658,12 +679,22 @@ private fun MessageRow(
                                 Text(RoomWords.time(m.at), color = Theme.inkDim, style = mono(11))
                             }
                         }
-                        Text(
-                            RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code, LocalOpenLink.current),
-                            Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
-                        )
-                        // The files it comes with (they are on the Mac): a picture shown, another file as a card; a tap opens one.
-                        MessageFiles(model, m.files)
+                        if (m.deleted) {
+                            Text("这条消息已删除", color = Theme.inkDim, style = plain(14).copy(fontStyle = FontStyle.Italic))
+                        } else {
+                            Text(
+                                RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code, LocalOpenLink.current),
+                                Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
+                                maxLines = if (long && !expanded) RoomText.foldLines else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis,
+                            )
+                            if (long) Text(
+                                if (expanded) "收起" else "展开全文",
+                                Modifier.clickable(role = Role.Button) { expanded = !expanded }.padding(vertical = 2.dp),
+                                color = Theme.signal, style = plain(13),
+                            )
+                            // The files it comes with (they are on the Mac): a picture shown, another file as a card; a tap opens one.
+                            MessageFiles(model, m.files)
+                        }
                         val readers = detail.readers(m)
                         val poke = if (m.from == RoomSeat.you && model.waitingFor(m.seq).isNotEmpty()) m.seq else null
                         if (readers != null || poke != null) ReadMark(readers, showMenu, poke?.let { seq -> { scope.launch { model.poke(api, seq) } } }, poking = model.poking == m.seq)
@@ -685,7 +716,8 @@ private fun QuoteBar(quoted: RoomMessage, handles: Set<String>, tap: () -> Unit)
     ) {
         if (classic) Box(Modifier.width(2.dp).fillMaxHeight().background(Theme.line)) else Text("┌─", color = Theme.inkDim, style = mono(12))
         Text(RoomWords.who(quoted.from), color = Theme.secondaryInk, style = plain(12, FontWeight.SemiBold), maxLines = 1)
-        Text(
+        if (quoted.deleted) Text("已删除", Modifier.weight(1f), color = Theme.inkDim, style = plain(12).copy(fontStyle = FontStyle.Italic), maxLines = 1)
+        else Text(
             RoomWords.text(RoomRow.quoteLine(quoted.text), handles, classic, Theme.secondaryInk, Theme.base, Theme.signal, Theme.code),
             Modifier.weight(1f), color = Theme.secondaryInk, style = plain(12), maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
