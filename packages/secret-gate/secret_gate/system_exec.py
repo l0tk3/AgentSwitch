@@ -67,7 +67,7 @@ class SystemDeps:
     status: Callable[[Path], Any]           # gate.sock -> the `status` result; GateError when it does not answer
     sleep: Callable[[float], None] = time.sleep
     simulate: bool = False                  # --root: list privileged commands instead of running them
-    wait_tries: int = 30
+    wait_tries: int = 90
     wait_delay: float = 1.0
 
 
@@ -573,9 +573,11 @@ def _publish(op: Publish, _deps: SystemDeps) -> list[str]:
 
 
 def _wait(op: WaitForService, deps: SystemDeps) -> list[str]:
-    expected = [r.public_key for r in key_rows(op.layout.gate)]
     last = "无响应"
     for attempt in range(deps.wait_tries):
+        # Read again each time: a service updated from a gate that kept its keys elsewhere makes its one key when it
+        # first starts, after this step began (2026-11-24: the update said "无响应" while the service was coming up).
+        expected = [r.public_key for r in key_rows(op.layout.gate)]
         try:
             status = deps.status(op.layout.socket)
             rows = status["keys"]

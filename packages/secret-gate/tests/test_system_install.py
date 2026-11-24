@@ -477,3 +477,24 @@ def test_install_as_the_mac_app_runs_it_with_home_unset(world):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "[完成]" in proc.stdout and keypair_info(world.layout.gate) is not None
     assert _snapshot(world.user_home) == before
+
+
+def test_the_wait_takes_a_key_the_service_makes_when_it_first_starts(world):
+    """An update from a gate that kept its keys elsewhere: the service makes its one key at its first start, after the
+    wait began (2026-11-24: the update said 无响应 while the service was coming up)."""
+    from secret_gate.system_exec import _wait
+    from secret_gate.system_ops import WaitForService
+
+    calls = {"n": 0}
+
+    def starting(socket):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ServiceUnavailable("凭据网关服务无响应（No such file or directory）")
+        if keypair_info(world.layout.gate) is None:
+            save_keypair(world.layout.gate, generate_keypair())
+        return local_status(world.layout.gate)(socket)
+
+    world.layout.gate.mkdir(parents=True, exist_ok=True)
+    lines = _wait(WaitForService(world.layout), world.deps(status=starting, wait_tries=5))
+    assert lines[0].startswith("服务已就绪")
