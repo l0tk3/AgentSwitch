@@ -791,4 +791,33 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(bodies[2], ["pixel": NSNull(), "classic": NSNull()])
         XCTAssertEqual(bodies[3], ["classic": ["emoji": "🦭"]])
     }
+
+    /// The room's secrets (the service's secrets.ts): ciphertexts only, read and removed from the phone.
+    func testSecretsAreReadAndRemoved() async throws {
+        let room = try JSONDecoder().decode(RoomDetail.self, from: Data(#"{"room":{"id":"r","name":"n"},"seats":[],"secrets":3}"#.utf8))
+        XCTAssertEqual(room.secrets, 3)
+        XCTAssertEqual(try JSONDecoder().decode(RoomDetail.self, from: Data(#"{"room":{"id":"r","name":"n"}}"#.utf8)).secrets, 0)
+
+        let transport = FakeTransport { req, _ in
+            if req.httpMethod == "DELETE" { return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url, status: 200)) }
+            return (Data(#"""
+            {"secrets":[
+              {"id":"s1","name":"GitHub 登录","kind":"site","url":"https://github.com","account":"me@x.com","token":"enc:v1:AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH","addedAt":1763800000000},
+              {"id":"s2","name":"OpenAI","kind":"api","url":"https://api.openai.com","token":"enc:v1:short0000000000000","addedAt":2},
+              {"id":"s3","name":"部署","kind":"exec","env":"DEPLOY_TOKEN","url":"","token":"enc:v1:x","addedAt":3},
+              {"id":"s4","name":"新的","kind":"vault","token":"enc:v1:y"}]}
+            """#.utf8), httpResponse(req.url, status: 200))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let secrets = try await api.roomSecrets("r")
+        XCTAssertEqual(secrets.map(\.kind), [.site, .api, .exec, .other])
+        XCTAssertEqual(secrets.map(\.kind.word), ["网站登录", "API Key", "命令用", "其他"])
+        XCTAssertEqual(secrets[0].whereLine, "https://github.com · me@x.com")
+        XCTAssertEqual(secrets[2].whereLine, "env DEPLOY_TOKEN")   // an empty url is none
+        XCTAssertNil(secrets[3].whereLine)
+        XCTAssertEqual(secrets[0].shortToken(), "enc:v1:AAAABBBBCCCCDDDDEEEEF…")
+        XCTAssertEqual(secrets[1].shortToken(), "enc:v1:short0000000000000")
+        try await api.deleteRoomSecret("s2", in: "r")
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["GET /rooms/r/secrets", "DELETE /rooms/r/secrets/s2"])
+    }
 }

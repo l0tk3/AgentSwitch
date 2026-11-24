@@ -605,11 +605,14 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
     /// Message number → the seats that have read it (given it whole, or read it themselves); kept for the newest few
     /// hundred.
     public let reads: [Int: [String]]
+    /// How many secrets the room keeps (ciphertexts sealed on the Mac).
+    public let secrets: Int
 
-    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, problems, notes, tasks, folder, claims, taskStats, reads }
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, problems, notes, tasks, folder, claims, taskStats, reads, secrets }
 
     public init(room: RoomInfo, seats: [RoomSeat], messages: [RoomMessage] = [], receipts: [Int: [String: RoomReceipt]] = [:], problems: [String] = [], notes: RoomNotes? = nil,
-                tasks: [RoomTask] = [], folder: String = "", claims: [RoomClaim] = [], taskStats: [Int: RoomStats] = [:], reads: [Int: [String]] = [:]) {
+                tasks: [RoomTask] = [], folder: String = "", claims: [RoomClaim] = [], taskStats: [Int: RoomStats] = [:], reads: [Int: [String]] = [:], secrets: Int = 0) {
+        self.secrets = secrets
         self.taskStats = taskStats
         self.reads = reads
         self.tasks = tasks
@@ -636,6 +639,7 @@ public struct RoomDetail: Decodable, Sendable, Hashable {
         claims = (try? c.decode([RoomClaim].self, forKey: .claims)) ?? []
         taskStats = ((try? c.decode([String: RoomStats].self, forKey: .taskStats)) ?? [:]).reduce(into: [:]) { out, e in if let n = Int(e.key) { out[n] = e.value } }
         reads = ((try? c.decode([String: [String]].self, forKey: .reads)) ?? [:]).reduce(into: [:]) { out, e in if let n = Int(e.key) { out[n] = e.value } }
+        secrets = (try? c.decode(Int.self, forKey: .secrets)) ?? 0
     }
 
     static func receipts(_ raw: [String: [String: String]]) -> [Int: [String: RoomReceipt]] {
