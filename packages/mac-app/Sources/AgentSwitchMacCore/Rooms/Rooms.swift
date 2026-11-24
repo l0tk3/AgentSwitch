@@ -556,7 +556,11 @@ public struct Room: Decodable, Equatable, Sendable {
     /// Message number → handle → where it is.
     public let receipts: [String: [String: String]]
 
-    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes, tasks, claims, folder, reads }
+    /// What each task has cost so far, by its number (2026-11-24): the wakes, characters, messages and calls counted
+    /// while a member worked on it.
+    public let taskStats: [Int: RoomSeat.Stats]
+
+    private enum CodingKeys: String, CodingKey { case room, seats, messages, receipts, notes, tasks, claims, folder, reads, taskStats }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -569,6 +573,8 @@ public struct Room: Decodable, Equatable, Sendable {
         claims = (try? c.decodeIfPresent([RoomClaim].self, forKey: .claims)) ?? []
         reads = (try? c.decodeIfPresent([String: [String]].self, forKey: .reads)) ?? [:]
         folder = try? c.decodeIfPresent(String.self, forKey: .folder)
+        let stats = (try? c.decodeIfPresent([String: RoomSeat.Stats].self, forKey: .taskStats)) ?? [:]
+        taskStats = Dictionary(uniqueKeysWithValues: stats.compactMap { k, v in Int(k).map { ($0, v) } })
     }
 
     /// The tasks in the order they are read: being done, to do, done (the last finished first).
@@ -596,6 +602,7 @@ public struct Room: Decodable, Equatable, Sendable {
         self.tasks = []
         self.claims = []
         self.reads = [:]
+        self.taskStats = [:]
         self.folder = nil
         self.room = room
         self.seats = seats

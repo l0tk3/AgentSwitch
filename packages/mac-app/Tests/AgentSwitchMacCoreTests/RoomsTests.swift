@@ -54,6 +54,9 @@ final class RoomsTests: XCTestCase {
         """.utf8))
         XCTAssertEqual(items.map(\.line), ["T4 卡住：iOS 表单：等字段名", "@api 问你：字段叫 name 吗？", "@ios 等你确认权限", "新的一种"])
         XCTAssertEqual(Set(items.map(\.id)).count, 4)
+        let costed = try JSONDecoder().decode(Room.self, from: Data(#"{"room":{"id":"r","name":"x","topic":"","paused":false,"lastSeq":0,"readSeq":0},"seats":[],"messages":[],"taskStats":{"3":{"wakes":2,"chars":1500,"posts":1,"calls":4},"x":{"wakes":1,"chars":1,"posts":1,"calls":1}}}"#.utf8))
+        XCTAssertEqual(costed.taskStats[3]?.says, "Woken 2× · 1.5K chars · 1 posts · 4 calls")
+        XCTAssertEqual(costed.taskStats.count, 1)
         let list = try JSONDecoder().decode([RoomSummary].self, from: Data(#"[{"id":"a","name":"x","attention":3},{"id":"b","name":"y"}]"#.utf8))
         XCTAssertEqual(list.map(\.attention), [3, 0])
     }

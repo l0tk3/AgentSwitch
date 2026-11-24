@@ -92,6 +92,7 @@ struct RoomTasksSheet: View {
                 let waits = room.waits(task)
                 if !waits.isEmpty { Text("Waits for " + waits.map { "T\($0)" }.joined(separator: ", ")).mono(11).foregroundStyle(Color.waiting) }
                 if let note = task.note { Text("→ " + note).font(.system(size: 12, design: .monospaced)).foregroundStyle(Look.ink2).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                if let cost = room.taskStats[task.n] { Text(cost.says).mono(11).foregroundStyle(Look.faint).help("这个任务至今的花费：被叫醒几次、送进去多少字、发了几条消息、调了几次房间工具") }
             }
             Spacer(minLength: 6)
             ownerMenu(task.owner) { model.setTask(task.n, owner: $0) }
