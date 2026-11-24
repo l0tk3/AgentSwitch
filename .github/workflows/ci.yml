@@ -70,38 +70,7 @@ jobs:
       - run: python -m venv .venv && .venv/bin/pip install --quiet -c ../mac-app/scripts/python-constraints.txt -e '.[dev]'
       - run: .venv/bin/pytest
 
-  # The gate on Windows (docs/gate-simple-v0.md §5): the core suite (POSIX-only tests are marked and skipped, Windows-only
-  # ones run: ACLs, the named pipe, secret_exec with cmd and PowerShell), then the service itself installed on the
-  # runner (an elevated administrator) and driven end to end. The coverage threshold is the Linux job's.
-  secret-gate-windows:
-    name: secret-gate · Windows (pytest, service smoke)
-    runs-on: windows-latest
-    # In development (gate-simple-v0 §5): the service smoke does not pass yet, so this job never fails the run.
-    continue-on-error: true
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: packages/secret-gate
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: packages/mac-app/scripts/python-constraints.txt
-      - run: python -m venv .venv; .venv\Scripts\pip install --quiet -c ../mac-app/scripts/python-constraints.txt -e '.[dev]'
-      # UTF-8 mode for the tests only: they read the gate's UTF-8 files with Path.read_text(), as on POSIX (the gate
-      # itself names its encodings, and its service runs with -X utf8)
-      # Each test by name (-vv: the -q in addopts takes one back); a hung one fails after 2 minutes with every thread's
-      # stack instead of silently using up the job's time.
-      - run: .venv\Scripts\pytest --cov-fail-under=0 -vv -rfE --timeout=120 --timeout-method=thread
-        env:
-          PYTHONUTF8: "1"
-      # Runs even when a test failed: the two say different things (the job fails either way).
-      - name: windows_service_smoke.ps1 (install, status, enc, proxy, rotate-key, uninstall)
-        if: ${{ !cancelled() }}
-        run: scripts\windows_service_smoke.ps1 -Venv .venv
+  # secret-gate on Windows is off for now (user #271); see git history for the job.
 
   linux-runtime:
     name: Linux runtime · ${{ matrix.arch }}

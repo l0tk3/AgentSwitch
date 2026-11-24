@@ -42,7 +42,7 @@ jobs:
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/jobs?per_page=100" > jobs.json
           jq -e '
             [.jobs[] | select(.name != "Publish GitHub Release")] as $jobs |
-            ($jobs | length == 7) and all($jobs[]; .conclusion == "success")
+            ($jobs | length == 6) and all($jobs[]; .conclusion == "success")
           ' jobs.json
       - uses: actions/download-artifact@v8
         with:
