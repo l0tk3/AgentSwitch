@@ -407,6 +407,14 @@ describe("an answer", () => {
     // Answering oneself calls nobody.
     expect(store.post(room.id, { from: "api", text: "补一句", replyTo: 1 }).to).toEqual([]);
   });
+
+  it("goes to whom it names, not also to the one it answers (user #260)", () => {
+    const { store, room } = made();
+    store.post(room.id, { from: "you", text: "@api 和 @ui 对一下" });
+    const m = store.post(room.id, { from: "api", text: "@ui 你那边接口是哪个版本？", replyTo: 1, expects: "answer" });
+    expect(m.to).toEqual(["ui"]);
+    expect(store.questionsForYou(room.id)).toEqual([]);
+  });
 });
 
 describe("whether a message expects a reply", () => {

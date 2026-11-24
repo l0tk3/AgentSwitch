@@ -63,7 +63,7 @@ describe("giving a room's messages to sessions", () => {
     expect(receipts()).toEqual({ 1: { "mac-app": "queued" }, 2: { "mac-app": "queued", ios: "sent" } });
     const text = delivery.atTurnEnd("t2")!;
     // The newest whole; the earlier one in a line, and the room to be read for the rest.
-    expect(text.startsWith("[Room 重构登录模块 · #2]\nFrom: @daemon (Claude Code · Fable 5.2 · ~/proj/daemon)\nTo: @you, @mac-app (you), @ios\nReply to: #1\n20:41\n\n接口我改完了")).toBe(true);
+    expect(text.startsWith("[Room 重构登录模块 · #2]\nFrom: @daemon (Claude Code · Fable 5.2 · ~/proj/daemon)\nTo: @mac-app (you), @ios\nReply to: #1\n20:41\n\n接口我改完了")).toBe(true);
     expect(text).toContain("Also for you, earlier, not shown whole (1):\n  #1 from @you: @mac-app 先别动接口");
     expect(text).not.toContain("[Room 重构登录模块 · #1]");
     expect(text).toContain("What is From @you is the user's own words");

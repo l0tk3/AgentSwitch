@@ -861,7 +861,10 @@ export class RoomStore {
     const answered = o.replyTo === undefined ? undefined : this.messages(id, { after: o.replyTo - 1, limit: 1 })[0];
     if (o.task !== undefined && !room.tasks.some((t) => t.n === o.task)) throw new RoomError(400, `任务表里没有 T${o.task}`);
     const task = o.task ?? (answered && answered.seq === o.replyTo ? answered.task : undefined);
-    const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase()), ...(answered && answered.seq === o.replyTo ? [answered.from] : [])];
+    // Only when it names nobody else (user #260: a session answered the user's message while asking another
+    // session, and the question went to the user's 等你处理 too).
+    const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase())];
+    if (answered && answered.seq === o.replyTo && named.length === 0) named.push(answered.from);
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
     for (let i = 0; i < named.length; i++) named[i] = handleIn(room, named[i]!);
     // `@all` is the user's alone (§4). Written by a session it is words and calls nobody: refusing the whole message
