@@ -22,7 +22,8 @@ final class RoomsStore {
     static let backgroundInterval: Duration = .seconds(20)
     static let unsupportedInterval: Duration = .seconds(60)
 
-    var rooms: [RoomSummary] { list?.rooms ?? [] }
+    /// The dispatch desk (调度台) first, then the rest as the Mac lists them.
+    var rooms: [RoomSummary] { list?.ordered ?? [] }
     /// Messages not seen yet: the tab's badge.
     var unread: Int { list?.unread ?? 0 }
     /// What waits on the user's hand in every room (等你处理), newest first; read when the list's count of them
@@ -32,6 +33,11 @@ final class RoomsStore {
     @ObservationIgnored private var attentionAt: Int?
     /// How many things wait, as the list says.
     var attentionCount: Int { list?.attention ?? 0 }
+    /// The items there were at the last read, by identity (room, kind, member, task, message); nil before the first
+    /// read, whose items are not new to anyone (they were there when the app started).
+    @ObservationIgnored private var attentionSeen: Set<String>?
+    /// Items not there at the last read: the app tells of them (a notification while it is not in front).
+    @ObservationIgnored var newAttention: ((@MainActor ([RoomAttentionItem]) -> Void))?
 
     /// The items read again; `always`: even when the list's count has not changed (their page is open).
     func refreshAttention(_ api: AgentSwitchAPI?, always: Bool = false) async {
@@ -39,8 +45,16 @@ final class RoomsStore {
         guard always || attentionAt != attentionCount else { return }
         let count = attentionCount
         do {
-            attention = try await api.roomAttention().items
+            let items = try await api.roomAttention().items
+            attention = items
             attentionAt = count
+            let ids = Set(items.map(\.id))
+            if let seen = attentionSeen {
+                let fresh = items.filter { !seen.contains($0.id) }
+                if !fresh.isEmpty { newAttention?(fresh) }
+            }
+            // What went away and comes back later is new again.
+            attentionSeen = ids
         } catch {
             // A Mac from before 等你处理: nothing to show.
             if case APIError.http(let status, _) = error, status == 404 || status == 403 { attention = []; attentionAt = count }
@@ -56,7 +70,9 @@ final class RoomsStore {
             if let fresh { list = fresh.list; etag = fresh.etag }
             unsupported = false
             error = nil
-            if attentionAt != attentionCount { await refreshAttention(api) }
+            // Read again when the count changed — and when the list did while something waits: one item can take
+            // another's place with the count the same.
+            if attentionAt != attentionCount || (fresh != nil && attentionCount > 0) { await refreshAttention(api) }
         } catch is RoomsUnsupported {
             guard asked == generation else { return }
             unsupported = true
@@ -74,6 +90,7 @@ final class RoomsStore {
         etag = nil
         attention = []
         attentionAt = nil
+        attentionSeen = nil
         unsupported = false
         error = nil
     }

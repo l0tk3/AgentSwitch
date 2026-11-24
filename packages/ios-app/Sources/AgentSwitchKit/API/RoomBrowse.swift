@@ -114,6 +114,15 @@ public struct RoomAttentionItem: Decodable, Sendable, Hashable, Identifiable {
         case .other: return said.isEmpty ? "有事等你处理" : said
         }
     }
+
+    /// The same in a notification, after `等你处理：` — no warning mark, the member named with `@`:
+    /// `@ios 等你确认权限`.
+    public var noticeLine: String {
+        var line = self.line
+        if line.hasPrefix("⚠ ") { line.removeFirst(2) }
+        if let handle, handle != RoomSeat.you, line.hasPrefix(handle) { line = "@" + line }
+        return line
+    }
 }
 
 /// `GET /rooms/attention`: newest first.

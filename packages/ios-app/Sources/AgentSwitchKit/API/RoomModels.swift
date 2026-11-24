@@ -156,6 +156,8 @@ public struct RoomSeat: Decodable, Sendable, Hashable, Identifiable {
     /// Muted by the user or an admin (§6.2): it reads and works but may not post; `mutedBy`: who did it.
     public let muted: Bool
     public let mutedBy: String?
+    /// Its session's two avatars (2026-11-24), the same in every room; nil for the user and when neither was chosen.
+    public let avatar: RoomAvatar?
 
     public var id: String { handle }
     public var here: Bool { left == nil }
@@ -166,10 +168,11 @@ public struct RoomSeat: Decodable, Sendable, Hashable, Identifiable {
     /// What the user has to do for a seat without the Kit.
     public static let noKitSays = "这个会话在 Chat Room 上线之前就已开着，身上没有 Chatroom Kit：它不能在房间里发言，也不会被消息唤醒。请将它恢复一次（记录不丢）。"
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, state, card, kit, muted, mutedBy }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, state, card, kit, muted, mutedBy, avatar }
 
     public init(handle: String, isUser: Bool = false, terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = RoomSeat.you,
-                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil, muted: Bool = false, mutedBy: String? = nil) {
+                canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil, muted: Bool = false, mutedBy: String? = nil, avatar: RoomAvatar? = nil) {
+        self.avatar = avatar
         self.muted = muted
         self.mutedBy = mutedBy
         self.handle = handle
@@ -202,6 +205,7 @@ public struct RoomSeat: Decodable, Sendable, Hashable, Identifiable {
         left = (try? c.decodeIfPresent(Int64.self, forKey: .left)).flatMap { $0 }
         state = (try? c.decodeIfPresent(String.self, forKey: .state)).flatMap { $0 }.flatMap(SeatState.init(rawValue:))
         card = (try? c.decodeIfPresent(SeatCard.self, forKey: .card)).flatMap { $0 }
+        avatar = (try? c.decodeIfPresent(RoomAvatar.self, forKey: .avatar)).flatMap { $0 }
     }
 }
 
@@ -543,13 +547,17 @@ public struct RoomInfo: Decodable, Sendable, Hashable, Identifiable {
     /// The user is told; nothing is stopped.
     public let rounds: Int?
     public let roundsLimit: Int
+    /// The dispatch desk (调度台): the user and the dispatch session; what the user says there is for the dispatch,
+    /// with no `@`.
+    public let desk: Bool
 
     /// The notice's sentence.
     public static func roundsSays(_ n: Int) -> String { "会话之间已经连续往返 \(n) 次，没有你参与。它们仍在继续，没有被打断。" }
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, lastSeq, readSeq, rounds, roundsLimit }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, lastSeq, readSeq, rounds, roundsLimit, desk }
 
-    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, lastSeq: Int = 0, readSeq: Int = 0, rounds: Int? = nil, roundsLimit: Int = 6) {
+    public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, lastSeq: Int = 0, readSeq: Int = 0, rounds: Int? = nil, roundsLimit: Int = 6, desk: Bool = false) {
+        self.desk = desk
         self.rounds = rounds
         self.roundsLimit = roundsLimit
         self.id = id
@@ -572,6 +580,7 @@ public struct RoomInfo: Decodable, Sendable, Hashable, Identifiable {
         readSeq = (try? c.decode(Int.self, forKey: .readSeq)) ?? 0
         rounds = (try? c.decodeIfPresent(Int.self, forKey: .rounds)).flatMap { $0 }
         roundsLimit = (try? c.decode(Int.self, forKey: .roundsLimit)) ?? 6
+        desk = (try? c.decode(Bool.self, forKey: .desk)) ?? false
     }
 }
 
@@ -711,11 +720,14 @@ public struct RoomSummary: Decodable, Sendable, Hashable, Identifiable {
     public let tasks: RoomTaskCounts
     /// How many things in the room wait on the user's hand (`GET /rooms/attention`, 2026-11-24).
     public let attention: Int
+    /// The dispatch desk (调度台): listed first.
+    public let desk: Bool
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, members, faces, last, unread, forYou, rounds, tasks, attention }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, members, faces, last, unread, forYou, rounds, tasks, attention, desk }
 
     public init(id: String, name: String, topic: String = "", paused: Bool = false, createdAt: Int64 = 0, members: Int = 1, faces: [Sitter] = [], last: Last? = nil, unread: Int = 0, forYou: Bool = false, rounds: Int? = nil,
-                tasks: RoomTaskCounts = RoomTaskCounts(), attention: Int = 0) {
+                tasks: RoomTaskCounts = RoomTaskCounts(), attention: Int = 0, desk: Bool = false) {
+        self.desk = desk
         self.attention = attention
         self.tasks = tasks
         self.rounds = rounds
@@ -746,6 +758,7 @@ public struct RoomSummary: Decodable, Sendable, Hashable, Identifiable {
         rounds = (try? c.decodeIfPresent(Int.self, forKey: .rounds)).flatMap { $0 }
         tasks = (try? c.decode(RoomTaskCounts.self, forKey: .tasks)) ?? RoomTaskCounts()
         attention = (try? c.decode(Int.self, forKey: .attention)) ?? 0
+        desk = (try? c.decode(Bool.self, forKey: .desk)) ?? false
     }
 
     /// The list's second line: who said the last thing and what; the topic before anything was said.
@@ -760,6 +773,9 @@ public struct RoomList: Decodable, Sendable, Hashable {
     public let rooms: [RoomSummary]
 
     public init(rooms: [RoomSummary]) { self.rooms = rooms }
+
+    /// The rooms as the list shows them: the dispatch desk first, the rest in the order given.
+    public var ordered: [RoomSummary] { rooms.filter(\.desk) + rooms.filter { !$0.desk } }
 
     /// Messages not seen yet, in all rooms: the tab's badge.
     public var unread: Int { rooms.reduce(0) { $0 + $1.unread } }

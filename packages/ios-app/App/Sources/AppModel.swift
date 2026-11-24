@@ -113,6 +113,8 @@ final class AppModel {
     let rooms = RoomsStore()
     /// A room to open on the Rooms tab (a demo screen, a terminal's room); the tab takes it.
     var openRoomRequest: String?
+    /// Where in that room (a notification of 等你处理): the task, the message, the member's card.
+    var openRoomAt: RoomRoute.Open?
     /// Where the Mac's files are read from: the API, or the demo screens' made-up disk.
     var fileSource: (any MacFileSource)? { api ?? demoFiles }
     /// The demo screens' made-up disk (`-uiDemo YES`); nil otherwise.
@@ -139,6 +141,7 @@ final class AppModel {
         self.vault = vault
         self.notifications = notifications
         loadSaved()
+        rooms.newAttention = { [weak self] items in self?.tellAttention(items) }
     }
 
     static func live() -> AppModel {
@@ -427,6 +430,25 @@ final class AppModel {
         sheet = nil
         files.openRequest = path
         filesShown = true
+    }
+
+    /// What newly waits in a room (等你处理), told while the app is not in front: one notification each.
+    private func tellAttention(_ items: [RoomAttentionItem]) {
+        guard !inFront else { return }
+        for item in items {
+            let at = RoomAttentionPage.where(item)
+            notifier.post(room: item.room, id: item.id, title: item.roomName.isEmpty ? "等你处理" : item.roomName,
+                          body: "等你处理：" + item.noticeLine, task: at.task, seq: at.seq, card: at.card)
+        }
+    }
+
+    /// From a notification: the Rooms tab opens the room, at the task, the message or the member's card.
+    func openRoom(_ id: String, at: RoomRoute.Open? = nil) {
+        sheet = nil
+        filesShown = false
+        tab = .rooms
+        openRoomAt = at
+        openRoomRequest = id
     }
 
     /// From a Live Activity: the terminals tab opens the terminal.

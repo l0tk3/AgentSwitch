@@ -713,4 +713,82 @@ final class RoomTests: XCTestCase {
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(transport.requests[4].httpBody)) as? NSDictionary)
         XCTAssertEqual(body, ["muted": true])
     }
+
+    /// A session's avatar (2026-11-24; the service's avatars.ts): one for each look, read off the seat; the library;
+    /// the dispatch desk marked in the list and the room's head.
+    func testAvatarsAndTheDeskAreRead() throws {
+        let json = #"""
+        {"room":{"id":"d","name":"调度台","desk":true,"lastSeq":0,"readSeq":0},
+         "seats":[
+           {"handle":"you","kind":"user","avatar":null},
+           {"handle":"ios","kind":"session","face":{"rows":["#.#.#",".###.","##.##",".###.","#.#.#"],"color":3},
+            "avatar":{"pixel":{"kind":"grid","id":"p1","palette":["611c17","ab7c51"],"rows":["0.1","..","Z0"]},"classic":{"kind":"emoji","id":"e1","emoji":"🦊","bg":4}}},
+           {"handle":"api","kind":"session","avatar":{"pixel":{"kind":"face","id":"f2","rows":["#####","#...#","#...#","#...#","#####"],"color":7},"classic":null}},
+           {"handle":"web","kind":"session","avatar":{"pixel":{"kind":"sprite"},"classic":{"kind":"emoji"}}},
+           {"handle":"old","kind":"session"}]}
+        """#
+        let room = try JSONDecoder().decode(RoomDetail.self, from: Data(json.utf8))
+        XCTAssertTrue(room.room.desk)
+        XCTAssertNil(room.seat("you")?.avatar)
+        let ios = try XCTUnwrap(room.seat("ios")?.avatar)
+        XCTAssertEqual(ios.pixel, .grid(id: "p1", palette: ["611c17", "ab7c51"], rows: ["0.1", "..", "Z0"]))
+        XCTAssertEqual(ios.classic, RoomClassicAvatar(id: "e1", emoji: "🦊", bg: 4))
+        XCTAssertEqual(ios.classic?.rgb(dark: true), RoomFace.colorsDark[4])
+        let api = try XCTUnwrap(room.seat("api")?.avatar)
+        XCTAssertEqual(api.pixel, .face(id: "f2", face: RoomFace(rows: ["#####", "#...#", "#...#", "#...#", "#####"], color: 7)))
+        XCTAssertNil(api.classic)
+        // What this app can not read is unchosen, not a room it can not read.
+        XCTAssertEqual(room.seat("web")?.avatar, RoomAvatar())
+        XCTAssertNil(room.seat("old")?.avatar)
+
+        // A character's cells: indices in 0-9a-zA-Z, `.` empty, an index past the palette left out.
+        let cells = RoomGrid.cells(palette: ["611c17", "ab7c51"], rows: ["0.1", "..", "Z0"])
+        XCTAssertEqual(cells.map { "\($0.x),\($0.y),\(String($0.rgb, radix: 16))" }, ["0,0,611c17", "2,0,ab7c51", "1,2,611c17"])
+        XCTAssertEqual([RoomGrid.index("0"), RoomGrid.index("9"), RoomGrid.index("a"), RoomGrid.index("z"), RoomGrid.index("A"), RoomGrid.index("Z"), RoomGrid.index(".")], [0, 9, 10, 35, 36, 61, nil])
+        XCTAssertEqual(RoomAvatar.initials("ios"), "IO")
+        XCTAssertEqual(RoomAvatar.initials("a"), "A")
+        XCTAssertEqual(RoomAvatar.initials("mac-app"), "MA")
+
+        let list = try JSONDecoder().decode(RoomList.self, from: Data(#"{"rooms":[{"id":"a","name":"A"},{"id":"d","name":"调度台","desk":true},{"id":"b","name":"B"}]}"#.utf8))
+        XCTAssertEqual(list.rooms.map(\.desk), [false, true, false])
+        XCTAssertEqual(list.ordered.map(\.id), ["d", "a", "b"])
+
+        let library = try JSONDecoder().decode(RoomAvatarLibrary.self, from: Data(#"""
+        {"faces":[{"id":"f1","rows":["#.#.#",".###.","##.##",".###.","#.#.#"],"color":2}],"art":[{"id":"p1","palette":["ffffff"],"rows":["0"]}],"emoji":[{"id":"e1","emoji":"🦊"}]}
+        """#.utf8))
+        XCTAssertEqual(library.faces.first?.face.color, 2)
+        XCTAssertEqual(library.art.map(\.id), ["p1"])
+        XCTAssertEqual(library.emoji.first?.emoji, "🦊")
+    }
+
+    /// 等你处理 in a notification: no warning mark, the member with its `@`; its identity is what a new one is told by.
+    func testAnAttentionItemIsToldInANotification() {
+        let permission = RoomAttentionItem(room: "r", roomName: "登录", kind: .permission, handle: "ios")
+        XCTAssertEqual(permission.noticeLine, "@ios 等你确认权限")
+        XCTAssertEqual(RoomAttentionItem(room: "r", roomName: "登录", kind: .question, handle: "api", task: 3, seq: 9, text: "用哪个字段？").noticeLine, "T3 · api 问你：用哪个字段？")
+        XCTAssertEqual(RoomAttentionItem(room: "r", roomName: "登录", kind: .blocked, handle: "ios", task: 4, text: "等接口").noticeLine, "T4 卡住：等接口")
+        XCTAssertNotEqual(permission.id, RoomAttentionItem(room: "r", roomName: "登录", kind: .permission, handle: "web").id)
+        XCTAssertEqual(permission.id, RoomAttentionItem(room: "r", roomName: "改名了", kind: .permission, handle: "ios", text: "x", at: 5).id)
+    }
+
+    func testAvatarCallsAreAsTheServiceTakesThem() async throws {
+        let transport = FakeTransport { req, _ in
+            if req.httpMethod == "GET" { return (Data(#"{"faces":[],"art":[],"emoji":[{"id":"e2","emoji":"🐼"}]}"#.utf8), httpResponse(req.url, status: 200)) }
+            return (Data(#"{"avatar":{"pixel":{"kind":"grid","id":"p7","palette":["000000"],"rows":["0"]},"classic":null}}"#.utf8), httpResponse(req.url, status: 200))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let library = try await api.roomAvatars()
+        XCTAssertEqual(library.emoji.map(\.id), ["e2"])
+        let set = try await api.setAvatar("ios", in: "r", pixel: .id("p7"))
+        XCTAssertEqual(set.pixel?.id, "p7")
+        try await api.setAvatar("ios", in: "r", classic: .emoji(id: "e2", bg: 5))
+        try await api.setAvatar("ios", in: "r", pixel: .reset, classic: .reset)
+        try await api.setAvatar("ios", in: "r", classic: .emojiText("🦭", bg: nil))
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["GET /rooms/avatars"] + Array(repeating: "PUT /rooms/r/seats/ios/avatar", count: 4))
+        let bodies = try transport.requests.dropFirst().map { try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap($0.httpBody)) as? NSDictionary) }
+        XCTAssertEqual(bodies[0], ["pixel": ["id": "p7"]])
+        XCTAssertEqual(bodies[1], ["classic": ["id": "e2", "bg": 5]])
+        XCTAssertEqual(bodies[2], ["pixel": NSNull(), "classic": NSNull()])
+        XCTAssertEqual(bodies[3], ["classic": ["emoji": "🦭"]])
+    }
 }

@@ -130,7 +130,7 @@ private struct RoomTaskRow<Actions: View>: View {
                 if task.owner != nil || waits != nil {
                     HStack(spacing: 6) {
                         if let owner = task.owner {
-                            RoomFaceView(face: detail.seat(owner)?.face, you: owner == RoomSeat.you, side: 16)
+                            RoomFaceView(seat: detail.seat(owner), handle: owner, side: 16)
                             Text(owner == RoomSeat.you ? "You" : "@\(owner)").foregroundStyle(Theme.secondaryInk)
                         }
                         if let waits {

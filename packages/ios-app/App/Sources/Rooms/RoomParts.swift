@@ -4,19 +4,46 @@ import SwiftUI
 // The pieces a room is drawn with (docs/chatroom-v0.md §1 头像, §6.1, §10): a seat's face, its state's mark and word,
 // a message's text with its `@names`, and the pictures Chat Room adds.
 
-/// A seat's face: its 5 × 5 pattern in its colour — square cells in the pixel look, round dots in the classic one. The
-/// user is a fixed `YOU`.
+/// A member's face as the look draws it (2026-11-24, avatars): the pixel look its pixel avatar — a 5 × 5 face or a
+/// 16 × 16 character — or, unchosen, the seat's face; the classic look its emoji on its colour or, unchosen, its
+/// initials on the face's colour. The user is a fixed `YOU`.
 struct RoomFaceView: View {
     let face: RoomFace?
     var you = false
     /// The side of the box; the cells are a fifth of what is left inside it.
     var side: CGFloat = 26
+    /// Its session's avatars; nil: neither chosen.
+    var avatar: RoomAvatar? = nil
+    /// Whose it is: the classic look's initials when no emoji was chosen.
+    var handle: String? = nil
     @Environment(\.interfaceLook) private var look
 
     private static let fallback = RoomFace(rows: ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"], color: 5)
 
+    init(face: RoomFace?, you: Bool = false, side: CGFloat = 26, avatar: RoomAvatar? = nil, handle: String? = nil) {
+        self.face = face
+        self.you = you
+        self.side = side
+        self.avatar = avatar
+        self.handle = handle
+    }
+
+    /// A seat's own: its face, its avatars, its handle (`you` for the user's).
+    init(seat: RoomSeat?, handle: String, side: CGFloat = 26) {
+        self.init(face: seat?.face, you: handle == RoomSeat.you, side: side, avatar: seat?.avatar, handle: handle)
+    }
+
     var body: some View {
-        if you { youMark } else { pattern(face ?? Self.fallback) }
+        if you { youMark }
+        else if look.isClassic {
+            if let classic = avatar?.classic { emoji(classic) } else if let handle { initials(handle) } else { pattern(face ?? Self.fallback) }
+        } else {
+            switch avatar?.pixel {
+            case .face(_, let drawn): pattern(drawn)
+            case .grid(_, let palette, let rows): RoomGridView(palette: palette, rows: rows, side: side)
+            case nil: pattern(face ?? Self.fallback)
+            }
+        }
     }
 
     private var youMark: some View {
@@ -26,6 +53,25 @@ struct RoomFaceView: View {
             .frame(width: side, height: side)
             .background(look.isClassic ? Theme.signal : Theme.ink, in: RoundedRectangle(cornerRadius: look.isClassic ? side * 0.3 : 0, style: .continuous))
             .accessibilityLabel("You")
+    }
+
+    private func emoji(_ classic: RoomClassicAvatar) -> some View {
+        Text(classic.emoji)
+            .font(.system(size: side * 0.58))
+            .frame(width: side, height: side)
+            .background(Circle().fill(Color(light: classic.rgb(dark: false), dark: classic.rgb(dark: true)).opacity(0.28)))
+            .accessibilityHidden(true)
+    }
+
+    private func initials(_ handle: String) -> some View {
+        let f = face ?? Self.fallback
+        return Text(RoomAvatar.initials(handle))
+            .font(.system(size: side * 0.4, weight: .semibold))
+            .foregroundStyle(.white)
+            .minimumScaleFactor(0.5)
+            .frame(width: side, height: side)
+            .background(Circle().fill(Color(light: f.rgb(dark: false), dark: f.rgb(dark: true))))
+            .accessibilityHidden(true)
     }
 
     private func pattern(_ face: RoomFace) -> some View {
@@ -48,6 +94,29 @@ struct RoomFaceView: View {
         .overlay {
             if !classic { Rectangle().strokeBorder(color.opacity(0.45), lineWidth: 1) }
         }
+        .accessibilityHidden(true)
+    }
+}
+
+/// A 16 × 16 pixel character (the library's `p…`): each cell its palette colour, the empty ones clear, in a box
+/// framed as the faces are.
+struct RoomGridView: View {
+    let palette: [String]
+    let rows: [String]
+    var side: CGFloat = 26
+
+    var body: some View {
+        let cells = RoomGrid.cells(palette: palette, rows: rows)
+        Canvas { context, size in
+            let inner = size.width - 2
+            let cell = inner / 16
+            for c in cells {
+                let rect = CGRect(x: 1 + CGFloat(c.x) * cell, y: 1 + CGFloat(c.y) * cell, width: cell + 0.3, height: cell + 0.3)
+                context.fill(Path(rect), with: .color(Color(uiColor: UIColor(rgb: c.rgb))))
+            }
+        }
+        .frame(width: side, height: side)
+        .overlay { Rectangle().strokeBorder(Theme.inkDim.opacity(0.4), lineWidth: 1) }
         .accessibilityHidden(true)
     }
 }

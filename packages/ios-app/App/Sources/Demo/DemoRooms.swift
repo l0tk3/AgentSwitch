@@ -15,6 +15,8 @@ enum DemoRooms {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         return decode("""
         {"rooms":[
+          {"id":"desk000000","name":"调度台","topic":"跟调度说要做什么","paused":false,"createdAt":0,"members":2,"faces":[],"desk":true,
+           "last":{"seq":9,"from":"dispatch","text":"@you 已经开了 2 个会话去做订阅页，进度在「手机订阅」里。","at":\(now - 60_000)},"unread":1,"forYou":true},
           {"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":false,"createdAt":1,"members":7,"faces":[],
            "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true,"tasks":{"todo":3,"doing":1,"done":2},"attention":3},
           {"id":"b1b2c3d4e5","name":"DayHub 发布","topic":"","paused":true,"createdAt":2,"members":3,"faces":[],
@@ -32,7 +34,7 @@ enum DemoRooms {
             let face = rows.split(separator: " ").map { "\"\($0)\"" }.joined(separator: ",")
             return """
             {"handle":"\(handle)","kind":"session","terminal":"\(handle == "daemon" ? "a1b2c3d4" : "t-\(handle)")","face":{"rows":[\(face)],"color":\(color)},"joinedAt":1,"addedBy":"\(by)","canAdd":\(canAdd),"byAgent":\(byAgent),"left":null,"state":"\(state)","kit":\(handle != "ios-app"),
-             "card":{"agent":"\(agent)","name":"\(handle)","cwd":"/Users/me/Projects/AgentSwitch/packages/\(handle)","model":"\(model)","profile":\(profile.map { "\"\($0)\"" } ?? "null"),\(dot.map { "\"color\":\"\($0)\"," } ?? "")"mode":"auto","node":null}}
+             "card":{"agent":"\(agent)","name":"\(handle)","cwd":"/Users/me/Projects/AgentSwitch/packages/\(handle)","model":"\(model)","profile":\(profile.map { "\"\($0)\"" } ?? "null"),\(dot.map { "\"color\":\"\($0)\"," } ?? "")"mode":"auto","node":null},"avatar":\(DemoAvatars.seat(handle))}
             """
         }
         let paused = screen == "roompaused"

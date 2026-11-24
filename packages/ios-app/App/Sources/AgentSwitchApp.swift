@@ -19,7 +19,7 @@ struct AgentSwitchApp: App {
         // browserzoomwatch|linkedpage|proxies|clash|clashservice|clashrules|clashcheck|clashnodes|clashtext|clashsource|
         // proxybrowser|proxyprofile|files|fileshome|filesopen|filespreview|filespreviewlong|filesimage|filesselect|fileschoose|filessensitive|
         // filesscoped|filessheet|filesreply|filesnew|filesnameerror|filestrash|filestrashbusy|filesselectbar|filesshare|filesupload|
-        // filesclash|filesgone|transcriptfiles|terminalpath|rooms|room|roompaused|roommembers|roomcard|roomnew|roomadd|roomrounds|roomnotes|
+        // filesclash|filesgone|transcriptfiles|terminalpath|rooms|room|roompaused|roommembers|roomcard|roomavatar|roomavatarclassic|roomnew|roomadd|roomrounds|roomnotes|
         // roomdrawer|roomsearch|roomtask|roomattention`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
@@ -72,7 +72,7 @@ struct AgentSwitchApp: App {
                                                                           MacPick(path: "\(DemoFiles.project)/.env", isFolder: false, sensitive: true)])
             // Chat Room (docs/chatroom-v0.md): the list, a room, its members, a member's card, a new room.
             case "rooms", "roomnew", "roomattention": model.tab = .rooms
-            case "room", "roompaused", "roomrounds", "roomnotes", "roomtasks", "roomtaskadd", "roomfiles", "roommembers", "roomcard", "roomadd", "roomdrawer", "roomsearch", "roomtask": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
+            case "room", "roompaused", "roomrounds", "roomnotes", "roomtasks", "roomtaskadd", "roomfiles", "roommembers", "roomcard", "roomavatar", "roomavatarclassic", "roomadd", "roomdrawer", "roomsearch", "roomtask": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)
             // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
             case "linkedpage":
@@ -94,7 +94,12 @@ struct AgentSwitchApp: App {
                 .environment(model)
                 .environment(lock)
                 .onOpenURL { open($0) }
-                .task { model.notifier.opened = { model.openTerminal($0) } }
+                .task {
+                    model.notifier.opened = { model.openTerminal($0) }
+                    model.notifier.openedRoom = { room, task, seq, card in
+                        model.openRoom(room, at: task == nil && seq == nil && card == nil ? nil : RoomRoute.Open(task: task, seq: seq, card: card))
+                    }
+                }
                 #if DEBUG
                 // Simulator has no camera: `simctl launch <dev> com.agentswitch.ios -pairLink 'agentswitch://pair?p=…'`.
                 .task { if let link = UserDefaults.standard.string(forKey: "pairLink") { model.receivePairingLink(link) } }

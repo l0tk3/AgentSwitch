@@ -160,6 +160,7 @@ struct RoomPage: View {
                 switch DemoRooms.screen {
                 case "roommembers": members = MembersRequest()
                 case "roomcard": members = MembersRequest(card: "android")
+                case "roomavatar", "roomavatarclassic": members = MembersRequest(card: "daemon")
                 case "roomadd": adding = true
                 case "roomnotes": notes = true
                 case "roomtasks", "roomtaskadd": tasks = true
@@ -401,7 +402,7 @@ private struct RoomMessageRow: View {
                 if row.continues {
                     Color.clear.frame(width: Self.faceSide, height: 1)
                 } else {
-                    Button { openCard(m.from) } label: { RoomFaceView(face: seat?.face, you: m.from == RoomSeat.you, side: Self.faceSide) }
+                    Button { openCard(m.from) } label: { RoomFaceView(seat: seat, handle: m.from, side: Self.faceSide) }
                         .buttonStyle(.plain).allowsHitTesting(m.from != RoomSeat.you).padding(.top, 2)
                 }
                 VStack(alignment: .leading, spacing: 3) {
@@ -459,7 +460,10 @@ private struct RoomMessageRow: View {
 
     /// The name in the face's colour in the classic look (as a chat's names are); ink in the pixel one.
     private func nameColor(_ seat: RoomSeat?) -> Color {
-        guard look.isClassic, let face = seat?.face else { return Theme.ink }
+        guard look.isClassic else { return Theme.ink }
+        // The ground of its chosen emoji, else its face's.
+        if let classic = seat?.avatar?.classic { return Color(light: classic.rgb(dark: false), dark: classic.rgb(dark: true)) }
+        guard let face = seat?.face else { return Theme.ink }
         return Color(light: face.rgb(dark: false), dark: face.rgb(dark: true))
     }
 
@@ -587,6 +591,8 @@ private struct RoomWriter: View {
     /// Where what is written goes: `发消息到 T3 登录接口…`, or to the room.
     private var placeholder: String {
         if let n = model.taskFilter { return "发消息到 " + RoomMessage.taskWord(n, model.detail?.tasks.first { $0.n == n }?.title) + "…" }
+        // The dispatch desk: what the user says is for the dispatch, with no `@`.
+        if model.detail?.room.desk == true { return "跟调度说要做什么…" }
         return "发消息到 \(model.detail?.room.name ?? "房间")…"
     }
 
@@ -611,6 +617,7 @@ private struct RoomWriter: View {
                 Button { model.draft = RoomMention.complete(model.draft, with: handle) } label: {
                     HStack(spacing: 10) {
                         if handle == RoomSeat.all { Color.clear.frame(width: 10, height: 10) } else { SeatStateMark(state: seat?.state).frame(width: 10) }
+                        if handle == RoomSeat.all { Color.clear.frame(width: 20, height: 20) } else { RoomFaceView(seat: seat, handle: handle, side: 20) }
                         Text("@\(handle)").font(.system(size: 14, weight: .semibold, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Theme.ink)
                         Text(handle == RoomSeat.all ? "全体，只有你能用"
                              : [seat?.card.map { RoomArt.agentName($0.agent) }, seat?.state?.word(in: look)].compactMap { $0 }.joined(separator: " · "))

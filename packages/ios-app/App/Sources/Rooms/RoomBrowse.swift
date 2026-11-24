@@ -119,7 +119,7 @@ struct RoomTaskDrawer: View {
                 }
                 Spacer(minLength: 4)
                 if let owner = task.owner {
-                    RoomFaceView(face: detail?.seat(owner)?.face, you: owner == RoomSeat.you, side: 18).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 4 }
+                    RoomFaceView(seat: detail?.seat(owner), handle: owner, side: 18).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 4 }
                 }
                 if unread > 0 { RoomCount(n: unread) }
             }
@@ -205,7 +205,7 @@ struct RoomTaskCard: View {
             }
             HStack(spacing: 6) {
                 if let owner = task.owner {
-                    RoomFaceView(face: detail.seat(owner)?.face, you: owner == RoomSeat.you, side: 18)
+                    RoomFaceView(seat: detail.seat(owner), handle: owner, side: 18)
                     Text(owner == RoomSeat.you ? "你" : "@" + owner).foregroundStyle(Theme.secondaryInk)
                     Text("·").foregroundStyle(Theme.inkDim)
                 } else {
@@ -338,7 +338,7 @@ struct RoomSearchPage: View {
     private func row(_ m: RoomMessage, _ detail: RoomDetail?) -> some View {
         let snippet = RoomSnippet.of(m.text, query: query)
         return HStack(alignment: .top, spacing: 10) {
-            RoomFaceView(face: detail?.seat(m.from)?.face, you: m.from == RoomSeat.you, side: 24).padding(.top, 1)
+            RoomFaceView(seat: detail?.seat(m.from), handle: m.from, side: 24).padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(RoomWords.who(m.from)).font(.system(size: 14, weight: .semibold, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Theme.ink).lineLimit(1)

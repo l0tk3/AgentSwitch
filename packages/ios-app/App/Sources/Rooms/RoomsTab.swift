@@ -80,8 +80,10 @@ struct RoomsTab: View {
     @ViewBuilder
     private func rows(_ rooms: [RoomSummary]) -> some View {
         let list = VStack(spacing: 0) {
+            // The desk has its mark, not a number: the rooms are counted after it.
+            let skip = rooms.first?.desk == true ? 1 : 0
             ForEach(Array(rooms.enumerated()), id: \.element.id) { index, room in
-                NavigationLink(value: RoomRoute.room(room.id)) { RoomListRow(room: room, index: index, last: index == rooms.count - 1) }
+                NavigationLink(value: RoomRoute.room(room.id)) { RoomListRow(room: room, index: index - skip, last: index == rooms.count - 1) }
                     .buttonStyle(.plain)
             }
         }
@@ -105,8 +107,10 @@ struct RoomsTab: View {
 
     private func openRequested() {
         guard let id = model.openRoomRequest else { return }
+        let at = model.openRoomAt
         model.openRoomRequest = nil
-        path = [.room(id)]
+        model.openRoomAt = nil
+        path = [.room(id, at)]
     }
 
     /// The inbox's mark and, when something waits, how many — amber (what waits for you).
@@ -135,10 +139,13 @@ private struct RoomListRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
-                if !look.isClassic {
+                if room.desk {
+                    RoomDeskMark()
+                } else if !look.isClassic {
                     Text(String(format: "%02d", index + 1)).font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.inkDim)
                 }
                 Text(room.name).font(.system(size: 15.5, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                if room.desk { RoomDeskTag() }
                 Spacer(minLength: 6)
                 if room.paused { Text("Paused").mono(11).foregroundStyle(Theme.inkDim) }
                 // Sessions talking among themselves with no word from the user (§7): told here too, in amber — it
@@ -150,9 +157,14 @@ private struct RoomListRow: View {
             Text(room.lastLine).font(.system(size: 13.5)).foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, 11)
+        .padding(.vertical, room.desk ? 13 : 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) { if !(look.isClassic && last) { HairRule().padding(.leading, look.isClassic ? Theme.Space.l : 0) } }
+        // The desk stands apart: a ground of the accent under it, a firmer rule below.
+        .background { if room.desk { Theme.signal.opacity(look.isClassic ? 0.07 : 0.09) } }
+        .overlay(alignment: .bottom) {
+            if room.desk { Theme.line.frame(height: look.isClassic ? 0.5 : 2) }
+            else if !(look.isClassic && last) { HairRule().padding(.leading, look.isClassic ? Theme.Space.l : 0) }
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -165,6 +177,47 @@ private struct RoomListRow: View {
                 .background(room.forYou ? Theme.waiting : Theme.inkDim, in: Capsule())
         } else {
             Text("[\(room.unread)]").font(.system(size: 11.5, design: .monospaced)).foregroundStyle(room.forYou ? Theme.waiting : Theme.secondaryInk)
+        }
+    }
+}
+
+/// The dispatch desk's mark (调度台): one source switched onto three lanes — the app's own mark, as the dispatch is the
+/// one that sends work out; a system symbol in the classic look.
+struct RoomDeskMark: View {
+    @Environment(\.interfaceLook) private var look
+
+    static let rows = PixelArt.markRows.map { String($0.map { $0 == "." ? "." : "#" }) }
+
+    var body: some View {
+        Group {
+            if look.isClassic {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 24, height: 24).background(Theme.signal, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            } else {
+                Canvas { context, _ in
+                    for (y, row) in Self.rows.enumerated() {
+                        for (x, c) in row.enumerated() where c == "#" {
+                            context.fill(Path(CGRect(x: CGFloat(x) * 1.5, y: CGFloat(y) * 1.5, width: 1.5, height: 1.5)), with: .color(Theme.signal))
+                        }
+                    }
+                }
+                .frame(width: 21, height: 16.5)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// `Dispatch` beside the desk's name.
+struct RoomDeskTag: View {
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        if look.isClassic {
+            Text("Dispatch").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.signal)
+                .padding(.horizontal, 6).padding(.vertical, 2).background(Theme.signal.opacity(0.14), in: Capsule())
+        } else {
+            Text("[DISPATCH]").mono(10.5, weight: .medium).foregroundStyle(Theme.signal)
         }
     }
 }

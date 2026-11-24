@@ -74,7 +74,7 @@ private struct RoomMemberRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RoomFaceView(face: seat.face, side: 26)
+            RoomFaceView(seat: seat, handle: seat.handle, side: 26)
                 .overlay(alignment: .bottomTrailing) {
                     SeatStateMark(state: seat.state).frame(width: 12, height: 12)
                         .background(Theme.base, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0))
@@ -119,6 +119,9 @@ private struct SeatCardPage: View {
     @State private var busy = false
     /// What became of the last 结束: it writes its handover note first.
     @State private var said: String?
+    /// The avatar picker is up.
+    @State private var pickingAvatar = false
+    @State private var confirmResetAvatar = false
 
     var body: some View {
         let seat = model.detail?.seat(handle)
@@ -126,7 +129,7 @@ private struct SeatCardPage: View {
             if let seat {
                 Section {
                     HStack(spacing: 12) {
-                        RoomFaceView(face: seat.face, side: 36)
+                        RoomFaceView(seat: seat, handle: seat.handle, side: 36)
                         Text("@\(seat.handle)").font(.system(size: 17, weight: .semibold, design: look.isClassic ? .default : .monospaced))
                         Spacer(minLength: 6)
                         SeatStateMark(state: seat.state)
@@ -181,6 +184,14 @@ private struct SeatCardPage: View {
                     } footer: {
                         Text(seat.byAgent ? "由别的会话拉起来的会话不能再拉人。" : "打开后，这个会话可以新建房间、拉会话进来，并读取拉人要用的清单。")
                     }
+                    // Its avatars (2026-11-24): one for each look, its session's in every room.
+                    Section {
+                        Button("Avatar") { pickingAvatar = true }
+                        Button("Reset", role: .destructive) { confirmResetAvatar = true }
+                            .disabled(busy || seat.avatar == nil || seat.avatar == RoomAvatar())
+                    } footer: {
+                        Text("像素风格用像素头像，Classic 风格用 Emoji 头像。头像跟着会话走，它在每个房间里都一样。")
+                    }
                     Section {
                         Button("Mention") { mention(handle) }
                         if let terminal = seat.terminal, seat.state != .exited, app.terminals.terminals.contains(where: { $0.id == terminal }) {
@@ -218,6 +229,23 @@ private struct SeatCardPage: View {
         }
         .navigationTitle("@\(handle)")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $pickingAvatar) {
+            RoomAvatarPicker(model: model, handle: handle).followsLook()
+        }
+        .confirmationDialog("把 @\(handle) 的头像恢复成默认？", isPresented: $confirmResetAvatar, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) {
+                Task { await act { try await $0.setAvatar(handle, in: model.id, pixel: .reset, classic: .reset) } }
+            }
+        } message: {
+            Text("像素风格回到它的方块脸，Classic 风格回到名字的首字母。")
+        }
+        #if DEBUG
+        .onAppear {
+            if DemoRooms.isDemo, DemoRooms.screen?.hasPrefix("roomavatar") == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { pickingAvatar = true }
+            }
+        }
+        #endif
         .confirmationDialog("把 @\(handle) 移出房间？", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
                 Task {

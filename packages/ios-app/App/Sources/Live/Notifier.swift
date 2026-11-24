@@ -15,6 +15,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     static let terminalKey = "terminal"
     /// A notification was tapped: its terminal's id.
     var opened: (@MainActor (String) -> Void)?
+    static let roomKey = "room"
+    /// A room's notification was tapped (等你处理): the room, and where in it — a task, a message, a member's card.
+    var openedRoom: (@MainActor (_ room: String, _ task: Int?, _ seq: Int?, _ card: String?) -> Void)?
     private let center: UNUserNotificationCenter?
 
     override init() {
@@ -52,6 +55,25 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         }
     }
 
+    /// Something in a room newly waits on the user (等你处理): `id` its identity — one notification for each, kept
+    /// until another of the same takes its place.
+    func post(room: String, id: String, title: String, body: String, task: Int?, seq: Int?, card: String?) {
+        Task {
+            guard await allowed(), let center else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            var info: [String: Any] = [Self.roomKey: room]
+            if let task { info["task"] = task }
+            if let seq { info["seq"] = seq }
+            if let card { info["card"] = card }
+            content.userInfo = info
+            content.threadIdentifier = "room:\(room)"
+            try? await center.add(UNNotificationRequest(identifier: "room:\(id)", content: content, trigger: nil))
+        }
+    }
+
     /// What was said about terminal `id` is taken back (it is on screen now).
     func clear(terminal id: String) {
         center?.removeDeliveredNotifications(withIdentifiers: ["terminal:\(id)"])
@@ -62,7 +84,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let id = response.notification.request.content.userInfo[Self.terminalKey] as? String else { return }
+        let info = response.notification.request.content.userInfo
+        if let room = info[Self.roomKey] as? String {
+            let task = info["task"] as? Int, seq = info["seq"] as? Int, card = info["card"] as? String
+            await MainActor.run { openedRoom?(room, task, seq, card) }
+            return
+        }
+        guard let id = info[Self.terminalKey] as? String else { return }
         await MainActor.run { opened?(id) }
     }
 }
