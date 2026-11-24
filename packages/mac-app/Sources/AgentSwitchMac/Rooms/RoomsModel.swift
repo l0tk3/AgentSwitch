@@ -517,36 +517,57 @@ final class RoomsModel {
         previewing = URL(fileURLWithPath: path)
     }
 
-    /// A file of a room on another node (user #255): fetched from there (the folder's own by its place in it, any other a
-    /// message came with by its whole path), then shown in a preview, or saved where the user says.
-    func fetch(file path: String, save: Bool) {
+    /// What a file of a room on another node is fetched for (user #255, #258: 点开就下载).
+    enum Fetch { case open, preview, saveAs }
+
+    /// A file of a room on another node: fetched from there (the folder's own by its place in it, any other a message
+    /// came with by its whole path). `open`: into Downloads and opened in its app; `preview`: Quick Look; `saveAs`:
+    /// where the user says.
+    func fetch(file path: String, as how: Fetch) {
         guard let id = selected else { return }
         let name = (path as NSString).lastPathComponent
         let wanted: String
         if let folder = room?.folder, path.hasPrefix(folder + "/") { wanted = String(path.dropFirst(folder.count + 1)) } else { wanted = path }
         var target: URL?
-        if save {
+        switch how {
+        case .saveAs:
             let panel = NSSavePanel()
             panel.nameFieldStringValue = name
             guard panel.runModal() == .OK, let url = panel.url else { return }
             target = url
+        case .open:
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser
+            target = Self.free(downloads.appendingPathComponent(name))
+        case .preview:
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-room-files/\(id)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            target = dir.appendingPathComponent(name)
         }
+        guard let target else { return }
         Task {
             do {
                 let data = try await client().roomFile(wanted, in: id)
-                if let target {
-                    try data.write(to: target)
-                } else {
-                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-room-files/\(id)", isDirectory: true)
-                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    let url = dir.appendingPathComponent(name)
-                    try data.write(to: url)
-                    previewing = url
+                try data.write(to: target)
+                switch how {
+                case .open: NSWorkspace.shared.open(target)
+                case .preview: previewing = target
+                case .saveAs: NSWorkspace.shared.activateFileViewerSelecting([target])
                 }
             } catch {
                 problem = "\(name) 取不下来：\(Self.say(error))"
             }
         }
+    }
+
+    /// `url`, or `name-2.ext`… when it is taken.
+    private static func free(_ url: URL) -> URL {
+        guard FileManager.default.fileExists(atPath: url.path) else { return url }
+        let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension, dir = url.deletingLastPathComponent()
+        for n in 2... {
+            let next = dir.appendingPathComponent(ext.isEmpty ? "\(stem)-\(n)" : "\(stem)-\(n).\(ext)")
+            if !FileManager.default.fileExists(atPath: next.path) { return next }
+        }
+        return url
     }
 
     func reveal(_ path: String) {

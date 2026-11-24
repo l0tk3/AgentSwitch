@@ -167,6 +167,8 @@ struct RoomRowActions {
     var reveal: ((String) -> Void)?
     /// Opens a message's file in a preview (Quick Look); a room on another node's: fetched from there first.
     var preview: ((String) -> Void)?
+    /// A room on another node: a message's file fetched from there into Downloads and opened (a click on it).
+    var open: ((String) -> Void)?
     /// A room on another node: a message's file fetched from there and saved where the user says.
     var saveAs: ((String) -> Void)?
     /// The timeline narrowed to a task's messages (its label clicked).
@@ -288,7 +290,7 @@ struct RoomMessageRow: View {
                     .foregroundStyle(Look.ink2)
                     .help(path)
                 } else {
-                    Button { actions.preview?(path) } label: {
+                    Button { if let open = actions.open { open(path) } else { actions.preview?(path) } } label: {
                         if let image = RoomPictures.thumb(path) {
                             Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
                                 .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
@@ -312,8 +314,9 @@ struct RoomMessageRow: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .help(path)
+                    .help(actions.open == nil ? path : "点开：下载到「下载」文件夹并打开\n\(path)")
                     .contextMenu {
+                        if actions.open != nil { Button("Download and Open") { actions.open?(path) } }
                         Button("Quick Look") { actions.preview?(path) }
                         if actions.reveal != nil { Button("Show in Finder") { actions.reveal?(path) } }
                         if actions.saveAs != nil { Button("Save As…") { actions.saveAs?(path) } }

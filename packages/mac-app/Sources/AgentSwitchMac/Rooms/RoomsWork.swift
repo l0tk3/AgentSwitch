@@ -153,7 +153,7 @@ struct RoomFilesSheet: View {
                                 Text("文件夹是空的。").font(.system(size: 12.5)).foregroundStyle(Look.faint).padding(.vertical, 24).frame(maxWidth: .infinity)
                             }
                             ForEach(shared.files) { file in
-                                Button { if let folder { model.onThisMac ? model.preview(file: folder + "/" + file.path) : model.fetch(file: folder + "/" + file.path, save: false) } } label: {
+                                Button { if let folder { model.onThisMac ? model.preview(file: folder + "/" + file.path) : model.fetch(file: folder + "/" + file.path, as: .open) } } label: {
                                     HStack(spacing: 10) {
                                         Text(file.path).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
                                         Spacer(minLength: 8)
