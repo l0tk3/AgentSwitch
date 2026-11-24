@@ -115,6 +115,7 @@ enum MainWindowPreview {
             ("task", { $0.taskFilter = 1 }),
             ("search", { $0.searching = true; $0.query = "毫秒"; $0.show(demoFound: demo.room.messages.filter { $0.text.contains("毫秒") }.reversed(), attention: []) }),
             ("attention", { $0.show(demoFound: [], attention: RoomsDemo.attention); $0.attentionShown = true }),
+            ("avatar", { $0.show(demoLibrary: RoomsDemo.library); $0.chooseAvatar("daemon") }),
         ]
         for (tail, setup) in steps {
             RoomsDemo.setup = setup

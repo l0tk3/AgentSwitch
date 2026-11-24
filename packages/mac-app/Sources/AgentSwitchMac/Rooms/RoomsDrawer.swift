@@ -254,3 +254,115 @@ struct RoomAttentionEntry: View {
         }
     }
 }
+
+/// A member's avatar chosen (2026-11-24, user #200, #203): one for the pixel look (a face or a pixel character of the
+/// library), one for the classic (an emoji on a ground of a face colour); each goes back to its own with Reset. The
+/// session's, in every room.
+struct RoomAvatarSheet: View {
+    @Bindable var model: RoomsModel
+    @State private var classicTab = false
+    @State private var bg = 0
+    @Environment(\.interfaceLook) private var look
+
+    private var seat: RoomSeat? { model.avatarSeat.flatMap { model.room?.seat($0) } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Avatar · @\(model.avatarSeat ?? "")").mono(look.isClassic ? 14 : 12.5, weight: .semibold).foregroundStyle(Look.ink)
+                Spacer()
+                RoomFaceView(seat: seat, side: 30).environment(\.interfaceLook, .pixel)
+                RoomFaceView(seat: seat, side: 30).environment(\.interfaceLook, .classic)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(look.isClassic ? Color.clear : Look.raised)
+            HairRule(color: Look.line)
+            Picker("", selection: $classicTab) {
+                Text("Pixel").tag(false)
+                Text("Classic").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize().padding(.horizontal, 16).padding(.top, 12)
+            Text(classicTab ? "经典外观用的头像：一个表情，底色可选。" : "像素外观用的头像：小像素脸，或 16×16 的像素人物（DiceBear Pixel Art，CC0）。")
+                .font(.system(size: 12)).foregroundStyle(Look.faint).padding(.horizontal, 16).padding(.top, 8)
+            ScrollView {
+                if let lib = model.avatarLibrary {
+                    if classicTab { classic(lib) } else { pixel(lib) }
+                } else {
+                    BrailleSpinner().padding(.vertical, 24).frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 330)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            HairRule(color: Look.line)
+            HStack(spacing: 10) {
+                if let problem = model.problem { Text(problem).font(.system(size: 12)).foregroundStyle(Color.failed).lineLimit(2) }
+                Spacer()
+                Button { model.setAvatar([classicTab ? "classic" : "pixel": NSNull()]) } label: { BracketLabel(word: "Reset") }.buttonStyle(BracketButtonStyle())
+                    .help(classicTab ? "回到名字的首字母。" : "回到它在房间里自动生成的像素脸。")
+                Button { model.sheet = nil } label: { BracketLabel(word: "Done", key: "esc") }.buttonStyle(BracketButtonStyle(role: .primary)).keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+        .frame(width: 620)
+        .roomFloat()
+        .onAppear { bg = seat?.avatar?.classic?.bg ?? seat?.face?.colorIndex ?? 0 }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 44, maximum: 52), spacing: 8)]
+
+    private func pixel(_ lib: RoomAvatarLibrary) -> some View {
+        let now = seat?.avatar?.pixel?.id
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Faces").mono(11.5).foregroundStyle(Look.ink2)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(lib.faces) { f in
+                    cell(now == f.id) { model.setAvatar(["pixel": ["id": f.id]]) } content: {
+                        RoomFacePattern(face: RoomFace(rows: f.rows, color: f.color), cell: 6, color: Color.faces[RoomFace(rows: f.rows, color: f.color).colorIndex])
+                    }
+                }
+            }
+            Text("Characters").mono(11.5).foregroundStyle(Look.ink2).padding(.top, 4)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(lib.art) { a in
+                    cell(now == a.id) { model.setAvatar(["pixel": ["id": a.id]]) } content: {
+                        RoomGridAvatar(pixel: .grid(id: a.id, palette: a.palette.map { UInt32($0, radix: 16) ?? 0 }, rows: a.rows), side: 36)
+                    }
+                }
+            }
+        }
+    }
+
+    private func classic(_ lib: RoomAvatarLibrary) -> some View {
+        let now = seat?.avatar?.classic
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text("Ground").mono(11.5).foregroundStyle(Look.ink2)
+                ForEach(0..<10, id: \.self) { i in
+                    Button { bg = i; if let e = now { model.setAvatar(["classic": ["emoji": e.emoji, "bg": i]]) } } label: {
+                        Circle().fill(Color.faces[i]).frame(width: 18, height: 18)
+                            .overlay { if bg == i { Circle().strokeBorder(Look.ink, lineWidth: 2) } }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(lib.emoji) { e in
+                    cell(now?.emoji == e.emoji) { model.setAvatar(["classic": ["id": e.id, "bg": bg]]) } content: {
+                        ZStack { Circle().fill(Color.faces[bg].opacity(0.28)); Text(e.emoji).font(.system(size: 22)) }.frame(width: 36, height: 36)
+                    }
+                }
+            }
+        }
+    }
+
+    private func cell<C: View>(_ on: Bool, action: @escaping () -> Void, @ViewBuilder content: () -> C) -> some View {
+        Button(action: action) {
+            content()
+                .frame(width: 44, height: 44)
+                .background(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0).fill(on ? Look.raised : Color.clear))
+                .overlay { RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0).strokeBorder(on ? Color.signal : Look.line, lineWidth: on ? 2 : 1) }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}

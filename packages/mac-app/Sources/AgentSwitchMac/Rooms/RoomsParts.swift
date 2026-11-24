@@ -11,8 +11,10 @@ extension Color {
     static let faces: [Color] = (0..<10).map { Color(nsColor: .dynamic(light: RoomFace.light[$0], dark: RoomFace.dark[$0], name: "AgentSwitchFace\($0)")) }
 }
 
-/// A seat's face (§1 头像): its pattern in its colour — squares in the pixel look, round dots in the classic one. The
-/// user is a fixed `YOU`. A seat without a face (an older service) is its handle's first letter.
+/// A seat's face (§1 头像), as its session chose it (2026-11-24, user #203: 像素风格的时候像素风头像，classic 风格的时候
+/// 正常头像): in the pixel look its pixel avatar — a face of the library or drawn, or a 16 × 16 character — else the
+/// seat's own face; in the classic look its emoji on a round ground, else its initials on the face's colour. The user is
+/// a fixed `YOU`.
 struct RoomFaceView: View {
     let seat: RoomSeat?
     /// The box's side; the cell is a fifth of what is left inside it.
@@ -22,44 +24,92 @@ struct RoomFaceView: View {
 
     var body: some View {
         let classic = look.isClassic
-        let color = seat?.face.map { Color.faces[$0.colorIndex] } ?? Look.ink
         Group {
             if seat?.isUser == true {
                 Text("YOU").font(.system(size: side * 0.38, weight: .bold, design: classic ? .default : .monospaced))
                     .foregroundStyle(classic ? Color.white : Look.ground)
                     .frame(width: side, height: side)
                     .background(classic ? Color.signal : Look.ink)
-            } else if let face = seat?.face, !face.cells.isEmpty {
-                pattern(face, color: color, classic: classic)
+            } else if classic {
+                RoomClassicAvatar(seat: seat, side: side)
+            } else if case .grid = seat?.avatar?.pixel {
+                RoomGridAvatar(pixel: seat!.avatar!.pixel!, side: side)
+                    .overlay { Rectangle().strokeBorder(Look.line, lineWidth: 1) }
+            } else if let face = seat.flatMap({ s in if case .face(_, let f)? = s.avatar?.pixel { return f } else { return s.face } }), !face.cells.isEmpty {
+                let color = Color.faces[face.colorIndex]
+                RoomFacePattern(face: face, cell: cell, color: color)
                     .frame(width: side, height: side)
-                    .background(classic ? color.opacity(0.2) : Color.clear)
-                    .background(classic ? Look.raised : Color.clear)
-                    .overlay { if !classic { Rectangle().strokeBorder(color.opacity(0.45), lineWidth: 1) } }
+                    .overlay { Rectangle().strokeBorder(color.opacity(0.45), lineWidth: 1) }
             } else {
                 Text(String(seat?.handle.prefix(1) ?? "?").uppercased()).mono(side * 0.45, weight: .semibold).foregroundStyle(Look.ink2)
                     .frame(width: side, height: side)
-                    .overlay { if !classic { Rectangle().strokeBorder(Look.line, lineWidth: 1) } }
-                    .background(classic ? Look.raised : Color.clear)
+                    .overlay { Rectangle().strokeBorder(Look.line, lineWidth: 1) }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: classic ? side * 0.3 : 0, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: classic ? side / 2 : 0, style: .continuous))
         .accessibilityLabel(seat.map { $0.isUser ? "You" : "@\($0.handle)" } ?? "")
     }
+}
 
-    private func pattern(_ face: RoomFace, color: Color, classic: Bool) -> some View {
+/// A 5 × 5 face: squares that touch.
+struct RoomFacePattern: View {
+    let face: RoomFace
+    var cell: CGFloat = 4
+    let color: Color
+
+    var body: some View {
         let cells = face.cells
-        // The classic look's dots stand a point apart; the pixel look's squares touch.
-        let step = classic ? cell + 1 : cell
-        let size = classic ? 5 * step - 1 : 5 * cell
-        return Canvas { context, _ in
+        Canvas { context, _ in
             var path = Path()
-            for c in cells {
-                let rect = CGRect(x: CGFloat(c.x) * step, y: CGFloat(c.y) * step, width: cell, height: cell)
-                if classic { path.addRoundedRect(in: rect, cornerSize: CGSize(width: cell * 0.35, height: cell * 0.35)) } else { path.addRect(rect) }
-            }
+            for c in cells { path.addRect(CGRect(x: CGFloat(c.x) * cell, y: CGFloat(c.y) * cell, width: cell, height: cell)) }
             context.fill(path, with: .color(color))
         }
-        .frame(width: size, height: size)
+        .frame(width: 5 * cell, height: 5 * cell)
+    }
+}
+
+/// A 16 × 16 pixel character, each cell its colour, filling the box.
+struct RoomGridAvatar: View {
+    let pixel: RoomAvatar.Pixel
+    let side: CGFloat
+
+    var body: some View {
+        let cells = pixel.cells
+        Canvas { context, size in
+            let step = size.width / 16
+            for c in cells {
+                context.fill(Path(CGRect(x: CGFloat(c.x) * step, y: CGFloat(c.y) * step, width: step + 0.3, height: step + 0.3)), with: .color(Color(red: Double((c.rgb >> 16) & 0xFF) / 255, green: Double((c.rgb >> 8) & 0xFF) / 255, blue: Double(c.rgb & 0xFF) / 255)))
+            }
+        }
+        .frame(width: side, height: side)
+        .background(Look.raised)
+    }
+}
+
+/// The classic look's avatar: its emoji, or its initials, on a round ground of a face colour.
+struct RoomClassicAvatar: View {
+    let seat: RoomSeat?
+    let side: CGFloat
+
+    var body: some View {
+        let chosen = seat?.avatar?.classic
+        let bg = Color.faces[((chosen?.bg ?? seat?.face?.colorIndex ?? 0) % 10 + 10) % 10]
+        ZStack {
+            Circle().fill(chosen == nil ? bg : bg.opacity(0.28))
+            if let chosen {
+                Text(chosen.emoji).font(.system(size: side * 0.58))
+            } else {
+                Text(Self.initials(seat?.handle ?? "?")).font(.system(size: side * 0.4, weight: .semibold)).foregroundStyle(Color.white)
+            }
+        }
+        .frame(width: side, height: side)
+    }
+
+    /// `mac-app` → `MA`, `daemon` → `DA`, `ios2` → `IO`.
+    static func initials(_ handle: String) -> String {
+        let words = handle.split(whereSeparator: { $0 == "-" || $0 == "_" || $0 == "." }).filter { !$0.isEmpty }
+        if words.count >= 2 { return words.prefix(2).compactMap { $0.first.map(String.init) }.joined().uppercased() }
+        return String(handle.prefix(2)).uppercased()
     }
 }
 
@@ -458,6 +508,8 @@ struct RoomMemberCard: View {
     var rename: (String) -> Void = { _ in }
     /// Its own terminal, on the Terminals page; nil: it has none here.
     var openTerminal: (() -> Void)? = nil
+    /// Its avatar chosen (one for each look).
+    var avatar: (() -> Void)? = nil
     @State private var renaming = false
     @State private var newName = ""
     @Environment(\.interfaceLook) private var look
@@ -545,6 +597,7 @@ struct RoomMemberCard: View {
                 HStack(spacing: 6) {
                     wide("Rename", help: "改它在这个房间里的名字。") { renaming.toggle(); newName = seat.handle }
                     wide(seat.muted ? "Unmute" : "Mute", help: "禁言：还能读、还能干活，但不能发消息、不能写置顶笔记。") { setMuted(!seat.muted) }
+                    if let avatar { wide("Avatar", help: "换它的头像：像素外观一个、经典外观一个，所有房间都一样。", action: avatar) }
                     Spacer(minLength: 0)
                 }
                 .padding(.top, 6)

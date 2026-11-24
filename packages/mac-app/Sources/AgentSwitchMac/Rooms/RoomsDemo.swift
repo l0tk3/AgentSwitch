@@ -26,11 +26,11 @@ extension RoomsDemo {
         {"room":{"id":"login","name":"重构登录模块","topic":"接口先定，三端跟着改","paused":false,"lastSeq":6,"readSeq":5,"rounds":6,"roundsLimit":6},
          "seats":[
           {"handle":"you","kind":"user","terminal":null,"face":null,"joinedAt":0,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":null,"card":null},
-          {"handle":"daemon","kind":"session","terminal":"t1","face":{"rows":["#.#.#",".###.","##.##",".#.#.","#...#"],"color":0},"joinedAt":0,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":"busy",
+          {"handle":"daemon","kind":"session","terminal":"t1","avatar":{"pixel":{"kind":"grid","id":"p1","palette":["611c17","ab7c51","ffffff","876658","dcd2ce","d29985","a26d3d","44c585","7dd6aa"],"rows":["................","....00000000....","...0000000000...","...0000000000...","...1111111111...","...1222112221...","..112341123411..","..112221122211..","...1111111111...","...1111551111...","...1115111111...","....11111111....",".......66.......","...6766666676...","..667777777766..","..667777788766.."]},"classic":{"kind":"emoji","id":"e1","emoji":"🦊","bg":2}},"face":{"rows":["#.#.#",".###.","##.##",".#.#.","#...#"],"color":0},"joinedAt":0,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":"busy",
            "card":{"agent":"claude-code","name":"daemon","cwd":"/Users/you/Projects/AgentSwitch/packages/daemon","model":"claude-fable-5-2","profile":"Work","color":"mint","mode":"acceptEdits","node":null}},
           {"handle":"mac-app","kind":"session","terminal":"t2","face":{"rows":[".###.","#.#.#","#####","..#..",".#.#."],"color":6},"joinedAt":0,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"idle","kit":false,
            "card":{"agent":"codex","name":"Mac App","cwd":"/Users/you/Projects/AgentSwitch/packages/mac-app","model":"gpt-6-sol","profile":null,"mode":"default","node":null}},
-          {"handle":"ios-app","kind":"session","terminal":"t3","face":{"rows":["##.##","#...#",".###.","#.#.#","##.##"],"color":3},"joinedAt":0,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"waiting","asks":{"title":"Do you trust the files in this folder?","options":["Yes, proceed","No, exit"],"selected":0,"trust":true},
+          {"handle":"ios-app","kind":"session","terminal":"t3","avatar":{"pixel":null,"classic":{"kind":"emoji","emoji":"🐙","bg":7}},"face":{"rows":["##.##","#...#",".###.","#.#.#","##.##"],"color":3},"joinedAt":0,"addedBy":"you","canAdd":false,"byAgent":false,"left":null,"state":"waiting","asks":{"title":"Do you trust the files in this folder?","options":["Yes, proceed","No, exit"],"selected":0,"trust":true},
            "card":{"agent":"opencode","name":"ios-app","cwd":"/Users/you/Projects/AgentSwitch/packages/ios-app","model":"deepseek-flash","profile":"Personal","color":"violet","mode":"default","node":null}},
           {"handle":"web","kind":"session","terminal":"t4","face":{"rows":["#...#",".#.#.","#####","#.#.#",".###."],"color":8},"joinedAt":0,"addedBy":"daemon","canAdd":false,"byAgent":true,"left":null,"state":"exited",
            "card":{"agent":"pi","name":"web","cwd":"/Users/you/Projects/Web","model":"deepseek-flash","profile":null,"mode":null,"node":null}}],
@@ -67,6 +67,12 @@ extension RoomsDemo {
     [{"room":"login","roomName":"重构登录模块","kind":"question","seq":6,"handle":"mac-app","text":"@you 模型加好了，要不要现在就发一版？","at":\(Int64(Date().timeIntervalSince1970 * 1000) - 120_000)},
      {"room":"login","roomName":"重构登录模块","kind":"trust","handle":"ios-app","terminal":"t3","text":"Do you trust the files in this folder?","at":\(Int64(Date().timeIntervalSince1970 * 1000) - 600_000)},
      {"room":"login","roomName":"重构登录模块","kind":"blocked","task":3,"handle":"ios-app","text":"iPhone 的模型跟着改：等你信任文件夹","at":\(Int64(Date().timeIntervalSince1970 * 1000) - 720_000)}]
+    """.utf8))
+
+    static let library: RoomAvatarLibrary = try! JSONDecoder().decode(RoomAvatarLibrary.self, from: Data("""
+    {"faces":[{"id":"f1","rows":["#.#.#",".###.","##.##",".#.#.","#...#"],"color":0},{"id":"f2","rows":[".###.","#.#.#","#####","..#..",".#.#."],"color":3},{"id":"f3","rows":["##.##","#...#",".###.","#.#.#","##.##"],"color":6}],
+     "art":[{"id":"p1","palette":["611c17","ab7c51","ffffff","876658","dcd2ce","d29985","a26d3d","44c585","7dd6aa"],"rows":["................","....00000000....","...0000000000...","...0000000000...","...1111111111...","...1222112221...","..112341123411..","..112221122211..","...1111111111...","...1111551111...","...1115111111...","....11111111....",".......66.......","...6766666676...","..667777777766..","..667777788766.."]}],
+     "emoji":[{"id":"e1","emoji":"🦊"},{"id":"e2","emoji":"🐼"},{"id":"e3","emoji":"🐨"},{"id":"e21","emoji":"🤖"},{"id":"e22","emoji":"👾"}]}
     """.utf8))
 
     static let models: RoomModels = try! JSONDecoder().decode(RoomModels.self, from: Data("""

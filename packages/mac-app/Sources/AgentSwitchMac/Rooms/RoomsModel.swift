@@ -11,7 +11,7 @@ import SwiftUI
 final class RoomsModel {
     /// What floats over the page: a room being made, sessions being added to the one on screen, or its name and topic
     /// being changed.
-    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models }
+    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models, avatar }
 
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// A made-up page for the design preview: shown as it is, the service never asked.
@@ -126,6 +126,29 @@ final class RoomsModel {
         if let taskFilter, message.task != taskFilter { self.taskFilter = nil }
         searching = false
         jump = seq
+    }
+
+    // avatars (2026-11-24, user #203)
+    /// The member whose avatar the sheet chooses.
+    private(set) var avatarSeat: String?
+    private(set) var avatarLibrary: RoomAvatarLibrary?
+
+    func chooseAvatar(_ handle: String) {
+        avatarSeat = handle
+        card = nil
+        open(.avatar)
+        if avatarLibrary == nil, !demo { Task { avatarLibrary = try? await client().avatarLibrary() } }
+    }
+
+    /// The design preview: the library as it is.
+    func show(demoLibrary: RoomAvatarLibrary) { avatarLibrary = demoLibrary }
+
+    func setAvatar(_ change: [String: Any]) {
+        guard let id = selected, let handle = avatarSeat, let body = try? JSONSerialization.data(withJSONObject: change) else { return }
+        Task {
+            do { try await client().setAvatar(body, seat: handle, in: id); roomVersion = nil; await load() }
+            catch { problem = Self.say(error) }
+        }
     }
 
     // 等你处理 (2026-11-24, user #191: 顶部单独一个入口)
@@ -593,7 +616,7 @@ final class RoomsModel {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
-                case .notes, .tasks, .files, .models: break
+                case .notes, .tasks, .files, .models, .avatar: break
                 case .edit:
                     guard let id else { break }
                     try await client().updateRoom(id, name: name, topic: topic)

@@ -31,6 +31,65 @@ public struct RoomFace: Decodable, Equatable, Sendable {
     public var colorIndex: Int { ((color % 10) + 10) % 10 }
 }
 
+/// A session's avatar (2026-11-24, daemon `rooms/avatars.ts`): one for the pixel look, one for the classic, the same in
+/// every room. nil of either: unchosen — the seat's face in the pixel look, its initials in the classic.
+public struct RoomAvatar: Decodable, Equatable, Sendable {
+    public enum Pixel: Equatable, Sendable {
+        case face(id: String?, RoomFace)
+        /// A 16 × 16 picture: each cell a palette index (`0-9a-zA-Z`), `.` empty.
+        case grid(id: String, palette: [UInt32], rows: [String])
+
+        public var id: String? { switch self { case .face(let id, _): id; case .grid(let id, _, _): id } }
+
+        /// The cells of a grid with their colours.
+        public var cells: [(x: Int, y: Int, rgb: UInt32)] {
+            guard case .grid(_, let palette, let rows) = self else { return [] }
+            return rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, ch -> (Int, Int, UInt32)? in
+                guard let i = RoomAvatar.index(ch), i < palette.count else { return nil }
+                return (x, y, palette[i])
+            } }
+        }
+    }
+    public struct Classic: Equatable, Sendable { public let id: String?; public let emoji: String; public let bg: Int }
+
+    public let pixel: Pixel?
+    public let classic: Classic?
+
+    public init(pixel: Pixel?, classic: Classic?) { self.pixel = pixel; self.classic = classic }
+
+    static func index(_ c: Character) -> Int? {
+        let digits = Array("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        return digits.firstIndex(of: c)
+    }
+
+    private struct Raw: Decodable {
+        let kind: String?; let id: String?; let rows: [String]?; let color: Int?; let palette: [String]?; let emoji: String?; let bg: Int?
+    }
+    private enum CodingKeys: String, CodingKey { case pixel, classic }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let p = try? c.decodeIfPresent(Raw.self, forKey: .pixel)
+        switch p?.kind {
+        case "face": pixel = p.flatMap { r in r.rows.map { .face(id: r.id, RoomFace(rows: $0, color: r.color ?? 0)) } }
+        case "grid": pixel = p.flatMap { r in r.rows.map { .grid(id: r.id ?? "", palette: (r.palette ?? []).map { UInt32($0, radix: 16) ?? 0 }, rows: $0) } }
+        default: pixel = nil
+        }
+        let k = try? c.decodeIfPresent(Raw.self, forKey: .classic)
+        classic = k?.kind == "emoji" ? k?.emoji.map { Classic(id: k?.id, emoji: $0, bg: k?.bg ?? 0) } : nil
+    }
+}
+
+/// The library a picker offers (`GET /rooms/avatars`).
+public struct RoomAvatarLibrary: Decodable, Equatable, Sendable {
+    public struct Face: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let rows: [String]; public let color: Int }
+    public struct Art: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let palette: [String]; public let rows: [String] }
+    public struct Emoji: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let emoji: String }
+    public let faces: [Face]
+    public let art: [Art]
+    public let emoji: [Emoji]
+}
+
 /// A seat's state in the room (§6.1). The first four are a terminal's own; the others say what is wrong with it.
 public enum SeatState: String, Sendable, CaseIterable {
     case busy, waiting, idle, exited, reconnecting, limited, signedOut = "signed_out", blocked, error, offline
@@ -153,6 +212,8 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     /// Its session has the Chatroom Kit (§6): it can speak in the room and be woken. False for one started before
     /// there was a Kit, until it is resumed; nil for the user, and from a service that does not say.
     public let kit: Bool?
+    /// Its session's avatar, one for each look (2026-11-24); nil: unchosen.
+    public let avatar: RoomAvatar?
 
     public var id: String { handle }
     /// Seated, running, and without the Kit: it reads nothing and says nothing until it is resumed once.
@@ -162,7 +223,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stats, asks, unread, stateWord = "state" }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stats, asks, unread, avatar, stateWord = "state" }
 
     public init(handle: String, kind: String = "session", terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = Room.you,
                 canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, muted: Bool = false, mutedBy: String? = nil,
@@ -184,6 +245,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         self.unread = 0
         self.stateWord = state?.rawValue
         self.card = card
+        self.avatar = nil
     }
 
     public init(from decoder: Decoder) throws {
@@ -205,6 +267,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         stateWord = try? c.decodeIfPresent(String.self, forKey: .stateWord)
         card = try? c.decodeIfPresent(SeatCard.self, forKey: .card)
         kit = try? c.decodeIfPresent(Bool.self, forKey: .kit)
+        avatar = try? c.decodeIfPresent(RoomAvatar.self, forKey: .avatar)
     }
 }
 
@@ -917,6 +980,14 @@ public extension DaemonClient {
         var path = "/rooms/\(DaemonClient.segment(room))/messages?limit=\(limit)&q=\(query.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? "")"
         if let task { path += "&task=\(task)" }
         return try decode(Found.self, try await call("GET", path, timeout: 10)).messages
+    }
+
+    func avatarLibrary() async throws -> RoomAvatarLibrary { try decode(RoomAvatarLibrary.self, try await call("GET", "/rooms/avatars", timeout: 10)) }
+
+    /// A member's avatar: a JSON object of `pixel` / `classic` as the service takes them (`{"id": "p7"}`,
+    /// `{"emoji": "🦊", "bg": 2}`), null to go back to its own; a key left out is not changed.
+    func setAvatar(_ body: Data, seat handle: String, in room: String) async throws {
+        _ = try await call("PUT", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))/avatar", body: body, timeout: 10)
     }
 
     func markRead(_ seq: Int, in room: String) async throws {

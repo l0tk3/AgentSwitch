@@ -119,6 +119,7 @@ private struct RoomsColumns: View {
             case .tasks: RoomTasksSheet(model: model)
             case .files: RoomFilesSheet(model: model)
             case .models: RoomModelsSheet(model: model)
+            case .avatar: RoomAvatarSheet(model: model)
             default: RoomSheet(model: model, kind: model.sheet ?? .new)
             }
         }
@@ -241,7 +242,7 @@ private struct RoomView: View {
                     RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
                                    setMuted: { model.setMuted($0, seat: handle) }, resume: { model.resume(seat: handle) },
                                    mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) }, rename: { model.rename(seat: handle, to: $0) },
-                                   openTerminal: seat.terminal.map { id in { model.card = nil; showTerminal(id) } })
+                                   openTerminal: seat.terminal.map { id in { model.card = nil; showTerminal(id) } }, avatar: { model.chooseAvatar(handle) })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
             }
@@ -731,6 +732,7 @@ private struct RoomSheet: View {
         case .tasks: "Tasks"
         case .files: "Files"
         case .models: "Models"
+        case .avatar: "Avatar"
         }
     }
 
@@ -770,7 +772,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
-        case .notes, .tasks, .files, .models: false
+        case .notes, .tasks, .files, .models, .avatar: false
         }
     }
 
