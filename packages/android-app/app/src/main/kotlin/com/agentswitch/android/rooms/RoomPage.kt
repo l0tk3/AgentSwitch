@@ -195,6 +195,7 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
             "roomcard" -> members(model.detail?.sessions?.firstOrNull()?.handle)
             "roomdrawer" -> drawer.open()
             "roomsearch" -> search()
+            "roomsecrets" -> nav.present("roomsecrets:$id") { RoomSecretsSheet(model) }
         }
     }
 
@@ -212,6 +213,7 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
                 PixelBox.Action("Notes…") { nav.present("roomnotes:$id") { RoomNotesSheet(model) } },
                 PixelBox.Action("Tasks…") { tasks() },
                 PixelBox.Action("Files…") { nav.present("roomfiles:$id") { RoomFilesSheet(model) } },
+                PixelBox.Action(if (d.secrets > 0) "Secrets (${d.secrets})…" else "Secrets…") { nav.present("roomsecrets:$id") { RoomSecretsSheet(model) } },
                 PixelBox.Action("Delete Room…", PixelBox.Action.Role.Destructive, icon = "trash") { confirmDelete = true },
             ),
         )

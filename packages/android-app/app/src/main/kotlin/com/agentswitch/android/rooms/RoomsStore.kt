@@ -129,6 +129,9 @@ class RoomsStore {
     var demoBytes: Map<String, ByteArray> = emptyMap()
         private set
 
+    /** The sample rooms' secrets (no Mac), by the room's id. */
+    var demoSecrets: Map<String, List<com.agentswitch.kit.api.RoomSecret>> = emptyMap()
+
     /** The avatar library (`GET /rooms/avatars`), read once when a picker first opens; the sample screens' own. */
     var avatars: com.agentswitch.kit.api.RoomAvatarLibrary? by mutableStateOf(null)
         private set

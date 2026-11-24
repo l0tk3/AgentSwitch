@@ -101,6 +101,7 @@ object Demo {
             browsers = if (screen == "browserprofiles") DemoBrowser.profileBrowsers else null)
         // The Rooms tab's sample rooms: one with its tasks, its shared folder and who is changing which files.
         model.rooms.setDemo(DemoRooms.list, mapOf(DemoRooms.room to DemoRooms.detail, DemoRooms.desk to DemoRooms.deskDetail), mapOf(DemoRooms.room to DemoRooms.files), DemoRooms.bytes, DemoRooms.attention, DemoRooms.avatars)
+        model.rooms.demoSecrets = mapOf(DemoRooms.room to DemoRooms.secrets)
         model.setDemo(macs, connection, progress, report)
         open(model, screen, phoneScreen)
         return model
