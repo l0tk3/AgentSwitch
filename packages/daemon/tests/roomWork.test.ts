@@ -829,7 +829,7 @@ describe("a stuck task, a long message, and asking for some of what was said (20
 });
 
 describe("what waits on the user (等你处理, 2026-11-24)", () => {
-  it("lists a stuck task and a question put to the user, until the user speaks", async () => {
+  it("lists a stuck task and a question put to the user, until the user speaks or reads it", async () => {
     const { store, room, call } = made();
     store.addTask(room.id, "you", { title: "Interface", owner: "api" });
     store.setTask(room.id, "api", 1, { state: "blocked", note: "等字段名" });
@@ -840,6 +840,11 @@ describe("what waits on the user (等你处理, 2026-11-24)", () => {
     expect(first.body.items.find((i: { kind: string }) => i.kind === "question")).toMatchObject({ room: room.id, handle: "api", task: 1, text: "@you 字段叫 name 还是 title？" });
     expect((await call("GET", "/rooms")).body.rooms[0].attention).toBe(2);
     await call("POST", `/rooms/${room.id}/messages`, { text: "@api 叫 name" });
+    expect((await call("GET", "/rooms/attention")).body.items.map((i: { kind: string }) => i.kind)).toEqual(["blocked"]);
+    // Read, not answered: no longer waiting either.
+    const asked = store.post(room.id, { from: "api", text: "@you 要不要顺便改 UI？", expects: "answer" });
+    expect((await call("GET", "/rooms/attention")).body.items.map((i: { kind: string }) => i.kind).sort()).toEqual(["blocked", "question"]);
+    store.read(room.id, asked.seq);
     expect((await call("GET", "/rooms/attention")).body.items.map((i: { kind: string }) => i.kind)).toEqual(["blocked"]);
   });
 });

@@ -368,8 +368,10 @@ export class RoomStore {
   /** Questions put to the user it has not answered yet (2026-11-24, 等你处理): addressed to the user, asking for an
    *  answer, said after the user last spoke in the room and not answered by a reply of the user's since. */
   questionsForYou(id: string): Message[] {
-    this.get(id);
-    const since = this.db.lastFromYou(id, 0) ?? 0;
+    const room = this.get(id);
+    // Seen is dealt with (user #234: 我都已读了，为什么还是有待办): a question the user has read, or answered by
+    // speaking after it, waits no more.
+    const since = Math.max(this.db.lastFromYou(id, 0) ?? 0, room.readSeq);
     return parsed(this.db.after(id, since, 200)).filter((m) => m.from !== YOU && m.to.includes(YOU) && m.expects === "answer").slice(-20);
   }
 
