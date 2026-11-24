@@ -75,6 +75,12 @@ extension RoomsDemo {
      "emoji":[{"id":"e1","emoji":"🦊"},{"id":"e2","emoji":"🐼"},{"id":"e3","emoji":"🐨"},{"id":"e21","emoji":"🤖"},{"id":"e22","emoji":"👾"}]}
     """.utf8))
 
+    static let secrets: [RoomSecret] = try! JSONDecoder().decode([RoomSecret].self, from: Data("""
+    [{"id":"a1b2c3","name":"GitHub 登录","kind":"site","url":"https://github.com","account":"me@example.com","token":"enc:v1:Q2lwaGVydGV4dEZvckdpdEh1YkxvZ2luMDEyMzQ1Njc4OQ","addedAt":0},
+     {"id":"d4e5f6","name":"OpenAI","kind":"api","url":"https://api.openai.com","token":"enc:v1:Q2lwaGVydGV4dEZvck9wZW5BSUtleTAxMjM0NTY3ODk","addedAt":0},
+     {"id":"g7h8i9","name":"部署密钥","kind":"exec","env":"DEPLOY_TOKEN","token":"enc:v1:Q2lwaGVydGV4dEZvckRlcGxveVRva2VuMDEyMzQ1Njc","addedAt":0}]
+    """.utf8))
+
     static let models: RoomModels = try! JSONDecoder().decode(RoomModels.self, from: Data("""
     {"agents":{"claude-code":{"current":"work","models":[{"id":"opus","name":"Opus 5.5"},{"id":"fable","name":"Fable 5.2"},{"id":"sonnet","name":"Sonnet 5.5"},{"id":"haiku","name":"Haiku 5.5"},{"id":"claude-opus-4-8","name":"Opus 4.8","older":true}],
        "profiles":[{"id":"default","name":"Default","off":[]},{"id":"work","name":"Work","off":["haiku"]},{"id":"p3","name":"Personal","off":["haiku","sonnet"]},

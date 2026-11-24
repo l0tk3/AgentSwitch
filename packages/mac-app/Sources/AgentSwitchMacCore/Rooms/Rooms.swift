@@ -603,6 +603,8 @@ public struct Room: Decodable, Equatable, Sendable {
         /// Sessions have exchanged this many messages with no word from the user (§7); nil under the limit.
         public let rounds: Int?
         public let roundsLimit: Int?
+        /// The dispatch desk (调度台): what the user says is for the dispatch, named or not.
+        public let desk: Bool?
     }
 
     /// What the notice of many rounds says: nothing was stopped.

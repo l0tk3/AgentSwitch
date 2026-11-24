@@ -26,6 +26,7 @@ struct RoomsPage: View {
                 let node = state.nodeId
                 model.client = { [app] in app.client(on: node) }
                 model.onThisMac = node == nil
+                model.sealer = node == nil ? { [app] drafts in try await app.gateCLI.seal(drafts: drafts) } : nil
                 if let demo {
                     model.show(demo: demo.rooms, room: demo.room)
                     if let sheet = RoomsDemo.opens { model.open(sheet) }
@@ -120,6 +121,7 @@ private struct RoomsColumns: View {
             case .files: RoomFilesSheet(model: model)
             case .models: RoomModelsSheet(model: model)
             case .avatar: RoomAvatarSheet(model: model)
+            case .secrets: RoomSecretsSheet(model: model)
             default: RoomSheet(model: model, kind: model.sheet ?? .new)
             }
         }
@@ -360,6 +362,7 @@ private struct RoomView: View {
             Menu {
                 Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
                 Button("Files…") { model.open(.files) }
+                Button("Secrets…") { model.open(.secrets) }
                 Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
                 Divider()
                 Button("Edit Room…") { model.open(.edit) }
@@ -554,6 +557,7 @@ private struct RoomWriter: View {
 
     /// Where the message goes, said in the box (user #191): the task shown, or the room.
     private var placeholder: String {
+        if room.room.desk == true { return "跟调度说要做什么…" }
         if let n = model.taskFilter { return "发消息到 " + RoomTaskLabel.word(n, room.tasks.first { $0.n == n }?.title) + "…  @ 唤醒成员" }
         return "发消息到 \(room.room.name)…  @ 唤醒成员"
     }
@@ -733,6 +737,7 @@ private struct RoomSheet: View {
         case .files: "Files"
         case .models: "Models"
         case .avatar: "Avatar"
+        case .secrets: "Secrets"
         }
     }
 
@@ -772,7 +777,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
-        case .notes, .tasks, .files, .models, .avatar: false
+        case .notes, .tasks, .files, .models, .avatar, .secrets: false
         }
     }
 

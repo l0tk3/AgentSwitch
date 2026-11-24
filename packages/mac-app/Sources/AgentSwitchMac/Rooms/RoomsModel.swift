@@ -11,7 +11,7 @@ import SwiftUI
 final class RoomsModel {
     /// What floats over the page: a room being made, sessions being added to the one on screen, or its name and topic
     /// being changed.
-    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models, avatar }
+    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models, avatar, secrets }
 
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// A made-up page for the design preview: shown as it is, the service never asked.
@@ -127,6 +127,102 @@ final class RoomsModel {
         searching = false
         jump = seq
     }
+
+    // secrets (2026-11-24, user #194)
+    /// Seals values with this Mac's gate; nil where the rooms are another node's (its values are sealed there).
+    @ObservationIgnored var sealer: (([RoomSecretDraft]) async throws -> [Result<String, CommandError>])?
+    private(set) var secrets: [RoomSecret]?
+    /// What the last add or import came to, in a line; and a plaintext file just read, to be put in the Trash.
+    private(set) var secretsSaid: String?
+    private(set) var plainFile: URL?
+    private(set) var sealing = false
+
+    func loadSecrets() {
+        guard let id = selected, !demo else { return }
+        Task { if let list = try? await client().roomSecrets(id) { secrets = list } }
+    }
+
+    /// Values sealed here and the ciphertexts added; the values are dropped with the drafts.
+    func addSecrets(_ drafts: [RoomSecretDraft], from file: URL? = nil) async -> Bool {
+        guard let id = selected else { return false }
+        if let problem = drafts.compactMap(\.problem).first { secretsSaid = problem; return false }
+        guard let sealer else { secretsSaid = "这台 Mac 封装不了别的节点的密钥：到那台 Mac 上加。"; return false }
+        sealing = true
+        defer { sealing = false }
+        do {
+            let tokens = try await sealer(drafts)
+            var items: [[String: Any]] = [], failed: [String] = []
+            for (d, r) in zip(drafts, tokens) {
+                switch r {
+                case .success(let t): items.append(d.item(token: t))
+                case .failure(let e): failed.append("\(d.name)：\(e.localizedDescription)")
+                }
+            }
+            if !items.isEmpty {
+                let body = try JSONSerialization.data(withJSONObject: ["items": items])
+                secrets = try await client().addRoomSecrets(body, to: id)
+            }
+            secretsSaid = ["已加 \(items.count) 条", failed.isEmpty ? nil : "没封上：" + failed.joined(separator: "；")].compactMap { $0 }.joined(separator: "。")
+            if file != nil, !items.isEmpty { plainFile = file }
+            return failed.isEmpty
+        } catch {
+            secretsSaid = Self.say(error)
+            return false
+        }
+    }
+
+    func importPlain(_ url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { secretsSaid = "读不了这个文件"; return }
+        let read = RoomSecretDraft.parse(csv: text)
+        if !read.problems.isEmpty { secretsSaid = read.problems.joined(separator: "；"); return }
+        Task { _ = await addSecrets(read.drafts, from: url) }
+    }
+
+    /// The plaintext file just imported, into the Trash.
+    func trashPlain() {
+        guard let url = plainFile else { return }
+        do { try FileManager.default.trashItem(at: url, resultingItemURL: nil); secretsSaid = "明文文件已移到废纸篓。"; plainFile = nil }
+        catch { secretsSaid = "没能移到废纸篓：\(error.localizedDescription)" }
+    }
+
+    func keepPlain() { plainFile = nil }
+
+    /// Ciphertexts exported from a room, added here (another room's secrets: the same gate opens them).
+    func importTokens(_ url: URL) {
+        guard let id = selected else { return }
+        Task {
+            do {
+                let data = try Data(contentsOf: url)
+                let list = try JSONDecoder().decode(ExportedSecrets.self, from: data).secrets
+                let items: [[String: Any]] = list.map { s in
+                    var o: [String: Any] = ["name": s.name, "kind": s.kind.rawValue, "token": s.token]
+                    if let u = s.url { o["url"] = u }; if let a = s.account { o["account"] = a }; if let e = s.env { o["env"] = e }
+                    return o
+                }
+                guard !items.isEmpty else { secretsSaid = "文件里没有密钥"; return }
+                secrets = try await client().addRoomSecrets(try JSONSerialization.data(withJSONObject: ["items": items]), to: id)
+                secretsSaid = "已导入 \(items.count) 条密文"
+            } catch { secretsSaid = "导入失败：\(Self.say(error))" }
+        }
+    }
+
+    struct ExportedSecrets: Codable { let secrets: [RoomSecret] }
+
+    func exportTokens(to url: URL) {
+        do { try JSONEncoder().encode(ExportedSecrets(secrets: secrets ?? [])).write(to: url); secretsSaid = "已导出 \(secrets?.count ?? 0) 条密文" }
+        catch { secretsSaid = Self.say(error) }
+    }
+
+    func removeSecret(_ secret: RoomSecret) {
+        guard let id = selected else { return }
+        Task {
+            do { try await client().removeRoomSecret(secret.id, from: id); secrets?.removeAll { $0.id == secret.id } }
+            catch { secretsSaid = Self.say(error) }
+        }
+    }
+
+    /// The design preview: secrets as they are.
+    func show(demoSecrets: [RoomSecret]) { secrets = demoSecrets }
 
     // avatars (2026-11-24, user #203)
     /// The member whose avatar the sheet chooses.
@@ -589,6 +685,7 @@ final class RoomsModel {
         card = nil
         if sheet == .files { shared = demo ? RoomsDemo.files : nil; loadShared() }
         if sheet == .models { if demo { adminModels = RoomsDemo.models }; loadAdminModels() }
+        if sheet == .secrets { secretsSaid = nil; plainFile = nil; loadSecrets() }
         guard sheet == .new || sheet == .add, !demo else { return }
         Task {
             if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
@@ -616,7 +713,7 @@ final class RoomsModel {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
-                case .notes, .tasks, .files, .models, .avatar: break
+                case .notes, .tasks, .files, .models, .avatar, .secrets: break
                 case .edit:
                     guard let id else { break }
                     try await client().updateRoom(id, name: name, topic: topic)
