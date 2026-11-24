@@ -940,14 +940,15 @@ describe("ending a member that holds unfinished work (2026-11-24)", () => {
     expect(store.last(room.id)!.text).toContain("〔交接〕@ui 你马上要被结束");
     expect(stopped).toEqual([]);
     store.handoff(room.id, "ui", "表单做了一半，在 Form.swift");
-    for (let i = 0; i < 50 && !stopped.length; i++) await new Promise((r) => setTimeout(r, 20));
+    // Up to 8 s: a busy CI runner took over the 1 s this once waited (v0.4.2's first build).
+    for (let i = 0; i < 400 && !stopped.length; i++) await new Promise((r) => setTimeout(r, 20));
     expect(stopped).toEqual(["ui"]);
     expect(store.get(room.id).seats.find((s) => s.handle === "ui")!.left).toBeDefined();
     // Nothing owed: at once.
     expect(await closeSeat({ store, stop }, room.id, "api", "you", false, false)).toBe("closed");
     expect(stopped).toEqual(["ui", "api"]);
     HANDOFF.waitMs = 120_000; HANDOFF.pollMs = 2_000;
-  });
+  }, 20_000);
 });
 
 describe("the user talking to a member in its terminal (2026-11-24)", () => {
