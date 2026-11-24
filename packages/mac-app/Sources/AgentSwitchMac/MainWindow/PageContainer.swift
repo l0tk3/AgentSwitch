@@ -52,7 +52,9 @@ extension MainPage {
         switch self {
         // Clash too since 2026-11-11: the app's own ground, light or dark with the system (black whatever before).
         case .dispatch, .clash, .rooms: .dispatchGround
-        case .terminals, .browser: .black
+        // The browser's screen: black while the pages are all dark, else the app's own ground with the system.
+        case .browser: MainPage.followSystem ? .dispatchGround : .black
+        case .terminals: .black
         }
     }
 }

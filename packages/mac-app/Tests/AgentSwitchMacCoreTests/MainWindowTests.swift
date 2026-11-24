@@ -60,7 +60,13 @@ final class MainWindowTests: XCTestCase {
     }
 
     func testEveryPageIsDark() {
-        XCTAssertTrue(MainPage.allCases.allSatisfy(\.alwaysDark), "Dispatch too since 2026-10-03: no light page between the dark ones")
+        // Since 2026-11-24 a choice: following the system, only Terminals stays dark; Always Dark, all of them.
+        let kept = UserDefaults.standard.object(forKey: MainPage.followSystemKey)
+        defer { UserDefaults.standard.set(kept, forKey: MainPage.followSystemKey) }
+        UserDefaults.standard.set(true, forKey: MainPage.followSystemKey)
+        XCTAssertEqual(MainPage.allCases.filter(\.alwaysDark), [.terminals])
+        UserDefaults.standard.set(false, forKey: MainPage.followSystemKey)
+        XCTAssertTrue(MainPage.allCases.allSatisfy(\.alwaysDark))
     }
 
     // MARK: activity

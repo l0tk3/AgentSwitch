@@ -51,10 +51,18 @@ public enum MainPage: String, CaseIterable, Sendable {
     /// dimmed in place elsewhere.
     public var hasList: Bool { self == .terminals || self == .browser }
 
-    /// The pages drawn dark whatever the system's look: the terminal window's dark block, the browser's screen, and
-    /// since 2026-10-03 Dispatch too (user: 首页白色的，其他地方黑色的太突兀了，这个dispatcher也改成默认黑色的) — a
-    /// light page between two dark ones made every page change a flash. The settings window still follows the system.
-    public var alwaysDark: Bool { true }
+    /// The pages drawn dark whatever the system's look. Since 2026-10-03 all of them (user: 首页白色的，其他地方黑色的太
+    /// 突兀了) — a light page between two dark ones made every page change a flash. Since 2026-11-24 (user: 为什么
+    /// dispatch rooms 浏览器默认都是暗黑主题？不能跟随系统吗？) that is a choice, `Pages: Follow System / Always Dark`
+    /// in Settings › General, following the system by default: then only Terminals, the terminal window's dark block,
+    /// stays dark. The settings window follows the system either way.
+    public var alwaysDark: Bool { self == .terminals || !MainPage.followSystem }
+
+    /// The pages follow the system's light or dark (Settings › General); false: all dark, as before 2026-11-24.
+    public static let followSystemKey = "pagesFollowSystem"
+    public static var followSystem: Bool { UserDefaults.standard.object(forKey: followSystemKey) as? Bool ?? true }
+    /// Said when the choice changes: the main window dresses its page again.
+    public static let followSystemChanged = Notification.Name("AgentSwitchPagesFollowSystemChanged")
 
     /// Where the page shown last is kept (UserDefaults).
     public static let storeKey = "mainWindowPage"

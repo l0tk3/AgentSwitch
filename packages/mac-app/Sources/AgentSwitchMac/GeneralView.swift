@@ -21,6 +21,7 @@ struct GeneralView: View {
     @AppStorage(SleepGuard.enabledKey) private var keepAwake = true
     /// The interface's look (docs/ui-v0.md §8), this Mac's own; every window follows it at once (`followsWindow`).
     @AppStorage(InterfaceLook.key) private var appearance = InterfaceLook.pixel.rawValue
+    @AppStorage(MainPage.followSystemKey) private var pagesFollow = true
     @AppStorage(CodeEditor.key) private var editor = CodeEditor.vscode.rawValue
 
     private var draft: PortSettings? {
@@ -34,6 +35,11 @@ struct GeneralView: View {
             Section {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(InterfaceLook.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                Picker("Pages", selection: Binding(get: { pagesFollow }, set: { pagesFollow = $0; NotificationCenter.default.post(name: MainPage.followSystemChanged, object: nil) })) {
+                    Text("Follow System").tag(true)
+                    Text("Always Dark").tag(false)
                 }
                 .pickerStyle(.segmented)
                 // The conversation's text, a point at a time (docs/ui-v0.md §8 “字号调节”).
@@ -53,7 +59,7 @@ struct GeneralView: View {
             } header: {
                 SectionLabel("Appearance")
             } footer: {
-                Footer("Appearance 只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Text Size 调整对话里文字的大小：消息、步骤、代码和回复框；侧栏、按钮和终端画面不变。")
+                Footer("Appearance 只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Pages 决定 Dispatch、Chat Room、Browser 的界面跟随系统的浅色/深色，还是总是暗色；终端本身总是暗色，网页本身由网站决定。Text Size 调整对话里文字的大小：消息、步骤、代码和回复框；侧栏、按钮和终端画面不变。")
             }
 
             Section {

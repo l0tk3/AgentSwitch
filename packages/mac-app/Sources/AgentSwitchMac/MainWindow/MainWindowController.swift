@@ -102,6 +102,13 @@ final class MainWindowController: NSObject {
             #endif
             UserDefaults.standard.set(hidden, forKey: MainRailLayout.hiddenKey)
         }
+        // Pages: Follow System / Always Dark changed in Settings: the page shown is dressed again at once.
+        NotificationCenter.default.addObserver(forName: MainPage.followSystemChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.window else { return }
+                Self.dress(window, for: self.state.page, record: self.terminals?.head.light ?? false)
+            }
+        }
     }
 
     // MARK: opening

@@ -121,6 +121,10 @@ enum MainWindowPreview {
             try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name)-\(tail).png"))
         }
         RoomsDemo.setup = nil
+        // With the system light (Pages: Follow System, 2026-11-24).
+        RoomsDemo.setup = { $0.drawer = true }
+        try await shot(model: model, page: .rooms, system: NSAppearance(named: .aqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name)-light.png"))
+        RoomsDemo.setup = nil
         // The names offered while an `@` is typed: over the box, not on it.
         RoomsDemo.draft = "@"
         try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name)-names.png"))

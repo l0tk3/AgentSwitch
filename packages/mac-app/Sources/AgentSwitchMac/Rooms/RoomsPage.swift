@@ -134,7 +134,7 @@ private struct RoomsList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                PartLabel("Rooms").layoutPriority(1)
+                PartLabel("Rooms").lineLimit(1).fixedSize()
                 Spacer(minLength: 4)
                 Button { model.open(.models) } label: { BracketLabel(word: "Models") }.buttonStyle(BracketButtonStyle(size: 12))
                     .help("管理员会话拉人时，每个配置下哪些模型能用。")
