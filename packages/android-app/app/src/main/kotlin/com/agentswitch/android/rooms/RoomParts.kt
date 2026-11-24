@@ -96,6 +96,60 @@ fun RoomFaceView(face: RoomFace?, modifier: Modifier = Modifier, you: Boolean = 
 }
 
 /**
+ * A member's avatar in the look in force (2026-11-24): the pixel look shows its pixel avatar — a 5 × 5 face drawn as a
+ * seat's face, or a 16 × 16 character — and the classic look its classic one, an emoji on a round ground of a face
+ * colour. Unchosen: the seat's face; its initials on the face's colour. The user is a fixed `YOU`.
+ */
+@Composable
+fun RoomAvatarView(seat: RoomSeat?, modifier: Modifier = Modifier, you: Boolean = false, side: Dp = 26.dp, handle: String = seat?.handle ?: "") {
+    if (you || seat?.isUser == true) { RoomFaceView(null, modifier, you = true, side = side); return }
+    if (LocalLook.current.isClassic) {
+        val chosen = seat?.avatar?.classic?.takeIf { it.emoji.isNotEmpty() }
+        ClassicAvatarView(chosen?.emoji, chosen?.bg ?: (seat?.face ?: RoomFace(color = RoomAvatarArt.faceColor(handle))).color, handle, modifier, side)
+    } else {
+        val pixel = seat?.avatar?.pixel
+        if (pixel?.isGrid == true) PixelGridView(pixel, modifier, side)
+        else RoomFaceView(pixel?.face ?: seat?.face, modifier, side = side)
+    }
+}
+
+/** The classic look's avatar: `emoji` (or, without one, the handle's initials) on a circle of face colour `bg`. */
+@Composable
+fun ClassicAvatarView(emoji: String?, bg: Int, handle: String, modifier: Modifier = Modifier, side: Dp = 26.dp) {
+    val ground = colorOf(RoomFace(color = bg).rgb(Theme.isDark))
+    Box(
+        modifier.size(side).background(if (emoji != null) ground.copy(alpha = 0.35f) else ground, androidx.compose.foundation.shape.CircleShape)
+            .semantics { contentDescription = "@$handle" },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (emoji != null) Text(emoji, fontSize = (side.value * 0.58f).sp, maxLines = 1, lineHeight = (side.value * 0.7f).sp)
+        else Text(com.agentswitch.kit.api.RoomAvatar.initials(handle), color = Color.White, fontSize = (side.value * 0.4f).sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
+/** A 16 × 16 pixel character, whole pixels per cell, centred in its box; `.` cells left empty. */
+@Composable
+fun PixelGridView(avatar: com.agentswitch.kit.api.PixelAvatar, modifier: Modifier = Modifier, side: Dp = 26.dp) {
+    val pixels = androidx.compose.runtime.remember(avatar) { avatar.pixels.map { (x, y, rgb) -> Triple(x, y, colorOf(rgb)) } }
+    val n = avatar.side.coerceAtLeast(1)
+    Canvas(modifier.size(side).border(1.dp, Theme.line, RectangleShape).clearAndSetSemantics { }) {
+        val cell = max(1f, floor(size.width / n))
+        val drawn = cell * n
+        val origin = Offset(((size.width - drawn) / 2).roundToInt().toFloat(), ((size.height - drawn) / 2).roundToInt().toFloat())
+        for ((x, y, color) in pixels) drawRect(color, Offset(origin.x + x * cell, origin.y + y * cell), Size(cell, cell))
+    }
+}
+
+/** A face colour for a handle with no seat to say it (the service's `faceColor`). */
+object RoomAvatarArt {
+    fun faceColor(name: String): Int {
+        var h = 0L
+        for (ch in name) h = ((h * 31) + ch.code) and 0xFFFFFFFFL
+        return (((h xor (h ushr 7)) and 0xFFFFFFFFL) % 10).toInt()
+    }
+}
+
+/**
  * A seat's state as a mark (§6.1). Amber is what needs the user's hands, red what went wrong; what mends itself has no
  * colour — a spinner while it tries again, a dim key while it only waits. Never the colour alone: the word stands
  * beside it.

@@ -15,7 +15,7 @@ import com.agentswitch.android.R
 
 /**
  * Notifications the phone posts itself (docs/app-v0.md §5 “通知”, 2026-11-11): a terminal that newly waits for you, a
- * terminal whose turn ended.
+ * terminal whose turn ended, a task that needs you, something in a room that waits on you (等你处理).
  *
  * Local ones: the app posts them when it learns of the change, which it does while it runs — in front, and behind
  * for as long as something is in progress (FollowService keeps it running then). With the app frozen or closed
@@ -35,6 +35,11 @@ class Notifier(context: Context) {
         manager?.createNotificationChannel(
             NotificationChannel(CHANNEL, "Terminals", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "终端等你处理，或这一轮已结束。"
+            },
+        )
+        manager?.createNotificationChannel(
+            NotificationChannel(ROOMS_CHANNEL, "Rooms", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "房间里有事等你处理。"
             },
         )
         manager?.createNotificationChannel(
@@ -101,6 +106,34 @@ class Notifier(context: Context) {
         manager.notify("task:$task", 0, notification)
     }
 
+    /**
+     * One thing in a room that newly waits on the user (等你处理): `等你处理：@ios 等你确认权限`. Tapping it opens the room
+     * there — `agentswitch://room/<id>?task=&seq=&card=`.
+     */
+    fun postRoom(room: String, identity: String, title: String, body: String, task: Int?, seq: Int?, card: String?) {
+        val manager = manager ?: return
+        if (!allowed) { prepare(); return }
+        val link = Uri.Builder().scheme("agentswitch").authority("room").appendPath(room).apply {
+            task?.let { appendQueryParameter("task", it.toString()) }
+            seq?.let { appendQueryParameter("seq", it.toString()) }
+            card?.let { appendQueryParameter("card", it) }
+        }.build()
+        val open = Intent(Intent.ACTION_VIEW, link, context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = PendingIntent.getActivity(context, ("room:$identity").hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = Notification.Builder(context, ROOMS_CHANNEL)
+            .setSmallIcon(StatusIcon.of(context))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setGroup("room:$room")
+            .build()
+        manager.notify("room:$identity", 0, notification)
+    }
+
     /** What was said about task `id` is taken back (it was opened or deleted). */
     fun clearTask(id: String) {
         manager?.cancel("task:$id", 0)
@@ -114,5 +147,6 @@ class Notifier(context: Context) {
     companion object {
         const val CHANNEL = "terminals"
         const val TASKS_CHANNEL = "tasks"
+        const val ROOMS_CHANNEL = "rooms"
     }
 }

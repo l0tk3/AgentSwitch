@@ -23,6 +23,7 @@ import com.agentswitch.kit.api.markRoomRead
 import com.agentswitch.kit.api.putRoomFile
 import com.agentswitch.kit.api.room
 import com.agentswitch.kit.api.roomAttention
+import com.agentswitch.kit.api.roomAvatars
 import com.agentswitch.kit.api.roomMessages
 import com.agentswitch.kit.api.roomFiles
 import com.agentswitch.kit.api.rooms
@@ -51,7 +52,8 @@ class RoomsStore {
     /** Bumped by `reset` (another Mac): a read that started before it is dropped. */
     private var generation = 0
 
-    val rooms: List<RoomSummary> get() = list?.rooms ?: emptyList()
+    /** The rooms, the dispatch desk (调度台) first whatever the Mac's order. */
+    val rooms: List<RoomSummary> get() = list?.rooms?.sortedByDescending { it.desk } ?: emptyList()
 
     /** Messages not seen yet: the tab's badge. */
     val unread: Int get() = list?.unread ?: 0
@@ -65,18 +67,35 @@ class RoomsStore {
     /** How many things wait on the user: the list's own count, or the page's when it was read since. */
     val attentionCount: Int get() = list?.attention ?: 0
 
-    suspend fun refreshAttention(api: AgentSwitchAPI?) {
-        if (api == null) return
+    /** What of 等你处理 is new since it was last read (nothing on the first read): for a notification. */
+    private val attentionTracker = com.agentswitch.kit.api.RoomAttentionTracker()
+    private var attentionAt = 0L
+
+    /** 等你处理 read again; what newly waits on the user is returned (none on the first read since the app started). */
+    suspend fun refreshAttention(api: AgentSwitchAPI?): List<RoomAttentionItem> {
+        if (api == null) return emptyList()
         val asked = generation
-        try {
+        return try {
             val items = api.roomAttention()
-            if (asked == generation) { attention = items; attentionError = null }
+            if (asked != generation) return emptyList()
+            attention = items
+            attentionError = null
+            attentionAt = System.currentTimeMillis()
+            attentionTracker.fresh(items)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             if (asked == generation) attentionError = e.message ?: e.javaClass.simpleName
+            emptyList()
         }
     }
+
+    /** Read again at most this often for the notifications, unless the list's count says something changed. */
+    private var attentionCountSeen = -1
+
+    /** Whether 等你处理 is due to be read again for the notifications. */
+    fun attentionDue(now: Long = System.currentTimeMillis()): Boolean =
+        !unsupported && (attentionCountSeen != attentionCount || now - attentionAt >= attentionIntervalMs).also { attentionCountSeen = attentionCount }
 
     suspend fun refresh(api: AgentSwitchAPI?) {
         if (api == null) return
@@ -110,8 +129,26 @@ class RoomsStore {
     var demoBytes: Map<String, ByteArray> = emptyMap()
         private set
 
-    fun setDemo(list: RoomList, details: Map<String, RoomDetail>, files: Map<String, RoomFiles>, bytes: Map<String, ByteArray> = emptyMap(), attention: List<RoomAttentionItem> = emptyList()) {
+    /** The avatar library (`GET /rooms/avatars`), read once when a picker first opens; the sample screens' own. */
+    var avatars: com.agentswitch.kit.api.RoomAvatarLibrary? by mutableStateOf(null)
+        private set
+
+    suspend fun loadAvatars(api: AgentSwitchAPI?): String? {
+        if (avatars != null) return null
+        if (api == null) return "未连接 Mac。"
+        return try {
+            avatars = api.roomAvatars()
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    fun setDemo(list: RoomList, details: Map<String, RoomDetail>, files: Map<String, RoomFiles>, bytes: Map<String, ByteArray> = emptyMap(), attention: List<RoomAttentionItem> = emptyList(), avatars: com.agentswitch.kit.api.RoomAvatarLibrary? = null) {
         this.list = list
+        this.avatars = avatars
         this.attention = attention
         demoDetails = details
         demoFiles = files
@@ -122,6 +159,8 @@ class RoomsStore {
         generation += 1
         list = null
         attention = null
+        avatars = null
+        attentionTracker.reset()
         etag = null
         unsupported = false
         error = null
@@ -131,6 +170,7 @@ class RoomsStore {
         const val pollIntervalMs = 3_000L
         const val backgroundIntervalMs = 20_000L
         const val unsupportedIntervalMs = 60_000L
+        const val attentionIntervalMs = 15_000L
     }
 }
 

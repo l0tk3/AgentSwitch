@@ -439,7 +439,7 @@ private fun DrawerTaskRow(t: RoomTask, detail: RoomDetail, model: RoomPageModel,
             Text(t.title, color = if (done) Theme.secondaryInk else Theme.ink, style = plain(14, if (done) FontWeight.Normal else FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (blocked) Text("卡住：${t.note ?: ""}", color = Theme.waiting, style = plain(11), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        t.owner?.let { RoomFaceView(detail.seat(it)?.face, you = it == RoomSeat.you, side = 16.dp) }
+        t.owner?.let { RoomAvatarView(detail.seat(it), handle = it, you = it == RoomSeat.you, side = 16.dp) }
         if (blocked) Text("⚠", color = Theme.waiting, style = plain(13))
         if (done) Text("✓", color = Theme.done, style = mono(12))
         val unread = model.unread(t.n)
@@ -637,7 +637,7 @@ private fun MessageRow(
                     ?: m.replyTo?.let { n -> QuoteGone(n) { jump(n) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (row.continues) Spacer(Modifier.size(faceSide, 1.dp))
-                    else RoomFaceView(seat?.face, Modifier.padding(top = 2.dp).clickable(m.from != RoomSeat.you, role = Role.Button) { openCard(m.from) }, you = m.from == RoomSeat.you, side = faceSide)
+                    else RoomAvatarView(seat, handle = m.from, modifier = Modifier.padding(top = 2.dp).clickable(m.from != RoomSeat.you, role = Role.Button) { openCard(m.from) }, you = m.from == RoomSeat.you, side = faceSide)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         // Who and when, nothing more (2026-11-22, user: 聊天中的信息展示能不能精简一些): the agent is the picture
                         // beside the name; the model, the folder and the mode are on the card.
@@ -749,7 +749,8 @@ private fun RoomWriter(model: RoomPageModel, detail: RoomDetail, focus: FocusReq
                 Box(Modifier.weight(1f).padding(vertical = 9.dp)) {
                     PlainField(
                         model.draft, { model.draft = it }, Modifier.fillMaxWidth().heightIn(max = 140.dp).focusRequester(focus),
-                        placeholder = "发消息到 $where…", singleLine = false,
+                        // The dispatch desk: what the user says is for the dispatch, no `@` needed.
+                        placeholder = if (detail.room.desk && model.taskFilter == null) "跟调度说要做什么…" else "发消息到 $where…", singleLine = false,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                     )
                 }
@@ -776,6 +777,7 @@ private fun MentionPicker(offers: List<String>, seats: List<RoomSeat>, pick: (St
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (handle == RoomSeat.all) Spacer(Modifier.size(10.dp)) else SeatStateMark(seat?.state, Modifier.width(10.dp))
+                if (handle == RoomSeat.all) Spacer(Modifier.size(18.dp)) else RoomAvatarView(seat, handle = handle, side = 18.dp)
                 Text("@$handle", color = Theme.ink, style = if (classic) plain(14, FontWeight.SemiBold) else mono(14, FontWeight.SemiBold), maxLines = 1)
                 Text(
                     if (handle == RoomSeat.all) "全体，只有你能用"

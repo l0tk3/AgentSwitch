@@ -145,6 +145,29 @@ class AppModel(
     /** A room to open on the Rooms tab (one just made); the tab takes it. */
     var openRoomRequest: String? by mutableStateOf(null)
 
+    /** Where in the room asked for it opens (a 等你处理 notification): the task, the message, a member's card. */
+    var openRoomAt: com.agentswitch.android.rooms.RoomOpening? = null
+
+    /** From a 等你处理 notification: the Rooms tab opens the room there. */
+    fun openRoom(id: String, at: com.agentswitch.android.rooms.RoomOpening? = null) {
+        tab = MainTab.Rooms
+        openRoomAt = at
+        openRoomRequest = id
+    }
+
+    /**
+     * 等你处理 read again now and then, from every tab and from behind (FollowService): while the app is not in front,
+     * a notification for each thing that newly waits on the user. What waited when the app started is not news.
+     */
+    suspend fun refreshRoomAttention() {
+        val api = api ?: return
+        if (!rooms.attentionDue()) return
+        val asked = session
+        val fresh = rooms.refreshAttention(api)
+        if (asked != session || inFront) return
+        for (item in fresh) notifier?.postRoom(item.room, item.identity, item.roomName.ifEmpty { "Rooms" }, item.notice, item.task, item.seq, item.card)
+    }
+
     private var manager: ConnectionManager? = null
 
     /** Bumped whenever the current Mac changes: an answer that arrives later from the one before is dropped. */

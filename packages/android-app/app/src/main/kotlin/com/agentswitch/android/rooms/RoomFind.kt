@@ -132,7 +132,7 @@ fun RoomSearchSheet(model: RoomPageModel, pick: (Int) -> Unit) {
             found.isEmpty() && !searching -> Text("没有找到。", Modifier.padding(Theme.Space.l), color = Theme.secondaryInk, style = plain(13))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(found, key = { it.seq }) { m ->
-                    SearchHit(m, query, detail?.seat(m.from)?.face, task == null) { nav.pop(); pick(m.seq) }
+                    SearchHit(m, query, detail?.seat(m.from), task == null) { nav.pop(); pick(m.seq) }
                     HairRule()
                 }
             }
@@ -141,7 +141,7 @@ fun RoomSearchSheet(model: RoomPageModel, pick: (Int) -> Unit) {
 }
 
 @Composable
-private fun SearchHit(m: RoomMessage, query: String, face: com.agentswitch.kit.api.RoomFace?, showTask: Boolean, tap: () -> Unit) {
+private fun SearchHit(m: RoomMessage, query: String, seat: com.agentswitch.kit.api.RoomSeat?, showTask: Boolean, tap: () -> Unit) {
     val classic = LocalLook.current.isClassic
     val snippet = remember(m.text, query) { RoomSearch.snippet(m.text, query) }
     val lit = Theme.signal
@@ -149,7 +149,7 @@ private fun SearchHit(m: RoomMessage, query: String, face: com.agentswitch.kit.a
         Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = tap).padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        RoomFaceView(face, you = m.from == com.agentswitch.kit.api.RoomSeat.you, side = 24.dp)
+        RoomAvatarView(seat, you = m.from == com.agentswitch.kit.api.RoomSeat.you, side = 24.dp, handle = m.from)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Text(RoomWords.who(m.from), color = Theme.ink, style = if (classic) plain(14, FontWeight.SemiBold) else mono(13, FontWeight.SemiBold), maxLines = 1)
@@ -187,8 +187,7 @@ fun RoomAttentionPage() {
         }
     }
     fun open(item: RoomAttentionItem) {
-        val card = if (item.kind == "trust" || item.kind == "asks" || item.kind == "permission") item.handle else null
-        nav.push("room:${item.room}") { RoomPage(item.room, openTask = item.task, openSeq = item.seq, openCard = card) }
+        nav.push("room:${item.room}") { RoomPage(item.room, openTask = item.task, openSeq = item.seq, openCard = item.card) }
     }
     Column(Modifier.fillMaxSize().background(Theme.base)) {
         NavBar("等你处理", leading = { BarBack({ nav.pop() }, "Rooms") })

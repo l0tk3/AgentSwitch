@@ -124,7 +124,7 @@ private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat
     val classic = LocalLook.current.isClassic
     val look = LocalLook.current
     Box {
-        RoomFaceView(seat.face, side = 26.dp)
+        RoomAvatarView(seat, side = 26.dp)
         SeatStateMark(
             seat.state,
             Modifier.align(Alignment.BottomEnd).offset(x = 5.dp, y = 5.dp).size(12.dp).background(Theme.raised, if (classic) RoundedCornerShape(6.dp) else androidx.compose.ui.graphics.RectangleShape),
@@ -182,7 +182,7 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
         }
         FormSection {
             FormRow(first = true) {
-                RoomFaceView(seat.face, side = 36.dp)
+                RoomAvatarView(seat, side = 36.dp)
                 Text("@${seat.handle}", Modifier.weight(1f), color = Theme.ink, style = if (classic) plain(17, FontWeight.SemiBold) else mono(17, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 SeatStateMark(seat.state)
                 seat.card?.color?.let { ProfileDot(it) }
@@ -241,6 +241,12 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
             val dim = Modifier.alpha(if (busy) 0.4f else 1f)
             FormSection(footer = if (seat.muted) "已禁言（@${seat.mutedBy ?: "?"}）：还能读、还能干活，但不能发消息、不能写置顶笔记。" else null) {
                 FormRow(first = true, onClick = { mention(handle) }) { Text("Mention", color = Theme.ink, style = plain(16)) }
+                // Its avatar, one for each look, the same in every room (RoomAvatarSheet).
+                if (seat.terminal != null) FormRow(onClick = { nav.present("roomavatar:${model.id}:$handle") { RoomAvatarSheet(model, handle) } }) {
+                    Text("Avatar", Modifier.weight(1f), color = Theme.ink, style = plain(16))
+                    RoomAvatarView(seat, side = 22.dp)
+                    Text("›", color = Theme.inkDim, style = plain(18))
+                }
                 val terminal = seat.terminal
                 if (terminal != null && seat.state != SeatState.Exited && app.terminals.terminals.any { it.id == terminal }) {
                     FormRow(onClick = { close(); nav.popToRoot(); app.openTerminal(terminal) }) { Text("Open Terminal", color = Theme.ink, style = plain(16)) }

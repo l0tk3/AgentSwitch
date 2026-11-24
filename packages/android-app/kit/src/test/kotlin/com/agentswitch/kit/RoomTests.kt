@@ -533,4 +533,90 @@ class RoomTests {
         api.say("看下", "a", expects = "answer", task = 2)
         assertEquals("""{"text":"看下","expects":"answer","task":2}""", String(transport.requests.last().body!!))
     }
+
+    @Test
+    fun testAvatarsTheDeskAndTheLibraryDecode() {
+        val d = KitJson.decodeFromString(RoomDetail.serializer(), """
+            {"room":{"id":"d","name":"调度台","desk":true,"lastSeq":0,"readSeq":0},
+             "seats":[
+              {"handle":"you","kind":"user","avatar":null},
+              {"handle":"api","kind":"session","face":{"rows":["#.#.#",".###.","##.##",".###.","#.#.#"],"color":2},
+               "avatar":{"pixel":{"kind":"grid","id":"p1","palette":["ff0000","00ff00"],"rows":["0.1","..","a"]},"classic":{"kind":"emoji","id":"e1","emoji":"🦊","bg":4}}},
+              {"handle":"web","kind":"session","avatar":{"pixel":{"kind":"face","id":"f2","rows":["#####","#...#","#...#","#...#","#####"],"color":7},"classic":null}},
+              {"handle":"ios","kind":"session"}]}
+        """.trimIndent())
+        assertTrue(d.room.desk)
+        val api = d.seat("api")!!.avatar!!
+        assertTrue(api.pixel!!.isGrid)
+        assertNull(api.pixel!!.face)
+        // `a` is index 10: past the palette, not drawn; `.` is empty.
+        assertEquals(listOf(Triple(0, 0, 0xff0000), Triple(2, 0, 0x00ff00)), api.pixel!!.pixels)
+        assertEquals("🦊", api.classic?.emoji)
+        assertEquals(4, api.classic?.bg)
+        val web = d.seat("web")!!.avatar!!
+        assertEquals(RoomFace(listOf("#####", "#...#", "#...#", "#...#", "#####"), 7), web.pixel?.face)
+        assertNull(web.classic)
+        assertNull(d.seat("ios")!!.avatar)
+        assertEquals(10, PixelAvatar.paletteIndex('a'))
+        assertEquals(36, PixelAvatar.paletteIndex('A'))
+        assertNull(PixelAvatar.paletteIndex('.'))
+        assertEquals("AP", RoomAvatar.initials("api"))
+        assertEquals("IO", RoomAvatar.initials("io-s"))
+        assertEquals("X", RoomAvatar.initials("x"))
+
+        val list = KitJson.decodeFromString(RoomList.serializer(), """{"rooms":[{"id":"d","name":"调度台","desk":true},{"id":"a","name":"登录"}]}""")
+        assertEquals(listOf(true, false), list.rooms.map { it.desk })
+
+        val lib = KitJson.decodeFromString(RoomAvatarLibrary.serializer(), """
+            {"faces":[{"id":"f1","rows":["#.#.#",".###.","##.##",".###.","#.#.#"],"color":3}],
+             "art":[{"id":"p1","palette":["611c17"],"rows":["0..."]}],
+             "emoji":[{"id":"e1","emoji":"🦊"}]}
+        """.trimIndent())
+        assertEquals("f1", lib.faces.single().avatar.id)
+        assertEquals(listOf(Triple(0, 0, 0x611c17)), lib.art.single().avatar.pixels)
+        assertEquals("🦊", lib.emoji.single().emoji)
+    }
+
+    @Test
+    fun testAttentionNoticesOnlyWhatIsNew() {
+        fun item(kind: String, handle: String? = null, task: Int? = null, seq: Int? = null, text: String = "") = RoomAttentionItem("a", "登录", kind, handle, task = task, seq = seq, text = text)
+        val tracker = RoomAttentionTracker()
+        val first = listOf(item("permission", "ios"))
+        // What is there when the app starts is not news.
+        assertTrue(tracker.fresh(first).isEmpty())
+        assertTrue(tracker.fresh(first).isEmpty())
+        val asked = item("question", "api", seq = 9, text = "字段名？")
+        assertEquals(listOf(asked), tracker.fresh(first + asked))
+        // Gone and back: new again.
+        tracker.fresh(listOf(asked))
+        assertEquals(first, tracker.fresh(first + asked))
+        assertEquals("等你处理：@ios 等你确认权限", item("permission", "ios").notice)
+        assertEquals("等你处理：@api 问你：字段名？", asked.notice)
+        assertEquals("等你处理：T4 卡住：等字段名", item("blocked", task = 4, text = "等字段名").notice)
+        assertEquals("a:question:api::9", asked.identity)
+    }
+
+    @Test
+    fun testAvatarRoutesSendOnlyTheLooksGiven() = runTest {
+        val transport = FakeTransport({ req, _ ->
+            when {
+                req.path == "/rooms/avatars" -> """{"faces":[],"art":[],"emoji":[{"id":"e2","emoji":"🐼"}]}""".toByteArray() to httpResponse(req.url)
+                else -> """{"avatar":{"pixel":null,"classic":{"kind":"emoji","id":"e2","emoji":"🐼","bg":1}}}""".toByteArray() to httpResponse(req.url)
+            }
+        })
+        val api = api(transport)
+        assertEquals("🐼", api.roomAvatars().emoji.single().emoji)
+        assertEquals("GET", transport.requests.last().method)
+        val got = api.setSeatAvatar("a", "ios", classic = AvatarChoice.Library("e2", bg = 1))
+        assertEquals("PUT", transport.requests.last().method)
+        assertEquals("/rooms/a/seats/ios/avatar", transport.paths.last())
+        assertEquals("""{"classic":{"id":"e2","bg":1}}""", String(transport.requests.last().body!!))
+        assertEquals("🐼", got?.classic?.emoji)
+        api.setSeatAvatar("a", "ios", pixel = AvatarChoice.Reset, classic = AvatarChoice.Reset)
+        assertEquals("""{"pixel":null,"classic":null}""", String(transport.requests.last().body!!))
+        api.setSeatAvatar("a", "ios", pixel = AvatarChoice.Library("p7"))
+        assertEquals("""{"pixel":{"id":"p7"}}""", String(transport.requests.last().body!!))
+        api.setSeatAvatar("a", "ios", pixel = AvatarChoice.Drawn(listOf("#####", "#...#", "#...#", "#...#", "#####"), 3), classic = AvatarChoice.Emoji("🦊"))
+        assertEquals("""{"pixel":{"rows":["#####","#...#","#...#","#...#","#####"],"color":3},"classic":{"emoji":"🦊"}}""", String(transport.requests.last().body!!))
+    }
 }

@@ -118,7 +118,7 @@ private fun RowScope.TaskRow(task: RoomTask, detail: RoomDetail) {
         if (task.owner != null || waits.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 task.owner?.let { owner ->
-                    RoomFaceView(detail.seat(owner)?.face, you = owner == RoomSeat.you, side = 14.dp)
+                    RoomAvatarView(detail.seat(owner), handle = owner, you = owner == RoomSeat.you, side = 14.dp)
                     Text("@$owner", color = Theme.secondaryInk, style = if (classic) plain(12, FontWeight.Medium) else mono(12, FontWeight.Medium), maxLines = 1)
                 }
                 // It can not go on until those are done: amber, for someone to look.
@@ -151,7 +151,7 @@ private fun OwnerRows(detail: RoomDetail?, owner: String?, enabled: Boolean, pic
         // A tap on whose it is gives it up.
         FormRow(Modifier.alpha(if (enabled) 1f else 0.4f), first = i == 0, onClick = if (enabled) ({ pick(if (on) null else seat.handle) }) else null) {
             PickMark(on)
-            RoomFaceView(seat.face, side = 22.dp)
+            RoomAvatarView(seat, side = 22.dp)
             Text("@${seat.handle}", Modifier.weight(1f), color = Theme.ink, style = plain(16), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(seat.state?.word(LocalLook.current) ?: "—", color = seat.state.wordColor(), style = mono(11), maxLines = 1)
         }

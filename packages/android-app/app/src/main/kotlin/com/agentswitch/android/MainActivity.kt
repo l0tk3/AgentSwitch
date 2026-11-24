@@ -120,5 +120,15 @@ class MainActivity : ComponentActivity() {
         // A task notification's link: agentswitch://task/<id>.
         intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "task" }
             ?.pathSegments?.firstOrNull()?.takeIf { it.isNotEmpty() }?.let { app.model.dispatch.openTask(it) }
+        // A 等你处理 notification's link: agentswitch://room/<id>?task=&seq=&card=.
+        intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "room" }?.let { uri ->
+            val id = uri.pathSegments.firstOrNull()?.takeIf { it.isNotEmpty() } ?: return@let
+            val at = com.agentswitch.android.rooms.RoomOpening(
+                task = uri.getQueryParameter("task")?.toIntOrNull(),
+                seq = uri.getQueryParameter("seq")?.toIntOrNull(),
+                card = uri.getQueryParameter("card")?.ifEmpty { null },
+            )
+            app.model.openRoom(id, at)
+        }
     }
 }

@@ -133,6 +133,8 @@ data class RoomSeat(
     val stats: RoomStats? = null,
     /** What its own screen asks now (a list to choose from: "trust this folder?"); null: nothing. */
     val asks: SeatAsks? = null,
+    /** Its session's avatar, one for each look, the same in every room (RoomAvatars.kt); null: none chosen. */
+    val avatar: RoomAvatar? = null,
 ) {
     val isUser: Boolean get() = kind == "user"
     val here: Boolean get() = left == null
@@ -337,6 +339,8 @@ data class RoomInfo(
     /** Messages from one session to another in a row with no word from the user, once at the room's limit (§7). */
     val rounds: Int? = null,
     val roundsLimit: Int = 6,
+    /** The dispatch desk (调度台): the user and the dispatch session; what the user says there is for it, no `@`. */
+    val desk: Boolean = false,
 )
 
 /** A room as its page has it: the seats as they are now, the last messages, and what has not arrived. */
@@ -431,6 +435,8 @@ data class RoomSummary(
     val tasks: RoomTaskCounts = RoomTaskCounts(),
     /** How many things in it wait on the user (等你处理, `GET /rooms/attention`). */
     val attention: Int = 0,
+    /** The dispatch desk (调度台): listed first. */
+    val desk: Boolean = false,
 ) {
     @Serializable
     data class Last(val seq: Int = 0, val from: String = "", val text: String = "", val at: Long = 0)
@@ -502,6 +508,39 @@ data class RoomAttentionItem(
 
     /** Amber marks: it needs the user's hand now. */
     val urgent: Boolean get() = kind == "trust" || kind == "asks" || kind == "permission" || kind == "blocked"
+
+    /** The member whose card it opens on (its screen asks, a permission); null: the room, the task, the message. */
+    val card: String? get() = if (kind == "trust" || kind == "asks" || kind == "permission") handle else null
+
+    /** Which one it is, across reads: the room, what, who, which task, which message. */
+    val identity: String get() = "$room:$kind:${handle ?: ""}:${task ?: ""}:${seq ?: ""}"
+
+    /** What a phone notification says: `等你处理：@ios 等你确认权限`. */
+    val notice: String
+        get() {
+            var said = line.removePrefix("⚠ ")
+            val who = handle
+            if (!who.isNullOrEmpty() && said.startsWith("$who ")) said = "@$said"
+            return "等你处理：$said"
+        }
+}
+
+/**
+ * What of 等你处理 is new since the last read, for a notification: nothing on the first read (what was there when the
+ * app started is not news), then each item not seen before. One that went and comes back is new again.
+ */
+class RoomAttentionTracker {
+    private var seen: Set<String>? = null
+
+    fun fresh(items: List<RoomAttentionItem>): List<RoomAttentionItem> {
+        val before = seen
+        seen = items.map { it.identity }.toSet()
+        if (before == null) return emptyList()
+        return items.filter { it.identity !in before }
+    }
+
+    /** Another Mac: its first read is not news either. */
+    fun reset() { seen = null }
 }
 
 @Serializable

@@ -102,6 +102,8 @@ fun MainTabs() {
     WhileStarted(Pair(model.connection.endpoint, model.tab)) {
         while (true) {
             model.rooms.refresh(model.api)
+            // 等你处理 kept current, so that what comes once the app is behind is told and what was seen here is not.
+            model.refreshRoomAttention()
             delay(
                 if (model.rooms.unsupported) RoomsStore.unsupportedIntervalMs
                 else if (model.tab == MainTab.Rooms) RoomsStore.pollIntervalMs else RoomsStore.backgroundIntervalMs,

@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import com.agentswitch.kit.api.ClassicAvatar
+import com.agentswitch.kit.api.RoomAvatar
+import com.agentswitch.kit.api.RoomAvatarLibrary
 import com.agentswitch.kit.api.RoomClaim
 import com.agentswitch.kit.api.RoomDetail
 import com.agentswitch.kit.api.RoomFace
@@ -37,14 +40,35 @@ object DemoRooms {
     private val webFace = RoomFace(listOf("##.##", "#...#", "..#..", "#...#", "##.##"), 2)
     private val docsFace = RoomFace(listOf(".###.", "#.#.#", "#####", "#...#", ".#.#."), 6)
 
+    /** The avatar library as the pickers have it (`GET /rooms/avatars`), a few of each. */
+    val avatars = RoomAvatarLibrary(
+        faces = listOf(
+            RoomAvatarLibrary.Face("f1", listOf("#.#.#", ".###.", "##.##", ".###.", "#.#.#"), 0),
+            RoomAvatarLibrary.Face("f2", listOf("##.##", "#...#", "..#..", "#...#", "##.##"), 1),
+            RoomAvatarLibrary.Face("f3", listOf(".###.", "#.#.#", "#####", "#...#", ".#.#."), 2),
+            RoomAvatarLibrary.Face("f4", listOf("#...#", ".#.#.", "#####", ".#.#.", "#...#"), 4),
+            RoomAvatarLibrary.Face("f5", listOf("..#..", ".###.", "##.##", ".###.", "..#.."), 7),
+            RoomAvatarLibrary.Face("f6", listOf("#####", "#.#.#", "#####", ".#.#.", "##.##"), 9),
+        ),
+        art = listOf(
+            RoomAvatarLibrary.Art("p1", listOf("611c17", "ab7c51", "ffffff", "876658", "dcd2ce", "d29985", "a26d3d", "44c585", "7dd6aa"), listOf("................", "....00000000....", "...0000000000...", "...0000000000...", "...1111111111...", "...1222112221...", "..112341123411..", "..112221122211..", "...1111111111...", "...1111551111...", "...1115111111...", "....11111111....", ".......66.......", "...6766666676...", "..667777777766..", "..667777788766..")),
+            RoomAvatarLibrary.Art("p2", listOf("bd1700", "99673b", "323232", "5b5b5b", "b2b2b2", "405761", "fdfde9", "d29985", "8d5524", "ffeead"), listOf("................", "..000000000000..", ".00000000000000.", ".00000001110100.", ".00000011111100.", ".00000233222200.", ".00004522445210.", ".00022211222260.", ".00111111111100.", ".00111177111100.", ".00111177111100.", ".00.11111111.00.", ".0.....88.....0.", "...8988888898...", "..889988889988..", "..889998899988..")),
+            RoomAvatarLibrary.Art("p3", listOf("2e1e05", "6d6251", "cab188", "d0a87d", "ffffff", "d1d8de", "647b90", "c98276", "cb9e6e", "ff6f69"), listOf("....00000010....", "...0000001001...", "..000000100100..", "..000001001000..", "..223333333322..", "..224443344422..", "..335643356433..", "..334443344433..", "...3333333333...", "...3333337333...", "...3337773333...", "....33333333....", ".......88.......", "...8988888898...", "..889988889988..", "..889998899988..")),
+            RoomAvatarLibrary.Art("p4", listOf("cab188", "e3bd93", "ffffff", "876658", "c98276", "e0b687", "ff6f69"), listOf("................", "...0000000000...", "..000000000000..", ".00000000000000.", ".00111111111100.", ".00122211222100.", ".00122311223100.", ".00111111111100.", ".00111111111100.", ".00111144111100.", ".00111111411100.", ".00.11111111.00.", ".00....55....00.", ".00665555556600.", "..666655556666..", "..666666666666..")),
+        ),
+        emoji = listOf("🦊", "🐼", "🐨", "🐯", "🦁", "🐸", "🐙", "🦉", "🐧", "🐢", "🤖", "👾", "👻", "🧠", "🚀", "🔭", "🧪", "⚙️").mapIndexed { i, e -> RoomAvatarLibrary.Emoji("e${i + 1}", e) },
+    )
+
     private val seats = listOf(
         RoomSeat(handle = RoomSeat.you, kind = "user", joinedAt = ago(300), canAdd = true),
         RoomSeat(
-            handle = "daemon", terminal = "a1b2c3d4", face = daemonFace, joinedAt = ago(299), canAdd = true, stateName = "busy", kit = true,
+            handle = "daemon", terminal = "a1b2c3d4", face = daemonFace,
+            avatar = RoomAvatar(avatars.art[1].avatar, ClassicAvatar(id = "e1", emoji = "🦊", bg = 6)), joinedAt = ago(299), canAdd = true, stateName = "busy", kit = true,
             card = SeatCard(agent = "claude-code", name = "daemon", cwd = "$repo/packages/daemon", model = "claude-opus-5-5", profile = "Work", colorName = "mint", mode = "default"),
         ),
         RoomSeat(
-            handle = "web", terminal = "t2", face = webFace, joinedAt = ago(298), stateName = "idle", kit = true,
+            handle = "web", terminal = "t2", face = webFace,
+            avatar = RoomAvatar(avatars.faces[4].avatar, ClassicAvatar(id = "e2", emoji = "🐼", bg = 5)), joinedAt = ago(298), stateName = "idle", kit = true,
             card = SeatCard(agent = "codex", name = "web", cwd = "$repo/packages/web", model = "gpt-6-luna", mode = "auto"),
         ),
         RoomSeat(
@@ -137,7 +161,31 @@ object DemoRooms {
         RoomAttentionItem(room = room, roomName = "登录", kind = "question", handle = "docs", seq = 5, text = "旧 cookie 逻辑已标成废弃（T7），清单在共享文件夹的 `deprecations.md`。", at = ago(8)),
     )
 
+    const val desk = "de5k000001"
+
+    /** The dispatch desk (调度台): the user and the dispatch session; what the user says there is for it, no `@`. */
+    val deskDetail = RoomDetail(
+        room = RoomInfo(id = desk, name = "调度台", topic = "你和调度", createdAt = ago(4000), lastSeq = 2, readSeq = 1, desk = true),
+        seats = listOf(
+            RoomSeat(handle = RoomSeat.you, kind = "user", joinedAt = ago(4000), canAdd = true),
+            RoomSeat(
+                handle = "dispatch", terminal = "d1", face = RoomFace(listOf("#...#", ".#.#.", "#####", ".#.#.", "#...#"), 4), joinedAt = ago(4000), canAdd = true, stateName = "idle", kit = true,
+                avatar = RoomAvatar(avatars.art[2].avatar, ClassicAvatar(id = "e11", emoji = "🤖", bg = 7)),
+                card = SeatCard(agent = "claude-code", name = "dispatch", cwd = "/Users/me/AgentSwitch/Dispatch", model = "claude-opus-5-5", profile = "Work", colorName = "mint", mode = "default"),
+            ),
+        ),
+        messages = listOf(
+            RoomMessage(seq = 1, from = RoomSeat.you, to = listOf("dispatch"), text = "登录这周要做完，盯一下进度。", at = ago(30)),
+            RoomMessage(seq = 2, from = "dispatch", to = listOf(RoomSeat.you), replyTo = 1, text = "登录那边 T4 卡住了，等 T2 定字段名；我去问 @daemon。", at = ago(6)),
+        ),
+    )
+
     val list = RoomList(listOf(
+        // The dispatch desk, listed first (调度台).
+        RoomSummary(
+            id = desk, name = "调度台", topic = "你和调度", createdAt = ago(4000), members = 2, desk = true,
+            last = RoomSummary.Last(seq = 31, from = "dispatch", text = "登录那边 T4 卡住了，等 T2 定字段名；我去问 @daemon。", at = ago(6)), unread = 1,
+        ),
         RoomSummary(
             id = room, name = "登录", topic = detail.room.topic, createdAt = ago(300), members = 4,
             faces = listOf(RoomSummary.Sitter("daemon", daemonFace), RoomSummary.Sitter("web", webFace), RoomSummary.Sitter("docs", docsFace)),

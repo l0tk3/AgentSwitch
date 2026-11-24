@@ -1,6 +1,8 @@
 package com.agentswitch.android.rooms
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +38,10 @@ import androidx.compose.ui.unit.dp
 import com.agentswitch.android.LocalAppModel
 import com.agentswitch.android.LocalNav
 import com.agentswitch.android.design.BarWord
+import com.agentswitch.android.design.ClassicIcon
+import com.agentswitch.android.design.ClassicIconKind
+import com.agentswitch.android.design.ShadedSpriteView
+import com.agentswitch.kit.live.ShadedSprite
 import com.agentswitch.android.design.HairRule
 import com.agentswitch.android.design.LocalLook
 import com.agentswitch.android.design.NavBar
@@ -64,13 +70,17 @@ fun RoomsTab() {
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
 
-    fun open(id: String) = nav.push("room:$id") { RoomPage(id) }
+    fun open(id: String, at: RoomOpening? = null) {
+        nav.push("room:$id") { RoomPage(id, openTask = at?.task, openSeq = at?.seq, openCard = at?.card) }
+    }
 
-    // A room asked for from elsewhere (a new one just made).
+    // A room asked for from elsewhere (a new one just made, a 等你处理 notification).
     LaunchedEffect(model.openRoomRequest) {
         val id = model.openRoomRequest ?: return@LaunchedEffect
         model.openRoomRequest = null
-        open(id)
+        val at = model.openRoomAt
+        model.openRoomAt = null
+        open(id, at)
     }
 
     Column(Modifier.fillMaxSize().background(Theme.base)) {
@@ -132,6 +142,9 @@ fun RoomsTab() {
     }
 }
 
+/** Where a room opens when asked from elsewhere (a 等你处理 notification): the task, the message, a member's card. */
+data class RoomOpening(val task: Int? = null, val seq: Int? = null, val card: String? = null)
+
 /** One room's line in the list. */
 @Composable
 private fun RoomListRow(room: RoomSummary, index: Int, last: Boolean, modifier: Modifier) {
@@ -139,17 +152,38 @@ private fun RoomListRow(room: RoomSummary, index: Int, last: Boolean, modifier: 
     Column(modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!classic) Text("%02d".format(index + 1), color = Theme.inkDim, style = mono(14))
+                if (room.desk) DeskMark()
+                else if (!classic) Text("%02d".format(index + 1), color = Theme.inkDim, style = mono(14))
                 Text(room.name, Modifier.weight(1f), color = Theme.ink, style = plain(15, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // The sessions have been talking among themselves (§7): told, not stopped. Amber: it is for the user to look.
                 room.rounds?.let { Text("$it Rounds", color = Theme.waiting, style = mono(11), maxLines = 1) }
                 if (room.paused) Text("Paused", color = Theme.inkDim, style = mono(11), maxLines = 1)
+                if (room.desk && room.name != "调度台") DeskBadge()
                 if (room.unread > 0) UnreadCount(room.unread, room.forYou)
             }
             Text(room.lastLine, color = Theme.secondaryInk, style = plain(13), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (!(classic && last)) HairRule(Modifier.padding(start = if (classic) Theme.Space.l else 0.dp))
     }
+}
+
+/** The dispatch desk's mark (调度台): the Dispatch tab's picture, small, where the others have their number. */
+@Composable
+private fun DeskMark() {
+    if (LocalLook.current.isClassic) ClassicIcon(ClassicIconKind.Lanes, 18.dp, 16.dp, Theme.signal)
+    else Box(Modifier.size(width = 22.dp, height = 18.dp), contentAlignment = Alignment.Center) { ShadedSpriteView(ShadedSprite.dispatch, shadow = false, cell = 1.0) }
+}
+
+/** `调度台`, said beside a desk whose name is another. */
+@Composable
+private fun DeskBadge() {
+    val classic = LocalLook.current.isClassic
+    Text(
+        "调度台",
+        Modifier.background(if (classic) Theme.signal.copy(alpha = 0.14f) else Color.Transparent, RoundedCornerShape(if (classic) 5.dp else 0.dp))
+            .then(if (classic) Modifier else Modifier.border(1.dp, Theme.line)).padding(horizontal = 5.dp, vertical = 1.dp),
+        color = if (classic) Theme.signal else Theme.secondaryInk, style = plain(11, FontWeight.Medium), maxLines = 1,
+    )
 }
 
 /** How many are not seen yet: amber when one of them names the user (amber is what waits for you), quiet otherwise. */

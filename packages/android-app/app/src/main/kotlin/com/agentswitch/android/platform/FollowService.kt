@@ -221,6 +221,7 @@ class FollowService : Service() {
                     try {
                         model.refreshTerminals()
                         model.dispatch.refreshFollowed()
+                        model.refreshRoomAttention()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
