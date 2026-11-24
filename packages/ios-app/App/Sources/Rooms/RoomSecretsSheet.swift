@@ -47,7 +47,7 @@ struct RoomSecretsSheet: View {
             .confirmationDialog("删除“\(removing?.name ?? "")”？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { if let s = removing { Task { await remove(s) } } }
             } message: {
-                Text("房间里的成员将不能再用这条密文。Mac 上的原文不受影响。")
+                Text("房间里的成员将不能再用这条密文。其他房间里导入过的同一条不受影响。")
             }
         }
         .presentationDetents([.medium, .large])
