@@ -46,6 +46,8 @@ export type ApiDeps = {
   /** This service's own routes, asked in process like a screen's (used to resume the session behind a room seat,
    *  docs/chatroom-v0.md §6.2). Absent: resuming from a room is not available. */
   readonly callLocal?: import("./roomOrg.js").Ask;
+  /** The new dispatch: a session at the 调度台 room (api/dispatchDesk.ts); absent = off. */
+  readonly dispatchDesk?: import("./dispatchDesk.js").DispatchDesk;
   /** Clash Integration (docs/clash-v0.md). */
   readonly clash?: import("../clash/integration.js").ClashIntegration;
   /** The browsers of profiles that have a proxy of their own (docs/profiles-v0.md §5.1). */

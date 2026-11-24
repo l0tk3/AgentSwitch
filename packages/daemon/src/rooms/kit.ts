@@ -274,7 +274,8 @@ export async function closeSeat(o: { readonly store: RoomStore; readonly stop: (
 }
 
 export class RoomKit {
-  constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number; /** Tests: how long a started session is waited for. */ readonly kitWaitMs?: number }) {}
+  constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number; /** Tests: how long a started session is waited for. */ readonly kitWaitMs?: number;
+    /** How many sessions a session may start (MAX_STARTED; the dispatch its own, 2026-11-24). */ readonly startLimit?: (terminal: string) => number }) {}
 
   private readonly seen = new Set<string>();
 
@@ -443,7 +444,8 @@ export class RoomKit {
       return sit(running, false);
     }
     if (!agent || !cwd) throw new RoomError(400, "room_admin add needs `terminal` (a running session), or `agent` and `cwd` (a new session; with `resume` an existing one).");
-    if (this.o.store.startedBy(terminal) >= MAX_STARTED) throw new RoomError(409, `You have started ${MAX_STARTED} sessions that still sit in rooms; that is the most one session may. Work with them, or ask the user.`);
+    const limit = this.o.startLimit?.(terminal) ?? MAX_STARTED;
+    if (this.o.store.startedBy(terminal) >= limit) throw new RoomError(409, `You have started ${limit} sessions that still sit in rooms; that is the most you may. Work with them, end the ones done, or ask the user.`);
     // A session started for a room runs in bypass unless the caller says otherwise (2026-11-24, user).
     const mode = str(args.mode) || "bypass";
     const profile = str(args.profile), model = str(args.model);

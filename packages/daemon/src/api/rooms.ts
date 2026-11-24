@@ -177,6 +177,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     const seats = room.seats.filter((s) => s.left === undefined);
     return {
       id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt,
+      ...(room.desk ? { desk: true } : {}),
       members: seats.length,
       // The sessions seated here: a screen that offers sessions to seat says which rooms each already sits in
       // (it may sit in several).
@@ -194,7 +195,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   };
 
   const whole = (room: Room, messages: readonly Message[]) => ({
-    room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
+    room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, ...(room.desk ? { desk: true } : {}), createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
     seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, taskStats: room.taskStats, claims: rooms.claims(room.id), reads: room.reads,
   });
 
@@ -205,7 +206,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     return rooms.seat(roomId, { terminal, was: wasOf(info), ...(canAdd === undefined ? {} : { canAdd }) });
   };
 
-  app.get("/rooms", (c) => versionedJson(c, { rooms: rooms.list().map(summary) }));
+  // The dispatch desk first (调度台), then the newest talked-in.
+  app.get("/rooms", (c) => versionedJson(c, { rooms: [...rooms.list()].sort((a, b) => Number(b.desk === true) - Number(a.desk === true)).map(summary) }));
 
   // Everything in every room that waits on the user (等你处理), newest first.
   app.get("/rooms/attention", (c) => c.json({ items: rooms.list().flatMap(attentionOf).sort((a, b) => b.at - a.at) }));

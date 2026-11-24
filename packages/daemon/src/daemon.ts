@@ -29,7 +29,7 @@ import { proxyPlace } from "./browser/identity.js";
 import { ClashIntegration } from "./clash/integration.js";
 import { ClashSources } from "./clash/sources.js";
 import { ClashStore } from "./clash/store.js";
-import { filesRoot, RoomStore } from "./rooms/store.js";
+import { filesRoot, MAX_STARTED, RoomStore } from "./rooms/store.js";
 import { RoomDelivery } from "./rooms/delivery.js";
 import { RoomKit } from "./rooms/kit.js";
 import type { SeatLookup } from "./rooms/state.js";
@@ -37,6 +37,7 @@ import { runningOf, seatLive } from "./api/rooms.js";
 import { follow } from "./rooms/follow.js";
 import { RoomPolicy } from "./rooms/policy.js";
 import { roomOrg, type Ask } from "./api/roomOrg.js";
+import { DispatchDesk } from "./api/dispatchDesk.js";
 
 /** How often what has not arrived in the rooms is looked at again. */
 const ROOM_LOOK_MS = 2000;
@@ -525,7 +526,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // Only a session that has the Kit is given anything: one that could not answer in the room is not spoken to.
   const roomDelivery: RoomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir(), push: (terminal, text) => (roomKit.has(terminal) ? roomSay(terminal, text) : Promise.resolve(false)) });
   let roomAsk: Ask | null = null;
-  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk, roomPolicy) : null) });
+  // The new dispatch (api/dispatchDesk.ts): a session at the 调度台 room; it may start more sessions than an admin.
+  const dispatchDesk = new DispatchDesk({ home: cfg.home, rooms, ask: (method, path, body) => (roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } })), changed: () => roomDelivery.look() });
+  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk, roomPolicy) : null), startLimit: (terminal) => dispatchDesk.limitOf(terminal) ?? MAX_STARTED });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -660,7 +663,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, roomKit, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
+  const apiDeps: ApiDeps = { rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -676,6 +679,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     const res = await api.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
     return { status: res.status, body: await res.json().catch(() => null) };
   };
+  // The dispatch, while it is on, is kept running (resumed when it ended).
+  if (terminalHost) dispatchDesk.watch();
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   // docs/mesh-v0.md: this node among the others. What it has is what its screens would show of it.
   const nodes = new Nodes({
@@ -691,7 +696,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
   return { app, api, remote, nodes, engine, store, quota, targets, clash, clashPhone, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { clearInterval(roomLooks); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    close: () => { clearInterval(roomLooks); dispatchDesk.close(); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml

@@ -255,7 +255,7 @@ describe("bringing sessions in (Admin)", () => {
     expect(kit.tools("new1").map((t) => t.name)).toEqual(["room_post", "room_read", "room_tasks", "room_info", "room_update"]);
     expect(() => store.setCanAdd(room.id, "new1", true)).toThrow();
     for (let i = 0; i < 3; i++) expect((await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).isError).toBeUndefined();
-    expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true, text: expect.stringContaining("the most one session may") });
+    expect(await kit.call("t1", "room_add", { agent: "codex", cwd: "/w" })).toMatchObject({ isError: true, text: expect.stringContaining("the most you may") });
     // A mode given is kept; bypass needs no bypass of the caller's own.
     store.setCanAdd(room.id, "ios", true);
     expect((await kit.call("t3", "room_add", { agent: "codex", cwd: "/w", mode: "manual" })).isError).toBeUndefined();
