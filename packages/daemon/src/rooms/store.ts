@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { basename, extname, join, sep } from "node:path";
 import { faceOf, type Face } from "./face.js";
 import { avatarKeys, type Avatar } from "./avatars.js";
+import { MAX_SECRETS, secretFrom, type RoomSecret } from "./secrets.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
 /** The most a session may say in one message: the rest belongs in a file. */
@@ -311,6 +312,36 @@ export class RoomStore {
 
   /** The `limit` before message `seq`, oldest first: the page above what is shown. */
   messagesBefore(id: string, seq: number, limit: number): Message[] { this.get(id); return parsed(this.db.before(id, seq, limit)); }
+
+  /** The room's sealed secrets (secrets.ts), oldest first. */
+  secrets(id: string): RoomSecret[] {
+    this.get(id);
+    return this.db.secrets(id).flatMap((b) => { try { return [JSON.parse(b) as RoomSecret]; } catch { return []; } });
+  }
+
+  /** Secrets added, all or none: each checked (a ciphertext only); one of the same name as one kept takes its place. */
+  addSecrets(id: string, items: readonly unknown[]): RoomSecret[] {
+    const kept = this.secrets(id);
+    const made: RoomSecret[] = [];
+    for (const raw of items) {
+      const s = secretFrom(raw, this.now());
+      if (typeof s === "string") throw new RoomError(400, s);
+      made.push(s);
+    }
+    const names = new Set(made.map((s) => s.name));
+    const replaced = kept.filter((s) => names.has(s.name));
+    if (kept.length - replaced.length + made.length > MAX_SECRETS) throw new RoomError(409, `一个房间最多 ${MAX_SECRETS} 条密钥`);
+    this.db.tx(() => {
+      for (const s of replaced) this.db.dropSecret(id, s.id);
+      for (const s of made) this.db.putSecret(id, s.id, s.addedAt, JSON.stringify(s));
+    });
+    return made;
+  }
+
+  removeSecret(id: string, secret: string): void {
+    this.get(id);
+    if (!this.db.dropSecret(id, secret)) throw new RoomError(404, "没有这条密钥");
+  }
 
   /** A seat's avatar (avatars.ts): its session's, whatever room; null: none chosen (its face and its initials). */
   avatarOf(seat: Seat): Avatar | null {

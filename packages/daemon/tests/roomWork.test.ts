@@ -887,7 +887,7 @@ describe("a Kit that does not fill a session's context (2026-11-24)", () => {
     const { kitOf, store, room } = made();
     store.setCanAdd(room.id, "api", true);
     const size = (t: string): number => JSON.stringify(kitOf().tools(t)).length;
-    expect(size("ui")).toBeLessThan(5600);      // was 10 381 characters for a member
+    expect(size("ui")).toBeLessThan(5800);      // was 10 381 characters for a member (avatars and secrets since)
     expect(size("api")).toBeLessThan(7200);     // and 15 362 for an admin
   });
 });
@@ -962,5 +962,28 @@ describe("a session's avatar, its own in every room (2026-11-24)", () => {
     await call("PUT", `/rooms/${room.id}/seats/ui/avatar`, { pixel: null });
     expect((await call("GET", `/rooms/${room.id}`)).body.seats.find((s: { handle: string }) => s.handle === "ui").avatar.pixel).toBeNull();
     expect((await call("GET", "/rooms/avatars")).body.art).toHaveLength(48);
+  });
+});
+
+describe("a room's secrets: ciphertexts only (2026-11-24)", () => {
+  it("takes sealed tokens, refuses a value, replaces by name, gives them to members with their use, and removes them", async () => {
+    const { store, room, say, call } = made();
+    const token = `enc:v1:${"A".repeat(40)}`;
+    expect((await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "GitHub 登录", kind: "site", url: "https://github.com", account: "me", token: "hunter2-plain" }] })).status).toBe(400);
+    expect(store.secrets(room.id)).toEqual([]);
+    const added = await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "GitHub 登录", kind: "site", url: "https://github.com", account: "me", token }, { name: "OPENAI", kind: "exec", env: "OPENAI_API_KEY", token }] });
+    expect(added.status).toBe(201);
+    expect(added.body.secrets).toHaveLength(2);
+    await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "OPENAI", kind: "api", url: "https://api.openai.com", token }] });
+    expect(store.secrets(room.id).map((s) => `${s.name}:${s.kind}`)).toEqual(["GitHub 登录:site", "OPENAI:api"]);
+    const read = (await say("api", "room_info", { show: "secrets" })).text;
+    expect(read).toContain("GitHub 登录 · website login · https://github.com · account me");
+    expect(read).toContain(token);
+    expect(read).toContain("the gate puts the key in");
+    expect((await call("GET", `/rooms/${room.id}`)).body.secrets).toBe(2);
+    const sid = store.secrets(room.id)[0]!.id;
+    expect((await call("DELETE", `/rooms/${room.id}/secrets/${sid}`)).status).toBe(200);
+    expect((await call("GET", `/rooms/${room.id}/secrets`)).body.secrets).toHaveLength(1);
+    expect((await call("DELETE", `/rooms/${room.id}/secrets/${sid}`)).status).toBe(404);
   });
 });

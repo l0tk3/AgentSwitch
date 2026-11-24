@@ -8,6 +8,7 @@ import { statSync } from "node:fs";
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
+import { lineOf } from "./secrets.js";
 import { classicFrom, defaultBg, LIBRARY_SAYS, pixelFrom, type ClassicAvatar, type PixelAvatar } from "./avatars.js";
 import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
 
@@ -95,8 +96,8 @@ const TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_info",
-    description: "About a room you sit in. `members` (default): who is here, their agent, model, folder and state. `notes`: the pinned notes all members keep. `files`: the shared folder's path and its files, newest first — hand anything long over as a file there. `changing`: which files members said they are changing now. `rooms`: the rooms you sit in. `avatars`: the avatar library.",
-    inputSchema: { type: "object", properties: { show: { type: "string", enum: ["members", "notes", "files", "changing", "rooms", "avatars"] }, room: ROOM_ARG } },
+    description: "About a room you sit in. `members` (default): who is here, their agent, model, folder and state. `notes`: the pinned notes all members keep. `files`: the shared folder's path and its files, newest first — hand anything long over as a file there. `changing`: which files members said they are changing now. `rooms`: yours. `avatars`: the avatar library. `secrets`: logins/keys as ciphertexts.",
+    inputSchema: { type: "object", properties: { show: { type: "string", enum: ["members", "notes", "files", "changing", "rooms", "avatars", "secrets"] }, room: ROOM_ARG } },
   },
   {
     name: "room_update",
@@ -331,6 +332,10 @@ export class RoomKit {
             case "rooms": {
               const sits = this.o.store.roomsOf(terminal);
               return { text: sits.map((x) => `"${x.room.name}" (${x.room.id}) — you are @${x.seat.handle}${x.seat.canAdd ? ", admin" : ""}${x.room.topic ? ` · ${x.room.topic}` : ""}`).join("\n") };
+            }
+            case "secrets": {
+              const all = this.o.store.secrets(room.id);
+              return { text: all.length ? [`${all.length} secret${all.length === 1 ? "" : "s"} of "${room.name}" — ciphertexts: use the token where the value goes, the gate puts the value in. Never ask for or write a value.`, ...all.map(lineOf)].join("\n") : "No secrets in this room. If you need a login or a key, ask the user (@you) to add it to the room's Secrets." };
             }
             case "avatars": {
               const mine = this.o.store.avatarOf(seat);

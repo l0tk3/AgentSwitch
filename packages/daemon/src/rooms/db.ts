@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS messages (
   PRIMARY KEY (room, seq)
 );
 CREATE INDEX IF NOT EXISTS messages_task ON messages (room, task, seq);
+CREATE TABLE IF NOT EXISTS secrets (room TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (room, id));
 CREATE TABLE IF NOT EXISTS avatars (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_words USING fts5(words, room UNINDEXED, seq UNINDEXED, tokenize = 'trigram');
 `;
@@ -56,6 +57,10 @@ export class RoomDb {
       search: p("SELECT m.seq AS seq, m.body AS body FROM messages_words w JOIN messages m ON m.room = w.room AND m.seq = w.seq WHERE messages_words MATCH ? AND w.room = ? ORDER BY m.seq DESC LIMIT ?"),
       like: p("SELECT seq, body FROM messages WHERE room = ? AND words LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?"),
       count: p("SELECT COUNT(*) AS n FROM messages WHERE room = ?"),
+      secrets: p("SELECT body FROM secrets WHERE room = ? ORDER BY at, id"),
+      putSecret: p("INSERT INTO secrets (room, id, at, body) VALUES (?, ?, ?, ?) ON CONFLICT (room, id) DO UPDATE SET body = excluded.body"),
+      dropSecret: p("DELETE FROM secrets WHERE room = ? AND id = ?"),
+      dropSecrets: p("DELETE FROM secrets WHERE room = ?"),
       avatar: p("SELECT value FROM avatars WHERE key = ?"),
       putAvatar: p("INSERT INTO avatars (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"),
       byTask: p("SELECT task, COUNT(*) AS n FROM messages WHERE room = ? AND seq > ? AND task IS NOT NULL GROUP BY task"),
@@ -70,7 +75,7 @@ export class RoomDb {
 
   rooms(): string[] { return (this.q.rooms!.all() as { state: string }[]).map((r) => r.state); }
   putRoom(id: string, state: string): void { this.q.putRoom!.run(id, state); }
-  dropRoom(id: string): void { this.tx(() => { this.q.dropRoom!.run(id); this.q.dropMessages!.run(id); this.q.dropWords!.run(id); }); }
+  dropRoom(id: string): void { this.tx(() => { this.q.dropRoom!.run(id); this.q.dropMessages!.run(id); this.q.dropWords!.run(id); this.q.dropSecrets!.run(id); }); }
 
   add(room: string, m: { readonly seq: number; readonly at: number; readonly from: string; readonly task?: number; readonly to: readonly string[]; readonly text: string }, body: string): void {
     this.q.add!.run(room, m.seq, m.at, m.from, m.task ?? null, m.to.includes("you") ? 1 : 0, m.to.some((h) => h !== "you") ? 1 : 0, body, m.text);
@@ -107,6 +112,11 @@ export class RoomDb {
     if ([...t].length >= 3) return this.q.search!.all(`"${t.replace(/"/g, '""')}"`, room, n) as StoredMessage[];
     return this.q.like!.all(room, `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`, n) as StoredMessage[];
   }
+
+  /** A room's sealed secrets (secrets.ts), as JSON. */
+  secrets(room: string): string[] { return (this.q.secrets!.all(room) as { body: string }[]).map((r) => r.body); }
+  putSecret(room: string, id: string, at: number, body: string): void { this.q.putSecret!.run(room, id, at, body); }
+  dropSecret(room: string, id: string): boolean { return Number(this.q.dropSecret!.run(room, id).changes) > 0; }
 
   /** A session's avatar (avatars.ts), by one of its keys. */
   avatar(key: string): string | null { return (this.q.avatar!.get(key) as { value: string } | undefined)?.value ?? null; }
