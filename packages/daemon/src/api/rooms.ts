@@ -284,7 +284,9 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   // there): the room's own folder only, whatever the phone may see of the Mac's other files.
   app.get("/rooms/:id/files/content", (c) => {
     try {
-      const file = rooms.fileAt(c.req.param("id"), c.req.query("path") ?? "");
+      // A path from the folder; or, whole, one a message came with (wherever on the disk the sender had it).
+      const path = c.req.query("path") ?? "";
+      const file = path.startsWith("/") ? rooms.attachedAt(c.req.param("id"), path) : rooms.fileAt(c.req.param("id"), path);
       if (file.size > MAX_PUT) return c.json({ error: "too-large", size: file.size, limit: MAX_PUT }, 413);
       const bytes = readFileSync(file.real);
       return c.body(new Uint8Array(bytes), 200, { "content-type": contentType(file.name), "content-length": String(bytes.length), "cache-control": "private, no-cache", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox" });

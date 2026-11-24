@@ -517,6 +517,38 @@ final class RoomsModel {
         previewing = URL(fileURLWithPath: path)
     }
 
+    /// A file of a room on another node (user #255): fetched from there (the folder's own by its place in it, any other a
+    /// message came with by its whole path), then shown in a preview, or saved where the user says.
+    func fetch(file path: String, save: Bool) {
+        guard let id = selected else { return }
+        let name = (path as NSString).lastPathComponent
+        let wanted: String
+        if let folder = room?.folder, path.hasPrefix(folder + "/") { wanted = String(path.dropFirst(folder.count + 1)) } else { wanted = path }
+        var target: URL?
+        if save {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = name
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            target = url
+        }
+        Task {
+            do {
+                let data = try await client().roomFile(wanted, in: id)
+                if let target {
+                    try data.write(to: target)
+                } else {
+                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-room-files/\(id)", isDirectory: true)
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let url = dir.appendingPathComponent(name)
+                    try data.write(to: url)
+                    previewing = url
+                }
+            } catch {
+                problem = "\(name) 取不下来：\(Self.say(error))"
+            }
+        }
+    }
+
     func reveal(_ path: String) {
         guard onThisMac else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])

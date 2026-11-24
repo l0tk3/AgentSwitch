@@ -165,8 +165,10 @@ struct RoomRowActions {
     var reply: (Int) -> Void = { _ in }
     /// Shows a message's file in Finder; nil where the room is another node's (the path is that node's).
     var reveal: ((String) -> Void)?
-    /// Opens a message's file in a preview (Quick Look); nil where the room is another node's.
+    /// Opens a message's file in a preview (Quick Look); a room on another node's: fetched from there first.
     var preview: ((String) -> Void)?
+    /// A room on another node: a message's file fetched from there and saved where the user says.
+    var saveAs: ((String) -> Void)?
     /// The timeline narrowed to a task's messages (its label clicked).
     var task: (Int) -> Void = { _ in }
     /// Brings a message into view (its quote clicked).
@@ -313,7 +315,8 @@ struct RoomMessageRow: View {
                     .help(path)
                     .contextMenu {
                         Button("Quick Look") { actions.preview?(path) }
-                        Button("Show in Finder") { actions.reveal?(path) }
+                        if actions.reveal != nil { Button("Show in Finder") { actions.reveal?(path) } }
+                        if actions.saveAs != nil { Button("Save As…") { actions.saveAs?(path) } }
                         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path, forType: .string) }
                     }
                 }

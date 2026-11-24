@@ -1014,6 +1014,12 @@ public extension DaemonClient {
         return path
     }
 
+    /// A file of the room's shared folder (`path` in it), or one a message came with (`path` whole), as its bytes.
+    func roomFile(_ path: String, in room: String) async throws -> Data {
+        let query = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+?#"))) ?? ""
+        return try await call("GET", "/rooms/\(DaemonClient.segment(room))/files/content?path=\(query)", timeout: 120)
+    }
+
     func markRead(_ seq: Int, in room: String) async throws {
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/read", body: try JSONSerialization.data(withJSONObject: ["seq": seq]), timeout: 10)
     }

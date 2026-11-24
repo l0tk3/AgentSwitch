@@ -257,6 +257,18 @@ export class RoomStore {
     return { real, size: stat.size, name: basename(real) };
   }
 
+  /** A file a message of the room came with, by the path it was sent with (one outside the shared folder too), for a
+   *  screen not on this Mac (user #255: 我点不了远程发给我的附件). Only a path some message carries: nothing else of
+   *  the Mac's disk is reached this way. */
+  attachedAt(id: string, path: string): { readonly real: string; readonly size: number; readonly name: string } {
+    if (!path.startsWith("/") || /[\0\n\r]/.test(path)) throw new RoomError(400, "bad path");
+    if (!this.messages(id).some((m) => m.files?.includes(path))) throw new RoomError(404, "房间里没有发过这个文件");
+    let stat;
+    try { stat = lstatSync(path); } catch { throw new RoomError(404, "这个文件已经不在了"); }
+    if (!stat.isFile()) throw new RoomError(400, "不是文件");
+    return { real: path, size: stat.size, name: basename(path) };
+  }
+
   /** A file put into a room's shared folder through the service (a picture picked on a phone): under its name, or
    *  that name with a number when one is there already. Where it is now. */
   putFile(id: string, name: string, bytes: Uint8Array): { readonly path: string; readonly name: string; readonly size: number } {

@@ -112,6 +112,14 @@ describe("a file of the shared folder through the service", () => {
     symlinkSync("/etc/hosts", join(store.folder(room.id), "out"));
     for (const path of ["../x", "/etc/hosts", "out", ".hidden", "a//b", "nope.png"]) expect((await app.request(`/rooms/${room.id}/files/content?path=${encodeURIComponent(path)}`)).status).toBeGreaterThanOrEqual(400);
     expect((await app.request(`/rooms/nosuchroom/files/content?path=photo.png`)).status).toBe(404);
+    // A file a message came with, wherever its sender had it: by its whole path; one no message carries is not.
+    const elsewhere = join(mkdtempSync(join(tmpdir(), "as-attached-")), "flow.pdf");
+    writeFileSync(elsewhere, "%PDF-1");
+    expect((await app.request(`/rooms/${room.id}/files/content?path=${encodeURIComponent(elsewhere)}`)).status).toBe(404);
+    store.post(room.id, { from: "you", text: "看这个", files: [elsewhere] });
+    const sent = await app.request(`/rooms/${room.id}/files/content?path=${encodeURIComponent(elsewhere)}`);
+    expect(sent.status).toBe(200);
+    expect(await sent.text()).toBe("%PDF-1");
   });
 });
 
