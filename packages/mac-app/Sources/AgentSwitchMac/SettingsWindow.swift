@@ -5,6 +5,8 @@ import SwiftUI
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
     case pairing, nodes, models, keys, agents, profiles, addons, environment, general
+    /// The new dispatch (2026-11-24): a session at the 调度台 room (DispatchDeskView).
+    case desk
     /// Dispatch's own settings (docs/dispatch-v0.md §3): one row in the sidebar, its parts chosen at the top of the
     /// page (2026-11-22, user: dispatch应该单独做一个选项，然后里面是分组的各个设置). `dispatchModels` and `permissions`
     /// were among the app's pages before: the model that dispatches and the default target, and who approves what
@@ -14,7 +16,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// The sidebar's first block, without a header.
-    static let app: [SettingsTab] = [.pairing, .nodes, .models, .keys, .agents, .profiles, .addons, .environment, .general]
+    static let app: [SettingsTab] = [.pairing, .nodes, .models, .keys, .agents, .profiles, .addons, .environment, .general, .desk]
     /// The parts of the sidebar's `Dispatch` page, in the order its switch shows them.
     static let dispatch: [SettingsTab] = [.dispatchModels, .permissions, .context, .extensions, .log, .history]
     var isDispatch: Bool { Self.dispatch.contains(self) }
@@ -33,6 +35,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .addons: return "Add-Ons"
         case .environment: return "Environment"
         case .general: return "General"
+        case .desk: return "Dispatch"
         case .context: return "Context"
         case .extensions: return "Extensions"
         case .log: return "Log"
@@ -52,6 +55,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .addons: return "square.stack.3d.up"
         case .environment: return "checklist"
         case .general: return "gearshape"
+        case .desk: return "person.crop.circle.badge.checkmark"
         case .context: return "doc.text"
         case .extensions: return "puzzlepiece.extension"
         case .log: return "list.bullet.rectangle"
@@ -255,7 +259,7 @@ struct SettingsView: View {
                 }
                 // One row for all of Dispatch's settings: tagged with the part it opens, the one shown last.
                 // Greyed out and not clickable while the old dispatch is off (OldDispatch).
-                Label("Dispatch", systemImage: "arrow.triangle.branch").oldDispatchOff().tag(navigation.dispatchPart)
+                Label("Old Dispatch", systemImage: "arrow.triangle.branch").oldDispatchOff().tag(navigation.dispatchPart)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
             .toolbar(removing: .sidebarToggle)
@@ -328,6 +332,7 @@ struct SettingsView: View {
         case .profiles: ProfilesSettingsView()
         case .addons: AddonsView()
         case .environment: EnvironmentView()
+        case .desk: DispatchDeskView()
         case .general: GeneralView()
         case .context: ContextSettingsPage()
         case .extensions: ExtensionsSettingsPage()

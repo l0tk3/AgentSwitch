@@ -168,7 +168,9 @@ private struct RoomListRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
-                    if !look.isClassic {
+                    if room.desk {
+                        LookGlyph(glyph: "◆", symbol: "person.crop.circle.badge.checkmark", size: 12).foregroundStyle(current ? Color.signal : Look.ink2).help("调度台：你和调度说话的地方")
+                    } else if !look.isClassic {
                         Text(String(format: "%02d", index + 1)).code(13).foregroundStyle(current ? Color.signal : Look.faint)
                     }
                     Text(room.name).mono(13, weight: look.isClassic ? .semibold : .regular).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)

@@ -61,6 +61,16 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(list.map(\.attention), [3, 0])
     }
 
+    func testTheDispatchDeskIsReadAndItsChoiceSaidWithNulls() throws {
+        let desk = try JSONDecoder().decode(DispatchDesk.self, from: Data(#"{"settings":{"on":true,"agent":"codex","profile":null,"model":"gpt-6-sol","mode":"bypass","maxStarted":8},"folder":"/w/Dispatch","instructions":"/w/Dispatch/AGENTS.md","room":"r1","terminal":{"id":"t1","status":"idle","model":"gpt-6-sol"},"problem":null,"replacing":false}"#.utf8))
+        XCTAssertEqual(desk.state, "空闲，在调度台等你说话")
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(desk.settings)) as? [String: Any]
+        XCTAssertTrue(sent?["profile"] is NSNull)
+        XCTAssertEqual(sent?["model"] as? String, "gpt-6-sol")
+        let list = try JSONDecoder().decode([RoomSummary].self, from: Data(#"[{"id":"d","name":"调度台","desk":true},{"id":"b","name":"y"}]"#.utf8))
+        XCTAssertEqual(list.map(\.desk), [true, false])
+    }
+
     func testAQuotedMessageKeepsItsMarkdownOnOneLine() {
         XCTAssertEqual(RoomText.quoteHead("## 结论\n- **接口** 改好了，见 `T3/api.md`", handles: []), "结论 **接口** 改好了，见 `T3/api.md`")
         let cut = RoomText.quoteHead("开头 **" + String(repeating: "长", count: 80) + "** 结尾", handles: [])

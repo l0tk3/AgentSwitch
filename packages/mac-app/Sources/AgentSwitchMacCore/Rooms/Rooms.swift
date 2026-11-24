@@ -370,8 +370,10 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public let terminals: [String]
     /// How many things in it wait on the user's hand (等你处理, `GET /rooms/attention`).
     public let attention: Int
+    /// The dispatch desk (调度台): the user and the dispatch session; listed first.
+    public let desk: Bool
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention, desk }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -386,6 +388,7 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
         rounds = try? c.decodeIfPresent(Int.self, forKey: .rounds)
         terminals = (try? c.decodeIfPresent([String].self, forKey: .terminals)) ?? []
         attention = (try? c.decodeIfPresent(Int.self, forKey: .attention)) ?? 0
+        desk = (try? c.decodeIfPresent(Bool.self, forKey: .desk)) ?? false
     }
 
     /// The list's second line: who said the last thing and what, on one line; the topic before anything is said.
