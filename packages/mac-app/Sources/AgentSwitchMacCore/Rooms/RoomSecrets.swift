@@ -104,6 +104,8 @@ extension GateCLI {
         let result = try await ProcessRunner.run(executable, ["enc", "--batch"], environment: environment, stdin: try JSONSerialization.data(withJSONObject: entries), timeout: GateCLI.timeout)
         guard !result.timedOut, result.status == 0 || result.status == 1 else {
             let text = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A gate service older than this app publishes several keys; this app's gate reads one (2026-11-24).
+            if text.contains("keys.json 格式无效") { throw CommandError("凭据网关服务是旧版本，和这个 App 对不上。到 设置 › 环境 › Gateway Service 点「Update…」更新后再试。") }
             throw CommandError(result.timedOut ? "secret-gate 超时" : (text.isEmpty ? "secret-gate 退出码 \(result.status)" : text))
         }
         guard let rows = try? JSONSerialization.jsonObject(with: result.stdout) as? [[String: Any]], rows.count == drafts.count else { throw CommandError("无法解析 secret-gate 的输出") }
