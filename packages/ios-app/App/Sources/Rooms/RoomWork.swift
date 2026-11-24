@@ -31,11 +31,11 @@ struct RoomTasksSheet: View {
                         if detail.tasks.isEmpty {
                             Text("这个房间还没有任务。点 Add 加一个；成员也可以自己加、自己领。").font(.subheadline).foregroundStyle(.secondary).padding(Theme.Space.l)
                         }
-                        ForEach([RoomTaskState.doing, .todo, .done], id: \.self) { state in
+                        ForEach([RoomTaskState.blocked, .doing, .todo, .done], id: \.self) { state in
                             let tasks = detail.tasks(state)
                             if !tasks.isEmpty {
                                 HStack(alignment: .firstTextBaseline) {
-                                    SectionLabel(state.word)
+                                    SectionLabel(state.says)
                                     Spacer(minLength: 6)
                                     Text("\(tasks.count)").mono(11.5).foregroundStyle(Theme.inkDim)
                                 }
@@ -141,9 +141,13 @@ private struct RoomTaskRow<Actions: View>: View {
                     .mono(11.5).lineLimit(1)
                 }
                 if let note = task.note {
-                    Text(note).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(4)
+                    let stuck = task.state == .blocked
+                    Text(stuck ? "卡在：" + note : note).font(.system(size: 12.5)).foregroundStyle(stuck ? Theme.waiting : .secondary).lineLimit(4)
                         .padding(.leading, 8)
-                        .overlay(alignment: .leading) { Theme.line.frame(width: 2) }
+                        .overlay(alignment: .leading) { (stuck ? Theme.waiting : Theme.line).frame(width: 2) }
+                }
+                if let stats = detail.taskStats[task.n], !stats.isEmpty {
+                    Text(stats.line).mono(10.5).foregroundStyle(Theme.inkDim).lineLimit(1)
                 }
             }
             Menu { actions() } label: {
@@ -162,11 +166,11 @@ private struct RoomTaskRow<Actions: View>: View {
     /// Empty while it is to do, half while it is being done, ticked when done.
     @ViewBuilder private var box: some View {
         if look.isClassic {
-            Image(systemName: task.state == .done ? "checkmark.circle.fill" : task.state == .doing ? "circle.lefthalf.filled" : "circle")
-                .font(.system(size: 20)).foregroundStyle(task.state == .done ? Theme.done : task.state == .doing ? Theme.busy : Theme.inkDim)
+            Image(systemName: task.state == .done ? "checkmark.circle.fill" : task.state == .blocked ? "exclamationmark.triangle.fill" : task.state == .doing ? "circle.lefthalf.filled" : "circle")
+                .font(.system(size: 20)).foregroundStyle(task.state == .done ? Theme.done : task.state == .blocked ? Theme.waiting : task.state == .doing ? Theme.busy : Theme.inkDim)
         } else {
-            Text(task.state == .done ? "[x]" : task.state == .doing ? "[~]" : "[ ]")
-                .font(.system(size: 14, design: .monospaced)).foregroundStyle(task.state == .todo ? Theme.inkDim : Theme.ink)
+            Text(task.state == .done ? "[x]" : task.state == .blocked ? "[!]" : task.state == .doing ? "[~]" : "[ ]")
+                .font(.system(size: 14, design: .monospaced)).foregroundStyle(task.state == .todo ? Theme.inkDim : task.state == .blocked ? Theme.waiting : Theme.ink)
                 .padding(.top, 1)
         }
     }

@@ -346,7 +346,7 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(room.tasks(.todo).map(\.n), [3, 5])
         XCTAssertEqual(room.tasks(.done).map(\.n), [1, 6])
         XCTAssertEqual(room.openTasks, 3)
-        XCTAssertEqual(RoomTaskState.allCases.map(\.word), ["To Do", "Doing", "Done"])
+        XCTAssertEqual(RoomTaskState.allCases.map(\.word), ["To Do", "Doing", "Blocked", "Done"])
         // It waits for what comes first and is not done: not for one that is done, nor one no longer on the list.
         XCTAssertEqual(room.waits(room.tasks[1]), [])
         XCTAssertNil(room.waitsWord(room.tasks[1]))
@@ -587,5 +587,130 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(String(RoomMarkdown.attributed("- x", lineStart: false).characters), "- x")
         // An attachment token stays as typed.
         XCTAssertEqual(String(RoomMarkdown.attributed("看 [Image #1] ", lineStart: true).characters), "看 [Image #1] ")
+    }
+
+    // MARK: - the page's second version (design-room-ui-v2)
+
+    func testAttentionTheSummaryCountAndBlockedTasksAreRead() throws {
+        let attention = try JSONDecoder().decode(RoomAttention.self, from: Data(#"""
+        {"items":[
+          {"room":"r1","roomName":"登录","kind":"permission","handle":"ios","terminal":"t9","text":"","at":9},
+          {"room":"r1","roomName":"登录","kind":"blocked","task":4,"handle":"ios","text":"iOS 表单：等字段名","at":8},
+          {"room":"r2","roomName":"文档","kind":"question","seq":12,"handle":"api","task":3,"text":"字段叫\nexpiresAt 行吗？","at":7},
+          {"room":"r2","roomName":"文档","kind":"rounds","text":"7","at":6},
+          {"room":"r2","roomName":"文档","kind":"trust","handle":"web","terminal":"t3","text":"Do you trust the files in this folder?","at":5},
+          {"room":"r3","roomName":"新","kind":"someday","text":"","at":1}]}
+        """#.utf8))
+        XCTAssertEqual(attention.items.map(\.line), ["⚠ ios 等你确认权限", "⚠ T4 卡住：iOS 表单：等字段名", "T3 · api 问你：字段叫 expiresAt 行吗？", "会话间已聊 7 条，没有你参与", "⚠ web 等你信任文件夹", "有事等你处理"])
+        XCTAssertEqual(attention.items[2].seq, 12)
+        XCTAssertEqual(attention.items[0].terminal, "t9")
+        XCTAssertEqual(attention.items.map(\.urgent), [true, true, false, false, true, false])
+        XCTAssertEqual(Set(attention.items.map(\.id)).count, 6)
+
+        let list = try JSONDecoder().decode(RoomList.self, from: Data(#"{"rooms":[{"id":"a","name":"a","attention":2,"unread":0,"forYou":false},{"id":"b","name":"b"}]}"#.utf8))
+        XCTAssertEqual(list.rooms.map(\.attention), [2, 0])
+        XCTAssertEqual(list.attention, 2)
+
+        let room = try JSONDecoder().decode(RoomDetail.self, from: Data(#"""
+        {"room":{"id":"r","name":"r","lastSeq":3,"readSeq":3},
+         "seats":[{"handle":"you","kind":"user"},
+                  {"handle":"api","kind":"session","state":"idle","muted":true,"mutedBy":"you"},
+                  {"handle":"ios","kind":"session","state":"exited","muted":false,"mutedBy":null},
+                  {"handle":"web","kind":"session","state":"idle"}],
+         "messages":[{"seq":1,"from":"you","to":["api","ios","web"],"text":"@all 看一下","at":1},
+                     {"seq":2,"from":"api","to":["you"],"text":"可以吗？","at":2,"expects":"answer","task":4},
+                     {"seq":3,"from":"you","to":[],"text":"记一笔","at":3}],
+         "tasks":[{"n":4,"title":"iOS 表单","state":"blocked","owner":"ios","note":"等字段名"}],
+         "taskStats":{"4":{"wakes":3,"chars":12345,"posts":8,"calls":21},"x":{"wakes":1}},
+         "reads":{"1":["api","web"],"2":["ios"]}}
+        """#.utf8))
+        XCTAssertEqual(room.tasks[0].state, .blocked)
+        XCTAssertEqual(room.tasks[0].state.says, "卡住")
+        XCTAssertEqual(room.taskStats, [4: RoomStats(wakes: 3, chars: 12345, posts: 8, calls: 21)])
+        XCTAssertEqual(room.taskStats[4]?.line, "唤醒 3 次 · 1.2 万字 · 8 条消息 · 21 次调用")
+        XCTAssertEqual(room.seat("api")?.muted, true)
+        XCTAssertEqual(room.seat("api")?.mutedBy, "you")
+        XCTAssertEqual(room.seat("web")?.muted, false)
+        XCTAssertEqual(room.messages[1].expects, "answer")
+        XCTAssertEqual(room.reads[1], ["api", "web"])
+
+        // Of the user's own message for others: who read it. Not on another's, nor on one for nobody.
+        let first = RoomReaders.of(room.messages[0], in: room)
+        XCTAssertEqual(first.word, "2/3 已读")
+        XCTAssertEqual(first.unread, ["ios"])
+        XCTAssertEqual(RoomReaders.of(room.messages[1], in: room).total, 0)
+        XCTAssertEqual(RoomReaders.of(room.messages[2], in: room).total, 0)
+    }
+
+    func testAQuoteASnippetAndATaskNamedAtTheStart() {
+        XCTAssertEqual(RoomRow.quoteLine("接口改好了，\n字段见 **T3/api.md**"), "接口改好了， 字段见 **T3/api.md**")
+        let long = String(repeating: "长", count: 55) + "**粗体在这里**"
+        XCTAssertEqual(RoomRow.quoteLine(long), String(repeating: "长", count: 55) + "**粗体在**…")
+        XCTAssertEqual(RoomRow.quoteLine(String(repeating: "a", count: 58) + "`code`"), String(repeating: "a", count: 58) + "`c`…")
+
+        let s = RoomSnippet.of("前面说了很多很多很多很多很多很多很多很多很多话，然后 Login 接口改好了，后面还有", query: "login", around: 6)
+        XCTAssertEqual(s.before, "…多话，然后 ")
+        XCTAssertEqual(s.hit, "Login")
+        XCTAssertEqual(s.after, " 接口改好了…")
+        XCTAssertEqual(RoomSnippet.of("短", query: "x").after, "短")
+        XCTAssertEqual(RoomSnippet.of("接口：**`GET /clash`**", query: "接口").after, "：GET /clash")
+
+        let tasks = [RoomTask(n: 3, title: "登录")]
+        XCTAssertEqual(RoomMessage.taskNamed(at: "T3 字段改了", tasks: tasks), 3)
+        XCTAssertEqual(RoomMessage.taskNamed(at: "t3：好", tasks: tasks), 3)
+        XCTAssertNil(RoomMessage.taskNamed(at: "T4 没有这个", tasks: tasks))
+        XCTAssertNil(RoomMessage.taskNamed(at: "T30 x", tasks: tasks))
+        XCTAssertNil(RoomMessage.taskNamed(at: "Today", tasks: tasks))
+
+        let messages = [RoomMessage(seq: 1, from: "a", text: "x", task: 3), RoomMessage(seq: 2, from: "a", text: "x", task: 3), RoomMessage(seq: 3, from: "a", text: "x")]
+        XCTAssertEqual(RoomMessagePage.byTask(messages, since: 1), [3: 1])
+    }
+
+    func testBrowseAndMemberCallsAreAsTheServiceTakesThem() async throws {
+        let transport = FakeTransport { req, _ in
+            let path = req.url?.path ?? "", method = req.httpMethod ?? ""
+            switch (method, path) {
+            case ("GET", "/rooms/attention"):
+                return (Data(#"{"items":[{"room":"r","roomName":"R","kind":"rounds","text":"6","at":1}]}"#.utf8), httpResponse(req.url, status: 200))
+            case ("GET", "/rooms/r/messages"):
+                return (Data(#"{"messages":[{"seq":9,"from":"api","to":[],"text":"hi","at":1,"task":3}],"byTask":{"3":2,"5":1}}"#.utf8), httpResponse(req.url, status: 200))
+            case ("PATCH", "/rooms/r/seats/api"):
+                return (Data(#"{"seat":{"handle":"api","kind":"session","muted":true,"mutedBy":"you"}}"#.utf8), httpResponse(req.url, status: 200))
+            case ("POST", "/rooms/r/seats/api/resume"):
+                return (Data(#"{"seat":{"handle":"api","kind":"session","state":"busy"},"terminal":{"id":"t2"}}"#.utf8), httpResponse(req.url, status: 201))
+            case ("DELETE", "/rooms/r/seats/api"):
+                let ending = req.url?.query?.contains("close=end") == true
+                return (Data((ending ? #"{"ok":true,"closed":false,"handingOver":true}"# : #"{"ok":true,"closed":false}"#).utf8), httpResponse(req.url, status: 200))
+            default: return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url, status: 200))
+            }
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let attention = try await api.roomAttention()
+        XCTAssertEqual(attention.items.first?.line, "会话间已聊 6 条，没有你参与")
+        let page = try await api.roomMessages("r", task: 3, since: 7)
+        XCTAssertEqual(page.messages.map(\.seq), [9])
+        XCTAssertEqual(page.byTask, [3: 2, 5: 1])
+        _ = try await api.roomMessages("r", task: 3, query: "登录")
+        _ = try await api.roomMessages("r", before: 40, limit: 500)
+        let muted = try await api.muteSeat("api", in: "r", muted: true)
+        XCTAssertTrue(muted.muted)
+        let back = try await api.resumeSeat("api", in: "r")
+        XCTAssertEqual(back.state, .busy)
+        let kicked = try await api.unseat("api", in: "r")
+        XCTAssertFalse(kicked.handingOver)
+        let ended = try await api.unseat("api", in: "r", close: .end)
+        XCTAssertTrue(ended.handingOver)
+        try await api.unseat("api", in: "r", close: .end, now: true)
+
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")\($0.url?.query.map { "?" + $0 } ?? "")" }, [
+            "GET /rooms/attention",
+            "GET /rooms/r/messages?task=3&since=7&limit=200",
+            "GET /rooms/r/messages?q=%E7%99%BB%E5%BD%95&task=3&limit=200",
+            "GET /rooms/r/messages?before=40&limit=200",
+            "PATCH /rooms/r/seats/api", "POST /rooms/r/seats/api/resume",
+            "DELETE /rooms/r/seats/api", "DELETE /rooms/r/seats/api?close=end", "DELETE /rooms/r/seats/api?close=end&now=1",
+        ])
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(transport.requests[4].httpBody)) as? NSDictionary)
+        XCTAssertEqual(body, ["muted": true])
     }
 }

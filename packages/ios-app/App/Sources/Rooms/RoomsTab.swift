@@ -8,7 +8,7 @@ import SwiftUI
 struct RoomsTab: View {
     @Environment(AppModel.self) private var model
     @Environment(\.interfaceLook) private var look
-    @State private var path: [String] = []
+    @State private var path: [RoomRoute] = []
     @State private var creating = false
 
     var body: some View {
@@ -40,6 +40,12 @@ struct RoomsTab: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { MacTabTitle(title: "Rooms") }
+                // 等你处理 (user #191): its own entry at the top, with how many things wait.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { path.append(.attention) } label: { attentionLabel(store.attentionCount) }
+                        .accessibilityLabel(store.attentionCount > 0 ? "等你处理 \(store.attentionCount)" : "等你处理")
+                        .disabled(store.list == nil || store.unsupported)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { creating = true } label: {
                         if look.isClassic { Image(systemName: "plus") } else { Text("New").mono(15, weight: .medium) }
@@ -48,12 +54,18 @@ struct RoomsTab: View {
                     .disabled(store.list == nil || store.unsupported)
                 }
             }
-            .navigationDestination(for: String.self) { id in RoomPage(id: id, detail: Self.sample(id)) }
+            .navigationDestination(for: RoomRoute.self) { route in
+                switch route {
+                case .room(let id, let open): RoomPage(id: id, detail: Self.sample(id), open: open)
+                case .attention: RoomAttentionPage { path.append($0) }
+                }
+            }
             .refreshable { await store.refresh(model.api) }
             .onAppear {
                 openRequested()
                 #if DEBUG
                 if DemoRooms.isDemo, DemoRooms.screen == "roomnew" { creating = true }
+                if DemoRooms.isDemo, DemoRooms.screen == "roomattention" { path = [.attention] }
                 #endif
             }
             .onChange(of: model.openRoomRequest) { openRequested() }
@@ -61,7 +73,7 @@ struct RoomsTab: View {
             .onChange(of: model.profile?.fingerprint) { path = [] }
         }
         .sheet(isPresented: $creating) {
-            RoomSessionsSheet(purpose: .create) { made in path = [made] }.followsLook()
+            RoomSessionsSheet(purpose: .create) { made in path = [.room(made)] }.followsLook()
         }
     }
 
@@ -69,7 +81,7 @@ struct RoomsTab: View {
     private func rows(_ rooms: [RoomSummary]) -> some View {
         let list = VStack(spacing: 0) {
             ForEach(Array(rooms.enumerated()), id: \.element.id) { index, room in
-                NavigationLink(value: room.id) { RoomListRow(room: room, index: index, last: index == rooms.count - 1) }
+                NavigationLink(value: RoomRoute.room(room.id)) { RoomListRow(room: room, index: index, last: index == rooms.count - 1) }
                     .buttonStyle(.plain)
             }
         }
@@ -94,7 +106,22 @@ struct RoomsTab: View {
     private func openRequested() {
         guard let id = model.openRoomRequest else { return }
         model.openRoomRequest = nil
-        path = [id]
+        path = [.room(id)]
+    }
+
+    /// The inbox's mark and, when something waits, how many — amber (what waits for you).
+    @ViewBuilder private func attentionLabel(_ n: Int) -> some View {
+        HStack(spacing: 3) {
+            if look.isClassic { Image(systemName: n > 0 ? "tray.full" : "tray") } else { Text("等你").mono(14, weight: .medium) }
+            if n > 0 {
+                if look.isClassic {
+                    Text("\(n)").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18).background(Theme.waiting, in: Capsule())
+                } else {
+                    Text("[\(n)]").mono(13, weight: .medium).foregroundStyle(Theme.waiting)
+                }
+            }
+        }
     }
 }
 
@@ -117,6 +144,7 @@ private struct RoomListRow: View {
                 // Sessions talking among themselves with no word from the user (§7): told here too, in amber — it
                 // waits for the user's look, and stops nothing.
                 else if let n = room.rounds { Text("\(n) Rounds").mono(11).foregroundStyle(Theme.waiting).accessibilityLabel("\(n) rounds without you") }
+                if room.attention > 0 { Text("⚠ \(room.attention)").mono(11).foregroundStyle(Theme.waiting).accessibilityLabel("\(room.attention) 件事等你处理") }
                 if room.unread > 0 { count }
             }
             Text(room.lastLine).font(.system(size: 13.5)).foregroundStyle(.secondary).lineLimit(1)

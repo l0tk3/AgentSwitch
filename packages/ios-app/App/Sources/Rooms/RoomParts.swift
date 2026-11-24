@@ -127,17 +127,28 @@ enum RoomWords {
     /// The day written above the first message of a day.
     static func day(_ date: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        let parts = calendar.dateComponents([.month, .day], from: date)
-        return "\(parts.month ?? 0)/\(parts.day ?? 0)"
+        if calendar.isDateInToday(date) { return "今天" }
+        if calendar.isDateInYesterday(date) { return "昨天" }
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        let thisYear = calendar.component(.year, from: Date())
+        return (parts.year == thisYear ? "" : "\(parts.year ?? 0)年") + "\(parts.month ?? 0)月\(parts.day ?? 0)日"
     }
 
     static func who(_ handle: String) -> String { handle == RoomSeat.you ? "You" : handle }
 
     /// A message's text as it is drawn: `@names` of seats firm (the classic look: in the accent), the user's own on a
     /// ground, `code` in the code font; the plain words' Markdown as it reads (RoomMarkdown).
-    static func text(_ text: String, handles: Set<String>, look: InterfaceLook) -> AttributedString {
+    /// One line of Markdown as it reads, `code` in the code font — bold that holds code, too (a reply's quote).
+    static func inline(_ text: String, size: CGFloat) -> AttributedString {
+        var run = RoomMarkdown.attributed(text, lineStart: false)
+        for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
+            run[r.range].font = .system(size: size - 1, design: .monospaced)
+            run[r.range].backgroundColor = Theme.code
+        }
+        return run
+    }
+
+    static func text(_ text: String, handles: Set<String>, look: InterfaceLook, size: CGFloat = 15) -> AttributedString {
         var out = AttributedString()
         var lineStart = true
         for piece in RoomText.pieces(text, handles: handles) {
@@ -151,24 +162,24 @@ enum RoomWords {
             case .text(let s):
                 var run = RoomMarkdown.attributed(s, lineStart: lineStart)
                 for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
-                    run[r.range].font = .system(size: 14, design: .monospaced)
+                    run[r.range].font = .system(size: size - 1, design: .monospaced)
                     run[r.range].backgroundColor = Theme.code
                 }
                 out += run
             case .code(let s):
                 var run = AttributedString(s)
-                run.font = .system(size: 14, design: .monospaced)
+                run.font = .system(size: size - 1, design: .monospaced)
                 run.backgroundColor = Theme.code
                 out += run
             case .mention(let name):
                 let me = name == RoomSeat.you
                 var run = AttributedString(me ? " @\(name) " : "@\(name)")
                 if look.isClassic {
-                    run.font = .system(size: 15, weight: .medium)
+                    run.font = .system(size: size, weight: .medium)
                     run.foregroundColor = me ? .white : Theme.signal
                     if me { run.backgroundColor = Theme.signal }
                 } else {
-                    run.font = .system(size: 14, weight: .semibold, design: .monospaced)
+                    run.font = .system(size: size - 1, weight: .semibold, design: .monospaced)
                     run.foregroundColor = me ? Theme.base : Theme.ink
                     if me { run.backgroundColor = Theme.ink }
                 }

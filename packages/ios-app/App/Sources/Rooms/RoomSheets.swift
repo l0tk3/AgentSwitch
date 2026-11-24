@@ -85,6 +85,7 @@ private struct RoomMemberRow: View {
                 HStack(spacing: 0) {
                     Text(seat.state?.word(in: look) ?? "—").foregroundStyle(seat.state?.wordColor ?? Theme.secondaryInk)
                     if seat.canAdd { Text(" · Admin").foregroundStyle(.secondary) }
+                    if seat.muted { Text(" · 已禁言").foregroundStyle(Theme.waiting) }
                     // Its session has no Chatroom Kit (§6): it needs the user to resume it once.
                     if seat.needsResume { Text(" · No Kit").foregroundStyle(Theme.waiting) }
                 }
@@ -114,7 +115,10 @@ private struct SeatCardPage: View {
     @Environment(\.interfaceLook) private var look
     @Environment(\.dismiss) private var dismiss
     @State private var confirmRemove = false
+    @State private var confirmEnd = false
     @State private var busy = false
+    /// What became of the last 结束: it writes its handover note first.
+    @State private var said: String?
 
     var body: some View {
         let seat = model.detail?.seat(handle)
@@ -143,6 +147,7 @@ private struct SeatCardPage: View {
                         Text(seat.left != nil ? "Left" : seat.state?.word(in: look) ?? "—").foregroundStyle(seat.left != nil ? Theme.secondaryInk : seat.state?.wordColor ?? Theme.secondaryInk)
                     }
                     line("Seated By", RoomWords.who(seat.addedBy))
+                    if seat.muted { line("禁言", "@" + (seat.mutedBy ?? "you") + " 禁的") }
                 } footer: {
                     if seat.left == nil, let says = seat.state?.says { Text(says) }
                 }
@@ -178,10 +183,33 @@ private struct SeatCardPage: View {
                     }
                     Section {
                         Button("Mention") { mention(handle) }
-                        if let terminal = seat.terminal, app.terminals.terminals.contains(where: { $0.id == terminal }) {
+                        if let terminal = seat.terminal, seat.state != .exited, app.terminals.terminals.contains(where: { $0.id == terminal }) {
                             Button("Open Terminal") { close(); app.openTerminal(terminal) }
                         }
-                        Button("Remove", role: .destructive) { confirmRemove = true }.disabled(busy)
+                    }
+                    // What is done with a member (design v2, 缺口 4): bring its session back, keep it from posting, take
+                    // it out of the room (its session goes on), or end it.
+                    Section {
+                        HStack(spacing: 8) {
+                            Button { Task { await act { try await $0.resumeSeat(handle, in: model.id) } } } label: { Text("恢复") }
+                                .buttonStyle(SquareButtonStyle(prominent: seat.state == .exited))
+                                .disabled(busy || seat.state != .exited)
+                            Button { Task { await act { try await $0.muteSeat(handle, in: model.id, muted: !seat.muted) } } } label: { Text(seat.muted ? "解除禁言" : "禁言") }
+                                .buttonStyle(SquareButtonStyle())
+                                .disabled(busy)
+                            Button { confirmRemove = true } label: { Text("踢出") }
+                                .buttonStyle(SquareButtonStyle(destructive: true))
+                                .disabled(busy)
+                            Button { confirmEnd = true } label: { Text("结束") }
+                                .buttonStyle(SquareButtonStyle(destructive: true))
+                                .disabled(busy || seat.state == .exited)
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    } footer: {
+                        if let said { Text(said).foregroundStyle(Theme.waiting) } else {
+                            Text(seat.state == .exited ? "会话已经结束：恢复会用同一个会话、同一个目录接着来，席位不变。" : "禁言：还能读、还能干活，但不能发消息。踢出：移出房间，会话继续运行。结束：移出房间并关掉它的终端，对话记录留着。")
+                        }
                     }
                 }
             } else {
@@ -202,6 +230,30 @@ private struct SeatCardPage: View {
         } message: {
             Text("它的会话不受影响；还没交到它手上的消息不再投递。")
         }
+        .confirmationDialog("结束 @\(handle)？", isPresented: $confirmEnd, titleVisibility: .visible) {
+            Button("结束", role: .destructive) { Task { await end(now: false) } }
+            Button("立即结束（不写交接）", role: .destructive) { Task { await end(now: true) } }
+        } message: {
+            Text("移出房间并关掉它的终端，对话记录留着，之后还能恢复。手上有没做完的任务时，它会先写交接，最多两分钟。")
+        }
+    }
+
+    /// Something done to the member, then the room read again.
+    private func act(_ work: @escaping (AgentSwitchAPI) async throws -> Void) async {
+        busy = true
+        defer { busy = false }
+        said = nil
+        await model.run(app.api, work)
+    }
+
+    /// Out and its terminal closed; with work unfinished it is asked for its handover note first, unless `now`.
+    private func end(now: Bool) async {
+        busy = true
+        defer { busy = false }
+        var handingOver = false
+        let done = await model.run(app.api) { handingOver = try await $0.unseat(handle, in: model.id, close: .end, now: now).handingOver }
+        guard done else { return }
+        if handingOver { said = "正在等它写交接，最多两分钟。写完就结束。" } else { dismiss() }
     }
 
     private func line(_ label: String, _ value: String, code: Bool = false) -> some View {

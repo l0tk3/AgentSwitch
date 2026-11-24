@@ -25,6 +25,27 @@ final class RoomsStore {
     var rooms: [RoomSummary] { list?.rooms ?? [] }
     /// Messages not seen yet: the tab's badge.
     var unread: Int { list?.unread ?? 0 }
+    /// What waits on the user's hand in every room (等你处理), newest first; read when the list's count of them
+    /// changes and while its page is on screen.
+    private(set) var attention: [RoomAttentionItem] = []
+    /// The list's count of them, at the last read of the items.
+    @ObservationIgnored private var attentionAt: Int?
+    /// How many things wait, as the list says.
+    var attentionCount: Int { list?.attention ?? 0 }
+
+    /// The items read again; `always`: even when the list's count has not changed (their page is open).
+    func refreshAttention(_ api: AgentSwitchAPI?, always: Bool = false) async {
+        guard let api, !unsupported else { return }
+        guard always || attentionAt != attentionCount else { return }
+        let count = attentionCount
+        do {
+            attention = try await api.roomAttention().items
+            attentionAt = count
+        } catch {
+            // A Mac from before 等你处理: nothing to show.
+            if case APIError.http(let status, _) = error, status == 404 || status == 403 { attention = []; attentionAt = count }
+        }
+    }
 
     func refresh(_ api: AgentSwitchAPI?) async {
         guard let api else { return }
@@ -35,6 +56,7 @@ final class RoomsStore {
             if let fresh { list = fresh.list; etag = fresh.etag }
             unsupported = false
             error = nil
+            if attentionAt != attentionCount { await refreshAttention(api) }
         } catch is RoomsUnsupported {
             guard asked == generation else { return }
             unsupported = true
@@ -50,13 +72,15 @@ final class RoomsStore {
         generation += 1
         list = nil
         etag = nil
+        attention = []
+        attentionAt = nil
         unsupported = false
         error = nil
     }
 
     #if DEBUG
     /// The sample screens' rooms.
-    func show(_ list: RoomList) { self.list = list }
+    func show(_ list: RoomList, attention: [RoomAttentionItem] = []) { self.list = list; self.attention = attention; attentionAt = list.attention }
     #endif
 }
 
@@ -72,13 +96,28 @@ final class RoomPageModel {
     var draft = "" { didSet { if draft != oldValue { tokensChanged() } } }
     /// The `[Image #1]` tokens standing in the box for the pictures (RoomAttachTokens), by each one's id.
     @ObservationIgnored private var attachTokens = RoomAttachTokens()
-    /// The message being answered; its task becomes the next message's.
-    var replyTo: Int? { didSet { if let replyTo, let task = detail?.message(replyTo)?.task { draftTask = task } } }
-    /// The task the next message is about (2026-11-24): taken from the message answered, or the one the timeline is
-    /// narrowed to; the user can change it beside the box. nil: about no one task.
-    var draftTask: Int?
-    /// The timeline narrowed to one task's messages (a label tapped); nil: all of them.
-    var taskFilter: Int? { didSet { if let taskFilter, taskFilter != oldValue { draftTask = taskFilter } } }
+    /// The message being answered; the Mac makes the reply about the task of what it answers.
+    var replyTo: Int?
+    /// The timeline narrowed to one task's messages (the task drawer, a task's tag); nil: `# 全部`. What is written
+    /// while it is narrowed is about that task.
+    var taskFilter: Int? {
+        didSet {
+            guard taskFilter != oldValue else { return }
+            taskMessages = nil
+            if let taskFilter { taskSeen[taskFilter] = byTask[taskFilter] ?? 0 }
+        }
+    }
+    /// The task's own last messages, as the Mac gave them (`GET /rooms/:id/messages?task=`); nil until read — the
+    /// ones the page has are shown meanwhile.
+    private(set) var taskMessages: [RoomMessage]?
+    /// Messages above the room's last page, read to reach one further up (a search's hit, a quote's original).
+    private(set) var older: [RoomMessage] = []
+    /// How many messages since the user last saw the room are about each task (`byTask`), and of those how many there
+    /// were when the user last looked at that task: the drawer's counts are the difference.
+    private(set) var byTask: [Int: Int] = [:]
+    @ObservationIgnored private var taskSeen: [Int: Int] = [:]
+    /// A message to bring into view and mark for a moment (a search's hit, a quote tapped, 等你处理).
+    var focus: Int?
     private(set) var sending = false
     /// The pictures picked here to go with the next message (`RoomMessage.maxFiles` at most).
     private(set) var attachments: [RoomAttachment] = []
@@ -144,16 +183,92 @@ final class RoomPageModel {
     static func wordsForPictures(_ n: Int) -> String { n == 1 ? "[图片]" : "[图片 × \(n)]" }
 
     func refresh(_ api: AgentSwitchAPI?) async {
-        guard let api, !gone else { return }
+        guard let api, !gone else {
+            #if DEBUG
+            if api == nil, let detail { byTask = RoomMessagePage.byTask(detail.messages, since: seenAtOpen ?? detail.room.readSeq) }
+            #endif
+            return
+        }
         do {
+            let before = detail?.room.lastSeq
             if let fresh = try await api.room(id, etag: etag) { take(fresh.room); etag = fresh.etag }
             error = nil
+            if before != detail?.room.lastSeq || (taskFilter != nil && taskMessages == nil) || byTaskRead == nil { await readTasks(api) }
             await markRead(api)
         } catch APIError.http(let status, _) where status == 404 {
             gone = true
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// The last page `byTask` was read at.
+    @ObservationIgnored private var byTaskRead: Int?
+
+    /// The narrowed task's own messages and the counts per task since the user last saw the room.
+    private func readTasks(_ api: AgentSwitchAPI) async {
+        let since = seenAtOpen ?? detail?.room.readSeq ?? 0
+        let task = taskFilter
+        do {
+            let page = try await api.roomMessages(id, task: task, since: since, limit: task == nil ? 1 : 200)
+            byTask = page.byTask
+            byTaskRead = detail?.room.lastSeq
+            if let task, task == taskFilter { taskMessages = page.messages; taskSeen[task] = byTask[task] ?? 0 }
+        } catch {
+            // A Mac from before the route: what the page has.
+            if let detail {
+                byTask = RoomMessagePage.byTask(detail.messages, since: since)
+                byTaskRead = detail.room.lastSeq
+                if let task, task == taskFilter { taskMessages = detail.messages.filter { $0.task == task } }
+            }
+        }
+    }
+
+    /// New messages about a task since the user last looked at it.
+    func unread(task n: Int) -> Int { max(0, (byTask[n] ?? 0) - (taskSeen[n] ?? 0)) }
+
+    /// The messages the timeline shows: the narrowed task's, or the room's with what was read above them.
+    var shown: [RoomMessage] {
+        guard let detail else { return [] }
+        if let task = taskFilter {
+            let have = taskMessages ?? (older + detail.messages).filter { $0.task == task }
+            // What came since its page was read is added from the room's own.
+            let last = have.last?.seq ?? 0
+            return have + detail.messages.filter { $0.task == task && $0.seq > last }
+        }
+        guard let first = detail.messages.first?.seq else { return older }
+        return older.filter { $0.seq < first } + detail.messages
+    }
+
+    /// The message by number, wherever the page has it.
+    func message(_ seq: Int) -> RoomMessage? {
+        detail?.message(seq) ?? older.first { $0.seq == seq } ?? taskMessages?.first { $0.seq == seq }
+    }
+
+    /// Bring a message into view: the task narrowed away when it is not about it, and the pages above read until it
+    /// is there (a few at most).
+    func reveal(_ seq: Int, api: AgentSwitchAPI?) async {
+        if let task = taskFilter, message(seq)?.task != task { taskFilter = nil }
+        if taskFilter == nil, !(shown.contains { $0.seq == seq }), let api {
+            var tries = 0
+            while tries < 10, let top = shown.first?.seq, top > seq {
+                tries += 1
+                guard let page = try? await api.roomMessages(id, before: top, limit: 200), !page.messages.isEmpty else { break }
+                older = (page.messages + older).sorted { $0.seq < $1.seq }
+            }
+        }
+        focus = seq
+    }
+
+    /// The words found, newest first: in the task the timeline is narrowed to, or in the whole room.
+    func search(_ query: String, api: AgentSwitchAPI?) async throws -> [RoomMessage] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+        guard let api else {
+            // The sample screens: what the page has.
+            return shown.filter { $0.text.range(of: q, options: [.caseInsensitive]) != nil }.reversed()
+        }
+        return try await api.roomMessages(id, task: taskFilter, query: q, limit: 100).messages
     }
 
     private func take(_ fresh: RoomDetail) {
@@ -189,7 +304,10 @@ final class RoomPageModel {
                 paths.append(put.path)
             }
             uploading = nil
-            try await api.say(text, in: id, replyTo: replyTo, files: paths, task: draftTask)
+            // In a task, about it; in `# 全部`, about the task its first word names (`T3 …`), else none — a reply is
+            // about what it answers, which the Mac knows.
+            let task = taskFilter ?? (replyTo == nil ? RoomMessage.taskNamed(at: text, tasks: detail?.tasks ?? []) : nil)
+            try await api.say(text, in: id, replyTo: replyTo, files: paths, task: task)
             draft = ""
             attachments = []
             attachTokens.clear()

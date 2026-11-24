@@ -16,10 +16,10 @@ enum DemoRooms {
         return decode("""
         {"rooms":[
           {"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":false,"createdAt":1,"members":7,"faces":[],
-           "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true,"tasks":{"todo":3,"doing":2,"done":2}},
+           "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true,"tasks":{"todo":3,"doing":1,"done":2},"attention":3},
           {"id":"b1b2c3d4e5","name":"DayHub 发布","topic":"","paused":true,"createdAt":2,"members":3,"faces":[],
            "last":{"seq":12,"from":"you","text":"@all 先停一下，等我看完迁移脚本","at":\(now - 3_600_000)},"unread":0,"forYou":false},
-          {"id":"c1b2c3d4e5","name":"文档整理","topic":"把 v0 文档里过期的段落标出来","paused":false,"createdAt":3,"members":2,"faces":[],"last":null,"unread":0,"forYou":false,"rounds":7},
+          {"id":"c1b2c3d4e5","name":"文档整理","topic":"把 v0 文档里过期的段落标出来","paused":false,"createdAt":3,"members":2,"faces":[],"last":null,"unread":0,"forYou":false,"rounds":7,"attention":1},
           {"id":"d1b2c3d4e5","name":"安卓 Classic","topic":"","paused":false,"createdAt":4,"members":3,"faces":[],
            "last":{"seq":5,"from":"android","text":"图标都换好了，菜单在键盘上面。","at":\(now - 90_000_000)},"unread":3,"forYou":false}]}
         """)
@@ -38,7 +38,7 @@ enum DemoRooms {
         let paused = screen == "roompaused"
         let rounds = screen == "roomrounds" ? "7" : "null"
         return decode("""
-        {"room":{"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":\(paused),"createdAt":1,"createdBy":"you","lastSeq":38,"readSeq":36,"rounds":\(rounds),"roundsLimit":6},
+        {"room":{"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":\(paused),"createdAt":1,"createdBy":"you","lastSeq":39,"readSeq":35,"rounds":\(rounds),"roundsLimit":6},
          "seats":[
           {"handle":"you","kind":"user","terminal":null,"face":null,"joinedAt":1,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":null,"card":null},
           \(seat("daemon", "#.#.# .###. ##.## .###. #.#.#", 0, "busy", agent: "claude-code", model: "claude-fable-5-2", profile: "Work", dot: "violet", canAdd: true)),
@@ -49,21 +49,24 @@ enum DemoRooms {
           \(seat("gate", "##.## ..#.. #.#.# ##### .#.#.", 9, "reconnecting", agent: "pi", model: "deepseek-flash", profile: nil, dot: nil))],
          "messages":[
           {"seq":31,"from":"you","to":["daemon"],"text":"@daemon 手机的订阅接口定了吗？","at":\(now - 86_400_000 - 600_000)},
-          {"seq":32,"from":"daemon","to":["mac-app","ios-app"],"replyTo":31,"text":"接口定了：`GET /clash` 多一个 `phone`，里面是 `on`、`listening`、`links`、`problem`。@mac-app @ios-app 可以开始了。","at":\(now - 86_400_000 - 540_000)},
-          {"seq":33,"from":"mac-app","to":[],"text":"收到，卡片今天做完。先看一眼样子：","at":\(now - 1_500_000),"files":["\(folder)/shots/stash-profile.png"]},
-          {"seq":34,"from":"mac-app","to":["daemon"],"text":"@daemon `links` 里局域网和 Tailscale 的顺序固定吗？","at":\(now - 1_440_000)},
-          {"seq":35,"from":"daemon","to":["mac-app"],"replyTo":34,"text":"固定，局域网在前。","at":\(now - 1_380_000)},
-          {"seq":36,"from":"you","to":["web","gate"],"text":"@web @gate 文档里的地址也要跟着改","at":\(now - 900_000),"files":["/Users/me/Projects/AgentSwitch/docs/clash-v0.md","/Users/me/Projects/AgentSwitch/packages/daemon/src/clash/phone.ts"]},
-          {"seq":37,"from":"daemon","to":["android","ios-app"],"text":"@android @ios-app `PROCESS-NAME` 的规则手机上都去掉了，重新拉一次配置。","at":\(now - 300_000)},
-          {"seq":38,"from":"daemon","to":["you"],"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000),"files":["\(folder)/mihomo-check.md","\(folder)/shots/clash-rules.png"]}],
-         "receipts":{"36":{"web":"ended","gate":"queued"},"37":{"android":"queued","ios-app":"delivered"}},
+          {"seq":32,"from":"daemon","to":["mac-app","ios-app"],"replyTo":31,"text":"接口定了：**`GET /clash` 多一个 `phone`**，里面是 `on`、`listening`、`links`、`problem`。@mac-app @ios-app 可以开始了。","at":\(now - 86_400_000 - 540_000),"task":1},
+          {"seq":33,"from":"mac-app","to":[],"text":"收到，卡片今天做完。先看一眼样子：","at":\(now - 1_500_000),"files":["\(folder)/shots/stash-profile.png"],"task":2},
+          {"seq":34,"from":"mac-app","to":["daemon"],"text":"@daemon `links` 里局域网和 Tailscale 的顺序固定吗？","at":\(now - 1_440_000),"task":2},
+          {"seq":35,"from":"daemon","to":["mac-app"],"replyTo":32,"text":"固定，**局域网在前**。","at":\(now - 1_380_000),"task":1},
+          {"seq":36,"from":"you","to":["web","gate","ios-app"],"text":"@web @gate @ios-app 文档里的地址也要跟着改","at":\(now - 900_000),"files":["/Users/me/Projects/AgentSwitch/docs/clash-v0.md","/Users/me/Projects/AgentSwitch/packages/daemon/src/clash/phone.ts"]},
+          {"seq":37,"from":"ios-app","to":["you"],"replyTo":36,"text":"@you 订阅页的字段名还没定，`links` 是数组还是对象？定了我接着做。","at":\(now - 600_000),"task":4,"expects":"answer"},
+          {"seq":38,"from":"daemon","to":["android","ios-app"],"text":"@android @ios-app `PROCESS-NAME` 的规则手机上都去掉了，重新拉一次配置。","at":\(now - 300_000),"task":3},
+          {"seq":39,"from":"daemon","to":["you"],"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000),"files":["\(folder)/mihomo-check.md","\(folder)/shots/clash-rules.png"],"task":3}],
+         "receipts":{"36":{"web":"ended","gate":"queued"},"38":{"android":"queued","ios-app":"delivered"}},
+         "reads":{"31":["daemon"],"36":["ios-app"],"38":["ios-app"]},
+         "taskStats":{"1":{"wakes":4,"chars":8210,"posts":6,"calls":19},"2":{"wakes":3,"chars":5120,"posts":4,"calls":12},"4":{"wakes":5,"chars":23400,"posts":7,"calls":41}},
          "notes":{"text":"接口\\n- GET /clash 多一个 phone：on、listening、links、problem\\n- links 里局域网在前，Tailscale 在后\\n\\n待办\\n- [ ] 文档里的地址跟着改（@web）\\n- [x] 手机上去掉 PROCESS-NAME 规则","at":\(now - 1_300_000),"by":"daemon"},
          "folder":"\(folder)",
          "tasks":[
           {"n":1,"title":"定下手机订阅的接口","state":"done","owner":"daemon","by":"you","createdAt":\(now - 90_000_000),"updatedAt":\(now - 86_000_000),"note":"GET /clash 多一个 phone，写进置顶笔记了"},
           {"n":2,"title":"Mac 上的订阅卡片","detail":"局域网和 Tailscale 两个地址，局域网在前","state":"doing","owner":"mac-app","by":"daemon","createdAt":\(now - 86_000_000),"updatedAt":\(now - 1_500_000),"after":[1]},
           {"n":3,"title":"手机上去掉 PROCESS-NAME 规则","state":"done","owner":"daemon","by":"daemon","createdAt":\(now - 80_000_000),"updatedAt":\(now - 300_000)},
-          {"n":4,"title":"iPhone 的订阅页","state":"doing","owner":"ios-app","by":"you","createdAt":\(now - 70_000_000),"updatedAt":\(now - 900_000),"after":[1],"note":"等你在终端里确认一次权限"},
+          {"n":4,"title":"iPhone 的订阅页","state":"blocked","owner":"ios-app","by":"you","createdAt":\(now - 70_000_000),"updatedAt":\(now - 600_000),"after":[1],"note":"等字段名：links 是数组还是对象"},
           {"n":5,"title":"文档里的地址跟着改","detail":"docs/clash-v0.md 的 §4 和 README","state":"todo","owner":"web","by":"you","createdAt":\(now - 900_000),"updatedAt":\(now - 900_000)},
           {"n":6,"title":"用真的 Stash 和 Clash 各拉一次配置","state":"todo","by":"daemon","createdAt":\(now - 600_000),"updatedAt":\(now - 600_000),"after":[2,4]},
           {"n":7,"title":"安卓的订阅页","state":"todo","owner":"android","by":"you","createdAt":\(now - 500_000),"updatedAt":\(now - 500_000),"after":[1,4]}],
@@ -71,6 +74,19 @@ enum DemoRooms {
           {"handle":"daemon","paths":["packages/daemon/src/clash/phone.ts","packages/daemon/tests/clashPhone.test.ts","docs/clash-v0.md"],"why":"给 phone 加 problem 字段","at":\(now - 600_000),"until":\(now + 1_500_000)},
           {"handle":"mac-app","paths":["packages/mac-app/Sources/Settings/ClashCard.swift"],"at":\(now - 300_000),"until":\(now + 2_400_000)}]}
         """)
+    }
+
+    /// 等你处理, as `GET /rooms/attention` would give it.
+    static var attention: [RoomAttentionItem] {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let made: RoomAttention = decode("""
+        {"items":[
+          {"room":"\(roomId)","roomName":"手机订阅","kind":"permission","handle":"ios-app","terminal":"t-ios-app","text":"","at":\(now - 60_000)},
+          {"room":"\(roomId)","roomName":"手机订阅","kind":"question","handle":"ios-app","seq":37,"task":4,"text":"@you 订阅页的字段名还没定，links 是数组还是对象？定了我接着做。","at":\(now - 600_000)},
+          {"room":"\(roomId)","roomName":"手机订阅","kind":"blocked","handle":"ios-app","task":4,"text":"iPhone 的订阅页：等字段名：links 是数组还是对象","at":\(now - 610_000)},
+          {"room":"c1b2c3d4e5","roomName":"文档整理","kind":"rounds","text":"7","at":\(now - 1_800_000)}]}
+        """)
+        return made.items
     }
 
     static let folder = "/Users/me/.agentswitch/room-files/\(roomId)"

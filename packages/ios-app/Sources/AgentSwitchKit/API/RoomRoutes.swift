@@ -12,6 +12,8 @@ private struct CreateRoomBody: Encodable { let name: String; let topic: String?;
 private struct UpdateRoomBody: Encodable { let name: String?; let topic: String?; let paused: Bool? }
 private struct AddSeatBody: Encodable { let terminal: String; let canAdd: Bool? }
 private struct SetSeatBody: Encodable { let canAdd: Bool }
+private struct MuteSeatBody: Encodable { let muted: Bool }
+private struct ResumedSeat: Decodable { let seat: RoomSeat }
 private struct SayBody: Encodable { let text: String; let replyTo: Int?; let files: [String]?; let task: Int? }
 private struct ReadBody: Encodable { let seq: Int }
 private struct NotesBody: Encodable { let text: String }
@@ -110,8 +112,46 @@ extension AgentSwitchAPI {
         (try await send("PATCH", ["rooms", room, "seats", handle], body: SetSeatBody(canAdd: canAdd)) as SeatReply).seat
     }
 
-    public func unseat(_ handle: String, in room: String) async throws {
-        let _: Done = try await perform("DELETE", ["rooms", room, "seats", handle], query: [], body: nil)
+    /// Out of the room — its session left running; with `close`, its terminal closed too (`delete`: and its
+    /// conversation's record). A member with work unfinished writes its handover note first (`handingOver`), unless
+    /// `now`.
+    @discardableResult
+    public func unseat(_ handle: String, in room: String, close: RoomSeatClose? = nil, now: Bool = false) async throws -> RoomUnseated {
+        var query: [URLQueryItem] = []
+        if let close {
+            query.append(URLQueryItem(name: "close", value: close.rawValue))
+            if now { query.append(URLQueryItem(name: "now", value: "1")) }
+        }
+        return try await perform("DELETE", ["rooms", room, "seats", handle], query: query, body: nil)
+    }
+
+    /// Muted or unmuted (§6.2): a muted member reads and works but may not post.
+    @discardableResult
+    public func muteSeat(_ handle: String, in room: String, muted: Bool) async throws -> RoomSeat {
+        (try await send("PATCH", ["rooms", room, "seats", handle], body: MuteSeatBody(muted: muted)) as SeatReply).seat
+    }
+
+    /// The session behind an ended seat goes on in a new terminal; the seat keeps its name and face.
+    @discardableResult
+    public func resumeSeat(_ handle: String, in room: String) async throws -> RoomSeat {
+        (try await post(["rooms", room, "seats", handle, "resume"], body: Nothing()) as ResumedSeat).seat
+    }
+
+    /// Everything in every room that waits on the user's hand (等你处理), newest first.
+    public func roomAttention() async throws -> RoomAttention {
+        try await get(["rooms", "attention"])
+    }
+
+    /// Some of a room's messages: one task's last ones (`task`), the ones whose words contain `query` (newest first;
+    /// within `task` when given), or the page above `before`; with how many since `since` are about each task.
+    public func roomMessages(_ room: String, task: Int? = nil, query: String? = nil, before: Int? = nil, since: Int? = nil, limit: Int = 200) async throws -> RoomMessagePage {
+        var items: [URLQueryItem] = []
+        if let query, !query.isEmpty { items.append(URLQueryItem(name: "q", value: query)) }
+        if let task { items.append(URLQueryItem(name: "task", value: String(task))) }
+        if let before { items.append(URLQueryItem(name: "before", value: String(before))) }
+        if let since { items.append(URLQueryItem(name: "since", value: String(since))) }
+        items.append(URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))))
+        return try await get(["rooms", room, "messages"], query: items)
     }
 
     /// The user speaks; who it is for is read from the `@names` in the text. `files`: what it comes with, by where

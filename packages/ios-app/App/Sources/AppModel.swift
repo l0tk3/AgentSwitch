@@ -827,7 +827,7 @@ extension AppModel {
             ProfileChoice(id: "abc123def1", name: "side", color: .sand)])] : [:]
         // `terminalsconnecting`: the first connection still being made, nothing read yet (the Terminals tab's one line).
         if screen != "terminalsconnecting" { model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git, profiles: profiles) }
-        model.rooms.show(DemoRooms.list)
+        model.rooms.show(DemoRooms.list, attention: DemoRooms.attention)
         model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom,
                               browsers: UserDefaults.standard.string(forKey: "uiDemoScreen") == "browserprofiles"
                                 ? [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", exit: .init(ip: "203.0.113.9", place: "Tokyo"), running: true)] : nil)
