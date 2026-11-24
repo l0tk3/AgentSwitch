@@ -270,6 +270,15 @@ private struct RoomListRow: View {
                     Text(room.name).mono(13, weight: look.isClassic ? .semibold : .regular).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
                     if room.paused { Text("Paused").mono(11).foregroundStyle(Look.faint) }
+                    // Someone in it is at work (user #269).
+                    if room.working > 0, !room.paused {
+                        HStack(spacing: 3) {
+                            BrailleSpinner(size: 11)
+                            Text("工作中").font(.system(size: 11))
+                        }
+                        .foregroundStyle(Color.signal)
+                        .help(room.working == 1 ? "1 个成员正在工作" : "\(room.working) 个成员正在工作")
+                    }
                     // Sessions went many rounds without the user (§7): the mark of what waits for you, where no count stands.
                     if room.rounds != nil, room.unread == 0, !room.paused { BlinkingSquare().help("会话之间已经往返多次，没有你参与。") }
                     if room.unread > 0 { count }
@@ -493,7 +502,7 @@ private struct RoomView: View {
                         if room.messages.first?.seq == 1 { opening }
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
-                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: { model.onThisMac ? model.preview(file: $0) : model.fetch(file: $0, as: .preview) }, open: model.onThisMac ? nil : { model.fetch(file: $0, as: .open) }, saveAs: model.onThisMac ? nil : { model.fetch(file: $0, as: .saveAs) }, task: { model.taskFilter = $0 },
+                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: { model.onThisMac ? model.preview(file: $0) : model.fetch(file: $0, as: .preview) }, open: model.onThisMac ? nil : { model.fetch(file: $0, as: .open) }, saveAs: model.onThisMac ? nil : { model.fetch(file: $0, as: .saveAs) }, picture: model.onThisMac ? nil : { model.picture($0) }, task: { model.taskFilter = $0 },
                                                                                        jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id, poke: { model.poke($0) }))
                                 .id(row.id)
                         }

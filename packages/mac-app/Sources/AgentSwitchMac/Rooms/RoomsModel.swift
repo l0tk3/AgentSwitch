@@ -310,6 +310,8 @@ final class RoomsModel {
     /// The node changed: nothing of the one before stays.
     func reset() {
         rooms = []
+        pictures = [:]
+        asked = []
         loaded = false
         listVersion = nil
         selected = nil
@@ -574,6 +576,27 @@ final class RoomsModel {
                 problem = "\(name) 取不下来：\(Self.say(error))"
             }
         }
+    }
+
+    /// Pictures in a room on another node, made small once fetched (user #264: 其他节点发送的图片应该也可以看到),
+    /// by room and path; a path being fetched or that could not be is in `asked`.
+    private(set) var pictures: [String: NSImage] = [:]
+    @ObservationIgnored private var asked: Set<String> = []
+
+    /// A picture a message in a room on another node comes with: nil while it is fetched (asked for once).
+    func picture(_ path: String) -> NSImage? {
+        guard let id = selected, RoomPictures.isPicture(path) else { return nil }
+        let key = "\(id)|\(path)"
+        if let image = pictures[key] { return image }
+        guard !asked.contains(key) else { return nil }
+        asked.insert(key)
+        let wanted: String
+        if let folder = room?.folder, path.hasPrefix(folder + "/") { wanted = String(path.dropFirst(folder.count + 1)) } else { wanted = path }
+        Task {
+            guard let data = try? await client().roomFile(wanted, in: id), let image = RoomPictures.thumb(data: data) else { return }
+            pictures[key] = image
+        }
+        return nil
     }
 
     /// `url`, or `name-2.ext`… when it is taken.

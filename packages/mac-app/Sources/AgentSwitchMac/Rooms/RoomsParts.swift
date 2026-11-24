@@ -171,6 +171,8 @@ struct RoomRowActions {
     var open: ((String) -> Void)?
     /// A room on another node: a message's file fetched from there and saved where the user says.
     var saveAs: ((String) -> Void)?
+    /// A room on another node: a picture a message comes with, fetched from there (nil until it has come).
+    var picture: ((String) -> NSImage?)?
     /// The timeline narrowed to a task's messages (its label clicked).
     var task: (Int) -> Void = { _ in }
     /// Brings a message into view (its quote clicked).
@@ -291,7 +293,7 @@ struct RoomMessageRow: View {
                     .help(path)
                 } else {
                     Button { if let open = actions.open { open(path) } else { actions.preview?(path) } } label: {
-                        if let image = RoomPictures.thumb(path) {
+                        if let image = actions.picture?(path) ?? RoomPictures.thumb(path) {
                             Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
                                 .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
                                 .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0))
@@ -301,7 +303,7 @@ struct RoomMessageRow: View {
                                 Image(nsImage: RoomPictures.icon(path)).resizable().frame(width: 30, height: 30)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text((path as NSString).lastPathComponent).font(.system(size: 12.5)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
-                                    Text(RoomPictures.note(path)).mono(11).foregroundStyle(Look.faint).lineLimit(1)
+                                    Text(actions.open == nil ? RoomPictures.note(path) : "在另一台节点上 · 点开下载").mono(11).foregroundStyle(Look.faint).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
                             }
@@ -666,8 +668,17 @@ enum RoomPictures {
     private static let kept = NSCache<NSString, NSImage>()
     private static let kinds: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"]
 
+    static func isPicture(_ path: String) -> Bool { kinds.contains((path as NSString).pathExtension.lowercased()) }
+
+    /// A picture's bytes made small, as `thumb` makes a file's.
+    static func thumb(data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 720, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
+        return NSImage(cgImage: small, size: NSSize(width: small.width / 2, height: small.height / 2))
+    }
+
     static func thumb(_ path: String) -> NSImage? {
-        guard kinds.contains((path as NSString).pathExtension.lowercased()) else { return nil }
+        guard isPicture(path) else { return nil }
         if let image = kept.object(forKey: path as NSString) { return image }
         guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
               let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 720, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }

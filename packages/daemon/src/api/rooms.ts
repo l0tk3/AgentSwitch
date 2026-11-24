@@ -187,6 +187,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       faces: seats.filter((s) => s.kind === "session").slice(0, 4).map((s) => ({ handle: s.handle, face: s.face })),
       last: last ? { seq: last.seq, from: last.from, text: last.text.slice(0, 200), at: last.at } : null,
       unread: unread.count, forYou: unread.forYou,
+      // Its sessions at work right now: the list marks the room (user #269).
+      working: seats.filter((s) => s.kind === "session" && s.terminal && host()?.get(s.terminal)?.status === "working").length,
       // Sessions have been talking among themselves for this many messages with no word from the user (§7); null
       // under the room's limit.
       rounds: roundsOf(room),
