@@ -89,7 +89,10 @@ export class RoomDelivery {
    *  nobody: it wakes nobody), at most once in ten minutes; the session is reminded, with that prompt, to say in the
    *  room what changes. A room's own delivery typed in (`[Room …`) is not the user. */
   userTyped(terminal: string, prompt: string): string | null {
-    if (/^\s*\[Room /.test(prompt)) return null;
+    // Not the user: the room's own envelope, and what the agent's own program hands it as a turn — a background
+    // task's notification, a system note, a message from another session (2026-11-24: a finished helper's report
+    // was said in the room as the user speaking in the terminal).
+    if (/^\s*(\[Room |<task-notification|<system-reminder|\[SYSTEM NOTIFICATION|<cross-session-message|Stop hook)/.test(prompt)) return null;
     const sits = this.o.store.roomsOf(terminal);
     if (!sits.length) return null;
     const now = this.now();

@@ -921,6 +921,8 @@ describe("the user talking to a member in its terminal (2026-11-24)", () => {
     let now = new Date(2026, 10, 23, 10, 0).getTime();
     const delivery = new RoomDelivery({ store, seat: () => null, now: () => now });
     expect(delivery.userTyped("ui", "[Room login · #3]\nFrom: @api")).toBeNull();
+    expect(delivery.userTyped("ui", "<task-notification>\n<task-id>a1</task-id>")).toBeNull();   // the agent's own program, not the user
+    expect(delivery.userTyped("ui", "[SYSTEM NOTIFICATION - NOT USER INPUT]")).toBeNull();
     const told = delivery.userTyped("ui", "先别改表单了")!;
     expect(told).toContain('"login" (as @ui)');
     expect(told).toContain("say so there in a line");
