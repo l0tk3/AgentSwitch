@@ -18,7 +18,9 @@ class RoomsUnsupported : Exception("这台 Mac 上的 AgentSwitch 还没有 Chat
 @Serializable private class UpdateRoomBody(val name: String? = null, val topic: String? = null, val paused: Boolean? = null)
 @Serializable private class AddSeatBody(val terminal: String, val canAdd: Boolean? = null)
 @Serializable private class SetSeatBody(val canAdd: Boolean)
-@Serializable private class SayBody(val text: String, val replyTo: Int? = null, val files: List<String>? = null, val task: Int? = null)
+@Serializable private class SayBody(val text: String, val replyTo: Int? = null, val files: List<String>? = null, val expects: String? = null, val task: Int? = null)
+@Serializable private class MuteBody(val muted: Boolean)
+@Serializable private class SeatNameBody(val name: String)
 @Serializable private class ReadBody(val seq: Int)
 @Serializable private class NotesBody(val text: String)
 @Serializable private class SeatReply(val seat: RoomSeat)
@@ -75,8 +77,53 @@ suspend fun AgentSwitchAPI.unseat(handle: String, room: String) {
  * The user speaks; who it is for is read from the `@names` in the text. `files`: what it comes with, by where each is
  * on the Mac (a picture from the phone is put into the shared folder first, [putRoomFile]).
  */
-suspend fun AgentSwitchAPI.say(text: String, room: String, replyTo: Int? = null, files: List<String> = emptyList(), task: Int? = null): RoomSaid =
-    post(listOf("rooms", room, "messages"), SayBody(text, replyTo, files.ifEmpty { null }, task), SayBody.serializer(), RoomSaid.serializer())
+suspend fun AgentSwitchAPI.say(text: String, room: String, replyTo: Int? = null, files: List<String> = emptyList(), task: Int? = null, expects: String? = null): RoomSaid =
+    post(listOf("rooms", room, "messages"), SayBody(text, replyTo, files.ifEmpty { null }, expects, task), SayBody.serializer(), RoomSaid.serializer())
+
+/**
+ * Some of what was said (2026-11-24): one task's (`task`), those whose words contain `q` (the newest first, within
+ * `task` when given), or the page above `before`. `byTask`: how many there are about each task after `since`.
+ */
+@Serializable
+data class RoomMessagePage(val messages: List<RoomMessage> = emptyList(), @kotlinx.serialization.SerialName("byTask") private val rawByTask: Map<String, Int> = emptyMap()) {
+    /** Task number → messages about it after `since`. */
+    val byTask: Map<Int, Int> get() = rawByTask.entries.mapNotNull { (k, v) -> k.toIntOrNull()?.let { it to v } }.toMap()
+}
+
+suspend fun AgentSwitchAPI.roomMessages(room: String, task: Int? = null, q: String? = null, before: Int? = null, since: Int? = null, limit: Int? = null): RoomMessagePage =
+    get(listOf("rooms", room, "messages"), RoomMessagePage.serializer(), listOfNotNull(
+        task?.let { URLQueryItem("task", it.toString()) },
+        q?.trim()?.ifEmpty { null }?.let { URLQueryItem("q", it) },
+        before?.let { URLQueryItem("before", it.toString()) },
+        since?.let { URLQueryItem("since", it.toString()) },
+        limit?.let { URLQueryItem("limit", it.toString()) },
+    ))
+
+/** Everything in every room that waits on the user (等你处理), the newest first. */
+suspend fun AgentSwitchAPI.roomAttention(): List<RoomAttentionItem> = get(listOf("rooms", "attention"), RoomAttention.serializer()).items
+
+/** A member muted or unmuted (§6.2): it reads and works, but may not post. */
+suspend fun AgentSwitchAPI.setSeatMuted(handle: String, room: String, muted: Boolean): RoomSeat =
+    send("PATCH", listOf("rooms", room, "seats", handle), MuteBody(muted), MuteBody.serializer(), SeatReply.serializer()).seat
+
+/** A member's name in this room changed (what `@` calls it); the old one still finds it. */
+suspend fun AgentSwitchAPI.renameSeat(handle: String, room: String, name: String): RoomSeat =
+    send("PATCH", listOf("rooms", room, "seats", handle), SeatNameBody(name), SeatNameBody.serializer(), SeatReply.serializer()).seat
+
+/** The session behind an ended member brought back (§6.2): the same conversation, the seat as it was. */
+suspend fun AgentSwitchAPI.resumeSeat(handle: String, room: String): RoomSeat =
+    perform("POST", listOf("rooms", room, "seats", handle, "resume"), emptyList(), null, SeatReply.serializer()).seat
+
+/** How a member's end went: `handingOver` — it writes its handover note first (two minutes at most), then ends. */
+@Serializable
+data class RoomSeatEnd(val ok: Boolean = false, val closed: Boolean = false, val handingOver: Boolean = false)
+
+/**
+ * A member out of the room and its terminal closed, its conversation kept (`close=end`); `delete`: its record deleted
+ * too. One with unfinished tasks writes its handover note first, unless `now`.
+ */
+suspend fun AgentSwitchAPI.endSeat(handle: String, room: String, now: Boolean = false, delete: Boolean = false): RoomSeatEnd =
+    perform("DELETE", listOf("rooms", room, "seats", handle), listOfNotNull(URLQueryItem("close", if (delete) "delete" else "end"), if (now) URLQueryItem("now", "1") else null), null, RoomSeatEnd.serializer())
 
 /** The user has seen up to `seq`. */
 suspend fun AgentSwitchAPI.markRoomRead(room: String, seq: Int): Int =

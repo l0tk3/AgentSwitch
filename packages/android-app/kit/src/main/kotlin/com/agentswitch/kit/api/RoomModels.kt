@@ -124,6 +124,15 @@ data class RoomSeat(
     val card: SeatCard? = null,
     /** Its session has the Chatroom Kit (§6); false for one started before there was a Kit, until it is resumed. */
     val kit: Boolean? = null,
+    /** Muted by the user or an admin (§6.2): it reads and works, but may not post or write the notes. */
+    val muted: Boolean = false,
+    val mutedBy: String? = null,
+    /** How many of the room's messages it has not read yet; null for the user (and from an older Mac). */
+    val unread: Int? = null,
+    /** What it has cost the room so far; null for the user. */
+    val stats: RoomStats? = null,
+    /** What its own screen asks now (a list to choose from: "trust this folder?"); null: nothing. */
+    val asks: SeatAsks? = null,
 ) {
     val isUser: Boolean get() = kind == "user"
     val here: Boolean get() = left == null
@@ -143,6 +152,29 @@ data class RoomSeat(
     }
 }
 
+/** What a seat's own screen asks (`trust`: it is "do you trust this folder?"). */
+@Serializable
+data class SeatAsks(val title: String = "", val options: List<String> = emptyList(), val selected: Int = 0, val trust: Boolean = false)
+
+/**
+ * What a seat — or one task of the list — has cost the room (2026-11-24): how often it was woken and with how many
+ * characters, how many messages, how many room tool calls. The tokens are the agent's own to say.
+ */
+@Serializable
+data class RoomStats(val wakes: Int = 0, val chars: Int = 0, val posts: Int = 0, val calls: Int = 0) {
+    /** `唤醒 4 次 · 1.2k 字 · 9 条消息 · 12 次调用`. */
+    val says: String
+        get() = "唤醒 $wakes 次 · ${short(chars)} 字 · $posts 条消息 · $calls 次调用"
+
+    companion object {
+        fun short(n: Int): String = when {
+            n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0).replace(".0M", "M")
+            n >= 1_000 -> "%.1fk".format(n / 1_000.0).replace(".0k", "k")
+            else -> n.toString()
+        }
+    }
+}
+
 @Serializable
 data class RoomMessage(
     val seq: Int,
@@ -157,6 +189,8 @@ data class RoomMessage(
     val files: List<String> = emptyList(),
     /** The task of the room's list it is about (`T3`), as a topic (2026-11-24); null: about no one task. */
     val task: Int? = null,
+    /** `answer`: its sender waits for an answer; `none`: told for knowing; null: the reader judges. */
+    val expects: String? = null,
 )
 
 /** Where a message is on its way to a seat (§5). Dealt with, there is no receipt. */
@@ -174,7 +208,11 @@ data class RoomNotes(val text: String = "", val at: Long = 0, val by: String = R
 
 /** How far a task is (§9 任务表). */
 enum class RoomTaskState(val rawValue: String, val word: String) {
-    Todo("todo", "To Do"), Doing("doing", "Doing"), Done("done", "Done");
+    Todo("todo", "To Do"), Doing("doing", "Doing"), Blocked("blocked", "Blocked"), Done("done", "Done");
+
+    /** The room's own word (2026-11-24 design: 进行中不标，卡住 ⚠，完成 ✓). */
+    val chinese: String
+        get() = when (this) { Todo -> "未开始"; Doing -> "进行中"; Blocked -> "卡住"; Done -> "已完成" }
 
     companion object {
         fun of(raw: String?): RoomTaskState? = entries.firstOrNull { it.rawValue == raw }
@@ -197,7 +235,7 @@ data class RoomTask(
     val updatedAt: Long = 0,
     /** Tasks that come first, by number. */
     val after: List<Int> = emptyList(),
-    /** How it ended, in a line: the result, or the file that holds it. */
+    /** How it ended, in a line: the result, or the file that holds it; for one blocked, what it waits for. */
     val note: String? = null,
 ) {
     /** A state this app does not know is one still to do. */
@@ -317,7 +355,31 @@ data class RoomDetail(
     val claims: List<RoomClaim> = emptyList(),
     /** Why a session named when the room was made could not be seated. */
     val problems: List<String> = emptyList(),
+    /** Message number → the seats that have read it (given it whole, or read it themselves); its sender not listed. */
+    val reads: Map<String, List<String>> = emptyMap(),
+    /** What each task of the list has cost, by its number. */
+    @SerialName("taskStats") private val rawTaskStats: Map<String, RoomStats> = emptyMap(),
 ) {
+    /** What one task has cost the room; null before anything was counted for it. */
+    fun taskStats(n: Int): RoomStats? = rawTaskStats[n.toString()]
+
+    /**
+     * Of the sessions a message was for, those that have read it and those that have not yet (only those still
+     * seated). Said only for the user's own messages to others (2026-11-24 design: `2/3 已读`).
+     */
+    fun readers(message: RoomMessage): RoomReaders? {
+        if (message.from != RoomSeat.you) return null
+        val here = sessions.map { it.handle }.toSet()
+        val asked = message.to.filter { it in here && it != message.from }
+        if (asked.isEmpty()) return null
+        val read = reads[message.seq.toString()]?.toSet() ?: emptySet()
+        return RoomReaders(asked.filter { it in read }, asked.filter { it !in read }, receipts[message.seq] ?: emptyMap())
+    }
+
+    /** The task list as the drawer has it: being done, blocked, to do — by number — then the ones done. */
+    val openTasks: List<RoomTask>
+        get() = tasks.filter { it.state != RoomTaskState.Done }.sortedWith(compareBy<RoomTask> { if (it.state == RoomTaskState.Blocked) 0 else if (it.state == RoomTaskState.Doing) 1 else 2 }.thenBy { it.n })
+
     /** Message number → handle → where it is. */
     @Transient
     val receipts: Map<Int, Map<String, RoomReceipt>> = rawReceipts.entries.mapNotNull { (seq, of) ->
@@ -367,6 +429,8 @@ data class RoomSummary(
     val rounds: Int? = null,
     /** How the room's work stands (§9). */
     val tasks: RoomTaskCounts = RoomTaskCounts(),
+    /** How many things in it wait on the user (等你处理, `GET /rooms/attention`). */
+    val attention: Int = 0,
 ) {
     @Serializable
     data class Last(val seq: Int = 0, val from: String = "", val text: String = "", val at: Long = 0)
@@ -386,7 +450,62 @@ data class RoomSummary(
 data class RoomList(val rooms: List<RoomSummary> = emptyList()) {
     /** Messages not seen yet, in all rooms: the tab's badge. */
     val unread: Int get() = rooms.sumOf { it.unread }
+
+    /** What waits on the user in all rooms (等你处理). */
+    val attention: Int get() = rooms.sumOf { it.attention }
 }
+
+/** Who of those a message was for has read it: `2/3 已读`; `open`: where it is for those it has not reached. */
+data class RoomReaders(val read: List<String>, val unread: List<String>, val open: Map<String, RoomReceipt> = emptyMap()) {
+    val total: Int get() = read.size + unread.size
+
+    /** `2/3 已读`; `已读` when everyone has. */
+    val word: String get() = if (unread.isEmpty()) "已读" else "${read.size}/$total 已读"
+
+    /** One that can not be handed over. */
+    val failed: Boolean get() = open.values.any { it == RoomReceipt.Ended }
+
+    /** Each one by name, in a line: `@api 已读`, `@ios 未读 · Queued`. */
+    val lines: List<String>
+        get() = read.map { "@$it 已读" } + unread.map { h -> "@$h 未读" + (open[h]?.let { " · ${it.word}" } ?: "") }
+}
+
+/** One thing in a room that waits on the user's hand (`GET /rooms/attention`, 等你处理). */
+@Serializable
+data class RoomAttentionItem(
+    val room: String,
+    val roomName: String = "",
+    /** `trust`, `asks`, `permission`, `blocked`, `question`, `rounds`. */
+    val kind: String = "",
+    val handle: String? = null,
+    val terminal: String? = null,
+    val task: Int? = null,
+    val seq: Int? = null,
+    val text: String = "",
+    val at: Long = 0,
+) {
+    /** What it is, in a line: `⚠ ios 等你确认权限`, `T4 卡住：等字段名`, `api 问你：…`, `会话间已聊 7 条`. */
+    val line: String
+        get() {
+            val who = handle ?: ""
+            val words = text.replace("\n", " ").trim()
+            return when (kind) {
+                "trust" -> "⚠ $who 问要不要信任这个文件夹"
+                "asks" -> "⚠ $who 等你选：$words"
+                "permission" -> "⚠ $who 等你确认权限"
+                "blocked" -> "⚠ ${task?.let { "T$it " } ?: ""}卡住：$words"
+                "question" -> "$who 问你：$words"
+                "rounds" -> "会话间已聊 $words 条，没有你的参与"
+                else -> words.ifEmpty { kind }
+            }
+        }
+
+    /** Amber marks: it needs the user's hand now. */
+    val urgent: Boolean get() = kind == "trust" || kind == "asks" || kind == "permission" || kind == "blocked"
+}
+
+@Serializable
+data class RoomAttention(val items: List<RoomAttentionItem> = emptyList())
 
 // MARK: - what the pages make of them
 
@@ -453,6 +572,19 @@ data class RoomRow(
                 before = m
             }
             return rows
+        }
+
+        /**
+         * A quoted message in one line (2026-11-24 design: 原文前 60 个字): its Markdown kept, to be drawn as Markdown;
+         * the lines joined, cut at `most` characters. A `code` span cut in two is closed again.
+         */
+        fun quoteLine(text: String, most: Int = 60): String {
+            val one = text.replace(Regex("\\s*\n\\s*"), " ").replace(Regex("^#{1,6}\\s+"), "").trim()
+            if (one.codePointCount(0, one.length) <= most) return one
+            var cut = one.substring(0, one.offsetByCodePoints(0, most)).trimEnd()
+            if (cut.count { it == '`' } % 2 == 1) cut += "`"
+            if (Regex("\\*\\*").findAll(cut).count() % 2 == 1) cut += "**"
+            return "$cut…"
         }
 
         /** A quoted message in one line: no code marks, no `@names`. */

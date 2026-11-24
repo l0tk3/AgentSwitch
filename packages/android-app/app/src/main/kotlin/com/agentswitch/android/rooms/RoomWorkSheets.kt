@@ -60,7 +60,7 @@ import kotlinx.coroutines.launch
 // (RoomSheets.kt). Written as the notes' sheet is.
 
 /** The three groups, in the order they are read: what is being done, what is left, what is finished. */
-private val taskGroups = listOf(RoomTaskState.Doing, RoomTaskState.Todo, RoomTaskState.Done)
+private val taskGroups = listOf(RoomTaskState.Blocked, RoomTaskState.Doing, RoomTaskState.Todo, RoomTaskState.Done)
 
 /**
  * The room's task list (§9): `Doing`, `To Do`, `Done`; each task with its number, whose it is, what it waits for and
@@ -99,7 +99,7 @@ fun RoomTasksSheet(model: RoomPageModel, opening: Int? = null, adding: Boolean =
         for (state in taskGroups) {
             val of = detail.tasks(state)
             if (of.isEmpty()) continue
-            FormSection("${state.word} · ${of.size}") {
+            FormSection("${state.chinese} · ${of.size}") {
                 of.forEachIndexed { i, task -> FormRow(first = i == 0, onClick = { model.error = null; open = task.n }) { TaskRow(task, detail) } }
             }
         }
@@ -125,7 +125,9 @@ private fun RowScope.TaskRow(task: RoomTask, detail: RoomDetail) {
                 if (waits.isNotEmpty()) Text("waits for ${waits.joinToString(", ") { "T$it" }}", color = Theme.waiting, style = mono(11), maxLines = 1)
             }
         }
-        task.note?.let { Text(it, color = Theme.secondaryInk, style = plain(12), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        val blocked = task.state == RoomTaskState.Blocked
+        task.note?.let { Text(if (blocked) "⚠ 卡住：$it" else it, color = if (blocked) Theme.waiting else Theme.secondaryInk, style = plain(12), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        detail.taskStats(task.n)?.let { Text(it.says, color = Theme.inkDim, style = mono(11), maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
 }
 
@@ -185,7 +187,7 @@ private fun TaskPage(model: RoomPageModel, n: Int, back: () -> Unit) {
                 }
                 first = false
             }
-            line("State", task.state.word)
+            line("State", task.state.chinese, color = if (task.state == RoomTaskState.Blocked) Theme.waiting else Theme.secondaryInk)
             line("Owner", task.owner?.let { "@$it" } ?: "—")
             val waits = detail.waitsFor(task)
             if (task.after.isNotEmpty()) line(if (waits.isEmpty()) "After" else "Waits For", (waits.ifEmpty { task.after }).joinToString(", ") { "T$it" }, color = if (waits.isEmpty()) Theme.secondaryInk else Theme.waiting)
@@ -193,7 +195,14 @@ private fun TaskPage(model: RoomPageModel, n: Int, back: () -> Unit) {
             line("Updated", "${RoomWords.day(task.updatedAt)} ${RoomWords.time(task.updatedAt)}")
         }
         task.note?.let { note ->
-            FormSection("Note") { FormRow(first = true) { Text(note, Modifier.weight(1f), color = Theme.ink, style = plain(15)) } }
+            val blocked = task.state == RoomTaskState.Blocked
+            FormSection(if (blocked) "卡住：在等" else "Note") { FormRow(first = true) { Text(note, Modifier.weight(1f), color = if (blocked) Theme.waiting else Theme.ink, style = plain(15)) } }
+        }
+        // What this piece of work has cost the room (2026-11-24): wakes, characters, messages, calls.
+        detail.taskStats(n)?.let { stats ->
+            FormSection("Room Cost", footer = "房间里为这个任务花的：唤醒几次、送进去多少字、几条消息、几次房间工具调用。token 要看各会话自己的用量。") {
+                FormRow(first = true) { Text(stats.says, Modifier.weight(1f), color = Theme.ink, style = plain(15)) }
+            }
         }
         FormSection("Owner", footer = "点一个会话把任务交给它；再点一次收回。正在做的任务收回后回到 To Do。") {
             OwnerRows(detail, task.owner, enabled = !busy) { handle ->

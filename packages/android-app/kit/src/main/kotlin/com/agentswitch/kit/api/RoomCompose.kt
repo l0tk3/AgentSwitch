@@ -144,3 +144,33 @@ object RoomMarkdown {
         return indent to rest.substring(space)
     }
 }
+
+/**
+ * A search hit as the search page shows it (2026-11-24 design: 命中前后一小段，命中的字高亮): one line around the first
+ * place the words are found, `…` where it was cut, and where every place they are found stands in that line.
+ */
+object RoomSearch {
+    data class Snippet(val text: String, val hits: List<IntRange>)
+
+    fun snippet(text: String, query: String, around: Int = 24): Snippet {
+        val line = text.replace(Regex("\\s+"), " ").trim()
+        val q = query.trim()
+        val first = if (q.isEmpty()) -1 else line.indexOf(q, ignoreCase = true)
+        if (first < 0) {
+            val cut = line.length > around * 2
+            return Snippet(if (cut) line.take(around * 2) + "…" else line, emptyList())
+        }
+        val from = (first - around).coerceAtLeast(0)
+        val to = (first + q.length + around).coerceAtMost(line.length)
+        val lead = if (from > 0) "…" else ""
+        val shown = lead + line.substring(from, to) + if (to < line.length) "…" else ""
+        val hits = ArrayList<IntRange>()
+        var at = line.indexOf(q, from, ignoreCase = true)
+        while (at >= 0 && at + q.length <= to) {
+            val start = at - from + lead.length
+            hits += start until start + q.length
+            at = line.indexOf(q, at + q.length, ignoreCase = true)
+        }
+        return Snippet(shown, hits)
+    }
+}

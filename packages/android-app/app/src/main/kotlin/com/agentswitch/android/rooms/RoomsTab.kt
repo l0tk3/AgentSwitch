@@ -79,6 +79,8 @@ fun RoomsTab() {
             subtitle = { MacTabSubtitle() },
             trailing = {
                 val can = store.list != null && !store.unsupported
+                // 等你处理 (2026-11-24 已定 3): its own entry, an inbox with a count, not at the list's bottom.
+                if (can) AttentionEntry(store.attentionCount) { nav.push("roomattention") { RoomAttentionPage() } }
                 if (classic) {
                     Box(
                         Modifier.clickable(can, role = Role.Button, onClickLabel = "New") { nav.present("roomnew") { RoomSessionsSheet(RoomSessionsPurpose.Create) } }.padding(horizontal = 12.dp, vertical = 10.dp),

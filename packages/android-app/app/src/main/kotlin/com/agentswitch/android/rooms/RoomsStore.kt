@@ -13,13 +13,17 @@ import com.agentswitch.kit.api.RoomAttachTokens
 import com.agentswitch.kit.api.RoomDetail
 import com.agentswitch.kit.api.RoomFilePath
 import com.agentswitch.kit.api.RoomFiles
+import com.agentswitch.kit.api.RoomAttentionItem
 import com.agentswitch.kit.api.RoomList
+import com.agentswitch.kit.api.RoomMessage
 import com.agentswitch.kit.api.RoomSummary
 import com.agentswitch.kit.api.RoomsUnsupported
 import com.agentswitch.kit.api.deleteRoom
 import com.agentswitch.kit.api.markRoomRead
 import com.agentswitch.kit.api.putRoomFile
 import com.agentswitch.kit.api.room
+import com.agentswitch.kit.api.roomAttention
+import com.agentswitch.kit.api.roomMessages
 import com.agentswitch.kit.api.roomFiles
 import com.agentswitch.kit.api.rooms
 import com.agentswitch.kit.api.say
@@ -51,6 +55,28 @@ class RoomsStore {
 
     /** Messages not seen yet: the tab's badge. */
     val unread: Int get() = list?.unread ?: 0
+
+    /** What waits on the user in every room (等你处理), as the Mac last said; null before it was asked. */
+    var attention: List<RoomAttentionItem>? by mutableStateOf(null)
+        private set
+    var attentionError: String? by mutableStateOf(null)
+        private set
+
+    /** How many things wait on the user: the list's own count, or the page's when it was read since. */
+    val attentionCount: Int get() = list?.attention ?: 0
+
+    suspend fun refreshAttention(api: AgentSwitchAPI?) {
+        if (api == null) return
+        val asked = generation
+        try {
+            val items = api.roomAttention()
+            if (asked == generation) { attention = items; attentionError = null }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (asked == generation) attentionError = e.message ?: e.javaClass.simpleName
+        }
+    }
 
     suspend fun refresh(api: AgentSwitchAPI?) {
         if (api == null) return
@@ -84,8 +110,9 @@ class RoomsStore {
     var demoBytes: Map<String, ByteArray> = emptyMap()
         private set
 
-    fun setDemo(list: RoomList, details: Map<String, RoomDetail>, files: Map<String, RoomFiles>, bytes: Map<String, ByteArray> = emptyMap()) {
+    fun setDemo(list: RoomList, details: Map<String, RoomDetail>, files: Map<String, RoomFiles>, bytes: Map<String, ByteArray> = emptyMap(), attention: List<RoomAttentionItem> = emptyList()) {
         this.list = list
+        this.attention = attention
         demoDetails = details
         demoFiles = files
         demoBytes = bytes
@@ -94,6 +121,7 @@ class RoomsStore {
     fun reset() {
         generation += 1
         list = null
+        attention = null
         etag = null
         unsupported = false
         error = null
@@ -137,22 +165,145 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
         get() = replyingTo
         set(value) {
             replyingTo = value
-            if (value != null) detail?.message(value)?.task?.let { draftTask = it }
         }
 
-    /** The task the next message is about (2026-11-24): taken from the message answered, or the one the timeline is
-     *  narrowed to; the user can change it beside the box. null: about no one task. */
-    var draftTask: Int? by mutableStateOf(null)
+    /**
+     * The task the next message is about (2026-11-24 design): inside a task, that task; in `# 全部`, none — unless it
+     * begins with `T3` (a task of the list), or answers a message (the Mac gives it the task of what it answers).
+     */
+    val draftTask: Int?
+        get() = narrowedTo ?: if (replyingTo != null) null else Regex("^\\s*T(\\d+)\\b").find(draftText)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { n -> detail?.task(n) != null }
 
     private var narrowedTo: Int? by mutableStateOf(null)
 
-    /** The timeline narrowed to one task's messages (a label tapped); null: all of them. */
+    /** The timeline as one task's messages (picked in the drawer, or a label tapped); null: `# 全部`. */
     var taskFilter: Int?
         get() = narrowedTo
         set(value) {
+            if (value == narrowedTo) return
+            narrowedTo?.let { seen(it) }
             narrowedTo = value
-            if (value != null) draftTask = value
+            taskMessages = null
+            value?.let { seen(it) }
         }
+
+    /** The task's messages as the Mac gave them (`GET /rooms/:id/messages?task=`), the newest 200. */
+    var taskMessages: List<RoomMessage>? by mutableStateOf(null)
+        private set
+
+    /** Every message the page has had, by number: the room's last ones as it is read again, and the pages above. */
+    private var kept: java.util.TreeMap<Int, RoomMessage> = java.util.TreeMap()
+
+    /** What `# 全部` shows: all the page has, oldest first. */
+    var allMessages: List<RoomMessage> by mutableStateOf(emptyList())
+        private set
+
+    init { detail?.messages?.let { keep(it) } }
+
+    /** The room's first message is among them: the room's beginning is shown above it. */
+    val atBeginning: Boolean get() = allMessages.firstOrNull()?.seq?.let { it <= 1 } ?: true
+
+    var loadingOlder: Boolean by mutableStateOf(false)
+        private set
+
+    /** Messages about each task after what the user had seen when the page opened (`byTask`). */
+    var byTask: Map<Int, Int> by mutableStateOf(emptyMap())
+        private set
+    private var byTaskAt = -1
+
+    /** Up to which message each task was looked at here: its count starts again from there. */
+    private val taskSeen = mutableStateMapOf<Int, Int>()
+
+    /** A message to bring into sight (a quote, a search hit, 等你处理): its number; and the one shown lit a moment. */
+    var jumpTo: Int? by mutableStateOf(null)
+    var lit: Int? by mutableStateOf(null)
+
+    private fun seen(task: Int) { taskSeen[task] = detail?.room?.lastSeq ?: 0 }
+
+    /** How many messages about a task the user has not seen: since it was last looked at here, or since the page opened. */
+    fun unread(task: Int): Int {
+        val at = taskSeen[task]
+        if (at != null) return allMessages.count { it.task == task && it.seq > at && it.from != com.agentswitch.kit.api.RoomSeat.you }
+        return byTask[task] ?: 0
+    }
+
+    /** The messages the timeline shows: the task's (the Mac's page and what came since), or all. */
+    val shown: List<RoomMessage>
+        get() {
+            val n = narrowedTo ?: return allMessages
+            val fetched = taskMessages ?: return allMessages.filter { it.task == n }
+            val newest = fetched.lastOrNull()?.seq ?: 0
+            return fetched + allMessages.filter { it.task == n && it.seq > newest }
+        }
+
+    /** A message by its number, wherever the page has it. */
+    fun message(seq: Int): RoomMessage? = kept[seq] ?: taskMessages?.firstOrNull { it.seq == seq }
+
+    private fun keep(messages: List<RoomMessage>) {
+        if (messages.isEmpty()) return
+        val next = java.util.TreeMap(kept)
+        for (m in messages) next[m.seq] = m
+        kept = next
+        allMessages = next.values.toList()
+    }
+
+    /** The task's own messages read again (the newest 200), and the counts per task when the room has moved on. */
+    suspend fun loadTask(api: AgentSwitchAPI?) {
+        if (api == null) return
+        val n = narrowedTo ?: return
+        try {
+            val page = api.roomMessages(id, task = n, limit = 200)
+            if (narrowedTo == n) taskMessages = page.messages
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    suspend fun loadCounts(api: AgentSwitchAPI?) {
+        val last = detail?.room?.lastSeq ?: return
+        if (api == null || last == byTaskAt || detail?.tasks.isNullOrEmpty()) return
+        try {
+            byTask = api.roomMessages(id, since = seenAtOpen ?: 0, limit = 1).byTask
+            byTaskAt = last
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) { }
+    }
+
+    /** The page above the oldest the page has. */
+    suspend fun loadOlder(api: AgentSwitchAPI?): Boolean {
+        val first = allMessages.firstOrNull()?.seq ?: return false
+        if (api == null || first <= 1 || loadingOlder) return false
+        loadingOlder = true
+        return try {
+            val page = api.roomMessages(id, before = first, limit = 200).messages
+            keep(page)
+            page.isNotEmpty()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = e.message ?: e.javaClass.simpleName
+            false
+        } finally {
+            loadingOlder = false
+        }
+    }
+
+    /**
+     * A message brought into sight (a quote tapped, a search hit, 等你处理): in the task shown when it is one of its
+     * messages, else in `# 全部`, the pages above read until it is there.
+     */
+    suspend fun jump(api: AgentSwitchAPI?, seq: Int) {
+        if (narrowedTo != null && shown.none { it.seq == seq }) taskFilter = null
+        var pages = 0
+        while (narrowedTo == null && allMessages.none { it.seq == seq } && (allMessages.firstOrNull()?.seq ?: 0) > seq && pages < 25) {
+            if (!loadOlder(api)) break
+            pages++
+        }
+        jumpTo = seq
+    }
     var sending: Boolean by mutableStateOf(false)
         private set
 
@@ -238,6 +389,7 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
                 if (seenAtOpen == null) seenAtOpen = fresh.first.room.readSeq
                 detail = fresh.first
                 etag = fresh.second
+                keep(fresh.first.messages)
             }
             error = null
             markRead(api)

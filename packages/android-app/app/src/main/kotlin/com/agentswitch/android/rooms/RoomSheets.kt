@@ -63,6 +63,10 @@ import com.agentswitch.kit.api.SeatState
 import com.agentswitch.kit.api.TerminalInfo
 import com.agentswitch.kit.api.TerminalStatus
 import com.agentswitch.kit.api.createRoom
+import com.agentswitch.kit.api.endSeat
+import com.agentswitch.kit.api.renameSeat
+import com.agentswitch.kit.api.resumeSeat
+import com.agentswitch.kit.api.setSeatMuted
 import com.agentswitch.kit.api.seat
 import com.agentswitch.kit.api.setRoomNotes
 import com.agentswitch.kit.api.setSeat
@@ -131,6 +135,8 @@ private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat
         Row {
             Text(seat.state?.word(look) ?: "—", color = seat.state.wordColor(), style = mono(11), maxLines = 1)
             if (seat.canAdd) Text(" · Admin", color = Theme.secondaryInk, style = mono(11), maxLines = 1)
+            if (seat.muted) Text(" · 禁言", color = Theme.waiting, style = mono(11), maxLines = 1)
+            seat.unread?.takeIf { it > 0 }?.let { Text(" · $it 未读", color = Theme.secondaryInk, style = mono(11), maxLines = 1) }
             // It can neither speak here nor be woken until it is resumed (§6): for the user to do.
             if (seat.noKit) Text(" · No Kit", color = Theme.waiting, style = mono(11), maxLines = 1)
         }
@@ -155,6 +161,20 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
     val seat = model.detail?.seat(handle)
     var busy by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
+    var confirmEnd by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<String?>(null) }
+    fun act(work: suspend (com.agentswitch.kit.api.AgentSwitchAPI) -> Unit) { scope.launch { busy = true; model.run(app.api, work); busy = false } }
+    fun end(now: Boolean, delete: Boolean = false) {
+        scope.launch {
+            busy = true
+            var handing = false
+            val done = model.run(app.api) { handing = it.endSeat(handle, model.id, now = now, delete = delete).handingOver }
+            busy = false
+            if (!done) return@launch
+            // One with unfinished tasks writes its handover note first, then ends by itself.
+            if (handing) app.banner = "@$handle 还有没做完的任务：正在等它写交接，最多两分钟，写完自动结束。" else back()
+        }
+    }
     FormPage("@$handle", leading = { BarBack(back, "Members") }) {
         if (seat == null) {
             Text("这个成员已不在房间里。", Modifier.padding(Theme.Space.l), color = Theme.secondaryInk, style = plain(15))
@@ -189,7 +209,12 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
             }
             line("State", if (gone) "Left" else seat.state?.word(look) ?: "—", color = if (gone) Theme.secondaryInk else seat.state.wordColor())
             if (seat.noKit) line("Kit", "No Kit", color = Theme.waiting)
+            if (seat.canAdd) line("Role", "Admin")
+            if (seat.muted) line("Muted", "by @${seat.mutedBy ?: "?"}", color = Theme.waiting)
             line("Seated By", RoomWords.who(seat.addedBy))
+            if (!gone) seat.unread?.let { line("Unread", if (it == 0) "全部已读" else "$it 条") }
+            seat.asks?.let { line("Asks", it.title, color = Theme.waiting) }
+            seat.stats?.let { line("Room Cost", it.says) }
         }
         // What it says it is changing (§9): every path it named, and until when.
         if (!gone) model.detail?.claim(handle)?.let { claim ->
@@ -212,20 +237,64 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
                     Switch(checked = seat.canAdd, onCheckedChange = if (can) ({ on: Boolean -> set(on) }) else null, enabled = can)
                 }
             }
-            FormSection {
+            // What goes on with it: mention, its terminal, its name here, back from an end, its voice.
+            val dim = Modifier.alpha(if (busy) 0.4f else 1f)
+            FormSection(footer = if (seat.muted) "已禁言（@${seat.mutedBy ?: "?"}）：还能读、还能干活，但不能发消息、不能写置顶笔记。" else null) {
                 FormRow(first = true, onClick = { mention(handle) }) { Text("Mention", color = Theme.ink, style = plain(16)) }
                 val terminal = seat.terminal
-                if (terminal != null && app.terminals.terminals.any { it.id == terminal }) {
+                if (terminal != null && seat.state != SeatState.Exited && app.terminals.terminals.any { it.id == terminal }) {
                     FormRow(onClick = { close(); nav.popToRoot(); app.openTerminal(terminal) }) { Text("Open Terminal", color = Theme.ink, style = plain(16)) }
                 }
-                FormRow(Modifier.alpha(if (busy) 0.4f else 1f), onClick = if (busy) null else ({ confirmRemove = true })) { Text("Remove", color = Theme.failed, style = plain(16)) }
+                if (seat.state == SeatState.Exited || seat.noKit) {
+                    FormRow(dim, onClick = if (busy) null else ({ act { it.resumeSeat(handle, model.id) } })) {
+                        Text("恢复", Modifier.weight(1f), color = agentInk, style = plain(16))
+                        Text("同一个会话、同一个目录", color = Theme.secondaryInk, style = plain(13), maxLines = 1)
+                    }
+                }
+                FormRow(dim, onClick = if (busy) null else ({ act { it.setSeatMuted(handle, model.id, !seat.muted) } })) {
+                    Text(if (seat.muted) "解除禁言" else "禁言", color = Theme.ink, style = plain(16))
+                }
+                val name = renaming
+                if (name == null) {
+                    FormRow(dim, onClick = if (busy) null else ({ renaming = handle })) { Text("Rename…", color = Theme.ink, style = plain(16)) }
+                } else {
+                    FormRow {
+                        PlainField(name, { renaming = it }, Modifier.weight(1f), placeholder = "这个房间里的新名字", keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
+                        BarWord("Save", {
+                            val next = name.trim()
+                            scope.launch {
+                                busy = true
+                                var now: String? = null
+                                val done = model.run(app.api) { now = it.renameSeat(handle, model.id, next).handle }
+                                busy = false
+                                if (done) { renaming = null; if (now != null && now != handle) back() }
+                            }
+                        }, enabled = !busy && name.isNotBlank() && name.trim() != handle, color = agentInk)
+                    }
+                }
+            }
+            // What takes it out, in the order of how much they undo.
+            FormSection(footer = "踢出：会话继续运行，之后还能再拉进来。结束：同时关掉它的终端，对话记录留着，之后能恢复；有没做完的任务时它先写交接。") {
+                FormRow(dim, first = true, onClick = if (busy) null else ({ confirmRemove = true })) { Text("踢出", color = Theme.failed, style = plain(16)) }
+                FormRow(dim, onClick = if (busy) null else ({ confirmEnd = true })) { Text("结束", color = Theme.failed, style = plain(16)) }
             }
         }
     }
+    PixelBoxEffect(confirmEnd, { confirmEnd = false }) {
+        PixelBox(
+            head = "End", tone = PixelBox.Tone.Red,
+            message = "结束 @$handle：移出房间并关掉它的终端，对话记录留着，之后还能恢复。它还有没做完的任务时，先在房间里写交接（最多两分钟）再结束；End Now 不等交接。Delete Record 连对话记录一起删，无法恢复。",
+            actions = listOf(
+                PixelBox.Action("End", PixelBox.Action.Role.Destructive) { end(now = false) },
+                PixelBox.Action("End Now", PixelBox.Action.Role.Destructive) { end(now = true) },
+                PixelBox.Action("Delete Record", PixelBox.Action.Role.Destructive) { end(now = true, delete = true) },
+            ),
+        )
+    }
     PixelBoxEffect(confirmRemove, { confirmRemove = false }) {
         PixelBox(
-            head = "Remove", tone = PixelBox.Tone.Red, message = "把 @$handle 移出房间？它的会话不受影响；还没交到它手上的消息不再投递。",
-            actions = listOf(PixelBox.Action("Remove", PixelBox.Action.Role.Destructive) {
+            head = "Kick", tone = PixelBox.Tone.Red, message = "把 @$handle 踢出房间？它的会话继续运行；还没交到它手上的消息不再投递。",
+            actions = listOf(PixelBox.Action("Kick", PixelBox.Action.Role.Destructive) {
                 scope.launch {
                     busy = true
                     val done = model.run(app.api) { it.unseat(handle, model.id) }

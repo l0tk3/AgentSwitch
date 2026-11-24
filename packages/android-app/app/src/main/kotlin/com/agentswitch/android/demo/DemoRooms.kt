@@ -14,6 +14,8 @@ import com.agentswitch.kit.api.RoomList
 import com.agentswitch.kit.api.RoomMessage
 import com.agentswitch.kit.api.RoomNotes
 import com.agentswitch.kit.api.RoomSeat
+import com.agentswitch.kit.api.RoomStats
+import com.agentswitch.kit.api.RoomAttentionItem
 import com.agentswitch.kit.api.RoomSummary
 import com.agentswitch.kit.api.RoomTask
 import com.agentswitch.kit.api.RoomTaskCounts
@@ -55,7 +57,7 @@ object DemoRooms {
         RoomTask(n = 1, title = "定登录接口", stateName = "done", owner = "daemon", by = RoomSeat.you, createdAt = ago(280), updatedAt = ago(200), note = "接口写在 api.md：POST /login，返回 token 和过期时间"),
         RoomTask(n = 2, title = "服务端实现 /login 和刷新 token", detail = "按 api.md。密码错误五次后锁十分钟；刷新 token 只能用一次。", stateName = "doing", owner = "daemon", by = RoomSeat.you, createdAt = ago(270), updatedAt = ago(35), after = listOf(1)),
         RoomTask(n = 3, title = "登录页：表单、错误提示、记住我", stateName = "doing", owner = "web", by = "daemon", createdAt = ago(260), updatedAt = ago(50), after = listOf(1)),
-        RoomTask(n = 4, title = "联调：登录页接上真实接口", stateName = "todo", owner = "web", by = RoomSeat.you, createdAt = ago(250), updatedAt = ago(250), after = listOf(2, 3)),
+        RoomTask(n = 4, title = "联调：登录页接上真实接口", stateName = "blocked", note = "等 T2 的刷新接口定下字段名", owner = "web", by = RoomSeat.you, createdAt = ago(250), updatedAt = ago(250), after = listOf(2, 3)),
         RoomTask(n = 5, title = "写登录流程的说明文档", detail = "放到共享文件夹，给之后接手的人看。", stateName = "todo", by = "daemon", createdAt = ago(110), updatedAt = ago(110), after = listOf(4)),
         RoomTask(n = 6, title = "补登录失败的测试", stateName = "todo", by = "web", createdAt = ago(40), updatedAt = ago(40)),
         RoomTask(n = 7, title = "把旧的 session cookie 逻辑标成废弃", stateName = "done", owner = "docs", by = "daemon", createdAt = ago(100), updatedAt = ago(60), note = "见 deprecations.md"),
@@ -79,6 +81,9 @@ object DemoRooms {
         seats = seats, messages = messages,
         notes = RoomNotes(text = "接口：POST /login → { token, expiresAt }\n约定：改公共文件前先在房间里说一声。", at = ago(190), by = "daemon"),
         folder = folder, tasks = tasks, claims = claims,
+        // Who has read the user's first message (2026-11-24: `1/2 已读`), and what the work has cost so far.
+        reads = mapOf("1" to listOf("daemon"), "2" to listOf("web"), "3" to listOf("daemon")),
+        rawTaskStats = mapOf("2" to RoomStats(wakes = 6, chars = 8_400, posts = 4, calls = 11), "3" to RoomStats(wakes = 3, chars = 2_100, posts = 2, calls = 5)),
     )
 
     val files = RoomFiles(
@@ -126,12 +131,18 @@ object DemoRooms {
         )
     }
 
+    /** 等你处理 in the sample: a task stuck, a question to the user. */
+    val attention = listOf(
+        RoomAttentionItem(room = room, roomName = "登录", kind = "blocked", task = 4, handle = "web", text = "联调：登录页接上真实接口：等 T2 的刷新接口定下字段名", at = ago(20)),
+        RoomAttentionItem(room = room, roomName = "登录", kind = "question", handle = "docs", seq = 5, text = "旧 cookie 逻辑已标成废弃（T7），清单在共享文件夹的 `deprecations.md`。", at = ago(8)),
+    )
+
     val list = RoomList(listOf(
         RoomSummary(
             id = room, name = "登录", topic = detail.room.topic, createdAt = ago(300), members = 4,
             faces = listOf(RoomSummary.Sitter("daemon", daemonFace), RoomSummary.Sitter("web", webFace), RoomSummary.Sitter("docs", docsFace)),
             last = RoomSummary.Last(seq = 5, from = "docs", text = messages.last().text, at = ago(8)), unread = 1, forYou = true,
-            tasks = RoomTaskCounts(todo = 3, doing = 2, done = 2),
+            tasks = RoomTaskCounts(todo = 3, doing = 2, done = 2), attention = 2,
         ),
         RoomSummary(id = "cd34ef56ab", name = "博客迁移", topic = "换主题之后的构建问题", paused = true, createdAt = ago(3000), members = 2, last = RoomSummary.Last(seq = 12, from = RoomSeat.you, text = "先停一下，明天再说", at = ago(1400))),
     ))

@@ -387,4 +387,150 @@ class RoomTests {
         api.say("好", "a", replyTo = 2)
         assertEquals("""{"text":"好","replyTo":2}""", String(transport.requests.last().body!!))
     }
+
+    // MARK: - the second design (2026-11-24): task drawer, receipts as `2/3 已读`, search, 等你处理, a member's buttons
+
+    @Test
+    fun testReadersTaskStatsBlockedAndAMembersNewFieldsDecode() {
+        val d = KitJson.decodeFromString(RoomDetail.serializer(), """
+            {"room":{"id":"a","readSeq":2},
+             "seats":[{"handle":"you","kind":"user"},
+              {"handle":"api","kind":"session","terminal":"t1","state":"idle","muted":true,"mutedBy":"you","unread":3,"stats":{"wakes":4,"chars":1200,"posts":9,"calls":12},
+               "asks":{"title":"Do you trust this folder?","options":["Yes","No"],"selected":0,"trust":true}},
+              {"handle":"ios","kind":"session","terminal":"t2","state":"busy"},
+              {"handle":"gone","kind":"session","terminal":"t3","left":5}],
+             "messages":[
+              {"seq":1,"from":"you","to":["api","ios","gone"],"text":"@api @ios @gone 看下","at":1,"expects":"answer"},
+              {"seq":2,"from":"api","to":["you"],"text":"好","at":2,"task":4},
+              {"seq":3,"from":"you","to":[],"text":"记一下","at":3}],
+             "receipts":{"1":{"ios":"queued"}},
+             "reads":{"1":["api","gone"],"2":["ios"]},
+             "tasks":[{"n":4,"title":"iOS 表单","state":"blocked","owner":"ios","note":"等字段名"},{"n":5,"title":"文档","state":"todo"},{"n":6,"title":"接口","state":"doing"},{"n":1,"title":"定","state":"done"}],
+             "taskStats":{"4":{"wakes":2,"chars":3400,"posts":5,"calls":1},"x":{"wakes":1}}}
+        """.trimIndent())
+        val api = d.seat("api")!!
+        assertTrue(api.muted)
+        assertEquals("you", api.mutedBy)
+        assertEquals(3, api.unread)
+        assertEquals(RoomStats(4, 1200, 9, 12), api.stats)
+        assertEquals("唤醒 4 次 · 1.2k 字 · 9 条消息 · 12 次调用", api.stats!!.says)
+        assertTrue(api.asks!!.trust)
+        assertFalse(d.seat("ios")!!.muted)
+        assertEquals("answer", d.message(1)?.expects)
+
+        // The user's own message to others: who of those still seated has read it; one that left is not counted.
+        val r = d.readers(d.message(1)!!)!!
+        assertEquals(listOf("api"), r.read)
+        assertEquals(listOf("ios"), r.unread)
+        assertEquals("1/2 已读", r.word)
+        assertEquals(listOf("@api 已读", "@ios 未读 · Queued"), r.lines)
+        // Not for another's message, nor one written to nobody.
+        assertNull(d.readers(d.message(2)!!))
+        assertNull(d.readers(d.message(3)!!))
+        assertEquals("已读", RoomReaders(listOf("a"), emptyList()).word)
+
+        // Blocked is its own state, with its note; the drawer puts it first, then what is being done, then to do.
+        assertEquals(RoomTaskState.Blocked, d.task(4)!!.state)
+        assertEquals("卡住", RoomTaskState.Blocked.chinese)
+        assertEquals(listOf(4, 6, 5), d.openTasks.map { it.n })
+        assertEquals(RoomStats(2, 3400, 5, 1), d.taskStats(4))
+        assertNull(d.taskStats(5))
+
+        // A Mac from before: none of it, not a failure.
+        val old = detail()
+        assertEquals(emptyMap(), old.reads)
+        assertNull(old.taskStats(3))
+        assertFalse(old.seat("daemon")!!.muted)
+        assertNull(old.seat("daemon")!!.stats)
+    }
+
+    @Test
+    fun testAttentionDecodesAndSaysEachInALine() {
+        val items = KitJson.decodeFromString(RoomAttention.serializer(), """
+            {"items":[
+             {"room":"a","roomName":"登录","kind":"permission","handle":"ios","terminal":"t2","text":"","at":9},
+             {"room":"a","roomName":"登录","kind":"blocked","task":4,"handle":null,"text":"iOS 表单：等字段名","at":8},
+             {"room":"b","roomName":"迁移","kind":"question","handle":"api","seq":12,"task":3,"text":"用哪个库？\n还是自己写","at":7},
+             {"room":"b","roomName":"迁移","kind":"rounds","text":"7","at":6},
+             {"room":"b","roomName":"迁移","kind":"trust","handle":"web","terminal":"t9","text":"Trust?","at":5},
+             {"room":"b","roomName":"迁移","kind":"asks","handle":"web","text":"Pick a model","at":4},
+             {"room":"b","kind":"someday","text":"新的","at":3}]}
+        """.trimIndent()).items
+        assertEquals("⚠ ios 等你确认权限", items[0].line)
+        assertEquals("⚠ T4 卡住：iOS 表单：等字段名", items[1].line)
+        assertEquals("api 问你：用哪个库？ 还是自己写", items[2].line)
+        assertEquals(12, items[2].seq)
+        assertEquals("会话间已聊 7 条，没有你的参与", items[3].line)
+        assertEquals("⚠ web 问要不要信任这个文件夹", items[4].line)
+        assertEquals("⚠ web 等你选：Pick a model", items[5].line)
+        assertEquals("新的", items[6].line)
+        assertTrue(items[0].urgent)
+        assertFalse(items[2].urgent)
+
+        val list = KitJson.decodeFromString(RoomList.serializer(), """{"rooms":[{"id":"a","attention":2},{"id":"b","attention":3},{"id":"c"}]}""")
+        assertEquals(5, list.attention)
+        assertEquals(0, list.rooms[2].attention)
+    }
+
+    @Test
+    fun testQuoteLineKeepsMarkdownAndTheSearchSnippetMarksItsHits() {
+        assertEquals("接口改好了， 字段见 **T3/api.md**", RoomRow.quoteLine("接口改好了，\n字段见 **T3/api.md**"))
+        val long = "改了 `src/api/rooms.ts` 里的" + "很多".repeat(40)
+        val cut = RoomRow.quoteLine(long, most = 12)
+        assertEquals("改了 `src/api/`…", cut)
+        assertEquals("**粗体没有结**…", RoomRow.quoteLine("**粗体没有结束的一句很长的话**", most = 7))
+
+        val s = RoomSearch.snippet("前面有很多很多很多很多的字，然后是 Login 接口，再后面 login 又出现一次，还有很多很多的字在后面", "login", around = 16)
+        assertTrue(s.text.startsWith("…"))
+        assertTrue(s.text.endsWith("…"))
+        assertEquals(listOf("Login", "login"), s.hits.map { s.text.substring(it.first, it.last + 1) })
+        val none = RoomSearch.snippet("短的", "x")
+        assertEquals("短的", none.text)
+        assertEquals(emptyList(), none.hits)
+    }
+
+    @Test
+    fun testMessagesSearchAttentionAndMemberRoutes() = runTest {
+        val transport = FakeTransport({ req, _ ->
+            when {
+                req.method == "GET" && req.path == "/rooms/a/messages" -> """{"messages":[{"seq":7,"from":"api","text":"login","at":1,"task":3}],"byTask":{"3":2,"5":1}}""".toByteArray() to httpResponse(req.url)
+                req.method == "GET" && req.path == "/rooms/attention" -> """{"items":[{"room":"a","kind":"permission","handle":"ios","at":1}]}""".toByteArray() to httpResponse(req.url)
+                req.path == "/rooms/a/seats/ios/resume" -> """{"seat":{"handle":"ios","kind":"session","state":"busy"},"terminal":{"id":"t9"}}""".toByteArray() to httpResponse(req.url, status = 201)
+                req.method == "PATCH" && req.path == "/rooms/a/seats/ios" -> """{"seat":{"handle":"ios","kind":"session","muted":true,"mutedBy":"you"}}""".toByteArray() to httpResponse(req.url)
+                req.method == "POST" && req.path == "/rooms/a/messages" -> """{"message":{"seq":8,"from":"you","text":"看下","at":1,"task":2}}""".toByteArray() to httpResponse(req.url, status = 201)
+                req.method == "DELETE" && req.query?.contains("close") == true -> """{"ok":true,"closed":false,"handingOver":true}""".toByteArray() to httpResponse(req.url)
+                else -> """{"ok":true,"closed":false}""".toByteArray() to httpResponse(req.url)
+            }
+        })
+        val api = api(transport)
+        val page = api.roomMessages("a", task = 3, since = 2, limit = 200)
+        assertEquals("task=3&since=2&limit=200", transport.requests.last().query)
+        assertEquals(3, page.messages.single().task)
+        assertEquals(mapOf(3 to 2, 5 to 1), page.byTask)
+        api.roomMessages("a", q = " 登录 ", task = 3)
+        assertEquals("task=3&q=%E7%99%BB%E5%BD%95", transport.requests.last().query)
+        api.roomMessages("a", before = 50)
+        assertEquals("before=50", transport.requests.last().query)
+
+        assertEquals("ios", api.roomAttention().single().handle)
+        assertEquals("/rooms/attention", transport.paths.last())
+
+        assertEquals(SeatState.Busy, api.resumeSeat("ios", "a").state)
+        assertEquals("POST", transport.requests.last().method)
+        assertTrue(api.setSeatMuted("ios", "a", true).muted)
+        assertEquals("""{"muted":true}""", String(transport.requests.last().body!!))
+        api.renameSeat("ios", "a", "phone")
+        assertEquals("""{"name":"phone"}""", String(transport.requests.last().body!!))
+
+        val ending = api.endSeat("ios", "a")
+        assertTrue(ending.handingOver)
+        assertEquals("close=end", transport.requests.last().query)
+        api.endSeat("ios", "a", now = true)
+        assertEquals("close=end&now=1", transport.requests.last().query)
+        api.unseat("ios", "a")
+        assertNull(transport.requests.last().query)
+
+        api.say("看下", "a", expects = "answer", task = 2)
+        assertEquals("""{"text":"看下","expects":"answer","task":2}""", String(transport.requests.last().body!!))
+    }
 }
