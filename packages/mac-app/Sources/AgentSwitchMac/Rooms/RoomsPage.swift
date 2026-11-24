@@ -31,6 +31,7 @@ struct RoomsPage: View {
                     if let sheet = RoomsDemo.opens { model.open(sheet) }
                     if let card = RoomsDemo.card { model.card = card }
                     if let draft = RoomsDemo.draft { model.draft = draft }
+                    RoomsDemo.setup?(model)
                     tell()
                     return
                 }
@@ -62,6 +63,8 @@ struct RoomsDemo {
     @MainActor static var opens: RoomsModel.Sheet?
     @MainActor static var card: String?
     @MainActor static var draft: String?
+    /// What else is set on the made-up page before it is drawn (the drawer out, a task shown, a search).
+    @MainActor static var setup: ((RoomsModel) -> Void)?
     let rooms: [RoomSummary]
     let room: Room
 }
@@ -131,14 +134,15 @@ private struct RoomsList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                PartLabel("Rooms")
-                Spacer()
+                PartLabel("Rooms").layoutPriority(1)
+                Spacer(minLength: 4)
                 Button { model.open(.models) } label: { BracketLabel(word: "Models") }.buttonStyle(BracketButtonStyle(size: 12))
                     .help("管理员会话拉人时，每个配置下哪些模型能用。")
-                Button { model.open(.new) } label: { BracketLabel(word: "New Room") }.buttonStyle(BracketButtonStyle(size: 12))
+                Button { model.open(.new) } label: { BracketLabel(word: "New") }.buttonStyle(BracketButtonStyle(size: 12)).help("New Room")
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
+            RoomAttentionEntry(model: model)
             ScrollView {
                 LazyVStack(spacing: look.isClassic ? 2 : 0) {
                     ForEach(Array(model.rooms.enumerated()), id: \.element.id) { index, room in
@@ -213,34 +217,21 @@ private struct RoomView: View {
     /// a message came while they were reading further up, and they were left where they were.
     @State private var atEnd = true
     @State private var unseen = false
+    /// The message gone to, lit a moment.
+    @State private var lit: Int?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text(room.room.name).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1).fixedSize()
-                Text(room.room.topic).font(.system(size: 12.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
-                Spacer(minLength: 8)
-                Button { model.open(.tasks) } label: { BracketLabel(word: room.tasks.isEmpty ? "Tasks" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)") }.buttonStyle(BracketButtonStyle(size: 12))
-                    .help("任务表：谁在做什么、做到哪了。成员和你都能加、能改。")
-                Button { model.open(.files) } label: { BracketLabel(word: "Files") }.buttonStyle(BracketButtonStyle(size: 12))
-                    .help("共享文件夹：成员把报告、方案这类长内容写在这里，消息里只放路径。")
-                Button { model.open(.notes) } label: { BracketLabel(word: "Notes") }.buttonStyle(BracketButtonStyle(size: 12))
-                    .help(room.notes == nil ? "置顶笔记：成员都能读、能改的一份约定。" : "置顶笔记，\(room.notes!.who) 最后写于 \(TimeText.at(room.notes!.date))。")
-                Button { model.open(.edit) } label: { BracketLabel(word: "Edit") }.buttonStyle(BracketButtonStyle(size: 12))
-                Button { model.setPaused(!room.room.paused) } label: { BracketLabel(word: room.room.paused ? "Resume" : "Pause") }
-                    .buttonStyle(BracketButtonStyle(size: 12))
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 40)
+            if model.searching { RoomSearchBar(model: model) } else { head }
             HairRule(color: Look.line)
             if room.room.paused { banner } else if let rounds = room.room.rounds { told(rounds) }
             needs
             if let said = model.problem ?? model.error { problem(said) }
-            if let n = model.taskFilter { filterBar(n) }
-            timeline
+            if model.searching { RoomSearchResults(model: model, room: room) } else { timeline }
             HairRule(color: Look.line)
             RoomWriter(model: model, room: room)
         }
+        .overlay(alignment: .topLeading) { if model.drawer { RoomTaskDrawer(model: model, room: room).padding(.top, 40) } }
         .overlay(alignment: .topTrailing) {
             if let handle = model.card, let seat = room.seat(handle), !seat.isUser {
                 ZStack(alignment: .topTrailing) {
@@ -336,19 +327,51 @@ private struct RoomView: View {
         .overlay(alignment: .bottom) { HairRule(color: Look.line) }
     }
 
-    /// The timeline narrowed to one task (its label clicked): said, with the way back.
-    private func filterBar(_ n: Int) -> some View {
-        let task = room.tasks.first { $0.n == n }
+    /// The room's bar (user #191: 一屏只回答一个问题): what is shown — the room, or one task of it — as a title that
+    /// pulls the task drawer out; ⌕ to search it; the rest (the task table, files, notes, the room's name, pause) in
+    /// one menu. Members are the window bar's 👥.
+    private var head: some View {
+        let task = model.taskFilter.flatMap { n in room.tasks.first { $0.n == n } }
         return HStack(spacing: 10) {
-            Text("Only " + RoomTaskLabel.word(n, task?.title)).mono(12).foregroundStyle(Look.ink)
-            if let owner = task?.owner { Text("@" + owner).mono(11.5).foregroundStyle(Look.faint) }
-            Spacer()
-            Button { model.taskFilter = nil } label: { BracketLabel(word: "Show All") }.buttonStyle(BracketButtonStyle(size: 12))
+            Button { model.drawer.toggle() } label: {
+                HStack(spacing: 6) {
+                    Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? "# " + room.room.name)
+                        .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
+                    LookGlyph(glyph: model.drawer ? "▴" : "▾", symbol: model.drawer ? "chevron.up" : "chevron.down", size: 10).foregroundStyle(Look.ink2)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help("任务：点开选一个任务，只看它的消息（⌘T）")
+            .keyboardShortcut("t", modifiers: .command)
+            if let task {
+                Text(["@" + (task.owner ?? "—"), RoomTaskLabel.stateWord(task.state)].joined(separator: " · ")).mono(12).foregroundStyle(Look.ink2).lineLimit(1)
+                if task.state == .blocked, let note = task.note { Text(note).font(.system(size: 12)).foregroundStyle(Color.waiting).lineLimit(1).truncationMode(.tail) }
+            } else {
+                Text(room.room.topic).font(.system(size: 12.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            Button { model.searching = true } label: { LookGlyph(glyph: "⌕", symbol: "magnifyingglass", size: 18).foregroundStyle(Look.ink).frame(width: 28, height: 28).contentShape(Rectangle()) }
+                .buttonStyle(.plain).help("搜索\(task == nil ? "这个房间" : "这个任务")（⌘F）").keyboardShortcut("f", modifiers: .command)
+            Menu {
+                Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
+                Button("Files…") { model.open(.files) }
+                Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
+                Divider()
+                Button("Edit Room…") { model.open(.edit) }
+                Button(room.room.paused ? "Resume Room" : "Pause Room") { model.setPaused(!room.room.paused) }
+            } label: {
+                LookGlyph(glyph: "⋯", symbol: "ellipsis", size: 18).foregroundStyle(Look.ink)
+            }
+            .menuStyle(.borderlessButton)
+            .tint(Look.ink)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("任务表、共享文件、置顶笔记、房间设置")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(Look.raised)
-        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+        .frame(height: 40)
     }
 
     @ViewBuilder
@@ -364,9 +387,11 @@ private struct RoomView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        if room.messages.first?.seq == 1 { opening }
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
-                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil, task: { model.taskFilter = $0 }))
+                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil, task: { model.taskFilter = $0 },
+                                                                                       jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id))
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 1).id("end")
@@ -376,8 +401,10 @@ private struct RoomView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                 }
-                .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+                .onAppear { proxy.scrollTo("end", anchor: .bottom); if let seq = model.jump { goTo(seq, proxy) } }
                 .onChange(of: room.room.id) { proxy.scrollTo("end", anchor: .bottom) }
+                .onChange(of: model.taskFilter) { proxy.scrollTo("end", anchor: .bottom) }
+                .onChange(of: model.jump) { if let seq = model.jump { goTo(seq, proxy) } }
                 .onChange(of: model.rows.last?.id) {
                     // Followed while the reader is at the end, or when it is the user's own; else left where it is.
                     if atEnd || room.messages.last?.from == Room.you { proxy.scrollTo("end", anchor: .bottom) } else { unseen = true }
@@ -397,6 +424,33 @@ private struct RoomView: View {
                 }
             }
         }
+    }
+
+    /// A message gone to: brought to the middle and lit a moment.
+    private func goTo(_ seq: Int, _ proxy: ScrollViewProxy) {
+        model.jump = nil
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo(seq, anchor: .center) }
+            lit = seq
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(.easeOut(duration: 0.4)) { if lit == seq { lit = nil } }
+        }
+    }
+
+    /// The room's first words, over its first message (Discord's channel start): its name, its topic, where it begins.
+    private var opening: some View {
+        let task = model.taskFilter.flatMap { n in room.tasks.first { $0.n == n } }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? "# " + room.room.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Look.ink)
+            if let detail = task.map({ $0.detail }) ?? (room.room.topic.isEmpty ? nil : room.room.topic) {
+                Text(detail).font(.system(size: 13)).foregroundStyle(Look.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(task == nil ? "这是房间「\(room.room.name)」的开始。" : "这是这个任务的消息。在这里发的话都算它的。").font(.system(size: 12.5)).foregroundStyle(Look.faint)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     private var example: String {
@@ -450,7 +504,7 @@ private struct RoomWriter: View {
                     .help("Attach Files")
                 }
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, insert: model.insert, label: "Message",
-                             placeholder: "Message — @ to mention", onKey: { model.key($0) },
+                             placeholder: placeholder, onKey: { model.key($0) },
                              onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: { model.pasteFromClipboard() }, onFocus: { _ in })
                     .frame(height: min(max(model.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
                     .padding(.horizontal, 12)
@@ -473,13 +527,14 @@ private struct RoomWriter: View {
                 .disabled(!model.canSend)
                 .help(ClassicWords.help("Send ↩", in: look))
             }
-            HStack(spacing: 12) {
-                if !room.tasks.isEmpty { taskPicker }
-                Text("只有 @ 才唤醒对方")
-                if room.room.paused { Text("Paused") }
+            if model.taskFilter == nil, !room.tasks.isEmpty || room.room.paused {
+                HStack(spacing: 12) {
+                    if !room.tasks.isEmpty { taskPicker }
+                    if room.room.paused { Text("Paused") }
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(Look.faint)
             }
-            .font(.system(size: 11.5))
-            .foregroundStyle(Look.faint)
         }
         .padding(.horizontal, 14)
         .padding(.top, 10)
@@ -492,6 +547,12 @@ private struct RoomWriter: View {
                     if !model.offered.isEmpty { names.padding(.leading, 14).padding(.bottom, 4) }
                 }
         }
+    }
+
+    /// Where the message goes, said in the box (user #191): the task shown, or the room.
+    private var placeholder: String {
+        if let n = model.taskFilter { return "发消息到 " + RoomTaskLabel.word(n, room.tasks.first { $0.n == n }?.title) + "…  @ 唤醒成员" }
+        return "发消息到 \(room.room.name)…  @ 唤醒成员"
     }
 
     /// Which task the next message is about (2026-11-24): taken from the message answered or the task the timeline
@@ -526,6 +587,7 @@ private struct RoomWriter: View {
     /// The members whose name begins with what is typed after `@`, and `all`.
     private var names: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Text("只有 @ 到的成员会被唤醒").font(.system(size: 11)).foregroundStyle(Look.faint).padding(.horizontal, 10).padding(.top, 2).padding(.bottom, 4)
             ForEach(Array(model.offered.enumerated()), id: \.element) { index, handle in
                 let on = index == model.offeredIndex
                 let seat = room.seat(handle)

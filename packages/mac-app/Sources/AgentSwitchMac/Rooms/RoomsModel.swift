@@ -39,6 +39,10 @@ final class RoomsModel {
             card = nil
             taskFilter = nil
             draftTask = nil
+            drawer = false
+            closeSearch()
+            taskSeen = [:]
+            taskBase = nil
             if let selected { UserDefaults.standard.set(selected, forKey: "roomsSelected") }
         }
     }
@@ -58,8 +62,94 @@ final class RoomsModel {
     var taskFilter: Int? {
         didSet {
             guard taskFilter != oldValue else { return }
-            if let taskFilter { draftTask = taskFilter }
-            if let room { rows = RoomRow.rows(room, task: taskFilter) }
+            if let taskFilter { draftTask = taskFilter } else { draftTask = nil }
+            if let room { rows = RoomRow.rows(room, task: taskFilter); seen(room) }
+            if searching { Task { await runSearch() } }
+        }
+    }
+
+    // the task drawer (2026-11-24, user #191: 任务栏收进抽屉)
+    /// The drawer of the room's tasks is out.
+    var drawer = false
+    /// The last message the user has seen in each task's view, and below which all counted as seen when the room
+    /// was opened: a task's count is what came for it since (Discord's channel counts).
+    @ObservationIgnored private var taskSeen: [Int: Int] = [:]
+    @ObservationIgnored private var taskBase: Int?
+
+    /// What the user has not seen of one task.
+    func unseen(task n: Int) -> Int {
+        guard let room else { return 0 }
+        let from = max(taskSeen[n] ?? 0, taskBase ?? room.room.readSeq)
+        return room.messages.reduce(0) { $0 + ($1.task == n && $1.seq > from && $1.from != Room.you ? 1 : 0) }
+    }
+
+    /// The view shown now is seen: one task's, or all of them.
+    private func seen(_ room: Room) {
+        if taskBase == nil { taskBase = room.room.readSeq }
+        let last = room.messages.last?.seq ?? 0
+        if let taskFilter { taskSeen[taskFilter] = last } else { for t in room.tasks { taskSeen[t.n] = last } }
+    }
+
+    // searching (⌕)
+    var searching = false
+    var query = ""
+    private(set) var found: [RoomMessage] = []
+    private(set) var finding = false
+    /// A result opened that the timeline has not loaded (an older one): shown whole in the results.
+    var opened: Int?
+
+    /// The design preview: what a search found and what waits on the user, as they are, the service never asked.
+    func show(demoFound: [RoomMessage], attention items: [RoomAttention]) { found = demoFound; attention = items }
+
+    func closeSearch() { searching = false; query = ""; found = []; opened = nil }
+
+    func runSearch() async {
+        guard let id = selected else { return }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { found = []; return }
+        finding = true
+        defer { finding = false }
+        do {
+            let answer = try await client().searchRoom(id, query: q, task: taskFilter)
+            if q == query.trimmingCharacters(in: .whitespacesAndNewlines) { found = answer }
+        } catch { problem = Self.say(error) }
+    }
+
+    /// A message to bring into view and light for a moment (a quote, a search result, an item of 等你处理).
+    var jump: Int?
+
+    /// Go to a message: in the timeline when it is loaded (the task narrowing let go when it hides it), else opened
+    /// in the results.
+    func go(to seq: Int) {
+        guard let room else { return }
+        guard let message = room.messages.first(where: { $0.seq == seq }) else { opened = seq; return }
+        if let taskFilter, message.task != taskFilter { self.taskFilter = nil }
+        searching = false
+        jump = seq
+    }
+
+    // 等你处理 (2026-11-24, user #191: 顶部单独一个入口)
+    private(set) var attention: [RoomAttention] = []
+    var attentionShown = false
+    var attentionCount: Int { rooms.reduce(0) { $0 + $1.attention } }
+
+    func loadAttention() async {
+        guard !demo else { return }
+        if let items = try? await client().roomAttention() { attention = items }
+    }
+
+    /// An item of 等你处理 taken: its room, then its task, its message, or its member's card.
+    func open(attention item: RoomAttention) {
+        attentionShown = false
+        selected = item.room
+        Task {
+            await load()
+            switch item.kind {
+            case .blocked: if let n = item.task { taskFilter = n }
+            case .question: if let seq = item.seq { go(to: seq) }
+            case .trust, .asks, .permission: card = item.handle
+            default: break
+            }
         }
     }
     /// Files the next message comes with, by their paths on this Mac (§3 附件).
@@ -111,6 +201,7 @@ final class RoomsModel {
         selected = room.room.id
         self.room = room
         rows = RoomRow.rows(room, task: taskFilter)
+        seen(room)
     }
 
     /// The list alone: the rail's mark while another page is shown.
@@ -136,6 +227,7 @@ final class RoomsModel {
     func load() async {
         guard !demo else { return }
         await loadList()
+        if attentionCount > 0 || !attention.isEmpty { await loadAttention() }
         guard let id = selected else { return }
         do {
             if let answer = try await client().room(id, version: roomVersion) {
@@ -143,6 +235,7 @@ final class RoomsModel {
                 roomVersion = answer.version
                 room = answer.value
                 rows = RoomRow.rows(answer.value, task: taskFilter)
+                seen(answer.value)
                 typed()
             }
             if let room, room.room.id == id, room.room.lastSeq > room.room.readSeq {

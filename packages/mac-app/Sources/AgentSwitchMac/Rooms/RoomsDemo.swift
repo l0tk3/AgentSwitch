@@ -48,13 +48,13 @@ extension RoomsDemo {
          "tasks":[
           {"n":1,"title":"定登录接口","state":"done","owner":"daemon","by":"you","updatedAt":\(at(30)),"note":"见 interface.md"},
           {"n":2,"title":"Mac 的模型跟着改","detail":"加 expiresAt，毫秒","state":"doing","owner":"mac-app","by":"daemon","updatedAt":\(at(12)),"after":[1]},
-          {"n":3,"title":"iPhone 的模型跟着改","state":"todo","owner":"ios-app","by":"daemon","updatedAt":\(at(12)),"after":[1]},
+          {"n":3,"title":"iPhone 的模型跟着改","state":"blocked","note":"等你信任文件夹","owner":"ios-app","by":"daemon","updatedAt":\(at(12)),"after":[1]},
           {"n":4,"title":"发一版","state":"todo","by":"you","updatedAt":\(at(5)),"after":[2,3]}],
          "claims":[{"handle":"mac-app","paths":["/Users/you/Projects/AgentSwitch/packages/mac-app/Sources/Login.swift","/Users/you/Projects/AgentSwitch/packages/mac-app/Sources/Session.swift"],"why":"T2","at":\(at(10)),"until":\(at(-20))}]}
         """
         let room = try! JSONDecoder().decode(Room.self, from: Data(json.utf8))
         let list = try! JSONDecoder().decode([RoomSummary].self, from: Data("""
-        [{"id":"login","name":"重构登录模块","topic":"接口先定，三端跟着改","paused":false,"members":5,"unread":1,"forYou":true,
+        [{"id":"login","name":"重构登录模块","topic":"接口先定，三端跟着改","paused":false,"members":5,"unread":1,"forYou":true,"attention":3,
           "last":{"seq":6,"from":"mac-app","text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}},
          {"id":"release","name":"发布检查","topic":"每次发版前过一遍","paused":true,"members":3,"unread":0,"forYou":false,
           "last":{"seq":9,"from":"you","text":"@all 先停一下","at":\(at(180))}},
@@ -62,6 +62,12 @@ extension RoomsDemo {
         """.utf8))
         return RoomsDemo(rooms: list, room: room)
     }()
+
+    static let attention: [RoomAttention] = try! JSONDecoder().decode([RoomAttention].self, from: Data("""
+    [{"room":"login","roomName":"重构登录模块","kind":"question","seq":6,"handle":"mac-app","text":"@you 模型加好了，要不要现在就发一版？","at":\(Int64(Date().timeIntervalSince1970 * 1000) - 120_000)},
+     {"room":"login","roomName":"重构登录模块","kind":"trust","handle":"ios-app","terminal":"t3","text":"Do you trust the files in this folder?","at":\(Int64(Date().timeIntervalSince1970 * 1000) - 600_000)},
+     {"room":"login","roomName":"重构登录模块","kind":"blocked","task":3,"handle":"ios-app","text":"iPhone 的模型跟着改：等你信任文件夹","at":\(Int64(Date().timeIntervalSince1970 * 1000) - 720_000)}]
+    """.utf8))
 
     static let models: RoomModels = try! JSONDecoder().decode(RoomModels.self, from: Data("""
     {"agents":{"claude-code":{"current":"work","models":[{"id":"opus","name":"Opus 5.5"},{"id":"fable","name":"Fable 5.2"},{"id":"sonnet","name":"Sonnet 5.5"},{"id":"haiku","name":"Haiku 5.5"},{"id":"claude-opus-4-8","name":"Opus 4.8","older":true}],

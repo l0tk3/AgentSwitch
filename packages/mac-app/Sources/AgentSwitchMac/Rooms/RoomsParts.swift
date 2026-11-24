@@ -119,6 +119,12 @@ struct RoomRowActions {
     var preview: ((String) -> Void)?
     /// The timeline narrowed to a task's messages (its label clicked).
     var task: (Int) -> Void = { _ in }
+    /// Brings a message into view (its quote clicked).
+    var jump: (Int) -> Void = { _ in }
+    /// The timeline shows one task: its messages' task labels say nothing and are not drawn.
+    var inTask = false
+    /// Lit for a moment: the message just gone to.
+    var lit = false
 }
 
 /// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
@@ -151,17 +157,17 @@ struct RoomMessageRow: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 if !message.files.isEmpty { files }
-                receipts
-                readers
+                failures
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
         .padding(.top, row.continues ? 1 : 9)
         .padding(.bottom, 3)
-        .background(row.forYou && look.isClassic ? Color.waiting.opacity(0.09) : hovering ? Look.hover : Color.clear)
+        .background(actions.lit ? Color.signal.opacity(0.14) : row.forYou && look.isClassic ? Color.waiting.opacity(0.09) : hovering ? Look.hover : Color.clear)
         // For the user and not yet seen: amber, the colour of what waits for you.
         .overlay(alignment: .leading) { if row.forYou { Rectangle().fill(Color.waiting).frame(width: 3) } }
+        .overlay(alignment: .bottomTrailing) { readCount.padding(.trailing, 14).padding(.bottom, 3) }
         .overlay(alignment: .topTrailing) {
             if hovering {
                 HStack(spacing: 8) {
@@ -188,23 +194,30 @@ struct RoomMessageRow: View {
             .buttonStyle(.plain)
             if let agent = seat?.card?.agent { AgentSprite(harness: agent).scaleEffect(0.8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
             Text(TimeText.at(message.date)).mono(11.5).foregroundStyle(Look.faint)
-            if let n = message.task { RoomTaskLabel(n: n, title: room.tasks.first { $0.n == n }?.title) { actions.task(n) } }
+            if let n = message.task, !actions.inTask { RoomTaskLabel(n: n, title: room.tasks.first { $0.n == n }?.title) { actions.task(n) } }
         }
         .lineLimit(1)
     }
 
+    /// The message answered, on one line above (2026-11-24, user: 引用标识里的内容加上 md 解析): its author and its first
+    /// words drawn as the message is (bold, code); a click goes to it.
     private func quote(_ quoted: RoomMessage) -> some View {
-        HStack(spacing: 6) {
-            if look.isClassic {
-                Rectangle().fill(Look.line).frame(width: 2, height: 13)
-            } else {
-                Text("┌─").code(12).foregroundStyle(Look.faint)
+        Button { actions.jump(quoted.seq) } label: {
+            HStack(spacing: 6) {
+                if look.isClassic {
+                    Rectangle().fill(Look.line).frame(width: 2, height: 13)
+                } else {
+                    Text("┌─").code(12).foregroundStyle(Look.faint)
+                }
+                Text(quoted.from == Room.you ? "You" : quoted.from).font(.system(size: 12, weight: .medium))
+                Text(RoomRich.text(RoomText.quoteHead(quoted.text, handles: handles), handles: handles, look: look, size: 12)).truncationMode(.tail)
             }
-            Text(quoted.from == Room.you ? "You" : quoted.from).font(.system(size: 12, weight: .medium))
-            Text(RoomText.quote(quoted.text, handles: handles)).font(.system(size: 12)).truncationMode(.tail)
+            .lineLimit(1)
+            .foregroundStyle(Look.ink2)
+            .contentShape(Rectangle())
         }
-        .lineLimit(1)
-        .foregroundStyle(Look.ink2)
+        .buttonStyle(.plain)
+        .help("跳到 #\(quoted.seq)")
     }
 
     /// The files a message comes with (§3 附件), as in a chat: a picture is shown, any other file is a card with its
@@ -257,34 +270,36 @@ struct RoomMessageRow: View {
         .padding(.top, 4)
     }
 
-    /// Who of those it was for has read it (user, 2026-11-23): `✓ daemon ios` — and who has not, when nothing else
-    /// says so already (a receipt still open says where it is).
+    /// How many of those the user's message was for have read it (user #191: 回执只显示几个已读，停上去看是谁):
+    /// `2/3 已读` at the message's foot, the names and where each stands when the pointer rests on it. On the user's
+    /// own messages that were for someone only.
     @ViewBuilder
-    private var readers: some View {
+    private var readCount: some View {
         let who = room.readers(of: message)
-        let waiting = Set(room.receipts(of: message.seq).map(\.handle))
-        let unread = who.unread.filter { !waiting.contains($0) }
-        if !who.read.isEmpty || !unread.isEmpty {
-            HStack(spacing: 12) {
-                if !who.read.isEmpty { Text((look.isClassic ? "Read · " : "✓ ") + who.read.joined(separator: " ")).foregroundStyle(Look.faint) }
-                if !unread.isEmpty { Text((look.isClassic ? "Unread · " : "○ ") + unread.joined(separator: " ")).foregroundStyle(Look.ink2) }
-            }
-            .mono(11.5)
-            .lineLimit(1)
-            .padding(.top, 1)
-            .help("已读：这条消息整条送到了它面前，或者它自己读了房间。")
+        let total = who.read.count + who.unread.count
+        if message.from == Room.you, total > 0 {
+            Text("\(who.read.count)/\(total) 已读").mono(11).foregroundStyle(who.unread.isEmpty ? Look.faint : Look.ink2)
+                .help(readHelp(who))
         }
     }
 
+    private func readHelp(_ who: (read: [String], unread: [String])) -> String {
+        let open = Dictionary(room.receipts(of: message.seq).map { ($0.handle, $0.receipt) }, uniquingKeysWith: { a, _ in a })
+        let lines = who.read.map { "✓ \($0) 已读" } + who.unread.map { handle in
+            open[handle].map { RoomText.receipt($0, to: room.seat(handle), handle: handle, classic: true) } ?? "○ \(handle) 未读"
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// What could not be given: said under the message, in red, whoever wrote it — the one thing of a receipt that
+    /// asks something of the user.
     @ViewBuilder
-    private var receipts: some View {
-        let open = room.receipts(of: message.seq)
-        if !open.isEmpty {
-            // Said only while it matters: what everyone has taken says nothing.
+    private var failures: some View {
+        let failed = room.receipts(of: message.seq).filter { RoomText.failed($0.receipt) }
+        if !failed.isEmpty {
             HStack(spacing: 12) {
-                ForEach(open, id: \.handle) { item in
-                    Text(RoomText.receipt(item.receipt, to: room.seat(item.handle), handle: item.handle, classic: look.isClassic))
-                        .foregroundStyle(RoomText.failed(item.receipt) ? Color.failed : item.receipt == .sent ? Look.faint : Look.ink2)
+                ForEach(failed, id: \.handle) { item in
+                    Text(RoomText.receipt(item.receipt, to: room.seat(item.handle), handle: item.handle, classic: look.isClassic)).foregroundStyle(Color.failed)
                 }
             }
             .mono(11.5)
@@ -297,9 +312,9 @@ struct RoomMessageRow: View {
 enum RoomRich {
     /// A message's text as it is drawn: code in fixed-width letters on a wash, an `@name` bold in the pixel look and in
     /// the accent in the classic one — never a status colour — and the user's own name alone on a ground.
-    static func text(_ text: String, handles: Set<String>, look: InterfaceLook) -> AttributedString {
+    static func text(_ text: String, handles: Set<String>, look: InterfaceLook, size base: CGFloat = 13.5) -> AttributedString {
         var out = AttributedString()
-        let size = Look.scaled(13.5)
+        let size = Look.scaled(base)
         var lineStart = true
         for piece in RoomText.pieces(text, handles: handles) {
             defer {
@@ -662,6 +677,16 @@ struct RoomTaskLabel: View {
         }
         .buttonStyle(.plain)
         .help("只看这个任务的消息")
+    }
+
+    /// A task's state in the user's words.
+    static func stateWord(_ state: RoomTask.State) -> String {
+        switch state {
+        case .todo: "未开始"
+        case .doing: "进行中"
+        case .blocked: "卡住"
+        case .done: "已完成"
+        }
     }
 
     /// `T3 登录接口`, the title cut to what fits beside a name.

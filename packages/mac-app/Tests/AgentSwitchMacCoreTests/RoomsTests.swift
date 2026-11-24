@@ -45,6 +45,26 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(RoomFace.light.count, 10)
     }
 
+    func testWhatWaitsOnTheUserIsReadAndSaid() throws {
+        let items = try JSONDecoder().decode([RoomAttention].self, from: Data("""
+        [{"room":"r1","roomName":"设计","kind":"blocked","task":4,"handle":"ios","text":"iOS 表单：等字段名","at":1},
+         {"room":"r1","roomName":"设计","kind":"question","seq":12,"handle":"api","text":"字段叫\\nname 吗？","at":2},
+         {"room":"r1","roomName":"设计","kind":"permission","handle":"ios","terminal":"t1","text":"","at":3},
+         {"room":"r1","roomName":"设计","kind":"later","text":"新的一种","at":4}]
+        """.utf8))
+        XCTAssertEqual(items.map(\.line), ["T4 卡住：iOS 表单：等字段名", "@api 问你：字段叫 name 吗？", "@ios 等你确认权限", "新的一种"])
+        XCTAssertEqual(Set(items.map(\.id)).count, 4)
+        let list = try JSONDecoder().decode([RoomSummary].self, from: Data(#"[{"id":"a","name":"x","attention":3},{"id":"b","name":"y"}]"#.utf8))
+        XCTAssertEqual(list.map(\.attention), [3, 0])
+    }
+
+    func testAQuotedMessageKeepsItsMarkdownOnOneLine() {
+        XCTAssertEqual(RoomText.quoteHead("## 结论\n- **接口** 改好了，见 `T3/api.md`", handles: []), "结论 **接口** 改好了，见 `T3/api.md`")
+        let cut = RoomText.quoteHead("开头 **" + String(repeating: "长", count: 80) + "** 结尾", handles: [])
+        XCTAssertTrue(cut.hasSuffix("…**"))
+        XCTAssertEqual(RoomText.quoteHead("`" + String(repeating: "a", count: 70) + "`", handles: []).suffix(2), "…`")
+    }
+
     func testTheListIsRead() throws {
         let list = try JSONDecoder().decode([RoomSummary].self, from: Data("""
         [{"id":"a","name":"登录","topic":"先定接口","paused":true,"createdAt":1,"members":3,"faces":[],"last":{"seq":1,"from":"you","text":"@daemon 好\\n第二行","at":5},"unread":2,"forYou":true},

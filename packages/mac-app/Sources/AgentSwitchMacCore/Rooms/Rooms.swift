@@ -297,6 +297,55 @@ public enum RoomReceipt: String, Sendable {
     }
 }
 
+/// One thing in a room that waits on the user's hand (等你处理, 2026-11-24): a member's screen asking (trust its
+/// folder, or a list to choose from), a member waiting on a permission, a task stuck, a question put to the user and
+/// not answered yet, or sessions talking long with no word from the user.
+public struct RoomAttention: Decodable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Decodable, Sendable { case trust, asks, permission, blocked, question, rounds, other }
+    public let room: String
+    public let roomName: String
+    public let kind: Kind
+    public let handle: String?
+    public let terminal: String?
+    public let task: Int?
+    public let seq: Int?
+    public let text: String
+    public let at: Int64
+
+    public var id: String { "\(room)|\(kind.rawValue)|\(handle ?? "")|\(task ?? 0)|\(seq ?? 0)" }
+
+    private enum CodingKeys: String, CodingKey { case room, roomName, kind, handle, terminal, task, seq, text, at }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        room = try c.decode(String.self, forKey: .room)
+        roomName = (try? c.decodeIfPresent(String.self, forKey: .roomName)) ?? ""
+        kind = Kind(rawValue: (try? c.decode(String.self, forKey: .kind)) ?? "") ?? .other
+        handle = try? c.decodeIfPresent(String.self, forKey: .handle)
+        terminal = try? c.decodeIfPresent(String.self, forKey: .terminal)
+        task = try? c.decodeIfPresent(Int.self, forKey: .task)
+        seq = try? c.decodeIfPresent(Int.self, forKey: .seq)
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        at = (try? c.decodeIfPresent(Int64.self, forKey: .at)) ?? 0
+    }
+
+    /// Its line in the list, in the user's words.
+    public var line: String {
+        let who = handle.map { "@" + $0 } ?? ""
+        switch kind {
+        case .trust: return "\(who) 等你信任它的文件夹"
+        case .asks: return "\(who) 在等你选：\(text)"
+        case .permission: return "\(who) 等你确认权限"
+        case .blocked: return "T\(task ?? 0) 卡住：\(text)"
+        case .question: return "\(who) 问你：\(RoomAttention.oneLine(text))"
+        case .rounds: return "会话之间已聊 \(text) 条，没有你参与"
+        case .other: return text
+        }
+    }
+
+    static func oneLine(_ s: String) -> String { s.split(whereSeparator: \.isNewline).joined(separator: " ") }
+}
+
 /// A room in the list.
 public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public struct Last: Decodable, Equatable, Sendable {
@@ -319,8 +368,10 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public let rounds: Int?
     /// The sessions seated here, by terminal: a session sits in one room at a time.
     public let terminals: [String]
+    /// How many things in it wait on the user's hand (等你处理, `GET /rooms/attention`).
+    public let attention: Int
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -334,6 +385,7 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
         forYou = (try? c.decodeIfPresent(Bool.self, forKey: .forYou)) ?? false
         rounds = try? c.decodeIfPresent(Int.self, forKey: .rounds)
         terminals = (try? c.decodeIfPresent([String].self, forKey: .terminals)) ?? []
+        attention = (try? c.decodeIfPresent(Int.self, forKey: .attention)) ?? 0
     }
 
     /// The list's second line: who said the last thing and what, on one line; the topic before anything is said.
@@ -634,6 +686,18 @@ public enum RoomText {
 
     private static func wordish(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "@" || c == "." || c == "-" }
 
+    /// A quoted message's first words for the line above a reply, its Markdown kept (2026-11-24): one line, at most
+    /// `limit` characters, a bold or a code cut in two closed again so it is drawn and not shown as marks.
+    public static func quoteHead(_ text: String, handles: Set<String>, limit: Int = 60) -> String {
+        var line = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.replacingOccurrences(of: #"^(#{1,6}|[-*+]|>)\s+"#, with: "", options: .regularExpression) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        if line.count > limit { line = String(line.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…" }
+        if line.components(separatedBy: "`").count % 2 == 0 { line += "`" }
+        if line.replacingOccurrences(of: "`[^`]*`", with: "", options: .regularExpression).components(separatedBy: "**").count % 2 == 0 { line += "**" }
+        return line
+    }
+
     /// A quoted message's line above a reply: one line, without its backticks and its `@names`.
     public static func quote(_ text: String, handles: Set<String>) -> String {
         pieces(text, handles: handles).compactMap { piece -> String? in
@@ -829,6 +893,20 @@ public extension DaemonClient {
     func say(_ text: String, replyTo: Int? = nil, files: [String] = [], task: Int? = nil, in room: String) async throws {
         let object = DaemonClient.sayBody(text, replyTo: replyTo, files: files, task: task)
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/messages", body: try JSONSerialization.data(withJSONObject: object), timeout: 10)
+    }
+
+    private struct Attention: Decodable { let items: [RoomAttention] }
+    /// What waits on the user in every room (等你处理), newest first.
+    func roomAttention() async throws -> [RoomAttention] {
+        try decode(Attention.self, try await call("GET", "/rooms/attention", timeout: 10)).items
+    }
+
+    private struct Found: Decodable { let messages: [RoomMessage] }
+    /// The messages of a room whose words contain `query`, newest first; of one task when `task` is given.
+    func searchRoom(_ room: String, query: String, task: Int? = nil, limit: Int = 50) async throws -> [RoomMessage] {
+        var path = "/rooms/\(DaemonClient.segment(room))/messages?limit=\(limit)&q=\(query.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? "")"
+        if let task { path += "&task=\(task)" }
+        return try decode(Found.self, try await call("GET", path, timeout: 10)).messages
     }
 
     func markRead(_ seq: Int, in room: String) async throws {
