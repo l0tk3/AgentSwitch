@@ -604,7 +604,7 @@ private struct RoomWriter: View {
                 .buttonStyle(.plain)
                 .help(model.uploading > 0 ? "正在上传…" : "Attach Files")
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, insert: model.insert, label: "Message",
-                             placeholder: placeholder, onKey: { model.key($0) },
+                             placeholder: placeholder, replace: model.replace, onKey: { model.key($0) }, onCaret: { model.caretMoved($0, $1) },
                              onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: { model.pasteFromClipboard() }, onFocus: { _ in })
                     .frame(height: min(max(model.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
                     .padding(.horizontal, 12)

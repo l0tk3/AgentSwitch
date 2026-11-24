@@ -792,6 +792,17 @@ public enum RoomText {
         return term.lowercased()
     }
 
+    /// The `@…` being typed where the caret is (UTF-16), not only at the end: written above lines already typed, it
+    /// offered nothing (user #262: 输入了好几行之后 @ 就不起作用了). The query and the range of `@…` in the text.
+    public static func mention(in text: String, caret: Int) -> (query: String, range: NSRange)? {
+        let ns = text as NSString
+        guard caret >= 0, caret <= ns.length else { return nil }
+        let before = ns.substring(to: caret)
+        guard let query = mentionQuery(before), let at = before.lastIndex(of: "@") else { return nil }
+        let length = before[at...].utf16.count
+        return (query, NSRange(location: caret - length, length: length))
+    }
+
     /// The draft with the `@…` being typed finished as `@handle `.
     public static func completing(_ draft: String, with handle: String) -> String {
         guard mentionQuery(draft) != nil, let at = draft.lastIndex(of: "@") else { return draft + "@\(handle) " }

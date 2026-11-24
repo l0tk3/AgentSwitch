@@ -157,6 +157,14 @@ final class RoomsTests: XCTestCase {
         XCTAssertNil(RoomText.mentionQuery("a@b"))
         XCTAssertNil(RoomText.mentionQuery("@daemon 好"))
         XCTAssertNil(RoomText.mentionQuery("没有"))
+        // Typed above lines already written (user #262).
+        let text = "第一行 @da\n第二行\n第三行"
+        let caret = ("第一行 @da" as NSString).length
+        let found = RoomText.mention(in: text, caret: caret)
+        XCTAssertEqual(found?.query, "da")
+        XCTAssertEqual(found.map { (text as NSString).substring(with: $0.range) }, "@da")
+        XCTAssertNil(RoomText.mention(in: text, caret: (text as NSString).length))
+        XCTAssertNil(RoomText.mention(in: text, caret: 99))
         XCTAssertEqual(RoomText.offered("", in: room), ["daemon", "gate", "web", "all"])
         XCTAssertEqual(RoomText.offered("g", in: room), ["gate"])
         XCTAssertEqual(RoomText.offered("a", in: room), ["all"])

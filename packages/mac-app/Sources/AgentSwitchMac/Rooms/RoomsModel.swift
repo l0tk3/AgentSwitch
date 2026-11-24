@@ -55,6 +55,10 @@ final class RoomsModel {
     private var attachTokens = RoomAttachTokens()
     /// Put in at the cursor once: a file's token.
     private(set) var insert: InsertRequest?
+    /// Put in place of the `@…` being typed once: a name taken from the list.
+    private(set) var replace: ReplaceRequest?
+    /// Where the caret is in the box (UTF-16); nil: not told yet, the end.
+    private var caret: Int?
     var draftHeight: CGFloat = 0
     var replyTo: Int? { didSet { if let replyTo, let task = room?.messages.first(where: { $0.seq == replyTo })?.task { draftTask = task } } }
     /// The task the next message is about (its label, 2026-11-24): taken from the message answered, or the one the
@@ -374,8 +378,16 @@ final class RoomsModel {
 
     // MARK: writing
 
+    /// The box's text and caret as they change.
+    func caretMoved(_ text: String, _ at: Int) {
+        guard text == draft else { return }
+        caret = at
+        typed()
+    }
+
     private func typed() {
-        guard let room, let query = RoomText.mentionQuery(draft) else {
+        let at = min(caret ?? Int.max, (draft as NSString).length)
+        guard let room, let query = RoomText.mention(in: draft, caret: at)?.query else {
             if !offered.isEmpty { offered = [] }
             return
         }
@@ -399,7 +411,12 @@ final class RoomsModel {
     }
 
     func take(_ handle: String) {
-        draft = RoomText.completing(draft, with: handle)
+        let at = min(caret ?? Int.max, (draft as NSString).length)
+        if let range = RoomText.mention(in: draft, caret: at)?.range {
+            replace = ReplaceRequest(range: range, text: "@\(handle) ")
+        } else {
+            draft = RoomText.completing(draft, with: handle)
+        }
         offered = []
         focusRequests += 1
     }
