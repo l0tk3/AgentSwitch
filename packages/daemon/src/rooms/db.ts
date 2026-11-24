@@ -57,7 +57,7 @@ export class RoomDb {
       search: p("SELECT m.seq AS seq, m.body AS body FROM messages_words w JOIN messages m ON m.room = w.room AND m.seq = w.seq WHERE messages_words MATCH ? AND w.room = ? ORDER BY m.seq DESC LIMIT ?"),
       like: p("SELECT seq, body FROM messages WHERE room = ? AND words LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?"),
       count: p("SELECT COUNT(*) AS n FROM messages WHERE room = ?"),
-      secrets: p("SELECT body FROM secrets WHERE room = ? ORDER BY at, id"),
+      secrets: p("SELECT body FROM secrets WHERE room = ? ORDER BY at, rowid"),
       putSecret: p("INSERT INTO secrets (room, id, at, body) VALUES (?, ?, ?, ?) ON CONFLICT (room, id) DO UPDATE SET body = excluded.body"),
       dropSecret: p("DELETE FROM secrets WHERE room = ? AND id = ?"),
       dropSecrets: p("DELETE FROM secrets WHERE room = ?"),

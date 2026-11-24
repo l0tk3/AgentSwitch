@@ -215,7 +215,8 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
                 PixelBox.Action("Tasks…") { tasks() },
                 PixelBox.Action("Files…") { nav.present("roomfiles:$id") { RoomFilesSheet(model) } },
                 PixelBox.Action(if (d.secrets > 0) "Secrets (${d.secrets})…" else "Secrets…") { nav.present("roomsecrets:$id") { RoomSecretsSheet(model) } },
-                PixelBox.Action("Delete Room…", PixelBox.Action.Role.Destructive, icon = "trash") { confirmDelete = true },
+                // 解散 (user #230); not the 调度台, which goes with the dispatch turned off on the Mac.
+                if (d.room.desk) null else PixelBox.Action("Dissolve Room…", PixelBox.Action.Role.Destructive, icon = "trash") { confirmDelete = true },
             ),
         )
     }
@@ -309,9 +310,9 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
     PixelBoxEffect(menu, { menu = null }) { it }
     PixelBoxEffect(confirmDelete, { confirmDelete = false }) {
         PixelBox(
-            head = "Delete Room", tone = PixelBox.Tone.Red,
-            message = "删除“${detail?.room?.name ?: ""}”？房间里的消息一并删除，无法恢复。成员的会话不受影响。",
-            actions = listOf(PixelBox.Action("Delete", PixelBox.Action.Role.Destructive) { scope.launch { model.delete(app.api) } }),
+            head = "Dissolve Room", tone = PixelBox.Tone.Red,
+            message = "解散“${detail?.room?.name ?: ""}”？房间、消息和共享文件夹一并删除。为这个房间新开的会话一起结束，对话记录留着可以恢复；原本就在跑的会话不受影响。",
+            actions = listOf(PixelBox.Action("Dissolve", PixelBox.Action.Role.Destructive) { scope.launch { model.delete(app.api) } }),
         )
     }
 }

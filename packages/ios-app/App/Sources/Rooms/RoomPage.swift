@@ -107,7 +107,10 @@ struct RoomPage: View {
                     Button(detail.map { $0.secrets > 0 ? "Secrets · \($0.secrets)" : "Secrets" } ?? "Secrets", systemImage: "key") { secrets = true }
                     Button("Add Sessions…", systemImage: "plus") { adding = true }
                     Button("Rename…", systemImage: "pencil") { editing = true }
-                    Section { Button("Delete Room…", systemImage: "trash", role: .destructive) { confirmDelete = true } }
+                    // 解散 (user #230); not the 调度台, which goes with the dispatch turned off on the Mac.
+                    if detail?.room.desk != true {
+                        Section { Button("Dissolve Room…", systemImage: "trash", role: .destructive) { confirmDelete = true } }
+                    }
                 } label: { LookGlyph.more }
                 .tint(look.isClassic ? Theme.signal : Theme.ink)
                 .accessibilityLabel("More")
@@ -182,8 +185,8 @@ struct RoomPage: View {
         }
         #endif
         .pixelBox(isPresented: $confirmDelete) {
-            PixelBox(head: "Delete Room", tone: .red, message: "删除“\(detail?.room.name ?? "")”？房间里的消息一并删除，无法恢复。成员的会话不受影响。",
-                     actions: [.init(label: "Delete", role: .destructive) { Task { await model.delete(app.api) } }])
+            PixelBox(head: "Dissolve Room", tone: .red, message: "解散“\(detail?.room.name ?? "")”？房间、消息和共享文件夹一并删除。为这个房间新开的会话一起结束，对话记录留着可以恢复；原本就在跑的会话不受影响。",
+                     actions: [.init(label: "Dissolve", role: .destructive) { Task { await model.delete(app.api) } }])
         }
     }
 

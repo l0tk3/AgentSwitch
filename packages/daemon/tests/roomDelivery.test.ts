@@ -203,6 +203,7 @@ describe("bringing sessions in (Admin)", () => {
   function org() {
     const { store, delivery, room, states } = made();
     const started: unknown[] = [];
+    const stopped: string[] = [];
     const seat = (terminal: string): SeatLive | null => (states.has(terminal) ? { state: states.get(terminal)!, card: { agent: terminal.startsWith("new") ? "codex" : "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: terminal === "t3" ? "bypassPermissions" : "default", node: null } } : null);
     const kit = new RoomKit({
       store, seat, delivery, now: () => 10 * 3_600_000, kitWaitMs: 0,
@@ -212,13 +213,33 @@ describe("bringing sessions in (Admin)", () => {
         sessions: async () => ({ running: [{ terminal: "t1", agent: "claude-code", name: "daemon", cwd: "/w/d", state: "idle", profile: null }, { terminal: "t8", agent: "codex", name: "spare", cwd: "/w/s", state: "idle", profile: "Work" }], resumable: [{ agent: "codex", id: "sess-1", title: "fix login", cwd: "/w/l", updatedAt: 9 * 3_600_000, profile: null }] }),
         check: async (agent, profile) => ({ status: "unhealthy", checkedAt: 1, message: `${agent}/${profile} signed out` }),
         start: async (req) => { started.push(req); const id = `new${started.length}`; states.set(id, "idle"); return id; },
-        stop: async () => true,
+        stop: async (t) => { stopped.push(t); return true; },
         rename: async () => undefined,
         resume: async (terminal) => { const id = `back-${terminal}`; states.set(id, "idle"); return { id }; },
       }),
     });
-    return { kit, store, room, states, started };
+    return { kit, store, room, states, started, stopped };
   }
+
+  it("makes a room with its members at once (拉群), and dissolves it: the sessions started for it end, the others go on", async () => {
+    const { kit, store, room, states, stopped } = org();
+    store.setCanAdd(room.id, "daemon", true);
+    states.set("t8", "idle");
+    const made = await kit.call("t1", "room_admin", { action: "create", name: "登录重构", terminals: ["t8", "nope", "t1"] });
+    expect(made.text).toContain("@t8 now sits in");
+    expect(made.text).toContain("nope: not brought in");
+    const other = store.list().find((r) => r.name === "登录重构")!;
+    expect(other.seats.map((s) => s.handle)).toEqual(["you", "t1", "t8"]);
+    expect((await kit.call("t1", "room_admin", { action: "add", room: other.id, agent: "codex", cwd: "/w/x" })).text).toContain("@new1 now sits in");
+    const gone = await kit.call("t1", "room_admin", { action: "dissolve", room: other.id });
+    expect(gone.text).toContain("is dissolved");
+    expect(stopped).toEqual(["new1"]);
+    expect(store.list().some((r) => r.id === other.id)).toBe(false);
+    expect(states.get("t8")).toBe("idle");
+    // The desk is not dissolved, by an admin or the user.
+    const desk = store.create({ name: "调度台", desk: true });
+    expect(() => store.remove(desk.id)).toThrow("调度台不能解散");
+  });
 
   it("has the organizing tools only with the switch on, and refuses a call the moment it is off", async () => {
     const { kit, store, room } = org();

@@ -22,7 +22,7 @@ export type { SeatCard, SeatState } from "../rooms/state.js";
 import type { TerminalHost, TerminalInfo } from "../terminals/host.js";
 import { profileModelLists } from "./profileModels.js";
 import { roomOrg } from "./roomOrg.js";
-import { closeSeat, owesHandoff } from "../rooms/kit.js";
+import { closeSeat, dissolveRoom, owesHandoff } from "../rooms/kit.js";
 import { parseBody, versionedJson, type ApiDeps } from "./shared.js";
 
 export type SeatView = {
@@ -317,8 +317,15 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     } catch (err) { return refused(c, err); }
   });
 
-  app.delete("/rooms/:id", (c) => {
-    try { rooms.remove(c.req.param("id")); return c.json({ ok: true }); } catch (err) { return refused(c, err); }
+  // Dissolved (解散): the room with its messages; the sessions started for it are ended, their conversations kept.
+  app.delete("/rooms/:id", async (c) => {
+    try {
+      const id = c.req.param("id");
+      const org = deps.callLocal ? roomOrg(deps.callLocal) : null;
+      const ended = await dissolveRoom(rooms, (t) => (org ? org.stop(t) : Promise.resolve(false)), id);
+      deps.roomsChanged?.(id);
+      return c.json({ ok: true, ended: ended.length });
+    } catch (err) { return refused(c, err); }
   });
 
   app.post("/rooms/:id/seats", async (c) => {

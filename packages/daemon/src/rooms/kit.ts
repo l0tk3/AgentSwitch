@@ -125,12 +125,12 @@ const TOOLS: readonly KitTool[] = [
 const ORG_TOOLS: readonly KitTool[] = [
   {
     name: "room_admin",
-    description: "For a room's admin. `sessions` (search, limit): running sessions and ones that can be resumed. `profiles`, `models` (agent), `check` (agent, profile). `add`: bring a session in — `terminal` (running), or `agent` + `cwd` (new; profile, model, mode — default bypass), or `agent` + `resume` + `cwd`. It joins knowing nothing: then room_post it what you need. Before adding, ask whether you can say what each part hands over and neither waits for the other; if not, the work is not ready to split. You may start at most " + MAX_STARTED + " sessions. `resume`, `mute`, `unmute`, `kick`, `end` (closes a session a session started; its conversation kept), `delete` (and its record) — with `handle` (`resume` all: every ended one). `create`: a new room (name, topic). `rooms`: every room.",
+    description: "For a room's admin. `sessions` (search, limit): running sessions and ones that can be resumed. `profiles`, `models` (agent), `check` (agent, profile). `add`: bring a session in — `terminal` (running), or `agent` + `cwd` (new; profile, model, mode — default bypass), or `agent` + `resume` + `cwd`. It joins knowing nothing: then room_post it what you need. Before adding, ask whether you can say what each part hands over and neither waits for the other; if not, the work is not ready to split. You may start at most " + MAX_STARTED + " sessions. `resume`, `mute`, `unmute`, `kick`, `end` (closes a session a session started; its conversation kept), `delete` (and its record) — with `handle` (`resume` all: every ended one). `create`: a new room (name, topic; `terminals` to bring in). `dissolve` (room): gone, sessions started for it ended. `rooms`: every room.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["sessions", "profiles", "models", "check", "add", "resume", "mute", "unmute", "kick", "end", "delete", "create", "rooms"] },
-        handle: { type: "string" }, terminal: { type: "string" }, agent: { type: "string", enum: ["claude-code", "codex", "opencode", "pi"] },
+        action: { type: "string", enum: ["sessions", "profiles", "models", "check", "add", "resume", "mute", "unmute", "kick", "end", "delete", "create", "dissolve", "rooms"] },
+        handle: { type: "string" }, terminal: { type: "string" }, terminals: { type: "array", items: { type: "string" } }, agent: { type: "string", enum: ["claude-code", "codex", "opencode", "pi"] },
         cwd: { type: "string" }, profile: { type: "string" }, model: { type: "string" }, mode: { type: "string", enum: ["manual", "auto", "bypass"] },
         resume: { type: "string" }, name: { type: "string" }, topic: { type: "string" }, search: { type: "string" }, limit: { type: "integer" },
         room: ROOM_ARG,
@@ -188,6 +188,17 @@ export function resumeOf(seat: Seat): { agent: string; cwd: string; session: str
   const s = seat.session;
   if (!s || !seat.was) throw new RoomError(409, `@${seat.handle} took its seat before session ids were kept, so its conversation can not be found again from here. Remove it from the room and add the session again (room_add with agent, resume, cwd — see \`sessions\`).`);
   return { agent: seat.was.agent, cwd: s.cwd, session: s.id, ...(s.profile ? { profile: s.profile } : {}), ...(s.model ? { model: s.model } : {}), ...(s.effort ? { effort: s.effort } : {}), ...(s.mode ? { mode: s.mode } : {}) };
+}
+
+/** A room dissolved (解散, 2026-11-24, user #230): gone with its messages and shared folder; the sessions started for
+ *  it that sit in no other room are ended (their conversations kept, to be resumed); sessions that were running before
+ *  they were brought in go on. The ended terminals. */
+export async function dissolveRoom(store: RoomStore, stop: (terminal: string) => Promise<boolean>, id: string): Promise<string[]> {
+  const started = store.startedFor(id);
+  store.remove(id);
+  const ended: string[] = [];
+  for (const t of started) if (await stop(t).catch(() => false)) ended.push(t);
+  return ended;
 }
 
 const RESUMING = new Set<string>();
@@ -418,7 +429,23 @@ export class RoomKit {
         const room = this.o.store.create({ name: typeof args.name === "string" ? args.name : "", ...(topic ? { topic } : {}), by: me.seat.handle });
         const seat = this.o.store.seat(room.id, { terminal, was, canAdd: true, by: me.seat.handle });
         this.o.changed?.(room.id);
-        return `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you). Bring sessions in with room_admin { action: "add", room: "${room.id}"). You sit in more than one room now: name the room in each call.`;
+        const made = `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you).`;
+        // Made with its members at once (拉群, user #230): each running session named is brought in.
+        const bring = Array.isArray(args.terminals) ? [...new Set(args.terminals.filter((t): t is string => typeof t === "string" && t !== terminal))] : [];
+        if (!bring.length) return `${made} Bring sessions in with room_admin { action: "add", room: "${room.id}"). You sit in more than one room now: name the room in each call.`;
+        const said: string[] = [];
+        for (const t of bring) {
+          try { said.push(await this.add(org, terminal, { room: room.id, terminal: t })); } catch (err) { said.push(`${t}: not brought in — ${err instanceof Error ? err.message : String(err)}`); }
+        }
+        return [made, ...said, `You sit in more than one room now: name the room ("${room.id}") in each call.`].join("\n");
+      }
+      case "dissolve": {
+        const { room, seat: me } = this.where(terminal, str(args.room));
+        if (!me.canAdd) throw new RoomError(403, NOT_ALLOWED);
+        if (room.desk) throw new RoomError(409, "调度台 is not dissolved.");
+        const ended = await dissolveRoom(this.o.store, (t) => org.stop(t), room.id);
+        this.o.changed?.(room.id);
+        return `"${room.name}" is dissolved: its messages and shared folder are gone${ended.length ? `; the ${ended.length} session${ended.length === 1 ? "" : "s"} started for it ended (conversations kept)` : ""}. Sessions that were running before they joined go on.`;
       }
       case "add": return this.add(org, terminal, args);
       case "resume": case "mute": case "unmute": case "kick": case "end": case "delete": return this.manage(org, terminal, args);
@@ -452,7 +479,7 @@ export class RoomKit {
         const result = await org.check(agent, profile);
         return `${agent} · ${profile}: ${result.status}${result.message ? ` — ${result.message}` : ""} (checked just now)`;
       }
-      default: throw new RoomError(400, "room_admin: `action` is sessions, profiles, models, check, add, resume, mute, unmute, kick, end, delete, create or rooms.");
+      default: throw new RoomError(400, "room_admin: `action` is sessions, profiles, models, check, add, resume, mute, unmute, kick, end, delete, create, dissolve or rooms.");
     }
   }
 

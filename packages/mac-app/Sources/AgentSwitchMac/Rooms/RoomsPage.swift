@@ -174,10 +174,10 @@ private struct RoomsColumns: View {
             }
         }
         .overlay { if model.sheet != nil { sheet } }
-        .confirmationDialog("Delete “\(model.room?.room.name ?? "")”?", isPresented: $model.deleting) {
-            Button("Delete", role: .destructive) { model.delete() }
+        .confirmationDialog("解散“\(model.room?.room.name ?? "")”？", isPresented: $model.deleting) {
+            Button("Dissolve", role: .destructive) { model.delete() }
         } message: {
-            Text("房间和里面的消息会一并删除，成员的会话不受影响。")
+            Text("房间、里面的消息和共享文件夹一并删除（文件夹进废纸篓）。为这个房间新开的会话一起结束，对话记录留着可以恢复；原本就在跑的会话不受影响。")
         }
     }
 
@@ -455,6 +455,11 @@ private struct RoomView: View {
                 Divider()
                 Button("Edit Room…") { model.open(.edit) }
                 Button(room.room.paused ? "Resume Room" : "Pause Room") { model.setPaused(!room.room.paused) }
+                // 解散 (user #230); not the 调度台, which goes with the dispatch turned off.
+                if room.room.desk != true {
+                    Divider()
+                    Button("Dissolve Room…", role: .destructive) { model.deleting = true }
+                }
             } label: {
                 LookGlyph(glyph: "⋯", symbol: "ellipsis", size: 18).foregroundStyle(Look.ink)
             }
@@ -902,8 +907,8 @@ private struct RoomSheet: View {
             .padding(.vertical, 14)
             HairRule(color: Look.line)
             HStack(spacing: 10) {
-                if kind == .edit {
-                    Button { model.sheet = nil; model.deleting = true } label: { BracketLabel(word: "Delete…") }.buttonStyle(BracketButtonStyle(role: .destructive))
+                if kind == .edit, model.room?.room.desk != true {
+                    Button { model.sheet = nil; model.deleting = true } label: { BracketLabel(word: "Dissolve…") }.buttonStyle(BracketButtonStyle(role: .destructive))
                 }
                 Spacer()
                 Button { model.sheet = nil } label: { BracketLabel(word: "Cancel", key: "esc") }.buttonStyle(BracketButtonStyle()).keyboardShortcut(.cancelAction)

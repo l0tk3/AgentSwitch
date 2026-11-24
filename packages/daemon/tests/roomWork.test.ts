@@ -888,7 +888,7 @@ describe("a Kit that does not fill a session's context (2026-11-24)", () => {
     store.setCanAdd(room.id, "api", true);
     const size = (t: string): number => JSON.stringify(kitOf().tools(t)).length;
     expect(size("ui")).toBeLessThan(5800);      // was 10 381 characters for a member (avatars and secrets since)
-    expect(size("api")).toBeLessThan(7200);     // and 15 362 for an admin
+    expect(size("api")).toBeLessThan(7400);     // and 15 362 for an admin (create with its members, dissolve since)
   });
 });
 

@@ -464,8 +464,18 @@ export class RoomStore {
     for (const name of names) if (ID.test(name) && !rooms.has(name)) this.discard(name, "");
   }
 
+  /** The sessions started for this room (an admin's `add` of a new one) that still sit here and in no other room:
+   *  what dissolving the room ends with it. */
+  startedFor(id: string): string[] {
+    const room = this.get(id);
+    const elsewhere = new Set<string>();
+    for (const other of this.all().values()) if (other.id !== id) for (const s of other.seats) if (s.left === undefined && s.terminal) elsewhere.add(s.terminal);
+    return room.seats.flatMap((s) => (s.starter && s.left === undefined && s.terminal && !elsewhere.has(s.terminal) ? [s.terminal] : []));
+  }
+
   remove(id: string): void {
     const room = this.get(id);
+    if (room.desk) throw new RoomError(409, "调度台不能解散：不要调度了，在设置 › Dispatch 里关掉它。");
     this.all().delete(id);
     this.db.dropRoom(id);
     this.dropRecordIfAlone(id);
