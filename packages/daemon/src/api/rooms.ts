@@ -43,6 +43,14 @@ export type SeatView = {
   readonly kit: boolean | null;
 };
 
+/** One thing that waits on the user's hand (`GET /rooms/attention`). */
+export type AttentionItem = {
+  readonly room: string; readonly roomName: string;
+  readonly kind: "trust" | "asks" | "permission" | "blocked" | "question" | "rounds";
+  readonly handle?: string | null; readonly terminal?: string; readonly task?: number; readonly seq?: number;
+  readonly text: string; readonly at: number;
+};
+
 const TROUBLE_NOTICE = "trouble";
 /** Agents that list their tools once, at their start. */
 const LISTS_ONCE: ReadonlySet<string> = new Set(["codex", "opencode"]);
@@ -143,6 +151,26 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   const roundsOf = (room: Room): number | null => { const n = rooms.rounds(room.id); return n >= room.roundsLimit ? n : null; };
 
+  // 等你处理 (2026-11-24): what in a room waits on the user's hand — a member's screen asking (trust this folder,
+  // or a list to choose from), a member waiting on a permission, a task stuck, a question put to the user and not
+  // answered yet, sessions that talked long with no word from the user. Newest first.
+  const attentionOf = (room: Room): AttentionItem[] => {
+    const items: AttentionItem[] = [];
+    const base = { room: room.id, roomName: room.name };
+    for (const seat of room.seats) {
+      if (seat.kind !== "session" || seat.left !== undefined || !seat.terminal) continue;
+      const info = host()?.get(seat.terminal) ?? null;
+      if (!info || info.status === "exited") continue;
+      if (info.choices) items.push({ ...base, kind: trustYes(info) ? "trust" : "asks", handle: seat.handle, terminal: seat.terminal, text: info.choices.title, at: info.lastOutputAt });
+      else if (info.status === "waiting") items.push({ ...base, kind: "permission", handle: seat.handle, terminal: seat.terminal, text: "", at: info.lastOutputAt });
+    }
+    for (const t of room.tasks) if (t.state === "blocked") items.push({ ...base, kind: "blocked", task: t.n, handle: t.owner ?? null, text: `${t.title}${t.note ? `：${t.note}` : ""}`, at: t.updatedAt });
+    for (const m of rooms.questionsForYou(room.id)) items.push({ ...base, kind: "question", seq: m.seq, handle: m.from, ...(m.task === undefined ? {} : { task: m.task }), text: m.text.slice(0, 200), at: m.at });
+    const rounds = roundsOf(room);
+    if (rounds !== null) items.push({ ...base, kind: "rounds", text: String(rounds), at: rooms.last(room.id)?.at ?? room.createdAt });
+    return items;
+  };
+
   const summary = (room: Room) => {
     const last = rooms.last(room.id);
     const unread = rooms.unread(room.id);
@@ -160,6 +188,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       // under the room's limit.
       rounds: roundsOf(room),
       // §9: how the room's work stands.
+      attention: attentionOf(room).length,
       tasks: { todo: room.tasks.filter((t) => t.state === "todo").length, doing: room.tasks.filter((t) => t.state === "doing").length, done: room.tasks.filter((t) => t.state === "done").length },
     };
   };
@@ -177,6 +206,9 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   };
 
   app.get("/rooms", (c) => versionedJson(c, { rooms: rooms.list().map(summary) }));
+
+  // Everything in every room that waits on the user (等你处理), newest first.
+  app.get("/rooms/attention", (c) => c.json({ items: rooms.list().flatMap(attentionOf).sort((a, b) => b.at - a.at) }));
 
   // Which models a session may start a session on, per profile (rooms/policy.ts): every agent's models and profiles,
   // and for each profile the models the user has turned off. Before `/rooms/:id`: "models" is not a room.

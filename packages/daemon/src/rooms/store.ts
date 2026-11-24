@@ -308,6 +308,14 @@ export class RoomStore {
   /** The `limit` before message `seq`, oldest first: the page above what is shown. */
   messagesBefore(id: string, seq: number, limit: number): Message[] { this.get(id); return parsed(this.db.before(id, seq, limit)); }
 
+  /** Questions put to the user it has not answered yet (2026-11-24, 等你处理): addressed to the user, asking for an
+   *  answer, said after the user last spoke in the room and not answered by a reply of the user's since. */
+  questionsForYou(id: string): Message[] {
+    this.get(id);
+    const since = this.db.lastFromYou(id, 0) ?? 0;
+    return parsed(this.db.after(id, since, 200)).filter((m) => m.from !== YOU && m.to.includes(YOU) && m.expects === "answer").slice(-20);
+  }
+
   /** The last `limit` about one task, oldest first. */
   messagesOfTask(id: string, task: number, limit: number): Message[] { this.get(id); return parsed(this.db.taskTail(id, task, limit)); }
 

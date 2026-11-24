@@ -828,6 +828,22 @@ describe("a stuck task, a long message, and asking for some of what was said (20
   });
 });
 
+describe("what waits on the user (等你处理, 2026-11-24)", () => {
+  it("lists a stuck task and a question put to the user, until the user speaks", async () => {
+    const { store, room, call } = made();
+    store.addTask(room.id, "you", { title: "Interface", owner: "api" });
+    store.setTask(room.id, "api", 1, { state: "blocked", note: "等字段名" });
+    store.post(room.id, { from: "api", text: "@you 字段叫 name 还是 title？", expects: "answer", task: 1 });
+    store.post(room.id, { from: "api", text: "@you 报一下进度", expects: "none" });
+    const first = await call("GET", "/rooms/attention");
+    expect(first.body.items.map((i: { kind: string }) => i.kind).sort()).toEqual(["blocked", "question"]);
+    expect(first.body.items.find((i: { kind: string }) => i.kind === "question")).toMatchObject({ room: room.id, handle: "api", task: 1, text: "@you 字段叫 name 还是 title？" });
+    expect((await call("GET", "/rooms")).body.rooms[0].attention).toBe(2);
+    await call("POST", `/rooms/${room.id}/messages`, { text: "@api 叫 name" });
+    expect((await call("GET", "/rooms/attention")).body.items.map((i: { kind: string }) => i.kind)).toEqual(["blocked"]);
+  });
+});
+
 describe("a Kit that does not fill a session's context (2026-11-24)", () => {
   it("gives short unread whole, long ones and the overflow as lines, a message whole by number in parts, and a task's card", async () => {
     const { store, room, say } = made();
