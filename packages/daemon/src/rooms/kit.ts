@@ -10,7 +10,7 @@ import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
 import { lineOf } from "./secrets.js";
 import { classicFrom, defaultBg, LIBRARY_SAYS, pixelFrom, type ClassicAvatar, type PixelAvatar } from "./avatars.js";
-import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
+import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, handleIn, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
 
 /** What bringing sessions in needs of the rest of AgentSwitch (§6 开了“拉会话”才有的): the lists, a check, and
  *  starting a session. Given by the composition root; nothing here carries a credential or an account. */
@@ -376,7 +376,7 @@ export class RoomKit {
       }
       case "rename": {
         const other = str(args.handle)?.replace(/^@/, "").toLowerCase();
-        const target = other && other !== seat.handle ? room.seats.find((x) => x.handle === (room.renames[other] ?? other)) : seat;
+        const target = other && other !== seat.handle ? room.seats.find((x) => x.handle === handleIn(room, other)) : seat;
         if (!target) throw new RoomError(404, `There is no @${other} in this room.`);
         const was = target.handle;
         const now = this.o.store.rename(room.id, seat.handle, target.handle, typeof args.name === "string" ? args.name : "");
@@ -533,7 +533,7 @@ export class RoomKit {
       if (!done.length) return `Nobody in "${room.name}" has ended: there is nothing to resume.`;
       return done.map((d) => (d.error ? `@${d.handle}: not resumed — ${d.error}` : `@${d.handle}: back`)).join("\n");
     }
-    const target = room.seats.find((s) => s.handle === name);
+    const target = room.seats.find((s) => s.handle === handleIn(room, name));
     if (!target) throw new RoomError(404, `There is no @${name} in this room.`);
     if (target.kind === "user") throw new RoomError(403, "You can not manage the user.");
     if (target.handle === me.handle) throw new RoomError(403, "You can not manage yourself; ask the user or another admin.");

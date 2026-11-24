@@ -199,6 +199,13 @@ export class RoomError extends Error {
 
 const ID = /^[a-z0-9]{6,24}$/;
 
+/** The seat a name written in a room means: a member called so now, else the one that was called so before it was
+ *  renamed (`@old` still reaches it), else the name as it is. */
+export function handleIn(room: Room, name: string): string {
+  if (room.seats.some((s) => s.handle === name)) return name;
+  return room.renames[name] ?? name;
+}
+
 export class RoomStore {
   private readonly dir: string;
   private rooms: Map<string, Room> | null = null;
@@ -499,7 +506,9 @@ export class RoomStore {
       this.save({ ...room, seats: room.seats.map((s) => (s === old ? back : s)) });
       return back;
     }
-    const handle = freeHandle(handleFrom(o.was.name, handleFrom(o.was.agent)), new Set(room.seats.map((s) => s.handle)));
+    // A name a seat had before it was renamed still reaches that seat: not given to a newcomer (2026-11-24: a new
+    // session took the old name of one that had left, and what was written to it went to the old seat).
+    const handle = freeHandle(handleFrom(o.was.name, handleFrom(o.was.agent)), new Set([...room.seats.map((s) => s.handle), ...Object.keys(room.renames)]));
     const face = faceOf(handle, room.seats.flatMap((s) => (s.face && s.left === undefined ? [s.face] : [])));
     const seat: Seat = { handle, kind: "session", terminal: o.terminal, face, joinedAt: this.now(), addedBy: o.by ?? YOU, canAdd: byAgent ? false : (o.canAdd ?? false), byAgent, was: o.was, ...(o.starter ? { starter: o.starter } : {}) };
     this.save({ ...room, seats: [...room.seats, seat] });
@@ -842,7 +851,7 @@ export class RoomStore {
     const task = o.task ?? (answered && answered.seq === o.replyTo ? answered.task : undefined);
     const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase()), ...(answered && answered.seq === o.replyTo ? [answered.from] : [])];
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
-    for (let i = 0; i < named.length; i++) named[i] = room.renames[named[i]!] ?? named[i]!;
+    for (let i = 0; i < named.length; i++) named[i] = handleIn(room, named[i]!);
     // `@all` is the user's alone (§4). Written by a session it is words and calls nobody: refusing the whole message
     // for it cost a session its report twice (2026-11-23), when it only spoke of the rule.
     // At the dispatch desk what the user says is for the dispatch, named or not (2026-11-24).

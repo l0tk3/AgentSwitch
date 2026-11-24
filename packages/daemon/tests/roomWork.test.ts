@@ -584,6 +584,20 @@ describe("a seat's name", () => {
     expect(store.post(room.id, { from: "you", text: "@frontend-form @ui hi" }).to).toEqual(["web"]);
     expect((await call("PATCH", `/rooms/${room.id}/seats/api`, { name: "backend" })).body.seat.handle).toBe("backend");
     expect(store.roomsOf("api")[0]!.seat.handle).toBe("backend");
+    // A newcomer named as one of the old names is not given it: @ui and @frontend-form still mean @web.
+    const seat = store.seat(room.id, { terminal: "ui2", was: { agent: "codex", name: "ui", cwd: "/w", model: null, profile: null } });
+    expect(seat.handle).toBe("ui-2");
+    expect(store.post(room.id, { from: "you", text: "@ui-2 @ui hi" }).to.slice().sort()).toEqual(["ui-2", "web"]);
+  });
+
+  it("a member called so now is the one a name means, before an old name of another (a room from before)", () => {
+    const { store, room } = made();
+    store.rename(room.id, "you", "ui", "gmail");
+    store.unseat(room.id, "gmail");
+    // As a room made before this fix may hold: a newcomer took the old name.
+    const r = store.get(room.id);
+    (store as unknown as { all(): Map<string, unknown> }).all().set(room.id, { ...r, seats: [...r.seats, { ...r.seats.find((x) => x.handle === "api")!, handle: "ui", terminal: "new-ui" }] });
+    expect(store.post(room.id, { from: "you", text: "@ui 接着做" }).to).toEqual(["ui"]);
   });
 });
 
