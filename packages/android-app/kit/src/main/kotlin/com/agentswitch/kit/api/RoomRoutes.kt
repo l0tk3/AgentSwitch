@@ -30,6 +30,12 @@ class RoomsUnsupported : Exception("这台 Mac 上的 AgentSwitch 还没有 Chat
 @Serializable private class NewTaskBody(val title: String, val detail: String? = null, val owner: String? = null, val after: List<Int>? = null)
 @Serializable private class TaskReply(val task: RoomTask)
 @Serializable private class Done(val ok: Boolean? = null)
+@Serializable private class PokeBody(val handle: String? = null)
+@Serializable private class PokeReply(val results: List<RoomPoke> = emptyList())
+
+/** How a 戳一下 went for one member: `given` — the user's message waiting for it was given to it now; else `why` not. */
+@Serializable
+data class RoomPoke(val handle: String, val given: Boolean = false, val why: String? = null)
 
 /** What the Mac says of a message just taken: the message, and who it still has to reach. */
 @Serializable
@@ -124,6 +130,13 @@ data class RoomSeatEnd(val ok: Boolean = false, val closed: Boolean = false, val
  */
 suspend fun AgentSwitchAPI.endSeat(handle: String, room: String, now: Boolean = false, delete: Boolean = false): RoomSeatEnd =
     perform("DELETE", listOf("rooms", room, "seats", handle), listOfNotNull(URLQueryItem("close", if (delete) "delete" else "end"), if (now) URLQueryItem("now", "1") else null), null, RoomSeatEnd.serializer())
+
+/**
+ * 戳一下: the user's message still waiting for a busy member (`sent`/`queued`) given to it now; `handle` null: every
+ * member something waits for.
+ */
+suspend fun AgentSwitchAPI.pokeRoom(room: String, handle: String? = null): List<RoomPoke> =
+    post(listOf("rooms", room, "poke"), PokeBody(handle), PokeBody.serializer(), PokeReply.serializer()).results
 
 /** The user has seen up to `seq`. */
 suspend fun AgentSwitchAPI.markRoomRead(room: String, seq: Int): Int =

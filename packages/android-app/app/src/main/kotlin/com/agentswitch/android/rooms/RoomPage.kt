@@ -603,6 +603,8 @@ private fun MessageRow(
     val clipboard = LocalClipboardManager.current
     var bounds by remember { mutableStateOf(Rect.Zero) }
     val lit = model.lit == m.seq
+    val api = LocalAppModel.current.api
+    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth()) {
         if (row.newDay) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -662,7 +664,9 @@ private fun MessageRow(
                         )
                         // The files it comes with (they are on the Mac): a picture shown, another file as a card; a tap opens one.
                         MessageFiles(model, m.files)
-                        detail.readers(m)?.let { ReadMark(it, showMenu) }
+                        val readers = detail.readers(m)
+                        val poke = if (m.from == RoomSeat.you && model.waitingFor(m.seq).isNotEmpty()) m.seq else null
+                        if (readers != null || poke != null) ReadMark(readers, showMenu, poke?.let { seq -> { scope.launch { model.poke(api, seq) } } }, poking = model.poking == m.seq)
                     }
                 }
             }
@@ -700,17 +704,25 @@ private fun QuoteGone(n: Int, tap: () -> Unit) {
 /** Who of those the user's message was for has read it (已定 2): `2/3 已读` at its right; a tap or long press says who. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ReadMark(readers: RoomReaders, showMenu: (PixelBox) -> Unit) {
+private fun ReadMark(readers: RoomReaders?, showMenu: (PixelBox) -> Unit, poke: (() -> Unit)?, poking: Boolean) {
     var bounds by remember { mutableStateOf(Rect.Zero) }
-    fun who() = showMenu(PixelBox(head = readers.word, anchor = bounds, cancel = null, actions = readers.lines.map { PixelBox.Action(it) { } }))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Text(
-            readers.word,
-            Modifier.onGloballyPositioned { bounds = it.boundsInRoot() }
-                .combinedClickable(remember { MutableInteractionSource() }, null, role = Role.Button, onClickLabel = "谁已读", onLongClick = { who() }, onClick = { who() })
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            color = if (readers.failed) Theme.failed else Theme.inkDim, style = mono(11), maxLines = 1,
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+        // 戳一下: what still waits for a busy member given to it now.
+        if (poke != null) Text(
+            if (poking) "戳…" else "戳一下",
+            Modifier.clickable(!poking, role = Role.Button, onClickLabel = "戳一下", onClick = poke).padding(horizontal = 4.dp, vertical = 2.dp),
+            color = Theme.signal, style = mono(11), maxLines = 1,
         )
+        if (readers != null) {
+            fun who() = showMenu(PixelBox(head = readers.word, anchor = bounds, cancel = null, actions = readers.lines.map { PixelBox.Action(it) { } }))
+            Text(
+                readers.word,
+                Modifier.onGloballyPositioned { bounds = it.boundsInRoot() }
+                    .combinedClickable(remember { MutableInteractionSource() }, null, role = Role.Button, onClickLabel = "谁已读", onLongClick = { who() }, onClick = { who() })
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                color = if (readers.failed) Theme.failed else Theme.inkDim, style = mono(11), maxLines = 1,
+            )
+        }
     }
 }
 

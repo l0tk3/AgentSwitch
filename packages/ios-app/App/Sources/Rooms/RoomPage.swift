@@ -286,7 +286,8 @@ struct RoomPage: View {
                                        mention: { mention($0) },
                                        openFile: { showFile($0) },
                                        openTask: { n in withAnimation(.easeOut(duration: 0.15)) { model.taskFilter = n } },
-                                       jump: { seq in Task { await model.reveal(seq, api: app.api) } })
+                                       jump: { seq in Task { await model.reveal(seq, api: app.api) } },
+                                       poke: { handles in Task { await model.poke(handles, api: app.api) } })
                             .id(row.id)
                     }
                     Color.clear.frame(height: 8).id("end").reportsListEnd(in: "roomTimeline")
@@ -400,6 +401,8 @@ private struct RoomMessageRow: View {
     let openTask: (Int) -> Void
     /// The message a quote stands for, brought into view.
     let jump: (Int) -> Void
+    /// 戳一下: what still waits for these busy members given to them now.
+    let poke: ([String]) -> Void
     @Environment(\.interfaceLook) private var look
 
     private static let faceSide: CGFloat = 30
@@ -516,8 +519,18 @@ private struct RoomMessageRow: View {
         if who.total > 0 {
             let lines = Dictionary(RoomReceiptLine.lines(m, in: detail).map { ($0.handle, $0) }, uniquingKeysWith: { a, _ in a })
             let failed = who.unread.contains { lines[$0]?.failed == true }
-            HStack {
+            let waiting = m.from == RoomSeat.you
+                ? (detail.receipts[m.seq] ?? [:]).filter { $0.value == .sent || $0.value == .queued }.keys.sorted() : []
+            HStack(spacing: 0) {
                 Spacer(minLength: 0)
+                if !waiting.isEmpty {
+                    Button { poke(waiting) } label: {
+                        Text("戳一下").mono(11).foregroundStyle(Theme.signal)
+                            .padding(.vertical, 2).padding(.horizontal, 6).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("戳一下 " + waiting.map { "@\($0)" }.joined(separator: " "))
+                }
                 Text(who.word).mono(11).foregroundStyle(failed ? Theme.failed : who.unread.isEmpty ? Theme.inkDim : Theme.secondaryInk)
                     .padding(.vertical, 2).padding(.leading, 12)
                     .contentShape(Rectangle())

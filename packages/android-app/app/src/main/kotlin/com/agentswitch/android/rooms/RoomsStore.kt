@@ -16,10 +16,12 @@ import com.agentswitch.kit.api.RoomFiles
 import com.agentswitch.kit.api.RoomAttentionItem
 import com.agentswitch.kit.api.RoomList
 import com.agentswitch.kit.api.RoomMessage
+import com.agentswitch.kit.api.RoomReceipt
 import com.agentswitch.kit.api.RoomSummary
 import com.agentswitch.kit.api.RoomsUnsupported
 import com.agentswitch.kit.api.deleteRoom
 import com.agentswitch.kit.api.markRoomRead
+import com.agentswitch.kit.api.pokeRoom
 import com.agentswitch.kit.api.putRoomFile
 import com.agentswitch.kit.api.room
 import com.agentswitch.kit.api.roomAttention
@@ -528,6 +530,37 @@ class RoomPageModel(val id: String, detail: RoomDetail? = null, files: RoomFiles
             false
         }
     }
+
+    /**
+     * 戳一下 for one of the user's messages: each member it still waits for (`sent`/`queued`) given it now, the room read
+     * again; those it could not be given to said in [error] (`没戳到 @ui：…`).
+     */
+    suspend fun poke(api: AgentSwitchAPI?, seq: Int) {
+        if (api == null || poking != null) return
+        val waiting = waitingFor(seq).ifEmpty { return }
+        poking = seq
+        val missed = ArrayList<String>()
+        for (handle in waiting) {
+            try {
+                api.pokeRoom(id, handle).filter { !it.given }.forEach { missed += "没戳到 @${it.handle}：${it.why ?: "没有给到"}" }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                missed += "没戳到 @$handle：${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        etag = null
+        refresh(api)
+        poking = null
+        if (missed.isNotEmpty()) error = missed.joinToString("\n")
+    }
+
+    /** The message being poked (戳一下), while it is. */
+    var poking: Int? by mutableStateOf(null)
+
+    /** Who the user's message `seq` still waits for: its receipt `sent` or `queued` (a busy member). */
+    fun waitingFor(seq: Int): List<String> =
+        detail?.receipts?.get(seq)?.filterValues { it == RoomReceipt.Sent || it == RoomReceipt.Queued }?.keys?.toList() ?: emptyList()
 
     suspend fun delete(api: AgentSwitchAPI?) {
         if (api == null) return

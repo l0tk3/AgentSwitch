@@ -356,6 +356,25 @@ final class RoomPageModel {
         }
     }
 
+    /// 戳一下: what waits for each of these members is given to it now, and the room read again; who could not be
+    /// given it says why, in the page's error line.
+    func poke(_ handles: [String], api: AgentSwitchAPI?) async {
+        guard let api, !handles.isEmpty else { return }
+        var missed: [String] = []
+        do {
+            for h in handles {
+                for r in try await api.pokeRoom(id, handle: h) where !r.given {
+                    missed.append("没戳到 @\(r.handle)：\(r.why ?? "没给到")")
+                }
+            }
+        } catch {
+            missed.append(error.localizedDescription)
+        }
+        etag = nil
+        await refresh(api)
+        if !missed.isEmpty { self.error = missed.joined(separator: "\n") }
+    }
+
     func delete(_ api: AgentSwitchAPI?) async {
         guard let api else { return }
         do { try await api.deleteRoom(id); gone = true } catch { self.error = error.localizedDescription }

@@ -48,6 +48,21 @@ private struct SeatReply: Decodable { let seat: RoomSeat }
 private struct SummaryReply: Decodable { let room: RoomSummary }
 private struct ReadReply: Decodable { let readSeq: Int }
 private struct Done: Decodable { let ok: Bool? }
+private struct PokeBody: Encodable { let handle: String? }
+private struct PokeReply: Decodable { let results: [RoomPoke] }
+
+/// What came of 戳一下 for one member: the user's message still waiting for it was given to it now, or why not.
+public struct RoomPoke: Decodable, Sendable, Hashable {
+    public let handle: String
+    public let given: Bool
+    public let why: String?
+
+    public init(handle: String, given: Bool, why: String? = nil) {
+        self.handle = handle
+        self.given = given
+        self.why = why
+    }
+}
 
 /// Whose a task is to be: a seat's, by handle, or nobody's any more.
 public enum RoomTaskOwner: Sendable, Hashable {
@@ -165,6 +180,12 @@ extension AgentSwitchAPI {
     @discardableResult
     public func markRoomRead(_ room: String, upTo seq: Int) async throws -> Int {
         (try await post(["rooms", room, "read"], body: ReadBody(seq: seq)) as ReadReply).readSeq
+    }
+
+    /// 戳一下: the user's messages still waiting for a busy member (`sent` or `queued` to it) are given to it now;
+    /// nil: to every member something waits for.
+    public func pokeRoom(_ room: String, handle: String? = nil) async throws -> [RoomPoke] {
+        (try await post(["rooms", room, "poke"], body: PokeBody(handle: handle)) as PokeReply).results
     }
 
     /// The user has seen the sessions' rounds go by (`OK`): counted from here again. Nothing was stopped.
