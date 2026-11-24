@@ -511,6 +511,18 @@ final class RoomsModel {
 
     // MARK: what the user does to a room
 
+    /// 戳一下: what waits for the members is given now; who could not be reached is said as the problem.
+    func poke(_ handles: [String]) {
+        guard let id = selected else { return }
+        act { client in
+            var missed: [(handle: String, why: String)] = []
+            for h in handles { missed += try await client.poke(room: id, handle: h) }
+            if !missed.isEmpty { throw RoomsModel.Missed(text: missed.map { "@\($0.handle)：\($0.why)" }.joined(separator: "；")) }
+        }
+    }
+
+    private struct Missed: LocalizedError { let text: String; var errorDescription: String? { "没戳到 \(text)" } }
+
     private func act(_ what: @escaping (DaemonClient) async throws -> Void) {
         guard !demo else { return }
         Task {

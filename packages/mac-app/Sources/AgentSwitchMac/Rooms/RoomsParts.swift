@@ -175,6 +175,8 @@ struct RoomRowActions {
     var inTask = false
     /// Lit for a moment: the message just gone to.
     var lit = false
+    /// 戳一下: what waits for these members is given to them now.
+    var poke: ([String]) -> Void = { _ in }
 }
 
 /// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
@@ -328,8 +330,17 @@ struct RoomMessageRow: View {
         let who = room.readers(of: message)
         let total = who.read.count + who.unread.count
         if message.from == Room.you, total > 0 {
-            Text("\(who.read.count)/\(total) 已读").mono(11).foregroundStyle(who.unread.isEmpty ? Look.faint : Look.ink2)
-                .help(readHelp(who))
+            HStack(spacing: 8) {
+                // Still on its way to someone busy (user #236): 戳一下 gives it now.
+                let waiting = room.receipts(of: message.seq).filter { $0.receipt == .sent || $0.receipt == .queued }.map(\.handle)
+                if !waiting.isEmpty {
+                    Button { actions.poke(waiting) } label: { Text("戳一下").mono(11).foregroundStyle(Color.signal) }
+                        .buttonStyle(.plain)
+                        .help("现在就送到 \(waiting.map { "@" + $0 }.joined(separator: " "))：先打断它手上的事（Esc），再把消息打进它的终端")
+                }
+                Text("\(who.read.count)/\(total) 已读").mono(11).foregroundStyle(who.unread.isEmpty ? Look.faint : Look.ink2)
+                    .help(readHelp(who))
+            }
         }
     }
 

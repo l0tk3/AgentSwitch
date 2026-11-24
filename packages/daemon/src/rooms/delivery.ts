@@ -23,6 +23,8 @@ export type DeliveryOptions = {
   /** Another way to put a text in front of a resting session (OpenCode's server, pi's extension); resolves false when
    *  this terminal has none. */
   readonly push?: (terminal: string, text: string) => Promise<boolean>;
+  /** 戳一下: a text put in front of a session now, what it is doing interrupted (TerminalHost.poke). */
+  readonly poke?: (terminal: string, text: string) => Promise<{ readonly given: boolean; readonly why?: string }>;
   readonly home?: string;
   readonly now?: () => number;
 };
@@ -103,6 +105,34 @@ export class RoomDelivery {
       try { this.o.store.post(room.id, { from: seat.handle, text: "〔终端〕用户刚在我的终端里直接跟我说了话。", expects: "none" }); } catch { /* muted: the reminder still goes */ }
     }
     return `You sit in AgentSwitch Chat Room${sits.length > 1 ? "s" : ""} ${sits.map((x) => `"${x.room.name}" (as @${x.seat.handle})`).join(", ")}. The user just spoke to you directly in your terminal, not in the room. If it changes what you are doing for the room (a task, a plan, what you hand over), say so there in a line (room_post, expects none); otherwise carry on.`;
+  }
+
+  /** 戳一下 (user #236): what waits for a seat of this room is given to its session now — interrupted if it is at
+   *  work — instead of at its next rest. A program it left waiting takes it at once; else it is typed in. */
+  async poke(roomId: string, handle: string): Promise<{ readonly given: boolean; readonly why?: string }> {
+    const room = this.o.store.get(roomId);
+    const seat = room.seats.find((s) => s.handle === handle && s.left === undefined);
+    if (!seat?.terminal) return { given: false, why: "不在房间里" };
+    const terminal = seat.terminal;
+    const waiting = this.waitingFor(terminal).filter((w) => w.room.id === roomId);
+    if (!waiting.length) return { given: false, why: "没有要送给它的消息" };
+    const waiter = this.waiters.get(terminal);
+    if (waiter) {
+      for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
+      waiter({ text: this.given(terminal, waiting) });
+      return { given: true };
+    }
+    if (!this.o.poke) return { given: false, why: "这台机器上不能戳" };
+    if (this.pushing.has(terminal)) return { given: false, why: "正在送" };
+    this.pushing.add(terminal);
+    try {
+      const text = this.given(terminal, waiting, false);
+      const done = await this.o.poke(terminal, text);
+      if (!done.given) return done;
+      this.counted(terminal, waiting, text);
+      for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
+      return done;
+    } finally { this.pushing.delete(terminal); }
   }
 
   /** The agent's waiting program asks. One per terminal: a later one takes the place of the one before. */

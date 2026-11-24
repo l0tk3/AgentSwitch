@@ -1678,6 +1678,30 @@ export class TerminalHost {
     return true;
   }
 
+  /** 戳一下 (user #236): a text put in front of the agent now, not when it next rests — what it is doing is interrupted
+   *  (Esc, as the user would), then the text is typed in and entered. Never while it asks the user something (a
+   *  permission, a list on its screen: Esc would answer it in the user's place) nor over what is in its input. False:
+   *  not given; `why` says. */
+  async poke(id: string, text: string, o: { stepMs?: number; waitMs?: number } = {}): Promise<{ readonly given: boolean; readonly why?: string }> {
+    const s = this.sessions.get(id);
+    if (!s || s.status === "exited") return { given: false, why: "它的终端已经结束" };
+    const asking = (): boolean => s.status === "waiting" || s.pending.size > 0 || s.attention || !!this.choicesNow(s);
+    if (asking()) return { given: false, why: "它在等你回答或批准，先处理那个" };
+    if (!inputEmpty(screenRows(s.term, s.rows))) return { given: false, why: "它的输入框里有没发出的字" };
+    if (s.status !== "idle") {
+      s.proc!.write("\x1b");
+      const step = o.stepMs ?? 200, until = this.o.now() + (o.waitMs ?? 5000);
+      const now = (): string => s.status;
+      while (this.sessions.get(id) === s && now() !== "idle" && now() !== "exited" && this.o.now() < until) await new Promise((r) => setTimeout(r, step));
+      // Interrupted, it may still be drawing: a moment for its input to come back.
+      await new Promise((r) => setTimeout(r, step));
+    }
+    if (this.sessions.get(id) !== s || (s.status as string) === "exited") return { given: false, why: "它的终端已经结束" };
+    if (asking()) return { given: false, why: "它在等你回答或批准，先处理那个" };
+    this.write(id, replyBytes(text, this.bracketedPaste(id), true));
+    return { given: true };
+  }
+
   /** The file its agent's hooks said its session is written to (Claude Code's and Codex's `transcript_path`), if any. */
   recordFileOf(id: string): string | null {
     return this.sessions.get(id)?.recordFile ?? null;

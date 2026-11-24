@@ -490,7 +490,7 @@ private struct RoomView: View {
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
                             RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: model.onThisMac ? { model.preview(file: $0) } : nil, task: { model.taskFilter = $0 },
-                                                                                       jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id))
+                                                                                       jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id, poke: { model.poke($0) }))
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 1).id("end")

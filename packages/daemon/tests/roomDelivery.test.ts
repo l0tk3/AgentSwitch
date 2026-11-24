@@ -29,6 +29,31 @@ function made(push?: (terminal: string, text: string) => Promise<boolean>) {
   return { store, delivery, kit, room, states, receipts };
 }
 
+describe("戳一下: a message given now (user #236)", () => {
+  it("types what waits for a busy member into its terminal now, and says why when it can not", async () => {
+    const store = new RoomStore(mkdtempSync(join(tmpdir(), "as-poke-")));
+    const states = new Map<string, SeatState>([["t1", "busy"], ["t2", "busy"]]);
+    const seat = (terminal: string): SeatLive | null => (states.has(terminal) ? { state: states.get(terminal)!, card: { agent: "claude-code", name: terminal === "t1" ? "api" : "ui", cwd: "/w", model: null, profile: null, mode: "default", node: null } } : null);
+    const poked: [string, string][] = [];
+    const delivery = new RoomDelivery({ store, seat, poke: async (terminal, text) => (terminal === "t2" ? { given: false, why: "它在等你回答或批准，先处理那个" } : (poked.push([terminal, text]), { given: true })) });
+    const room = store.create({ name: "r" });
+    for (const t of ["t1", "t2"]) store.seat(room.id, { terminal: t, was: seat(t)!.card });
+    store.post(room.id, { from: "you", text: "@api @ui 先停一下" });
+    delivery.look();
+    expect(store.get(room.id).receipts).toEqual({ 1: { api: "queued", ui: "queued" } });
+    expect(await delivery.poke(room.id, "api")).toEqual({ given: true });
+    expect(poked[0]![1].startsWith("[Room r · #1]")).toBe(true);
+    expect(await delivery.poke(room.id, "ui")).toEqual({ given: false, why: "它在等你回答或批准，先处理那个" });
+    expect(store.get(room.id).receipts).toEqual({ 1: { api: "delivered", ui: "queued" } });
+    expect(await delivery.poke(room.id, "api")).toMatchObject({ given: false });
+    // Over the API: everyone something waits for, or one.
+    const app = new Hono();
+    mountRooms(app, { rooms: store, roomDelivery: delivery } as unknown as ApiDeps);
+    const res = await app.request(`/rooms/${room.id}/poke`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(await res.json()).toEqual({ results: [{ handle: "ui", given: false, why: "它在等你回答或批准，先处理那个" }] });
+  });
+});
+
 describe("giving a room's messages to sessions", () => {
   it("hands a busy session its messages when its turn ends, in an envelope that says who and to whom", () => {
     const { store, delivery, room, receipts } = made();

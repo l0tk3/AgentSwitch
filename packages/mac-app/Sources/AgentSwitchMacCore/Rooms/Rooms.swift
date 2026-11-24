@@ -992,6 +992,19 @@ public extension DaemonClient {
         _ = try await call("PUT", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))/avatar", body: body, timeout: 10)
     }
 
+    /// 戳一下 (user #236): what waits for the room's members (one, with `handle`) is given to them now, what they are
+    /// doing interrupted. Those it could not reach, with why.
+    func poke(room: String, handle: String? = nil) async throws -> [(handle: String, why: String)] {
+        var body: [String: Any] = [:]
+        if let handle { body["handle"] = handle }
+        let data = try await call("POST", "/rooms/\(DaemonClient.segment(room))/poke", body: try JSONSerialization.data(withJSONObject: body), timeout: 30)
+        let results = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["results"] as? [[String: Any]] ?? []
+        return results.compactMap { r in
+            guard (r["given"] as? Bool) != true, let h = r["handle"] as? String else { return nil }
+            return (h, r["why"] as? String ?? "没送到")
+        }
+    }
+
     func markRead(_ seq: Int, in room: String) async throws {
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/read", body: try JSONSerialization.data(withJSONObject: ["seq": seq]), timeout: 10)
     }

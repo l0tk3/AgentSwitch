@@ -569,6 +569,24 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     try { rooms.roundsSeen(c.req.param("id")); return c.json({ ok: true }); } catch (err) { return refused(c, err); }
   });
 
+  // 戳一下 (user #236): what waits for these members (all, without `handle`) is given to them now, what they are doing
+  // interrupted.
+  app.post("/rooms/:id/poke", async (c) => {
+    const delivery = deps.roomDelivery;
+    if (!delivery) return c.json({ error: "rooms are not delivered here" }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as { handle?: unknown };
+    try {
+      const room = rooms.get(c.req.param("id"));
+      const wanted = typeof body.handle === "string" ? [body.handle.replace(/^@/, "").toLowerCase()] : null;
+      const open = new Set(Object.values(room.receipts).flatMap((of) => Object.entries(of).filter(([, r]) => r === "sent" || r === "queued").map(([h]) => h)));
+      const handles = (wanted ?? [...open]).filter((h) => h !== YOU);
+      const results = [];
+      for (const handle of handles) results.push({ handle, ...(await delivery.poke(room.id, handle)) });
+      deps.roomsChanged?.(room.id);
+      return c.json({ results });
+    } catch (err) { return refused(c, err); }
+  });
+
   app.post("/rooms/:id/read", async (c) => {
     const body = await parseBody(c, Read);
     if (!body.ok) return c.json({ error: body.error }, 400);
