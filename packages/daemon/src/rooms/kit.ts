@@ -53,7 +53,7 @@ const TOOLS: readonly KitTool[] = [
         text: { type: "string", description: "The message. @name addresses a member; @you is the user." },
         to: { type: "array", items: { type: "string" }, description: "Members to address, besides any @name in the text." },
         files: { type: "array", items: { type: "string" }, description: "Absolute paths of files to point at (not copied)." },
-        reply_to: { type: "integer", description: "The #n this answers; its author gets it too." },
+        reply_to: { type: "integer", description: "The #n this answers; its author gets it if you name nobody." },
         expects: { type: "string", enum: ["none", "answer"], description: "When you address someone: none — a report, no reply wanted; answer — a question or request." },
         task: { type: "integer", description: "The task this is about (3 for T3). A reply keeps the task of what it answers." },
         room: ROOM_ARG,
