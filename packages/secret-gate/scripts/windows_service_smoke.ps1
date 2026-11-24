@@ -148,6 +148,8 @@ try {
         if (Test-Path $gone) { Fail "$gone is still there" }
     }
     Step 'ok'
+    # sc.exe's 1060 above is the last native exit code: the runner would end the step with it.
+    $global:LASTEXITCODE = 0
 }
 catch {
     DumpLogs

@@ -139,7 +139,7 @@ import { removeOwnBrowserFiles, sharedBrowser, sweepOwnBrowserFiles } from "./br
 import { newEngineKit } from "./browser/engine/setup.js";
 import { stdioServePorts } from "./harness/opencodeStdio.js";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.4.1";
 export const DEFAULT_PORT = 4711;
 /** Expired archived threads are deleted at start-up and then this often. */
 const THREAD_SWEEP_INTERVAL_MS = 3600_000;
