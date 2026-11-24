@@ -211,6 +211,9 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/rooms/:id/tasks"],
   ["PATCH", "/rooms/:id/tasks/:n"],
   ["DELETE", "/rooms/:id/tasks/:n"],
+  // The dispatch desk of that node, opened from another Mac's Dispatch page (user #263).
+  ["GET", "/dispatch/desk"],
+  ["PUT", "/dispatch/desk"],
   ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],

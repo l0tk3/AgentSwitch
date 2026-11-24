@@ -52,8 +52,8 @@ struct RoomsPage: View {
                 }
                 while !Task.isCancelled {
                     if desk {
-                        // The dispatch is this Mac's own: another node's window has none to show.
-                        if node == nil, shown || dispatch == nil { await readDispatch() }
+                        // The node shown's own dispatch, this Mac's or another's (user #263).
+                        if shown || dispatch == nil { await readDispatch(on: node) }
                         if model.pinned != nil, shown { await model.load() }
                     } else if shown { await model.load() } else if state.windowVisible { await model.loadList() }
                     tell()
@@ -64,15 +64,18 @@ struct RoomsPage: View {
             .onChange(of: state.newRoomRequests) { if !desk { model.open(.new) } }
     }
 
-    private func readDispatch() async {
+    private func readDispatch(on node: String?) async {
         do {
-            let now = try await app.client.dispatchDesk()
+            let now = try await app.client(on: node).dispatchDesk()
+            guard node == state.nodeId else { return }
             dispatch = now
             dispatchError = nil
             let room = now.settings.on ? now.room : nil
             if model.pinned != room { model.pinned = room }
         } catch {
-            dispatchError = "读不到调度：\(error.localizedDescription)"
+            guard node == state.nodeId else { return }
+            // An older node keeps its dispatch from other Macs (404): it is updated first.
+            dispatchError = node == nil ? "读不到调度：\(error.localizedDescription)" : "读不到那台节点的调度。它要先更新到新版本（那台的 AgentSwitch ›「有新版本 · 安装并重启…」）。\n\(error.localizedDescription)"
         }
     }
 
@@ -81,9 +84,10 @@ struct RoomsPage: View {
         settings.on = true
         turningOn = true
         Task {
-            do { dispatch = try await app.client.setDispatchDesk(settings); dispatchError = nil } catch { dispatchError = "没打开：\(error.localizedDescription)" }
+            let node = state.nodeId
+            do { dispatch = try await app.client(on: node).setDispatchDesk(settings); dispatchError = nil } catch { dispatchError = "没打开：\(error.localizedDescription)" }
             turningOn = false
-            await readDispatch()
+            await readDispatch(on: node)
         }
     }
 
@@ -116,16 +120,16 @@ private struct DeskOff: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if !onThisMac {
-                Text("调度在这台 Mac 上，切回这台 Mac 就能看到。").foregroundStyle(Look.ink2)
-            } else if let dispatch, !dispatch.settings.on {
+            if let dispatch, !dispatch.settings.on {
                 Text("调度还没打开").font(.system(size: 15, weight: .semibold)).foregroundStyle(Look.ink)
                 Text("打开后，调度是一个一直在的会话，在「调度台」等你说话：你说要做什么，它开房间、拉人或开新会话、分任务、向你汇报。")
                     .foregroundStyle(Look.ink2).lineSpacing(4)
                 HStack(spacing: 10) {
                     Button(action: turnOn) { BracketLabel(word: turningOn ? "Turning On…" : "Turn On") }
                         .buttonStyle(BracketButtonStyle(role: .primary)).disabled(turningOn)
-                    Button { SettingsOpener.show(.desk) } label: { BracketLabel(word: "Settings…") }.buttonStyle(BracketButtonStyle())
+                    if onThisMac {
+                        Button { SettingsOpener.show(.desk) } label: { BracketLabel(word: "Settings…") }.buttonStyle(BracketButtonStyle())
+                    }
                 }
             } else if error == nil {
                 BrailleSpinner()

@@ -263,8 +263,9 @@ export class DispatchDesk {
 
 const Instructions = z.object({ text: z.string().max(100_000) }).strict();
 
-/** `GET/PUT /dispatch/desk`, `GET/PUT /dispatch/desk/instructions`, `POST /dispatch/desk/replace`: on this Mac only
- *  (not in the remote list) — which agent runs as the dispatch, and with what say, is set where the user sits. */
+/** `GET/PUT /dispatch/desk`, `GET/PUT /dispatch/desk/instructions`, `POST /dispatch/desk/replace`. The desk itself
+ *  (`GET/PUT /dispatch/desk`) is also in the remote list: another Mac's Dispatch page opens and turns on this node's
+ *  (user #263: 我也应该可以调用其他节点的dispatch). Its instructions and Replace stay on this Mac. */
 export function mountDispatchDesk(app: Hono, deps: ApiDeps): void {
   const desk = deps.dispatchDesk;
   if (!desk) return;
