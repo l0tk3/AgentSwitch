@@ -742,6 +742,29 @@ public enum RoomText {
         var i = 0
         while i < chars.count {
             let c = chars[i]
+            // A fenced block (```), at a line's start, to its closing fence or the end (user #281: 这个代码框怎么还失效了):
+            // its lines as they are, the language word after the fence left out.
+            if c == "`", i + 2 < chars.count, chars[i + 1] == "`", chars[i + 2] == "`", i == 0 || chars[i - 1] == "\n" {
+                var start = i + 3
+                while start < chars.count, chars[start] != "\n" { start += 1 }
+                if start < chars.count { start += 1 }
+                var end = start, close = chars.count
+                while end < chars.count {
+                    if (end == start || chars[end - 1] == "\n"), end + 2 < chars.count + 0, chars[end] == "`", chars[end + 1] == "`", chars[end + 2] == "`" { close = end; break }
+                    end += 1
+                }
+                flush()
+                var body = start < close ? String(chars[start..<close]) : ""
+                if body.hasSuffix("\n") { body.removeLast() }
+                out.append(.code(body))
+                i = close
+                if i < chars.count {
+                    i += 3
+                    while i < chars.count, chars[i] != "\n" { i += 1 }
+                    if i < chars.count { plain.append("\n"); i += 1 }
+                }
+                continue
+            }
             if c == "`", let end = chars[(i + 1)...].firstIndex(of: "`"), end > i + 1, !chars[(i + 1)..<end].contains("\n") {
                 flush()
                 out.append(.code(String(chars[(i + 1)..<end])))
@@ -764,6 +787,16 @@ public enum RoomText {
         }
         flush()
         return out
+    }
+
+    /// The web links a message's text holds, for its menu's Copy Link (user #282: 超链接应该可以选择复制).
+    public static func links(_ text: String) -> [String] {
+        var found: [String] = []
+        for m in text.matches(of: /https?:\/\/[^\s<>()"'`）】」，。]+/) {
+            let s = String(m.output).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?"))
+            if !found.contains(s) { found.append(s) }
+        }
+        return found
     }
 
     private static func wordish(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "@" || c == "." || c == "-" }

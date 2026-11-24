@@ -261,6 +261,9 @@ struct RoomMessageRow: View {
             if !message.deleted {
                 Button("Reply") { actions.reply(message.seq) }
                 Button("Copy") { Clipboard.copy(message.text) }
+                ForEach(Array(RoomText.links(message.text).prefix(3)), id: \.self) { link in
+                    Button("Copy Link  \(link.count > 48 ? String(link.prefix(48)) + "…" : link)") { Clipboard.copy(link) }
+                }
                 if long { Button(expanded ? "Collapse" : "Expand") { expanded.toggle() } }
                 if let delete = actions.delete {
                     Divider()
@@ -463,6 +466,8 @@ enum RoomRich {
                 else if let m = line.firstMatch(of: /^(\s*)[-*+]\s+/) { out += AttributedString(m.output.1 + "• "); line = line[m.range.upperBound...] }
             }
             var run = (try? AttributedString(markdown: String(line), options: .init(allowsExtendedAttributes: false, interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(line)
+            // An e-mail address is words, not a link to open (user #282: 这种邮箱就不要出现超链接).
+            for r in run.runs where r.link?.scheme == "mailto" { run[r.range].link = nil }
             for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
                 run[r.range].font = .system(size: size - 1, design: .monospaced)
                 run[r.range].backgroundColor = Look.code

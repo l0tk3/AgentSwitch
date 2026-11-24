@@ -157,6 +157,10 @@ final class RoomsTests: XCTestCase {
         XCTAssertNil(RoomText.mentionQuery("a@b"))
         XCTAssertNil(RoomText.mentionQuery("@daemon 好"))
         XCTAssertNil(RoomText.mentionQuery("没有"))
+        // A fenced block (user #281), and links to copy (user #282).
+        XCTAssertEqual(RoomText.pieces("看：\n```text\na@b.com\nc@d.com\n```\n好了", handles: []), [.plain("看：\n"), .code("a@b.com\nc@d.com"), .plain("\n好了")])
+        XCTAssertEqual(RoomText.pieces("```\nx", handles: []), [.code("x")])
+        XCTAssertEqual(RoomText.links("见 https://a.com/x，和 https://b.org."), ["https://a.com/x", "https://b.org"])
         // Folding (user #280) and a deleted message (user #278).
         XCTAssertFalse(RoomText.isLong("短", lines: 12))
         XCTAssertTrue(RoomText.isLong(Array(repeating: "x", count: 13).joined(separator: "\n"), lines: 12))
