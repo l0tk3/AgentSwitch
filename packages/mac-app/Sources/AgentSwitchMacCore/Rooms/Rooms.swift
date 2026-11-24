@@ -282,13 +282,16 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
     public let files: [String]
     /// The task of the room's list it is about (`T3`), as a topic (2026-11-24); nil: about no one task.
     public let task: Int?
+    /// Deleted by the user (user #278): drawn as 「这条消息已删除」 in its place.
+    public let deleted: Bool
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, deleted }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, deleted: Bool = false) {
+        self.deleted = deleted
         self.files = files
         self.task = task
         self.seq = seq
@@ -309,6 +312,7 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
         at = RoomJSON.int(c, .at) ?? 0
         files = (try? c.decodeIfPresent([String].self, forKey: .files)) ?? []
         task = try? c.decodeIfPresent(Int.self, forKey: .task)
+        deleted = (try? c.contains(.deleted) && !c.decodeNil(forKey: .deleted)) ?? false
     }
 }
 
@@ -806,6 +810,14 @@ public enum RoomText {
         return (query, NSRange(location: caret - length, length: length))
     }
 
+    /// A message folded in the timeline (user #280): more than `lines` lines, or as many characters as a wide line
+    /// holds times that.
+    public static func isLong(_ text: String, lines: Int) -> Bool {
+        var n = 1
+        for c in text where c == "\n" { n += 1; if n > lines { return true } }
+        return text.count > lines * 60
+    }
+
     /// The draft with the `@…` being typed finished as `@handle `.
     public static func completing(_ draft: String, with handle: String) -> String {
         guard mentionQuery(draft) != nil, let at = draft.lastIndex(of: "@") else { return draft + "@\(handle) " }
@@ -1017,6 +1029,11 @@ public extension DaemonClient {
             guard (r["given"] as? Bool) != true, let h = r["handle"] as? String else { return nil }
             return (h, r["why"] as? String ?? "没送到")
         }
+    }
+
+    /// A message deleted (user #278); `tell`: the members who had it already are told to leave it aside.
+    func deleteMessage(_ seq: Int, in room: String, tell: Bool) async throws {
+        _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/messages/\(seq)\(tell ? "?tell=1" : "")", timeout: 15)
     }
 
     /// A file's bytes put into the room's shared folder (a room on another node, whose disk this Mac's paths do not

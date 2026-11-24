@@ -158,6 +158,9 @@ const ALIASES: Readonly<Record<string, (args: Record<string, unknown>) => [strin
   sessions: (a) => ["room_admin", { ...a, action: "sessions" }],
   profile_check: (a) => ["room_admin", { ...a, action: "check" }],
 };
+/** What a message says to a reader: a deleted one says so (user #278). */
+const said = (m: Message): string => (m.deleted ? "(deleted by the user)" : m.text);
+
 
 /** How much one answer of room_read may be: what is past it is given as one line a message. */
 const READ_BUDGET = 4000;
@@ -750,7 +753,7 @@ export class RoomKit {
 
   /** One message as a line of an index: who, when, which task, the start of it (or the words around `hit`). */
   private line(m: Message, hit?: string): string {
-    const words = m.text.replace(/\s+/g, " ").trim();
+    const words = said(m).replace(/\s+/g, " ").trim();
     let shown = [...words].slice(0, 80).join("");
     if (hit) {
       const at = words.toLowerCase().indexOf(hit.toLowerCase());
@@ -774,7 +777,7 @@ export class RoomKit {
     const blocks: string[] = [], lines: string[] = [], read: number[] = [];
     let later = 0;
     for (const m of fresh) {
-      const whole = `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m, seat.handle, reads, "\n")}`;
+      const whole = `#${m.seq} ${hm(m.at)}${m.task === undefined ? "" : ` [T${m.task}]`} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${said(m)}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}${readBy(m, seat.handle, reads, "\n")}`;
       if ([...m.text].length <= WHOLE_UP_TO && used + whole.length <= READ_BUDGET) { blocks.push(whole); used += whole.length + 2; read.push(m.seq); continue; }
       // Too long to give whole: a line now, and it counts as read (it is asked for by its number). Past what fits:
       // a line, and it stays unread for the next read.
@@ -796,7 +799,7 @@ export class RoomKit {
   private one(room: Room, seat: Seat, seq: number, part: number): string {
     const m = this.o.store.messages(room.id, { after: seq - 1, limit: 1 })[0];
     if (!m || m.seq !== seq) throw new RoomError(404, `There is no #${seq} in "${room.name}".`);
-    const chars = [...m.text];
+    const chars = [...said(m)];
     const parts = Math.max(1, Math.ceil(chars.length / PART));
     const p = Math.min(Math.max(part, 1), parts);
     const text = chars.slice((p - 1) * PART, p * PART).join("");

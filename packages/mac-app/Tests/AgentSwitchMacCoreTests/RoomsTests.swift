@@ -157,6 +157,12 @@ final class RoomsTests: XCTestCase {
         XCTAssertNil(RoomText.mentionQuery("a@b"))
         XCTAssertNil(RoomText.mentionQuery("@daemon 好"))
         XCTAssertNil(RoomText.mentionQuery("没有"))
+        // Folding (user #280) and a deleted message (user #278).
+        XCTAssertFalse(RoomText.isLong("短", lines: 12))
+        XCTAssertTrue(RoomText.isLong(Array(repeating: "x", count: 13).joined(separator: "\n"), lines: 12))
+        XCTAssertTrue(RoomText.isLong(String(repeating: "长", count: 800), lines: 12))
+        let gone = try! JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":3,"from":"you","to":[],"text":"","at":1,"deleted":{"at":2,"by":"you"}}"#.utf8))
+        XCTAssertTrue(gone.deleted)
         // Typed above lines already written (user #262).
         let text = "第一行 @da\n第二行\n第三行"
         let caret = ("第一行 @da" as NSString).length

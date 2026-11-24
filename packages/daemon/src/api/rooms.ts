@@ -185,7 +185,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       // (it may sit in several).
       terminals: seats.flatMap((s) => (s.terminal ? [s.terminal] : [])),
       faces: seats.filter((s) => s.kind === "session").slice(0, 4).map((s) => ({ handle: s.handle, face: s.face })),
-      last: last ? { seq: last.seq, from: last.from, text: last.text.slice(0, 200), at: last.at } : null,
+      last: last ? { seq: last.seq, from: last.from, text: last.deleted ? "（已删除）" : last.text.slice(0, 200), at: last.at } : null,
       unread: unread.count, forYou: unread.forYou,
       // Its sessions at work right now: the list marks the room (user #269).
       working: seats.filter((s) => s.kind === "session" && s.terminal && host()?.get(s.terminal)?.status === "working").length,
@@ -504,6 +504,23 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const message = rooms.post(id, { from: YOU, text: body.data.text, ...(body.data.files ? { files: body.data.files } : {}), ...(body.data.replyTo === undefined ? {} : { replyTo: body.data.replyTo }), ...(body.data.expects ? { expects: body.data.expects } : {}), ...(body.data.task === undefined ? {} : { task: body.data.task }) });
       deps.roomsChanged?.(id);
       return c.json({ message, receipts: rooms.get(id).receipts[message.seq] ?? {} }, 201);
+    } catch (err) { return refused(c, err); }
+  });
+
+  // 删除消息 (user #278): the user's, any message. `tell`: those who had it already are told in a line to leave it aside
+  // (what a session has read can not be taken back from it).
+  app.delete("/rooms/:id/messages/:seq", (c) => {
+    try {
+      const id = c.req.param("id");
+      const seq = Number(c.req.param("seq"));
+      if (!Number.isInteger(seq) || seq < 1) return c.json({ error: "消息编号不对" }, 400);
+      const done = rooms.deleteMessage(id, seq);
+      let told: number | undefined;
+      if (c.req.query("tell") === "1" && done.reached.length) {
+        told = rooms.post(id, { from: YOU, text: `〔撤回〕#${seq} 已被删除，请忽略它说的内容。`, to: done.reached, expects: "none" }).seq;
+      }
+      deps.roomsChanged?.(id);
+      return c.json({ ok: true, ...done, ...(told === undefined ? {} : { told }) });
     } catch (err) { return refused(c, err); }
   });
 

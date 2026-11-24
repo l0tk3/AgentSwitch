@@ -398,6 +398,22 @@ describe("the task list speaks for itself", () => {
   });
 });
 
+describe("deleting a message (user #278)", () => {
+  it("keeps its place and number, clears its words, withdraws it where it was on its way, and says who had it", () => {
+    const { store, room } = made();
+    store.post(room.id, { from: "you", text: "@api @ui 密码是 hunter2" });
+    store.setReceipt(room.id, 1, "api", "delivered");
+    const done = store.deleteMessage(room.id, 1);
+    expect(done).toEqual({ reached: ["api"], withdrawn: ["ui"] });
+    const m = store.messages(room.id)[0]!;
+    expect(m).toMatchObject({ seq: 1, from: "you", text: "", deleted: { by: "you" } });
+    expect(store.get(room.id).receipts[1]).toBeUndefined();
+    expect(store.search(room.id, "hunter2", 10)).toEqual([]);
+    expect(store.deleteMessage(room.id, 1)).toEqual({ reached: [], withdrawn: [] });
+    expect(() => store.deleteMessage(room.id, 9)).toThrow(/#9/);
+  });
+});
+
 describe("an answer", () => {
   it("is for the one it answers, named again or not", () => {
     const { store, room } = made();

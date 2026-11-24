@@ -646,6 +646,16 @@ final class RoomsModel {
         }
     }
 
+    /// The message the user asked to delete, while its confirmation is open.
+    var deletingMessage: RoomMessage?
+
+    /// 删除消息 (user #278); `tell`: those who had it already are told to leave it aside.
+    func delete(message seq: Int, tell: Bool) {
+        guard let id = selected else { return }
+        deletingMessage = nil
+        act { client in try await client.deleteMessage(seq, in: id, tell: tell) }
+    }
+
     private struct Missed: LocalizedError { let text: String; var errorDescription: String? { "没戳到 \(text)" } }
 
     private func act(_ what: @escaping (DaemonClient) async throws -> Void) {

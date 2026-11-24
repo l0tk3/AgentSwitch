@@ -183,6 +183,8 @@ struct RoomRowActions {
     var lit = false
     /// 戳一下: what waits for these members is given to them now.
     var poke: ([String]) -> Void = { _ in }
+    /// 删除消息 (user #278): asks first.
+    var delete: ((RoomMessage) -> Void)?
 }
 
 /// One message (§10): the speaker's face, name and the time on the first of a run; the quoted one above a reply; the
@@ -192,10 +194,15 @@ struct RoomMessageRow: View {
     let room: Room
     let actions: RoomRowActions
     @State private var hovering = false
+    /// A long message opened whole (user #280: 发送的消息太长的话可以折叠).
+    @State private var expanded = false
     @Environment(\.interfaceLook) private var look
 
     private var message: RoomMessage { row.message }
     private var handles: Set<String> { Set(room.seats.map(\.handle)) }
+    /// Folded to this many lines when longer.
+    private static let foldLines = 12
+    private var long: Bool { RoomText.isLong(message.text, lines: Self.foldLines) }
 
     var body: some View {
         let seat = room.seat(message.from)
@@ -208,13 +215,25 @@ struct RoomMessageRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 if let quoted = message.replyTo.flatMap({ n in room.messages.first { $0.seq == n } }) { quote(quoted) }
                 if !row.continues { head(seat) }
-                Text(RoomRich.text(message.text, handles: handles, look: look))
-                    .font(.system(size: Look.scaled(13.5)))
-                    .lineSpacing(4)
-                    .foregroundStyle(Look.ink)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !message.files.isEmpty { files }
+                if message.deleted {
+                    Text("这条消息已删除").font(.system(size: Look.scaled(13))).italic().foregroundStyle(Look.faint)
+                } else {
+                    Text(RoomRich.text(message.text, handles: handles, look: look))
+                        .font(.system(size: Look.scaled(13.5)))
+                        .lineSpacing(4)
+                        .foregroundStyle(Look.ink)
+                        .textSelection(.enabled)
+                        .lineLimit(long && !expanded ? Self.foldLines : nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if long {
+                        Button { expanded.toggle() } label: {
+                            Text(expanded ? "收起" : "展开全文").font(.system(size: 12)).foregroundStyle(Color.signal)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
+                    }
+                }
+                if !message.files.isEmpty, !message.deleted { files }
                 failures
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,8 +258,15 @@ struct RoomMessageRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("Reply") { actions.reply(message.seq) }
-            Button("Copy") { Clipboard.copy(message.text) }
+            if !message.deleted {
+                Button("Reply") { actions.reply(message.seq) }
+                Button("Copy") { Clipboard.copy(message.text) }
+                if long { Button(expanded ? "Collapse" : "Expand") { expanded.toggle() } }
+                if let delete = actions.delete {
+                    Divider()
+                    Button("Delete Message…", role: .destructive) { delete(message) }
+                }
+            }
         }
     }
 
@@ -268,7 +294,11 @@ struct RoomMessageRow: View {
                     Text("┌─").code(12).foregroundStyle(Look.faint)
                 }
                 Text(quoted.from == Room.you ? "You" : quoted.from).font(.system(size: 12, weight: .medium))
-                Text(RoomRich.text(RoomText.quoteHead(quoted.text, handles: handles), handles: handles, look: look, size: 12)).truncationMode(.tail)
+                if quoted.deleted {
+                    Text("已删除").font(.system(size: 12)).italic().foregroundStyle(Look.faint)
+                } else {
+                    Text(RoomRich.text(RoomText.quoteHead(quoted.text, handles: handles), handles: handles, look: look, size: 12)).truncationMode(.tail)
+                }
             }
             .lineLimit(1)
             .foregroundStyle(Look.ink2)

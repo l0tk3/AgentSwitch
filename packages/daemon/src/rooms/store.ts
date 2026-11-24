@@ -108,6 +108,8 @@ export type Message = {
   /** The task of the room's list it is about (`T3`), as Zulip's topic (2026-11-24, user: 给消息加tag): one room holds
    *  several pieces of work at once, and a reader follows one. A reply is about what it answers unless it says. */
   readonly task?: number;
+  /** Deleted by the user (user #278): its words and files are gone, its number and place stay (「已删除」). */
+  readonly deleted?: { readonly at: number; readonly by: string };
 };
 
 /** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
@@ -888,6 +890,24 @@ export class RoomStore {
     return message;
   }
 
+  /** A message deleted (user #278): its words, files and search entry go; its number, sender, time and whom it was
+   *  for stay, so what answers or quotes it still points somewhere (「这条消息已删除」). Where it was still on its way
+   *  it is withdrawn. Says who had it already (it can not be taken back from them) and from whom it was withdrawn. */
+  deleteMessage(id: string, seq: number, by: string = YOU): { readonly reached: string[]; readonly withdrawn: string[] } {
+    const room = this.get(id);
+    const message = this.messages(id, { after: seq - 1, limit: 1 })[0];
+    if (!message || message.seq !== seq) throw new RoomError(404, `没有 #${seq} 这条消息`);
+    if (message.deleted) return { reached: [], withdrawn: [] };
+    const of = room.receipts[seq] ?? {};
+    const withdrawn = Object.entries(of).filter(([, r]) => r === "sent" || r === "queued").map(([h]) => h);
+    const reached = message.to.filter((h) => h !== YOU && !withdrawn.includes(h));
+    const gone: Message = { seq, from: message.from, to: message.to, ...(message.replyTo === undefined ? {} : { replyTo: message.replyTo }), text: "", at: message.at, ...(message.task === undefined ? {} : { task: message.task }), deleted: { at: this.now(), by } };
+    this.db.add(id, gone, JSON.stringify(gone));
+    const { [seq]: _was, ...receipts } = room.receipts;
+    this.rewriteLog(this.save({ ...room, receipts }));
+    return { reached, withdrawn };
+  }
+
   /** The user has seen up to `seq`. */
   read(id: string, seq: number): Room {
     const room = this.get(id);
@@ -964,7 +984,7 @@ export class RoomStore {
       put("tasks.md", [`# Tasks of ${room.name}`, "", ...(room.tasks.length ? room.tasks.map((t) => `## T${t.n} [${state(t)}${t.owner ? ` · @${t.owner}` : ""}] ${t.title}\n${t.after?.length ? `After: ${t.after.map((a) => `T${a}`).join(", ")}\n` : ""}Added by @${t.by}\n${t.detail ? `\n${t.detail}\n` : ""}${t.note ? `\nResult: ${t.note}\n` : ""}`) : ["No tasks."]), ""].join("\n"));
       put("notes.md", room.notes ? `# Pinned notes of ${room.name}\n\nLast written by @${room.notes.by}.\n\n${room.notes.text}\n` : `# Pinned notes of ${room.name}\n\nNone.\n`);
       put("members.md", [`# Members of ${room.name}`, "", ...here.map((s) => (s.kind === "user" ? "- @you — the user" : `- @${s.handle} — ${[s.was?.agent, s.was?.name ? `session "${s.was.name}"` : null, s.was?.cwd, s.canAdd ? "admin" : null, s.muted ? "muted" : null].filter(Boolean).join(" · ")}`)), ""].join("\n"));
-      const line = (m: Message): string => `## #${m.seq} · ${stamp(m.at)}${m.task === undefined ? "" : ` · T${m.task}`} · @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n\n${m.text}\n${m.files?.length ? `\nFiles: ${m.files.join(", ")}\n` : ""}\n`;
+      const line = (m: Message): string => `## #${m.seq} · ${stamp(m.at)}${m.task === undefined ? "" : ` · T${m.task}`} · @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n\n${m.deleted ? "(deleted by the user)" : m.text}\n${m.files?.length ? `\nFiles: ${m.files.join(", ")}\n` : ""}\n`;
       const log = join(dir, "log.md");
       if (said && existsSync(log)) appendFileSync(log, line(said), { mode: 0o600 });
       else if (said || !existsSync(log)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(log, `# What was said in ${room.name}\n\n${this.messages(room.id).map(line).join("")}`, { mode: 0o600 }); }
@@ -1093,5 +1113,5 @@ function messageFrom(v: unknown): Message | null {
   const o = v as Record<string, unknown>;
   // A message of files alone has no words: it is kept all the same.
   if (!num(o.seq) || !str(o.from) || typeof o.text !== "string" || !num(o.at)) return null;
-  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}) };
+  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}), ...(o.deleted && typeof o.deleted === "object" && num((o.deleted as Record<string, unknown>).at) ? { deleted: { at: (o.deleted as { at: number }).at, by: str((o.deleted as Record<string, unknown>).by) ? (o.deleted as { by: string }).by : YOU } } : {}) };
 }

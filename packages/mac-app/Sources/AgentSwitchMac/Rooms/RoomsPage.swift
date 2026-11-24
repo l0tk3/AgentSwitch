@@ -178,6 +178,16 @@ private struct RoomsColumns: View {
             }
         }
         .overlay { if model.sheet != nil { sheet } }
+        .confirmationDialog("删除 #\(model.deletingMessage?.seq ?? 0)？", isPresented: Binding(get: { model.deletingMessage != nil }, set: { if !$0 { model.deletingMessage = nil } }), presenting: model.deletingMessage) { message in
+            Button("Delete", role: .destructive) { model.delete(message: message.seq, tell: false) }
+            if message.to.contains(where: { $0 != Room.you }) {
+                Button("Delete and Tell Members") { model.delete(message: message.seq, tell: true) }
+            }
+        } message: { message in
+            Text(message.to.contains(where: { $0 != Room.you })
+                 ? "文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到；已经收到的成员看过了，删不掉它记得的内容——选「Delete and Tell Members」会发一句让它们忽略这条。"
+                 : "文字和附件链接会删掉，原位置留「这条消息已删除」。")
+        }
         .confirmationDialog("解散“\(model.room?.room.name ?? "")”？", isPresented: $model.deleting) {
             Button("Dissolve", role: .destructive) { model.delete() }
         } message: {
@@ -503,7 +513,7 @@ private struct RoomView: View {
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
                             RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: { model.onThisMac ? model.preview(file: $0) : model.fetch(file: $0, as: .preview) }, open: model.onThisMac ? nil : { model.fetch(file: $0, as: .open) }, saveAs: model.onThisMac ? nil : { model.fetch(file: $0, as: .saveAs) }, picture: model.onThisMac ? nil : { model.picture($0) }, task: { model.taskFilter = $0 },
-                                                                                       jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id, poke: { model.poke($0) }))
+                                                                                       jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id, poke: { model.poke($0) }, delete: { model.deletingMessage = $0 }))
                                 .id(row.id)
                         }
                         Color.clear.frame(height: 1).id("end")
