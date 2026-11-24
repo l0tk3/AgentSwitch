@@ -958,6 +958,8 @@ describe("the user talking to a member in its terminal (2026-11-24)", () => {
     expect(delivery.userTyped("ui", "[Room login · #3]\nFrom: @api")).toBeNull();
     expect(delivery.userTyped("ui", "<task-notification>\n<task-id>a1</task-id>")).toBeNull();   // the agent's own program, not the user
     expect(delivery.userTyped("ui", "[SYSTEM NOTIFICATION - NOT USER INPUT]")).toBeNull();
+    // 戳一下's envelope after the Esc it pressed (user #268).
+    expect(delivery.userTyped("ui", "[Request interrupted by user for tool use]\n<pasted_content id=\"x\">\n[Room login · #4]")).toBeNull();
     const told = delivery.userTyped("ui", "先别改表单了")!;
     expect(told).toContain('"login" (as @ui)');
     expect(told).toContain("say so there in a line");

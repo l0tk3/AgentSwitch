@@ -44,6 +44,8 @@ const GONE_MS = 15_000;
 const NAMED = 8;
 /** The room is told at most this often that the user is talking to a member in its terminal. */
 const TYPED_NOTE_MS = 10 * 60_000;
+/** A prompt with a room's envelope in it this soon after 戳一下 typed one in is that, not the user. */
+const POKED_MS = 60_000;
 const hm = (at: number): string => { const t = new Date(at); return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
 
 /** States in which a message waits for the seat (it will take it later by itself). */
@@ -60,6 +62,8 @@ export class RoomDelivery {
   private readonly seen = new Map<string, number>();
   /** When the room was last told that the user typed into a member's terminal, by room and seat. */
   private readonly typedAt = new Map<string, number>();
+  /** When 戳一下 last typed a room's message into each terminal. */
+  private readonly pokedAt = new Map<string, number>();
   private now(): number { return (this.o.now ?? Date.now)(); }
 
   constructor(private readonly o: DeliveryOptions) {}
@@ -94,7 +98,11 @@ export class RoomDelivery {
     // Not the user: the room's own envelope, and what the agent's own program hands it as a turn — a background
     // task's notification, a system note, a message from another session (2026-11-24: a finished helper's report
     // was said in the room as the user speaking in the terminal).
-    if (/^\s*(\[Room |<task-notification|<system-reminder|\[SYSTEM NOTIFICATION|<cross-session-message|Stop hook)/.test(prompt)) return null;
+    // 戳一下 types the envelope in after an Esc: the agent may put its own words before it ("[Request interrupted by
+    // user]", a paste's wrapper), and the room was told the user spoke (user #268: 戳一下会显示这个？).
+    const bare = prompt.replace(/^\s*(\[Request interrupted[^\]\n]*\]\s*)+/, "").replace(/^\s*<pasted_content[^>]*>\s*/, "");
+    if (/^\s*(\[Room |<task-notification|<system-reminder|\[SYSTEM NOTIFICATION|<cross-session-message|Stop hook)/.test(bare)) return null;
+    if (this.now() - (this.pokedAt.get(terminal) ?? -Infinity) < POKED_MS && prompt.includes("[Room ")) return null;
     const sits = this.o.store.roomsOf(terminal);
     if (!sits.length) return null;
     const now = this.now();
@@ -127,6 +135,7 @@ export class RoomDelivery {
     this.pushing.add(terminal);
     try {
       const text = this.given(terminal, waiting, false);
+      this.pokedAt.set(terminal, this.now());
       const done = await this.o.poke(terminal, text);
       if (!done.given) return done;
       this.counted(terminal, waiting, text);
