@@ -598,13 +598,11 @@ private struct RoomWriter: View {
                 }
             }
             HStack(alignment: .bottom, spacing: 8) {
-                if model.onThisMac {
-                    Button { model.pickFiles() } label: {
-                        LookGlyph(glyph: "+", symbol: "plus", size: 15).foregroundStyle(Look.ink2).frame(width: 30, height: look.isClassic ? 30 : 34).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Attach Files")
+                Button { model.pickFiles() } label: {
+                    LookGlyph(glyph: "+", symbol: "plus", size: 15).foregroundStyle(Look.ink2).frame(width: 30, height: look.isClassic ? 30 : 34).contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help(model.uploading > 0 ? "正在上传…" : "Attach Files")
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, insert: model.insert, label: "Message",
                              placeholder: placeholder, onKey: { model.key($0) },
                              onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: { model.pasteFromClipboard() }, onFocus: { _ in })

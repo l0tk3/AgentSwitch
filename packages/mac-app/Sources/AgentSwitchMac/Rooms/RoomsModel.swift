@@ -298,7 +298,7 @@ final class RoomsModel {
     @ObservationIgnored private var roomVersion: String?
 
     /// Words, or files alone: a picture says enough.
-    var canSend: Bool { !sending && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty) && room != nil }
+    var canSend: Bool { !sending && uploading == 0 && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty) && room != nil }
     var summary: RoomSummary? { rooms.first { $0.id == selected } }
 
     // MARK: reading
@@ -418,9 +418,41 @@ final class RoomsModel {
 
     /// Files dropped on the box or picked: added once each, ten at most (the service's limit).
     func attach(urls: [URL]) {
-        guard onThisMac else { return }
+        guard onThisMac else { upload(urls: urls); return }
+        attach(paths: urls.filter(\.isFileURL).map(\.path))
+    }
+
+    /// A room on another node: what is attached is put into its shared folder first, and comes along from there.
+    private func upload(urls: [URL]) {
+        let picked = urls.filter { url in url.isFileURL && !((try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false) }
+        if picked.count < urls.count { problem = "文件夹不能发到别的机器上的房间，只能发文件。" }
+        for url in picked {
+            guard let data = try? Data(contentsOf: url) else { problem = "读不了 \(url.lastPathComponent)"; continue }
+            upload(data, name: url.lastPathComponent)
+        }
+    }
+
+    private func upload(_ data: Data, name: String) {
+        guard let id = selected else { return }
+        guard data.count <= 25 * 1024 * 1024 else { problem = "\(name) 太大（最多 25 MB）"; return }
+        uploading += 1
+        Task {
+            do {
+                let path = try await client().putRoomFile(data, name: name, in: id)
+                if selected == id { attach(paths: [path]) }
+            } catch {
+                problem = "\(name) 没传上去：\(Self.say(error))"
+            }
+            uploading -= 1
+        }
+    }
+
+    /// Files being put into a room on another node.
+    private(set) var uploading = 0
+
+    private func attach(paths: [String]) {
         var put: [String] = []
-        for path in urls.filter(\.isFileURL).map(\.path) where !files.contains(path) && files.count < 10 {
+        for path in paths where !files.contains(path) && files.count < 10 {
             files.append(path)
             put.append(attachTokens.add(path))
         }
@@ -446,13 +478,13 @@ final class RoomsModel {
     /// ⌘V with files or a picture on the clipboard: files come along by their paths; a picture (a screenshot, a copy
     /// from Preview) has no path, so it is written into the room's shared folder and comes along from there.
     func pasteFromClipboard() {
-        guard onThisMac else { return }
         let board = NSPasteboard.general
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
             attach(urls: urls)
             return
         }
         guard let image = DispatchModel.pastedImage(board) else { return }
+        guard onThisMac else { upload(image.data, name: image.name); return }
         let folder = room?.folder.map { URL(fileURLWithPath: $0) } ?? FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-attach")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -472,7 +504,7 @@ final class RoomsModel {
     func pickFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = true
+        panel.canChooseDirectories = onThisMac
         panel.canChooseFiles = true
         panel.prompt = "Attach"
         if panel.runModal() == .OK { attach(urls: panel.urls) }

@@ -1005,6 +1005,15 @@ public extension DaemonClient {
         }
     }
 
+    /// A file's bytes put into the room's shared folder (a room on another node, whose disk this Mac's paths do not
+    /// reach): where it is there, to send a message with.
+    func putRoomFile(_ data: Data, name: String, in room: String) async throws -> String {
+        let query = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+?#"))) ?? "file"
+        let answer = try await call("PUT", "/rooms/\(DaemonClient.segment(room))/files/content?name=\(query)", body: data, timeout: 120)
+        guard let path = ((try? JSONSerialization.jsonObject(with: answer)) as? [String: Any])?["path"] as? String else { throw DaemonError.unreachable("文件没传上去") }
+        return path
+    }
+
     func markRead(_ seq: Int, in room: String) async throws {
         _ = try await call("POST", "/rooms/\(DaemonClient.segment(room))/read", body: try JSONSerialization.data(withJSONObject: ["seq": seq]), timeout: 10)
     }
