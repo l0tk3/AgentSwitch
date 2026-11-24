@@ -14,8 +14,8 @@ enum OldDispatch {
     /// The help on what is greyed out, and the sentence under the title.
     static let note = "旧调度已停用，新调度测试中。"
 
-    /// The main window may go to `page` (the Dispatch page is not gone to while it is off).
-    static func reachable(_ page: MainPage) -> Bool { !(off && page == .dispatch) }
+    /// The main window may go to `page`: every page (the Dispatch page shows the new dispatch while the old is off).
+    static func reachable(_ page: MainPage) -> Bool { true }
 
     /// The page the main window opens on: the one kept, unless that is Dispatch while it is off (Terminals then).
     static func landing(_ page: MainPage) -> MainPage { reachable(page) ? page : .terminals }

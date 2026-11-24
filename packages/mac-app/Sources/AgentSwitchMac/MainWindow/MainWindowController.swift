@@ -461,7 +461,7 @@ final class MainWindowController: NSObject {
         case .terminals:
             return terminals?.filesTarget()
         case .dispatch:
-            guard state.node == nil else { return nil }
+            guard state.node == nil, !OldDispatch.off else { return nil }
             return FilesTarget(name: "Dispatch") { [weak self] picks in
                 self?.state.give(files: picks.filter { !$0.folder }.map { URL(fileURLWithPath: $0.path) })
             }
@@ -714,7 +714,8 @@ struct DispatchRoot: View {
 
     var body: some View {
         if OldDispatch.off {
-            OldDispatchPlaceholder()
+            // The new dispatch: the 调度台 room (RoomsPage on the Dispatch page).
+            RoomsPage(state: state, desk: true).environment(model)
         } else {
             page
         }

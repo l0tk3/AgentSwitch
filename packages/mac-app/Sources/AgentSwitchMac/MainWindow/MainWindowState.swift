@@ -86,6 +86,16 @@ final class MainWindowState {
     private(set) var newRoomRequests = 0
     func askNewRoom() { newRoomRequests += 1 }
 
+    /// The status bar's right on Dispatch (the new dispatch): how it stands.
+    private(set) var deskStatus: [String] = []
+
+    /// The Dispatch page (the 调度台 room) was read: how the dispatch stands, and whether something there waits for you.
+    func deskChanged(status: [String], waiting: Bool) {
+        if status != deskStatus { deskStatus = status }
+        let activity = PageActivity(waiting: waiting ? 1 : 0)
+        if activity != dispatchActivity { dispatchActivity = activity }
+    }
+
     func roomsChanged(activity: PageActivity, status: [String], title: String?) {
         if activity != roomsActivity { roomsActivity = activity }
         if status != roomsStatus { roomsStatus = status }
@@ -272,7 +282,8 @@ final class MainWindowState {
 
     func liveChanged(_ snapshot: LiveSnapshot?) {
         let dispatch = PageActivity.of(.dispatch, in: snapshot), terminals = PageActivity.of(.terminals, in: snapshot)
-        if dispatch != dispatchActivity { dispatchActivity = dispatch }
+        // The old dispatch's tasks are not what the Dispatch page shows while it is off (deskChanged is).
+        if !OldDispatch.off, dispatch != dispatchActivity { dispatchActivity = dispatch }
         if terminals != terminalsActivity { terminalsActivity = terminals }
     }
 }

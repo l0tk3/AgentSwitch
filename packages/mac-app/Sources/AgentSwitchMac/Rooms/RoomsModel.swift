@@ -28,6 +28,8 @@ final class RoomsModel {
     private(set) var error: String?
     /// What the last thing the user did came to, when it failed; gone with the next that works.
     private(set) var problem: String?
+    /// The one room this page shows (the Dispatch page: the 调度台 room); nil: any of the list.
+    var pinned: String? { didSet { if let pinned, selected != pinned { selected = pinned } } }
     var selected: String? {
         didSet {
             guard selected != oldValue else { return }
@@ -43,7 +45,7 @@ final class RoomsModel {
             closeSearch()
             taskSeen = [:]
             taskBase = nil
-            if let selected { UserDefaults.standard.set(selected, forKey: "roomsSelected") }
+            if let selected, pinned == nil { UserDefaults.standard.set(selected, forKey: "roomsSelected") }
         }
     }
 
@@ -333,7 +335,9 @@ final class RoomsModel {
             }
             loaded = true
             if error != nil { error = nil }
-            if selected == nil || !rooms.contains(where: { $0.id == selected }) {
+            if let pinned {
+                if selected != pinned { selected = pinned }
+            } else if selected == nil || !rooms.contains(where: { $0.id == selected }) {
                 let kept = UserDefaults.standard.string(forKey: "roomsSelected")
                 selected = rooms.first { $0.id == kept }?.id ?? rooms.first?.id
             }

@@ -157,6 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindows.onVisibilityChange = { [weak self] name, open in self?.windowVisibility(name, open) }
         mainWindows.openSettings = { [weak self] in self?.settings.show(nil) }
         mainWindows.openNodes = { [weak self] in self?.settings.show(.nodes) }
+        SettingsOpener.show = { [weak self] tab in self?.settings.show(tab) }
         wireWindows()
         windows.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminal-windows", open) }
         settings.openTask = { [weak self] id in self?.mainWindows.show(task: id) }

@@ -8,15 +8,29 @@ import SwiftUI
 /// another page is shown only the list is read, slowly, for the rail's mark.
 struct RoomsPage: View {
     let state: MainWindowState
+    /// The Dispatch page (the new dispatch, 2026-11-24): the 调度台 room alone, no list; while the dispatch is off, the
+    /// way to turn it on.
+    var desk = false
     /// A made-up page for the design preview.
     var demo: RoomsDemo?
     @Environment(AppModel.self) private var app
     @State private var model = RoomsModel()
+    /// The dispatch, as the service tells it (the Dispatch page).
+    @State private var dispatch: DispatchDesk?
+    @State private var dispatchError: String?
+    @State private var turningOn = false
 
-    private var shown: Bool { state.page == .rooms && state.windowVisible }
+    private var page: MainPage { desk ? .dispatch : .rooms }
+    private var shown: Bool { state.page == page && state.windowVisible }
 
     var body: some View {
-        RoomsColumns(model: model, state: state, home: app.paths.userHome.path)
+        Group {
+            if desk && model.pinned == nil && demo == nil {
+                DeskOff(dispatch: dispatch, error: dispatchError, turningOn: turningOn, onThisMac: state.nodeId == nil, turnOn: turnOn)
+            } else {
+                RoomsColumns(model: model, state: state, home: app.paths.userHome.path, list: !desk)
+            }
+        }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Look.ground)
             .tint(.brand)
@@ -37,17 +51,51 @@ struct RoomsPage: View {
                     return
                 }
                 while !Task.isCancelled {
-                    if shown { await model.load() } else if state.windowVisible { await model.loadList() }
+                    if desk {
+                        // The dispatch is this Mac's own: another node's window has none to show.
+                        if node == nil, shown || dispatch == nil { await readDispatch() }
+                        if model.pinned != nil, shown { await model.load() }
+                    } else if shown { await model.load() } else if state.windowVisible { await model.loadList() }
                     tell()
                     try? await Task.sleep(for: shown ? .milliseconds(1500) : .seconds(15))
                 }
             }
-            .onChange(of: state.nodeId) { model.reset() }
-            .onChange(of: state.newRoomRequests) { model.open(.new) }
+            .onChange(of: state.nodeId) { model.reset(); model.pinned = nil; dispatch = nil }
+            .onChange(of: state.newRoomRequests) { if !desk { model.open(.new) } }
+    }
+
+    private func readDispatch() async {
+        do {
+            let now = try await app.client.dispatchDesk()
+            dispatch = now
+            dispatchError = nil
+            let room = now.settings.on ? now.room : nil
+            if model.pinned != room { model.pinned = room }
+        } catch {
+            dispatchError = "读不到调度：\(error.localizedDescription)"
+        }
+    }
+
+    private func turnOn() {
+        guard var settings = dispatch?.settings else { return }
+        settings.on = true
+        turningOn = true
+        Task {
+            do { dispatch = try await app.client.setDispatchDesk(settings); dispatchError = nil } catch { dispatchError = "没打开：\(error.localizedDescription)" }
+            turningOn = false
+            await readDispatch()
+        }
     }
 
     /// The window's bars and rail are told what the page has.
     private func tell() {
+        if desk {
+            var status: [String] = []
+            if let dispatch { status.append(dispatch.state) }
+            if let room = model.room, room.room.paused { status.append("Paused") }
+            state.deskChanged(status: status, waiting: model.summary?.forYou == true)
+            return
+        }
         let waiting = model.rooms.filter(\.forYou).count
         var status = [model.rooms.count == 1 ? "1 Room" : "\(model.rooms.count) Rooms"]
         if let room = model.room {
@@ -55,6 +103,41 @@ struct RoomsPage: View {
             if room.room.paused { status.append("Paused") }
         }
         state.roomsChanged(activity: PageActivity(waiting: waiting), status: status, title: model.room?.room.name ?? model.summary?.name)
+    }
+}
+
+/// The Dispatch page while the dispatch is off (or not read yet): what it is, and `Turn On`.
+private struct DeskOff: View {
+    let dispatch: DispatchDesk?
+    let error: String?
+    let turningOn: Bool
+    let onThisMac: Bool
+    let turnOn: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if !onThisMac {
+                Text("调度在这台 Mac 上，切回这台 Mac 就能看到。").foregroundStyle(Look.ink2)
+            } else if let dispatch, !dispatch.settings.on {
+                Text("调度还没打开").font(.system(size: 15, weight: .semibold)).foregroundStyle(Look.ink)
+                Text("打开后，调度是一个一直在的会话，在「调度台」等你说话：你说要做什么，它开房间、拉人或开新会话、分任务、向你汇报。")
+                    .foregroundStyle(Look.ink2).lineSpacing(4)
+                HStack(spacing: 10) {
+                    Button(action: turnOn) { BracketLabel(word: turningOn ? "Turning On…" : "Turn On") }
+                        .buttonStyle(BracketButtonStyle(role: .primary)).disabled(turningOn)
+                    Button { SettingsOpener.show(.desk) } label: { BracketLabel(word: "Settings…") }.buttonStyle(BracketButtonStyle())
+                }
+            } else if error == nil {
+                BrailleSpinner()
+                if let dispatch { Text(dispatch.state).foregroundStyle(Look.ink2) }
+            }
+            if let error { Text(error).foregroundStyle(Color.failed) }
+        }
+        .font(.system(size: 13))
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 420)
+        .padding(.horizontal, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -74,12 +157,16 @@ private struct RoomsColumns: View {
     @Bindable var model: RoomsModel
     let state: MainWindowState
     let home: String
+    /// The list of rooms on the left (not on the Dispatch page, which has the one room).
+    var list = true
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 0) {
-            RoomsList(model: model).frame(width: 236)
-            HairRule(color: Look.line, vertical: true)
+            if list {
+                RoomsList(model: model).frame(width: 236)
+                HairRule(color: Look.line, vertical: true)
+            }
             center.frame(maxWidth: .infinity, maxHeight: .infinity)
             if state.roomsMembers, let room = model.room {
                 HairRule(color: Look.line, vertical: true)

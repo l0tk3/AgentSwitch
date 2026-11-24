@@ -256,6 +256,8 @@ struct MainBar: View {
             switch state.page {
             case .terminals:
                 TerminalTitle(name: head.name, git: head.git, status: head.status, help: head.help).allowsHitTesting(false)
+            case .dispatch where OldDispatch.off:
+                DispatchTitleView(title: BarTitle("Dispatch · 调度台"), back: false, action: {})
             case .dispatch:
                 DispatchTitleView(title: state.dispatchTitle, back: state.showsBack, action: actions.back)
             case .browser:

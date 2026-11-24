@@ -2,6 +2,11 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
+/// Opens the settings window on a page, from anywhere in the app (the Dispatch page's `Settings…`).
+@MainActor enum SettingsOpener {
+    static var show: (SettingsTab) -> Void = { _ in }
+}
+
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
     case pairing, nodes, models, keys, agents, profiles, addons, environment, general
