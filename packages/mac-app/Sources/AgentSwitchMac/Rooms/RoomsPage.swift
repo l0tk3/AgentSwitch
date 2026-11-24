@@ -440,7 +440,8 @@ private struct RoomView: View {
             if let task {
                 Text(["@" + (task.owner ?? "—"), RoomTaskLabel.stateWord(task.state)].joined(separator: " · ")).mono(12).foregroundStyle(Look.ink2).lineLimit(1)
                 if task.state == .blocked, let note = task.note { Text(note).font(.system(size: 12)).foregroundStyle(Color.waiting).lineLimit(1).truncationMode(.tail) }
-            } else {
+            } else if room.room.desk != true {
+                // 调度台 says nothing under its name (user #227): what it is goes without saying there.
                 Text(room.room.topic).font(.system(size: 12.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 8)
@@ -536,10 +537,13 @@ private struct RoomView: View {
         let task = model.taskFilter.flatMap { n in room.tasks.first { $0.n == n } }
         return VStack(alignment: .leading, spacing: 6) {
             Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? "# " + room.room.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Look.ink)
-            if let detail = task.map({ $0.detail }) ?? (room.room.topic.isEmpty ? nil : room.room.topic) {
+            let desk = task == nil && room.room.desk == true
+            if let detail = task.map({ $0.detail }) ?? (room.room.topic.isEmpty || desk ? nil : room.room.topic) {
                 Text(detail).font(.system(size: 13)).foregroundStyle(Look.ink2).fixedSize(horizontal: false, vertical: true)
             }
-            Text(task == nil ? "这是房间「\(room.room.name)」的开始。" : "这是这个任务的消息。在这里发的话都算它的。").font(.system(size: 12.5)).foregroundStyle(Look.faint)
+            if !desk {
+                Text(task == nil ? "这是房间「\(room.room.name)」的开始。" : "这是这个任务的消息。在这里发的话都算它的。").font(.system(size: 12.5)).foregroundStyle(Look.faint)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
