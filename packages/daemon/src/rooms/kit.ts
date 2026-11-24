@@ -8,6 +8,7 @@ import { statSync } from "node:fs";
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
+import { classicFrom, defaultBg, LIBRARY_SAYS, pixelFrom, type ClassicAvatar, type PixelAvatar } from "./avatars.js";
 import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
 
 /** What bringing sessions in needs of the rest of AgentSwitch (§6 开了“拉会话”才有的): the lists, a check, and
@@ -94,16 +95,18 @@ const TOOLS: readonly KitTool[] = [
   },
   {
     name: "room_info",
-    description: "About a room you sit in. `members` (default): who is here, their agent, model, folder and state. `notes`: the pinned notes all members keep. `files`: the shared folder's path and its files, newest first — hand anything long over as a file there. `changing`: which files members said they are changing now. `rooms`: the rooms you sit in.",
-    inputSchema: { type: "object", properties: { show: { type: "string", enum: ["members", "notes", "files", "changing", "rooms"] }, room: ROOM_ARG } },
+    description: "About a room you sit in. `members` (default): who is here, their agent, model, folder and state. `notes`: the pinned notes all members keep. `files`: the shared folder's path and its files, newest first — hand anything long over as a file there. `changing`: which files members said they are changing now. `rooms`: the rooms you sit in. `avatars`: the avatar library.",
+    inputSchema: { type: "object", properties: { show: { type: "string", enum: ["members", "notes", "files", "changing", "rooms", "avatars"] }, room: ROOM_ARG } },
   },
   {
     name: "room_update",
-    description: "Change something of yours in a room. `notes` with text: replaces the whole pinned notes (read them first, write back what stays). `changing` with paths: the files you are about to change (absolute; [] when done; lapses after `minutes`) — you are told if another member said the same files. `handoff` with text: your handover note — what you did, how far, what next, where the files are. `rename` with name: your @name here (an admin may give `handle`). `session_rename` with name: your session's own name in AgentSwitch.",
+    description: "Change something of yours in a room. `notes` with text: replaces the whole pinned notes (read them first, write back what stays). `changing` with paths: the files you are about to change (absolute; [] when done; lapses after `minutes`) — you are told if another member said the same files. `handoff` with text: your handover note — what you did, how far, what next, where the files are. `rename` with name: your @name here (an admin may give `handle`). `session_rename` with name: your session's own name in AgentSwitch. `avatar`: yours in all rooms — `pixel` id (or `rows`+`color`), `classic` id (or `emoji`, `bg`); see room_info avatars.",
     inputSchema: {
       type: "object",
       properties: {
-        what: { type: "string", enum: ["notes", "changing", "handoff", "rename", "session_rename"] },
+        what: { type: "string", enum: ["notes", "changing", "handoff", "rename", "session_rename", "avatar"] },
+        pixel: { type: "string" }, rows: { type: "array", items: { type: "string" } }, color: { type: "integer" },
+        classic: { type: "string" }, emoji: { type: "string" }, bg: { type: "integer" },
         text: { type: "string" },
         name: { type: "string" },
         handle: { type: "string" },
@@ -329,6 +332,10 @@ export class RoomKit {
               const sits = this.o.store.roomsOf(terminal);
               return { text: sits.map((x) => `"${x.room.name}" (${x.room.id}) — you are @${x.seat.handle}${x.seat.canAdd ? ", admin" : ""}${x.room.topic ? ` · ${x.room.topic}` : ""}`).join("\n") };
             }
+            case "avatars": {
+              const mine = this.o.store.avatarOf(seat);
+              return { text: `${LIBRARY_SAYS}\nYours: pixel ${mine?.pixel ? (mine.pixel.kind === "grid" ? mine.pixel.id : mine.pixel.id ?? "drawn") : "your seat's face (unchosen)"}, classic ${mine?.classic?.emoji ?? "your initials (unchosen)"}. Set with room_update { what: "avatar", pixel: "p7", classic: "e3" }.` };
+            }
             default: return { text: this.members(room, seat) };
           }
         }
@@ -369,7 +376,24 @@ export class RoomKit {
         await org.rename(terminal, wanted);
         return `This session is called "${wanted}" in AgentSwitch now. Your @name in the room is still @${seat.handle} (room_update rename changes that).`;
       }
-      default: throw new RoomError(400, "room_update: `what` is notes, changing, handoff, rename or session_rename.");
+      case "avatar": {
+        const change: { pixel?: PixelAvatar; classic?: ClassicAvatar } = {};
+        if (args.pixel !== undefined || args.rows !== undefined) {
+          const p = pixelFrom({ ...(typeof args.pixel === "string" ? { id: args.pixel } : {}), rows: args.rows, color: args.color });
+          if (typeof p === "string") throw new RoomError(400, p);
+          change.pixel = p;
+        }
+        if (args.classic !== undefined || args.emoji !== undefined) {
+          const c = classicFrom({ ...(typeof args.classic === "string" ? { id: args.classic } : {}), ...(typeof args.emoji === "string" ? { emoji: args.emoji } : {}), bg: args.bg }, defaultBg(seat.handle));
+          if (typeof c === "string") throw new RoomError(400, c);
+          change.classic = c;
+        }
+        if (!change.pixel && !change.classic) throw new RoomError(400, `room_update avatar needs \`pixel\` (or \`rows\`) and/or \`classic\` (or \`emoji\`). ${LIBRARY_SAYS}`);
+        this.o.store.setAvatar(terminal, change);
+        for (const r of this.o.store.roomsOf(terminal)) this.o.changed?.(r.room.id);
+        return `Your avatar is changed in every room you sit in${change.pixel ? ` (pixel look: ${change.pixel.kind === "grid" ? change.pixel.id : change.pixel.id ?? "your drawn face"})` : ""}${change.classic ? ` (classic look: ${change.classic.emoji})` : ""}.`;
+      }
+      default: throw new RoomError(400, "room_update: `what` is notes, changing, handoff, rename, session_rename or avatar.");
     }
   }
 

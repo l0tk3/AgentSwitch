@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS messages (
   PRIMARY KEY (room, seq)
 );
 CREATE INDEX IF NOT EXISTS messages_task ON messages (room, task, seq);
+CREATE TABLE IF NOT EXISTS avatars (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_words USING fts5(words, room UNINDEXED, seq UNINDEXED, tokenize = 'trigram');
 `;
 
@@ -55,6 +56,8 @@ export class RoomDb {
       search: p("SELECT m.seq AS seq, m.body AS body FROM messages_words w JOIN messages m ON m.room = w.room AND m.seq = w.seq WHERE messages_words MATCH ? AND w.room = ? ORDER BY m.seq DESC LIMIT ?"),
       like: p("SELECT seq, body FROM messages WHERE room = ? AND words LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?"),
       count: p("SELECT COUNT(*) AS n FROM messages WHERE room = ?"),
+      avatar: p("SELECT value FROM avatars WHERE key = ?"),
+      putAvatar: p("INSERT INTO avatars (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"),
       byTask: p("SELECT task, COUNT(*) AS n FROM messages WHERE room = ? AND seq > ? AND task IS NOT NULL GROUP BY task"),
     };
   }
@@ -104,6 +107,10 @@ export class RoomDb {
     if ([...t].length >= 3) return this.q.search!.all(`"${t.replace(/"/g, '""')}"`, room, n) as StoredMessage[];
     return this.q.like!.all(room, `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`, n) as StoredMessage[];
   }
+
+  /** A session's avatar (avatars.ts), by one of its keys. */
+  avatar(key: string): string | null { return (this.q.avatar!.get(key) as { value: string } | undefined)?.value ?? null; }
+  putAvatar(key: string, value: string): void { this.q.putAvatar!.run(key, value); }
 
   close(): void { this.db.close(); }
 }

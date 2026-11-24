@@ -934,3 +934,33 @@ describe("the user talking to a member in its terminal (2026-11-24)", () => {
     expect(delivery.userTyped("nobody", "hi")).toBeNull();
   });
 });
+
+describe("a session's avatar, its own in every room (2026-11-24)", () => {
+  it("is chosen by the session from the library or drawn, one for each look, kept across rooms and by its conversation", async () => {
+    const { store, room, say, call } = made();
+    const other = store.create({ name: "second" });
+    store.seat(other.id, { terminal: "api", was: { agent: "claude-code", name: "api", cwd: "/w/api", model: null, profile: null } });
+    expect((await say("api", "room_info", { show: "avatars", room: room.id })).text).toContain("p1–p48");
+    expect((await say("api", "room_update", { what: "avatar", room: room.id, pixel: "p7", classic: "e3" })).text).toContain("changed in every room");
+    const inOther = store.avatarOf(store.get(other.id).seats.find((s) => s.handle === "api")!);
+    expect(inOther?.pixel).toMatchObject({ kind: "grid", id: "p7" });
+    expect(inOther?.classic).toMatchObject({ kind: "emoji", emoji: "🐨" });
+    // A drawn face; an emoji of its own; the bad ones refused with the library said.
+    await say("api", "room_update", { what: "avatar", room: room.id, rows: ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"], color: 4, emoji: "🦖", bg: 2 });
+    expect(store.avatarOf(store.get(room.id).seats.find((s) => s.handle === "api")!)).toEqual({ pixel: { kind: "face", rows: ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"], color: 4 }, classic: { kind: "emoji", emoji: "🦖", bg: 2 } });
+    expect((await say("api", "room_update", { what: "avatar", room: room.id, emoji: "ab" })).isError).toBe(true);
+    expect((await say("api", "room_update", { what: "avatar", room: room.id, pixel: "p99" })).text).toContain("No pixel avatar");
+    // Its conversation known: the same avatar after a resume in another terminal.
+    store.note(room.id, "api", { id: "conv-1", cwd: "/w/api" });
+    await say("api", "room_update", { what: "avatar", room: room.id, classic: "e1" });
+    store.rebind(room.id, "api", "api2", { agent: "claude-code", name: "api", cwd: "/w/api", model: null, profile: null });
+    expect(store.avatarOf(store.get(room.id).seats.find((s) => s.handle === "api")!)?.classic?.emoji).toBe("🦊");
+    // The user sets one, or puts it back; the seat view carries it.
+    const put = await call("PUT", `/rooms/${room.id}/seats/ui/avatar`, { pixel: { id: "f3" } });
+    expect(put.body.avatar.pixel).toMatchObject({ kind: "face", id: "f3" });
+    expect((await call("GET", `/rooms/${room.id}`)).body.seats.find((s: { handle: string }) => s.handle === "ui").avatar.pixel.id).toBe("f3");
+    await call("PUT", `/rooms/${room.id}/seats/ui/avatar`, { pixel: null });
+    expect((await call("GET", `/rooms/${room.id}`)).body.seats.find((s: { handle: string }) => s.handle === "ui").avatar.pixel).toBeNull();
+    expect((await call("GET", "/rooms/avatars")).body.art).toHaveLength(48);
+  });
+});

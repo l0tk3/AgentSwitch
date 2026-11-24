@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpath
 import { homedir } from "node:os";
 import { basename, extname, join, sep } from "node:path";
 import { faceOf, type Face } from "./face.js";
+import { avatarKeys, type Avatar } from "./avatars.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
 /** The most a session may say in one message: the rest belongs in a file. */
@@ -310,6 +311,28 @@ export class RoomStore {
 
   /** The `limit` before message `seq`, oldest first: the page above what is shown. */
   messagesBefore(id: string, seq: number, limit: number): Message[] { this.get(id); return parsed(this.db.before(id, seq, limit)); }
+
+  /** A seat's avatar (avatars.ts): its session's, whatever room; null: none chosen (its face and its initials). */
+  avatarOf(seat: Seat): Avatar | null {
+    if (seat.kind !== "session") return null;
+    for (const key of avatarKeys({ session: seat.session?.id ?? null, terminal: seat.terminal ?? null })) {
+      const raw = this.db.avatar(key);
+      if (raw) { try { return JSON.parse(raw) as Avatar; } catch { /* torn: as none */ } }
+    }
+    return null;
+  }
+
+  /** A session's avatar changed, one look or both: kept by its conversation (and its terminal, until the agent has
+   *  said its conversation's id), so every room it sits in shows it, and a resume keeps it. */
+  setAvatar(terminal: string, change: { readonly pixel?: Avatar["pixel"]; readonly classic?: Avatar["classic"] }): Avatar {
+    const seats = this.roomsOf(terminal).map((s) => s.seat);
+    if (!seats.length) throw new RoomError(404, "这个会话不在任何房间里");
+    const was = this.avatarOf(seats[0]!) ?? { pixel: null, classic: null };
+    const next: Avatar = { pixel: change.pixel === undefined ? was.pixel : change.pixel, classic: change.classic === undefined ? was.classic : change.classic };
+    const session = seats.find((s) => s.session?.id)?.session?.id ?? null;
+    for (const key of avatarKeys({ session, terminal })) this.db.putAvatar(key, JSON.stringify(next));
+    return next;
+  }
 
   /** Questions put to the user it has not answered yet (2026-11-24, 等你处理): addressed to the user, asking for an
    *  answer, said after the user last spoke in the room and not answered by a reply of the user's since. */

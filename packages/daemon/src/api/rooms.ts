@@ -14,6 +14,8 @@ import { MAX_NAME, MAX_PUT, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type R
 import type { Running } from "../rooms/follow.js";
 import { resumeEnded, resumeSeat } from "../rooms/kit.js";
 import { YOU } from "../rooms/names.js";
+import { classicFrom, defaultBg, EMOJI, FACES, pixelFrom, type ClassicAvatar, type PixelAvatar } from "../rooms/avatars.js";
+import { PIXEL_ART } from "../rooms/avatarArt.js";
 import type { SeatCard, SeatLive, SeatState } from "../rooms/state.js";
 
 export type { SeatCard, SeatState } from "../rooms/state.js";
@@ -140,7 +142,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
   };
 
   const seatsOf = (room: Room): SeatView[] => room.seats.map((seat) => {
-    const view = seatView(seat, host(), hasKit, room.stats[seat.handle], seat.kind === "session" && seat.left === undefined ? rooms.unreadOf(room.id, seat.handle).length : 0);
+    const view = { ...seatView(seat, host(), hasKit, room.stats[seat.handle], seat.kind === "session" && seat.left === undefined ? rooms.unreadOf(room.id, seat.handle).length : 0), avatar: rooms.avatarOf(seat) };
     // What it is called now is kept for the day its terminal is gone.
     if (seat.terminal && view.card && seat.left === undefined && host()?.get(seat.terminal)) {
       const { mode: _mode, node: _node, ...was } = view.card;
@@ -208,6 +210,9 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   // The dispatch desk first (调度台), then the newest talked-in.
   app.get("/rooms", (c) => versionedJson(c, { rooms: [...rooms.list()].sort((a, b) => Number(b.desk === true) - Number(a.desk === true)).map(summary) }));
+
+  // The avatar library (avatars.ts), for the screens' pickers.
+  app.get("/rooms/avatars", (c) => c.json({ faces: FACES, art: PIXEL_ART, emoji: EMOJI.map((emoji, i) => ({ id: `e${i + 1}`, emoji })) }));
 
   // Everything in every room that waits on the user (等你处理), newest first.
   app.get("/rooms/attention", (c) => c.json({ items: rooms.list().flatMap(attentionOf).sort((a, b) => b.at - a.at) }));
@@ -337,6 +342,35 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const seat = rooms.get(id).seats.find((s) => s.handle === named);
       if (!seat) throw new RoomError(404, `房间里没有 @${handle}`);
       return c.json({ seat: seatView(seat, host(), hasKit) });
+    } catch (err) { return refused(c, err); }
+  });
+
+  // A member's avatar set by the user (2026-11-24): its session's, in every room. null: back to the seat's own.
+  const AvatarBody = z.object({
+    pixel: z.union([z.null(), z.object({ id: z.string().max(10) }).strict(), z.object({ rows: z.array(z.string()).length(5), color: z.number().int().min(0).max(9) }).strict()]).optional(),
+    classic: z.union([z.null(), z.object({ id: z.string().max(10), bg: z.number().int().min(0).max(9).optional() }).strict(), z.object({ emoji: z.string().max(40), bg: z.number().int().min(0).max(9).optional() }).strict()]).optional(),
+  }).strict();
+  app.put("/rooms/:id/seats/:handle/avatar", async (c) => {
+    const body = await parseBody(c, AvatarBody);
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try {
+      const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase();
+      const seat = rooms.get(id).seats.find((s) => s.handle === handle && s.left === undefined);
+      if (!seat?.terminal || seat.kind !== "session") throw new RoomError(404, `房间里没有 @${handle} 这个会话`);
+      const change: { pixel?: PixelAvatar | null; classic?: ClassicAvatar | null } = {};
+      if (body.data.pixel !== undefined) {
+        const p = body.data.pixel === null ? null : pixelFrom(body.data.pixel);
+        if (typeof p === "string") throw new RoomError(400, p);
+        change.pixel = p;
+      }
+      if (body.data.classic !== undefined) {
+        const k = body.data.classic === null ? null : classicFrom(body.data.classic, defaultBg(handle));
+        if (typeof k === "string") throw new RoomError(400, k);
+        change.classic = k;
+      }
+      const avatar = rooms.setAvatar(seat.terminal, change);
+      deps.roomsChanged?.(id);
+      return c.json({ avatar });
     } catch (err) { return refused(c, err); }
   });
 
