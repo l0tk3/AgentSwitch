@@ -7,6 +7,8 @@ import UIKit
 /// made up, as the Mac would give them.
 enum DemoRooms {
     static let roomId = "a1b2c3d4e5"
+    /// The dispatch desk (调度台): what the Dispatch tab shows.
+    static let deskId = "desk000000"
 
     static var isDemo: Bool { UserDefaults.standard.bool(forKey: "uiDemo") }
     static var screen: String? { UserDefaults.standard.string(forKey: "uiDemoScreen") }
@@ -15,7 +17,7 @@ enum DemoRooms {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         return decode("""
         {"rooms":[
-          {"id":"desk000000","name":"调度台","topic":"跟调度说要做什么","paused":false,"createdAt":0,"members":2,"faces":[],"desk":true,
+          {"id":"\(deskId)","name":"调度台","topic":"跟调度说要做什么","paused":false,"createdAt":0,"members":2,"faces":[],"desk":true,
            "last":{"seq":9,"from":"dispatch","text":"@you 已经开了 2 个会话去做订阅页，进度在「手机订阅」里。","at":\(now - 60_000)},"unread":1,"forYou":true},
           {"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":false,"createdAt":1,"members":7,"faces":[],
            "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true,"tasks":{"todo":3,"doing":1,"done":2},"attention":3},
@@ -28,8 +30,22 @@ enum DemoRooms {
     }
 
     static func detail(_ id: String) -> RoomDetail? {
-        guard isDemo, id == roomId else { return nil }
+        guard isDemo else { return nil }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
+        if id == deskId {
+            return decode("""
+            {"room":{"id":"\(deskId)","name":"调度台","topic":"跟调度说要做什么","paused":false,"createdAt":0,"createdBy":"you","lastSeq":9,"readSeq":8,"rounds":null,"roundsLimit":6,"desk":true},
+             "seats":[
+              {"handle":"you","kind":"user","terminal":null,"face":null,"joinedAt":0,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":null,"card":null},
+              {"handle":"dispatch","kind":"session","terminal":"t-dispatch","face":{"rows":["#.#.#",".###.","#####",".###.","#.#.#"],"color":1},"joinedAt":0,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":"idle","kit":true,
+               "card":{"agent":"claude-code","name":"dispatch","cwd":"/Users/me/Projects","model":"claude-opus-5-5","profile":"Work","mode":"auto","node":null}}],
+             "messages":[
+              {"seq":7,"from":"you","to":[],"text":"手机上要能拉 Clash 订阅，iPhone 和安卓都做。","at":\(now - 900_000)},
+              {"seq":8,"from":"dispatch","to":["you"],"replyTo":7,"text":"@you 好。开了房间「手机订阅」，拉了 daemon、mac-app、ios-app、android 四个会话进去，先定接口。","at":\(now - 840_000)},
+              {"seq":9,"from":"dispatch","to":["you"],"text":"@you 已经开了 2 个会话去做订阅页，进度在「手机订阅」里。","at":\(now - 60_000)}]}
+            """)
+        }
+        guard id == roomId else { return nil }
         func seat(_ handle: String, _ rows: String, _ color: Int, _ state: String, agent: String, model: String, profile: String?, dot: String?, canAdd: Bool = false, byAgent: Bool = false, by: String = "you") -> String {
             let face = rows.split(separator: " ").map { "\"\($0)\"" }.joined(separator: ",")
             return """

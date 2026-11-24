@@ -37,13 +37,17 @@ struct RoomPage: View {
     /// Where the page was asked to open (等你处理): a task, a message, a member's card; taken once.
     @State private var opening: RoomRoute.Open?
     @FocusState private var writing: Bool
+    /// Shown as the Dispatch tab's own page (the dispatch desk), not pushed from the list: the tab bar stays, and the
+    /// title is this instead of the room's name.
+    private let tabTitle: String?
 
     struct MembersRequest: Identifiable {
         let id = UUID()
         var card: String?
     }
 
-    init(id: String, detail: RoomDetail? = nil, open: RoomRoute.Open? = nil) {
+    init(id: String, detail: RoomDetail? = nil, open: RoomRoute.Open? = nil, tabTitle: String? = nil) {
+        self.tabTitle = tabTitle
         _model = State(initialValue: RoomPageModel(id: id, detail: detail))
         _opening = State(initialValue: open)
     }
@@ -73,7 +77,7 @@ struct RoomPage: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .toolbar(tabTitle == nil ? .hidden : .automatic, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .principal) { titleButton(detail) }
             ToolbarItem(placement: .primaryAction) {
@@ -190,7 +194,7 @@ struct RoomPage: View {
         return Button { withAnimation(.easeOut(duration: 0.2)) { drawer.toggle() } } label: {
             VStack(spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(model.taskFilter.map { RoomMessage.taskWord($0, task?.title) } ?? detail?.room.name ?? "Room")
+                    Text(model.taskFilter.map { RoomMessage.taskWord($0, task?.title) } ?? tabTitle ?? detail?.room.name ?? "Room")
                         .font(.headline).foregroundStyle(Theme.ink).lineLimit(1)
                     LookGlyph.fold(open: drawer, size: 11).foregroundStyle(Theme.secondaryInk)
                 }

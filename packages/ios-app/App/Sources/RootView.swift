@@ -100,9 +100,11 @@ struct MainTabs: View {
                 .tabItem { Label { Text("Terminals") } icon: { look.isClassic ? Image(systemName: "terminal") : Image(uiImage: TabIcons.shaded(.terminals, on: model.tab == .terminals, dark: scheme == .dark)) } }
                 .badge(model.terminals.waiting)
                 .tag(MainTab.terminals)
-            // The old dispatch is off (OldDispatch): the tab stays, showing why, so it is not mistaken for a lost page.
-            Group { if OldDispatch.off { DispatchOffView() } else { HomeView() } }
+            // The old dispatch is off (OldDispatch): the tab shows the new one, the dispatch desk's room (DispatchDeskTab).
+            // The badge: the desk's unseen messages while one of them names the user.
+            Group { if OldDispatch.off { DispatchDeskTab() } else { HomeView() } }
                 .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .tasks, dark: scheme == .dark)) } }
+                .badge(OldDispatch.off ? model.rooms.rooms.first(where: \.desk).map { $0.forYou ? max($0.unread, 1) : 0 } ?? 0 : 0)
                 .tag(MainTab.tasks)
             // Chat Room (docs/chatroom-v0.md §10; 2026-11-22, user: iPhone/安卓上的file图标放到terminal顶栏，做成弹出式的……
             // 空出来的放这个chatroom): Files left the bar for the Terminals page's top bar, where it comes up as a sheet.
@@ -134,7 +136,8 @@ struct MainTabs: View {
             while !Task.isCancelled {
                 await model.rooms.refresh(model.api)
                 let every = model.rooms.unsupported ? RoomsStore.unsupportedInterval
-                    : model.tab == .rooms ? RoomsStore.pollInterval : RoomsStore.backgroundInterval
+                    : model.tab == .rooms || (model.tab == .tasks && OldDispatch.off && !model.rooms.rooms.contains(where: \.desk))
+                    ? RoomsStore.pollInterval : RoomsStore.backgroundInterval
                 try? await Task.sleep(for: every)
             }
         }
