@@ -240,6 +240,12 @@ Reply to: #39
 - Kit 合并成 `room_post`、`room_read`、`room_tasks`、`room_info`、`room_update`，管理员多一个 `room_admin`；旧名字照样认。`room_read` 有预算：短的未读给全文，长的和超出的一条一行，按编号分段取全文，按字、任务、人、页给目录。会话发的消息超过 800 字退回，让它写进共享文件夹。
 - 任务多一个 `blocked`（卡住，要写原因，通知派活的人和你）；每个任务记花费（叫醒、字数、消息、调用）；结束一个还有任务的成员先让它写交接（最多两分钟，`now=1` 立刻结束）；你在成员的终端里直接打字时房间里记一句，提醒它在房间说一声。
 
+### 10.3 调度台、头像、密钥（2026-11-24）
+
+- **新调度**（`api/dispatchDesk.ts`，设计稿 `design-dispatch-admin.md`）：设置 › Dispatch 选 agent / 配置 / 模型、权限模式、最多开几个会话（默认 8）。调度是一个普通会话，跑在 `<工作文件夹>/Dispatch`，那里的 `AGENTS.md` 是它的工作说明（`CLAUDE.md` 引它）；文件夹自动加进信任名单。它在「调度台」房间（`desk: true`，列表第一个）里是管理员，你在那里说的话不用 @ 都给它。开着时一直在：会话结束了 30 秒内恢复同一个对话。换一个新的：旧的先把交接写进 `handoff.md`（最多两分钟），新的从它开始。`GET/PUT /dispatch/desk`、`/dispatch/desk/instructions`、`POST /dispatch/desk/replace`，只在本机。
+- **头像**（`rooms/avatars.ts`）：每个会话两份，像素外观一份（40 个小像素脸、48 个 16×16 像素人物——DiceBear Pixel Art，CC0——或自己画 5×5），经典外观一份（60 个表情或任意一个表情，加底色）；没选时像素外观用席位的脸，经典外观用名字首字母。跟着会话走（按它的对话 id，之前按终端），所有房间一样，恢复不变。会话用 `room_update what=avatar` 自己换，`room_info show=avatars` 看库；你在名片上换（`PUT /rooms/:id/seats/:handle/avatar`）；`GET /rooms/avatars` 是库。
+- **密钥**（`rooms/secrets.ts`）：房间里的登录、API key、命令用的值。在 Mac 上加，网关当场封成密文（网站：http+fill，只限填的网址；API：http；命令：exec），服务只收 `enc:v1:` 密文，给明文就拒绝。可以导出模板、填好导入（之后提示把明文文件移到废纸篓），密文导出成 JSON 再导入别的房间。成员 `room_info show=secrets` 看到名称、网址、账号、密文和用法。手机上只能看、能删。
+
 ## 11. 分步
 
 1. 房间、席位、消息的存取；用户建房间、拉正在运行的会话；Mac 与 iPhone 的页面（只读加用户发言）。**已写**（2026-11-23；服务在 `rooms/` 与 `api/rooms.ts`）。
