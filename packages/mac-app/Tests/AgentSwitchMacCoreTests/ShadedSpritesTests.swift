@@ -54,6 +54,8 @@ final class ShadedSpritesTests: XCTestCase {
         XCTAssertFalse(ShadedSprite.all.contains { $0.sprite == .clash })
         // In the classic look it is drawn by hand too (Clash's own cat's head; the system has only a whole cat).
         XCTAssertNil(PixelArt.symbol(for: PixelArt.railClash))
+        // The password book in the classic look: the system's lock, not the pixel one (user #397).
+        XCTAssertEqual(PixelArt.symbol(for: PixelArt.railPasswords), "lock")
         XCTAssertTrue(ShadedSprite.clash.rows.allSatisfy { $0.count == 16 } && ShadedSprite.clash.height <= 16)
         XCTAssertTrue(Set(ShadedSprite.clash.rows.joined()).subtracting(["."]).allSatisfy { ShadedSprite.color($0, dark: true) != nil && ShadedSprite.color($0, dark: false) != nil })
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.toolbarSettings), .settings)
