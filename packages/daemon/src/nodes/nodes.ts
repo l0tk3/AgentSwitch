@@ -2,7 +2,7 @@
  *  with this one, and how the nodes it uses are doing. Every node is the same kind of thing; what differs is what it
  *  has, which it says itself (`GET /node`). */
 
-import type { Store } from "../engine/store.js";
+import type { Devices } from "../remote/deviceStore.js";
 import { normalizeCode, pairPayload, parsePairLink, type PairPayload } from "../remote/pairing.js";
 import { macName, type RemoteRuntime } from "../remote/runtime.js";
 import { peerView, rememberLan, type NodeBook, type Peer, type PeerView } from "./book.js";
@@ -59,7 +59,7 @@ export type NodeStatus = PeerView & { readonly state: "online" | "offline" | "re
 export type NodesOptions = {
   readonly book: NodeBook;
   readonly dialer: Dialer;
-  readonly store: Store;
+  readonly store: Devices;
   /** This node's own listener: without one it can use other nodes and cannot be used back. */
   readonly remote: RemoteRuntime | null;
   readonly info: () => NodeInfo;

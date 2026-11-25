@@ -2,8 +2,8 @@
  *  a revoked device gets 401 at once. Also who is online, for GET /remote/info. */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { Store } from "../engine/store.js";
-import type { Device } from "../engine/types.js";
+import type { Devices } from "./deviceStore.js";
+import type { Device } from "./deviceStore.js";
 
 const TOKEN_BYTES = 32;
 /** A device's last_seen_at is written at most this often; every request still authenticates against the table. */
@@ -21,7 +21,7 @@ export function hashToken(token: string): string {
 }
 
 /** A new device row for a token; only the token's hash is stored. */
-export function registerDevice(store: Store, input: { readonly name: string; readonly platform: string }, random?: (n: number) => Buffer): { readonly device: Device; readonly token: string } {
+export function registerDevice(store: Devices, input: { readonly name: string; readonly platform: string }, random?: (n: number) => Buffer): { readonly device: Device; readonly token: string } {
   const token = newToken(random);
   return { device: store.createDevice({ ...input, tokenHash: hashToken(token) }), token };
 }
@@ -29,7 +29,7 @@ export function registerDevice(store: Store, input: { readonly name: string; rea
 /** The device an `Authorization: Bearer <token>` header belongs to, or null (no header, wrong token, revoked). Every
  *  stored hash is compared with timingSafeEqual, revoked devices included, so timing says nothing about which failed.
  *  A match refreshes last_seen_at, at most once per LAST_SEEN_THROTTLE_MS. */
-export function authenticate(store: Store, header: string | undefined, now: number = Date.now()): Device | null {
+export function authenticate(store: Devices, header: string | undefined, now: number = Date.now()): Device | null {
   const token = header ? BEARER.exec(header)?.[1] : undefined;
   if (!token) return null;
   const presented = Buffer.from(hashToken(token), "hex");

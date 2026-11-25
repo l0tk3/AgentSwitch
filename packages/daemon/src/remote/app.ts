@@ -12,8 +12,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { markRemote } from "../core/caller.js";
-import type { Store } from "../engine/store.js";
-import type { Device } from "../engine/types.js";
+import type { Devices } from "./deviceStore.js";
+import type { Device } from "./deviceStore.js";
 import { isAllowedSource, normalizeAddress } from "./address.js";
 import { authenticate, registerDevice, type Presence } from "./devices.js";
 import type { GateKeyReader } from "./gateKey.js";
@@ -52,7 +52,7 @@ export type RemoteNodes = {
 };
 
 export type RemoteAppDeps = {
-  readonly store: Store;
+  readonly store: Devices;
   readonly pairing: PairingDesk;
   readonly presence: Presence;
   readonly gateKey: GateKeyReader;

@@ -6,13 +6,13 @@ import type { Hono } from "hono";
 import { statSync } from "node:fs";
 import { z } from "zod";
 import { canonicalPath } from "../core/paths.js";
-import type { Store } from "../engine/store.js";
+import type { Devices } from "./deviceStore.js";
 import { askedPath, MAX_SCOPE_FOLDERS, type FileScope } from "../files/browse.js";
 import { pairPayload, bonjourName } from "./pairing.js";
 import type { RemoteRuntime } from "./runtime.js";
 
 export type RemoteAdminDeps = {
-  readonly store: Store;
+  readonly store: Devices;
   /** Null when AGENTSWITCH_REMOTE is off: devices can still be listed and revoked, but nothing can pair. */
   readonly remote: RemoteRuntime | null;
   /** A device was revoked here: it may have been another node's (nodes/nodes.ts). */
