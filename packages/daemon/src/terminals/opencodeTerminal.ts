@@ -14,7 +14,8 @@
  *  this server runs is read (`/api/session/active`, then each running session's own line): the list of every session
  *  of the folder is shared with other OpenCodes and is not asked for this. */
 
-import type { PermissionRequest } from "../executors/opencodeServeMap.js";
+/** OpenCode's permission request, as its server sends it. */
+type PermissionRequest = { readonly id: string; readonly sessionID: string; readonly action: string; readonly resources?: readonly string[]; readonly metadata?: unknown };
 import { randomBytes } from "node:crypto";
 import { basicAuth, noteServePort, startStdioServe, stopStdioServe, type StdioServe, type StdioServeOptions } from "../harness/opencodeStdio.js";
 import { attachHeldServer, startHeldServer, type HoldPlace, type Holding, type ServerProcess } from "./held.js";

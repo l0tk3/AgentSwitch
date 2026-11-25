@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { ExitPool } from "./browser/exits.js";
-import { probeRateLimits } from "./executors/claude.js";
+import { probeRateLimits } from "./quota/claudeProbe.js";
 import { codexQuota } from "./quota/codex.js";
 import { RateLimitCache, type Window } from "./quota/windows.js";
 import { proxyEnv } from "./terminals/launch.js";
