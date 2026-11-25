@@ -60,7 +60,7 @@ struct RedactionView: View {
         } header: {
             SectionLabel("Model Traffic")
         } footer: {
-            Footer(s.settings.enabled ? "从 AgentSwitch 启动的终端（Claude Code、Codex、OpenCode、pi）访问模型时经过内置网关：下面的词和各房间（房间菜单 › Words…）的词，在发给模型前换成占位符，回来时换回原词。只对之后启动的终端生效；不改你的任何配置，原来的代理照常是出口。" : "已关闭：新开的终端不经过网关，替换词和各房间的替换词都不可用。")
+            if !s.settings.enabled { Footer("已关闭：新开的终端不经过网关，替换词和各房间的替换词都不可用。") }
         }
     }
 
@@ -85,8 +85,6 @@ struct RedactionView: View {
             if let said { Text(said).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         } header: {
             SectionLabel("Words")
-        } footer: {
-            Footer("默认换成 h_ 加 10 个字符的加盐哈希（每个 profile 的盐不同），模型方无法反推。自己指定的替换太简单（少于 6 个字符、普通词、纯数字）时只替换不还原。替换词加密保存，钥匙在钥匙串里。")
         }
     }
 
@@ -125,8 +123,6 @@ struct RedactionView: View {
             }
         } header: {
             SectionLabel("Logs")
-        } footer: {
-            Footer("Before：agent 发出和收到的原样内容（含原词，打开前要验证身份）。After：模型那边实际收到和发回的内容。按终端、按天分文件，每份最多 64 MB。")
         }
     }
 

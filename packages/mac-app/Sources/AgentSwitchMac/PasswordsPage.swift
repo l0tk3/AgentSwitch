@@ -102,8 +102,6 @@ struct PasswordsPage: View {
                     if e.hasTotp { totpField }
                     if e.hasNote { noteField }
                     if let said = model.said { Text(said).font(.system(size: 12)).foregroundStyle(Look.ink2) }
-                    Text("这条密码也是替换词：模型只看到占位符，本机的 agent 拿到真值（设置 › Redaction 打开时）。")
-                        .font(.system(size: 12)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(24)
                 .frame(maxWidth: 620, alignment: .leading)

@@ -510,9 +510,6 @@ struct RoomWordsSheet: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(look.isClassic ? Color.clear : Look.raised)
             HairRule(color: Look.line)
-            Text("坐在这个房间里的成员访问模型时，除了「设置 › Redaction」里的全局替换词，还会替换这里的词：发出去前换成占位符，回来时换回原词。留空「替换成」就用加盐哈希。")
-                .font(.system(size: 12)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 16).padding(.top, 10)
             HStack(spacing: 8) {
                 TextField("", text: $value, prompt: Text("要替换的词")).textFieldStyle(.roundedBorder)
                 TextField("", text: $replace, prompt: Text("替换成（留空：加盐哈希）")).textFieldStyle(.roundedBorder)
