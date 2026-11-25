@@ -202,14 +202,18 @@ struct RoomAttentionEntry: View {
                         .padding(.horizontal, 5).frame(minWidth: 17, minHeight: 17).background(Capsule().fill(Color.waiting))
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, look.isClassic ? 10 : 12)
             .frame(height: 32)
-            .background(n > 0 ? Color.waiting.opacity(look.isClassic ? 0.12 : 0.08) : Color.clear)
+            // The classic look: a card with round corners in the list, no line under it (§8.1).
+            .background(RoundedRectangle(cornerRadius: look.isClassic ? Look.controlRadius : 0, style: .continuous)
+                .fill(n > 0 ? Color.waiting.opacity(look.isClassic ? 0.14 : 0.08) : Color.clear))
+            .padding(.horizontal, look.isClassic ? 8 : 0)
+            .padding(.bottom, look.isClassic ? 4 : 0)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
-        .help(n > 0 ? "所有房间里要你动手的事" : "现在没有要你动手的事")
+        .overlay(alignment: .bottom) { HairRule(color: look.isClassic ? .clear : Look.line) }
+        .help(n > 0 ? "所有频道里要你动手的事" : "现在没有要你动手的事")
         .popover(isPresented: $model.attentionShown, arrowEdge: .trailing) { list }
     }
 

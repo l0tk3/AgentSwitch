@@ -57,7 +57,7 @@ struct GeneralView: View {
             } header: {
                 SectionLabel("Appearance")
             } footer: {
-                Footer("Appearance 只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Pages 决定 Dispatch、Chat Room、Browser 的界面跟随系统的浅色/深色，还是总是暗色；终端本身总是暗色，网页本身由网站决定。Text Size 调整对话里文字的大小：消息、步骤、代码和回复框；侧栏、按钮和终端画面不变。")
+                Footer("Appearance 只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Pages 决定 Dispatch、Channels、Browser 的界面跟随系统的浅色/深色，还是总是暗色；终端本身总是暗色，网页本身由网站决定。Text Size 调整对话里文字的大小：消息、步骤、代码和回复框；侧栏、按钮和终端画面不变。")
             }
 
             Section {

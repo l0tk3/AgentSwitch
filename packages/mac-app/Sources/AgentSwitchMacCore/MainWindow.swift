@@ -17,7 +17,7 @@ public enum MainPage: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .dispatch: "Dispatch"
-        case .rooms: "Chat Room"
+        case .rooms: "Channels"
         case .terminals: "Terminals"
         case .browser: "Browser"
         case .clash: "Clash"
@@ -40,7 +40,7 @@ public enum MainPage: String, CaseIterable, Sendable {
     public var railHelp: String {
         switch self {
         case .dispatch: "Dispatch ⌘0"
-        case .rooms: "Chat Room ⌘⇧M"
+        case .rooms: "Channels ⌘⇧M"
         case .terminals: "Terminals ⌘1–9"
         case .browser: "Browser ⌘⇧B"
         case .clash: "Clash ⌘⇧K"

@@ -254,7 +254,7 @@ struct MainBar: View {
                     case .browser:
                         ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Tab ⌘T", action: actions.newTab)
                     case .rooms:
-                        ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Room") { state.askNewRoom() }
+                        ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Channel") { state.askNewRoom() }
                         ToolbarPixelButton(rows: PixelArt.toolbarPeople, help: "Members", lit: state.roomsMembers) { state.roomsMembers.toggle() }
                     case .dispatch, .clash:
                         EmptyView()
@@ -273,7 +273,7 @@ struct MainBar: View {
             case .clash:
                 DispatchTitleView(title: BarTitle("Clash Integration"))
             case .rooms:
-                DispatchTitleView(title: BarTitle(state.roomsTitle.map { "Chat Room · \($0)" } ?? "Chat Room"))
+                DispatchTitleView(title: BarTitle(state.roomsTitle.map { "# \($0)" } ?? "Channels"))
             }
         }
     }

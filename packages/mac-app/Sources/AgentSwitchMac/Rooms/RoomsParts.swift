@@ -61,36 +61,6 @@ struct RoomFaceView: View {
     }
 }
 
-/// A room's picture (user #412: 根据群成员头像生成一个群头像…一个一个小气泡样式的): its first members' own, small, in a
-/// loose cluster of bubbles of different sizes (RoomPictureLayout) — a handful of pictures, never taken for one member's. A room with no session yet: its name's first
-/// letter.
-struct RoomPictureView: View {
-    let seats: [RoomSeat]
-    let name: String
-    var side: CGFloat = 34
-    @Environment(\.interfaceLook) private var look
-
-    var body: some View {
-        let spots = RoomPictureLayout.spots(seats.count)
-        ZStack(alignment: .topLeading) {
-            if spots.isEmpty {
-                Text(String(name.prefix(1)).uppercased()).font(.system(size: side * 0.44, weight: .semibold)).foregroundStyle(Look.ink2)
-                    .frame(width: side, height: side)
-                    .background(RoundedRectangle(cornerRadius: look.isClassic ? side / 2 : 0).fill(Look.raised))
-            }
-            ForEach(Array(zip(seats, spots).enumerated()), id: \.offset) { _, pair in
-                let s = (CGFloat(pair.1.side) * side).rounded()
-                RoomFaceView(seat: pair.0, side: s, cell: max(1, (s / 5).rounded(.down)))
-                    .offset(x: (CGFloat(pair.1.x) * side).rounded(), y: (CGFloat(pair.1.y) * side).rounded())
-            }
-        }
-        // From the box's own corner: laid out in the middle, the stack — as big as its biggest bubble only — put every
-        // bubble right of and under its place (user #426: 头像排列都是偏右下角的).
-        .frame(width: side, height: side, alignment: .topLeading)
-        .accessibilityHidden(true)
-    }
-}
-
 /// A 5 × 5 face: squares that touch.
 struct RoomFacePattern: View {
     let face: RoomFace
@@ -640,7 +610,7 @@ struct RoomMemberCard: View {
                 line("Seated By", seat.addedBy == Room.you ? "You" : "@\(seat.addedBy)")
                 if seat.here { line("Unread", seat.unread == 0 ? "Read everything" : "\(seat.unread) messages", help: "房间里它还没读过的消息数（它入座之后别人说的）。") }
                 if let asks = seat.asks { line("Asks", asks.title, color: .waiting, help: asks.options.joined(separator: "\n")) }
-                if let stats = seat.stats { line("Room Cost", stats.says, help: "这个成员在房间里的开销：被唤醒几次、送进去多少字、发了几条消息、调了几次房间工具。花了多少 token 要看它自己的用量。") }
+                if let stats = seat.stats { line("Channel Cost", stats.says, help: "这个成员在房间里的开销：被唤醒几次、送进去多少字、发了几条消息、调了几次房间工具。花了多少 token 要看它自己的用量。") }
                 if let claim { line("Changing", "\(claim.names) → \(claim.untilDate.formatted(date: .omitted, time: .shortened))", mono: true, help: claim.paths.joined(separator: "\n") + (claim.why.map { "\n\($0)" } ?? "")) }
             }
             .padding(.top, 10)

@@ -101,7 +101,7 @@ struct RoomsPage: View {
             return
         }
         let waiting = model.rooms.filter(\.forYou).count
-        var status = [model.rooms.count == 1 ? "1 Room" : "\(model.rooms.count) Rooms"]
+        var status = [model.rooms.count == 1 ? "1 Channel" : "\(model.rooms.count) Channels"]
         if let room = model.room {
             status.append(room.sessions.count == 1 ? "1 Session Here" : "\(room.sessions.count) Sessions Here")
             if room.room.paused { status.append("Paused") }
@@ -209,7 +209,7 @@ private struct RoomsColumns: View {
             VStack(spacing: 12) {
                 Text(model.error ?? "还没有房间。建一个，把正在运行的会话拉进来，它们就能互相说话。")
                     .font(.system(size: 13)).foregroundStyle(model.error == nil ? Look.ink2 : Color.failed).multilineTextAlignment(.center).lineSpacing(4)
-                Button { model.open(.new) } label: { BracketLabel(word: "New Room") }.buttonStyle(BracketButtonStyle(role: .primary))
+                Button { model.open(.new) } label: { BracketLabel(word: "New Channel") }.buttonStyle(BracketButtonStyle(role: .primary))
             }
             .padding(.horizontal, 40)
         } else if let error = model.error {
@@ -235,6 +235,33 @@ private struct RoomsColumns: View {
     }
 }
 
+private extension View {
+    /// What waits for the user, said across the room: a band with a line under it in the pixel look; in the classic
+    /// one a card with round corners that stands clear of the edges (§8.1).
+    func noticeBand() -> some View { modifier(NoticeBand()) }
+}
+
+private struct NoticeBand: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
+            content
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.waiting.opacity(0.14)))
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+        } else {
+            content
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.waiting.opacity(0.1))
+                .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+        }
+    }
+}
+
 // MARK: - the rooms
 
 private struct RoomsList: View {
@@ -244,11 +271,11 @@ private struct RoomsList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                PartLabel("Rooms").lineLimit(1).fixedSize()
+                PartLabel("Channels").lineLimit(1).fixedSize()
                 Spacer(minLength: 4)
                 Button { model.open(.models) } label: { BracketLabel(word: "Models") }.buttonStyle(BracketButtonStyle(size: 12))
                     .help("管理员会话拉人时，每个配置下哪些模型能用。")
-                Button { model.open(.new) } label: { BracketLabel(word: "New") }.buttonStyle(BracketButtonStyle(size: 12)).help("New Room")
+                Button { model.open(.new) } label: { BracketLabel(word: "New") }.buttonStyle(BracketButtonStyle(size: 12)).help("New Channel")
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
@@ -270,42 +297,44 @@ private struct RoomsList: View {
 private struct RoomListRow: View {
     let room: RoomSummary
     let current: Bool
+    /// Something in it the user has not seen, or that waits for them.
+    private var fresh: Bool { room.unread > 0 || room.attention > 0 || room.rounds != nil }
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-            // The room's picture, of its members' (user #412); the 调度台 keeps its own mark.
-            if !room.desk { RoomPictureView(seats: room.faces, name: room.name) }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    if room.desk {
-                        LookGlyph(glyph: "◆", symbol: "person.crop.circle.badge.checkmark", size: 12).foregroundStyle(current ? Color.signal : Look.ink2).help("调度台：你和调度说话的地方")
-                    }
-                    Text(room.name).mono(13, weight: look.isClassic ? .semibold : .regular).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    if room.paused { Text("Paused").mono(11).foregroundStyle(Look.faint) }
-                    // Someone in it is at work (user #269).
-                    if room.working > 0, !room.paused {
-                        HStack(spacing: 3) {
-                            BrailleSpinner(size: 11)
-                            Text("工作中").font(.system(size: 11))
-                        }
-                        .foregroundStyle(Color.signal)
-                        .help(room.working == 1 ? "1 个成员正在工作" : "\(room.working) 个成员正在工作")
-                    }
-                    // Sessions went many rounds without the user (§7): the mark of what waits for you, where no count stands.
-                    if room.rounds != nil, room.unread == 0, !room.paused { BlinkingSquare().help("会话之间已经往返多次，没有你参与。") }
-                    if room.unread > 0 { count }
+            // A channel: `#` and its name on one line (user #436: rooms改成channels…按照这种方式显示), what waits in it at
+            // the row's end. A channel with nothing new is quieter; the 调度台 keeps its own mark. What was said last
+            // is the row's help.
+            HStack(spacing: 8) {
+                if room.desk {
+                    LookGlyph(glyph: "◆", symbol: "person.crop.circle.badge.checkmark", size: 12).foregroundStyle(current ? Color.signal : Look.ink2).help("调度台：你和调度说话的地方")
+                } else {
+                    Text("#").font(.system(size: 15, weight: .regular, design: look.isClassic ? .default : .monospaced)).foregroundStyle(current ? Look.ink : Look.faint).frame(width: 14)
                 }
-                Text(room.lastLine).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
+                Text(room.name).mono(13, weight: look.isClassic ? (fresh || current ? .semibold : .medium) : .regular)
+                    .foregroundStyle(fresh || current ? Look.ink : Look.ink2).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 4)
+                if room.paused { Text("Paused").mono(11).foregroundStyle(Look.faint) }
+                // Someone in it is at work (user #269).
+                if room.working > 0, !room.paused {
+                    HStack(spacing: 3) {
+                        BrailleSpinner(size: 11)
+                        Text("工作中").font(.system(size: 11))
+                    }
+                    .foregroundStyle(Color.signal)
+                    .help(room.working == 1 ? "1 个成员正在工作" : "\(room.working) 个成员正在工作")
+                }
+                // Sessions went many rounds without the user (§7): the mark of what waits for you, where no count stands.
+                if room.rounds != nil, room.unread == 0, !room.paused { BlinkingSquare().help("会话之间已经往返多次，没有你参与。") }
+                if room.unread > 0 { count }
             }
-            }
+            .help(room.lastLine)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, look.isClassic ? 10 : 12)
-            .padding(.vertical, look.isClassic ? 7 : 8)
+            .padding(.vertical, look.isClassic ? 6 : 7)
             // The room open is plain to see (user #301: 好像没有选中效果？): in the classic look tinted in the signal colour, as
             // the terminals' list marks its own; a row under the pointer only a light wash.
             .background(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0).fill(current ? (look.isClassic ? Color.signal.opacity(0.2) : Look.raised) : hovering ? Look.hover : Color.clear))
@@ -348,12 +377,13 @@ private struct RoomView: View {
     var body: some View {
         VStack(spacing: 0) {
             if model.searching { RoomSearchBar(model: model) } else { head }
-            HairRule(color: Look.line)
+            // No lines across the content in the classic look (§8.1): the bar and the box stand on the page's ground.
+            HairRule(color: look.isClassic ? .clear : Look.line)
             if room.room.paused { banner } else if let rounds = room.room.rounds { told(rounds) }
             needs
             if let said = model.problem ?? model.error { problem(said) }
             if model.searching { RoomSearchResults(model: model, room: room) } else { timeline }
-            HairRule(color: Look.line)
+            HairRule(color: look.isClassic ? .clear : Look.line)
             RoomWriter(model: model, room: room)
         }
         .overlay(alignment: .topLeading) { if model.drawer { RoomTaskDrawer(model: model, room: room).padding(.top, 40) } }
@@ -380,10 +410,7 @@ private struct RoomView: View {
             Spacer()
             Button { model.setPaused(false) } label: { BracketLabel(word: "Resume") }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.waiting.opacity(look.isClassic ? 0.14 : 0.1))
-        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+        .noticeBand()
     }
 
     /// Many rounds without the user (§7): told, not stopped. `OK` counts again from here; `Pause` is the user's to press.
@@ -395,10 +422,7 @@ private struct RoomView: View {
             Button { model.setPaused(true) } label: { BracketLabel(word: "Pause") }.buttonStyle(BracketButtonStyle(size: 12))
             Button { model.roundsSeen() } label: { BracketLabel(word: "OK") }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.waiting.opacity(look.isClassic ? 0.14 : 0.1))
-        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+        .noticeBand()
     }
 
     /// Members that need one thing of the user, several at once (§6.2): their agents ask whether a folder is trusted,
@@ -432,10 +456,7 @@ private struct RoomView: View {
             }
             Button(action: action) { BracketLabel(word: word) }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.waiting.opacity(look.isClassic ? 0.14 : 0.1))
-        .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+        .noticeBand()
     }
 
     private func problem(_ text: String) -> some View {
@@ -461,8 +482,7 @@ private struct RoomView: View {
         return HStack(spacing: 10) {
             Button { model.drawer.toggle() } label: {
                 HStack(spacing: 6) {
-                    if task == nil, room.room.desk != true { RoomPictureView(seats: Array(room.seats.filter { !$0.isUser && $0.left == nil }.prefix(4)), name: room.room.name, side: 24) }
-                    Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? (room.room.desk == true ? "# " : "") + room.room.name)
+                    Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? "# " + room.room.name)
                         .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
                     LookGlyph(glyph: model.drawer ? "▴" : "▾", symbol: model.drawer ? "chevron.up" : "chevron.down", size: 10).foregroundStyle(Look.ink2)
                 }
@@ -490,12 +510,12 @@ private struct RoomView: View {
                 Button("Passwords…") { PasswordsOpener.showRoom(model.nodeId, room.room.id, room.room.name) }
                 Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
                 Divider()
-                Button("Edit Room…") { model.open(.edit) }
-                Button(room.room.paused ? "Resume Room" : "Pause Room") { model.setPaused(!room.room.paused) }
+                Button("Edit Channel…") { model.open(.edit) }
+                Button(room.room.paused ? "Resume Channel" : "Pause Channel") { model.setPaused(!room.room.paused) }
                 // 解散 (user #230); not the 调度台, which goes with the dispatch turned off.
                 if room.room.desk != true {
                     Divider()
-                    Button("Dissolve Room…", role: .destructive) { model.deleting = true }
+                    Button("Dissolve Channel…", role: .destructive) { model.deleting = true }
                 }
             } label: {
                 LookGlyph(glyph: "⋯", symbol: "ellipsis", size: 18).foregroundStyle(Look.ink)
@@ -878,9 +898,9 @@ private struct RoomSheet: View {
 
     private var title: String {
         switch kind {
-        case .new: "New Room"
+        case .new: "New Channel"
         case .add: "Add Sessions"
-        case .edit: "Edit Room"
+        case .edit: "Edit Channel"
         case .notes: "Notes"
         case .tasks: "Tasks"
         case .files: "Files"
@@ -938,7 +958,7 @@ private struct RoomSheet: View {
             HairRule(color: Look.line)
             VStack(alignment: .leading, spacing: 12) {
                 if kind != .add {
-                    field("Name") { RoomField(prompt: "Room Name", text: $name) }
+                    field("Name") { RoomField(prompt: "Channel Name", text: $name) }
                     field("Topic") { RoomField(prompt: "进来的成员先读到的一句话", text: $topic) }
                 }
                 if kind != .edit {
