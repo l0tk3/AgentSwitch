@@ -49,7 +49,7 @@ private struct SideEdge: View {
 
     var body: some View {
         Rectangle()
-            .fill(hovering || dragging ? Look.ink2 : Look.line)
+            .fill(hovering || dragging ? Look.ink2 : InterfaceLook.current.isClassic ? .clear : Look.line)
             .frame(width: 1)
             .frame(maxHeight: .infinity)
             .overlay {

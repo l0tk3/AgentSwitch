@@ -23,7 +23,7 @@ struct BrowserSideEdge: View {
 
     var body: some View {
         ZStack {
-            HairRule(color: Look.line, vertical: true)
+            HairRule(color: InterfaceLook.current.isClassic ? .clear : Look.line, vertical: true)
             if hovering || dragging {
                 Rectangle().fill(dragging ? Color.signal : Look.ink2).frame(width: 1)
             }

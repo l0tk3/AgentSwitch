@@ -46,6 +46,23 @@ struct MainWindowRoot: View {
     let model: AppModel
     let content: NSView
     let actions: MainBarActions
+    var browser: BrowserPageModel?
+    var files: FilesColumn?
+
+    var body: some View {
+        // The look is handed down from here (`followsWindow`), so the layout that reads it is a view under it.
+        MainWindowLayout(state: state, head: head, model: model, content: content, actions: actions, browser: browser, files: files)
+            // The bars' spinners and marks stop while the window is not seen (ui-v0 §7.4).
+            .followsWindow()
+    }
+}
+
+private struct MainWindowLayout: View {
+    let state: MainWindowState
+    let head: TerminalHead
+    let model: AppModel
+    let content: NSView
+    let actions: MainBarActions
     /// The Browser page's model: its hold is the status bar's right on Browser.
     var browser: BrowserPageModel?
     /// The window's Files column (docs/files-v0.md §2): beside the page on the right, or over it.
@@ -62,7 +79,7 @@ struct MainWindowRoot: View {
                     .frame(height: state.barHeight)
                     .background(BarGround(side: side))
                 // The bar's edge, while there is an outline to draw (BarRule).
-                BarRule(shown: side > 0 || filesDocked(proxy.size.width))
+                BarRule(shown: !look.isClassic && (side > 0 || filesDocked(proxy.size.width)))
                 // Another node's pages: whose they are, said across the window, with the way back.
                 if let node = state.node, NodeStrip.shown(node: model.nodes.node(node.id) ?? node, known: model.nodes.node(node.id) != nil, hidden: stripHidden) {
                     NodeStrip(node: model.nodes.node(node.id) ?? node, known: model.nodes.node(node.id) != nil, back: { actions.useNode(nil) },
@@ -74,7 +91,7 @@ struct MainWindowRoot: View {
                     // the window's edge.
                     if !state.railHidden {
                         MainRail(state: state, switchPage: actions.switchPage, settings: actions.settings)
-                            .background(ChromeGround(color: Look.sidebar))
+                            .background(ChromeGround(color: .clear))
                         RailEdge(state: state).zIndex(1)
                     }
                     ContentHost(view: content)
@@ -98,7 +115,7 @@ struct MainWindowRoot: View {
                 .overlay(alignment: .leading) {
                     RailOut(state: state, switchPage: actions.switchPage, settings: actions.settings)
                 }
-                BarRule(shown: side > 0 || filesDocked(proxy.size.width))
+                BarRule(shown: !look.isClassic && (side > 0 || filesDocked(proxy.size.width)))
                 MainStatusBar(state: state, head: head, model: model, browser: browser, files: files, seal: actions.seal)
                     .frame(height: MainStatusBar.height)
                     .background(BarGround(side: side))
@@ -106,8 +123,6 @@ struct MainWindowRoot: View {
         }
         .background(Color(nsColor: ground))
         .ignoresSafeArea(.container, edges: .top)
-        // The bars' spinners and marks stop while the window is not seen (ui-v0 §7.4).
-        .followsWindow()
     }
 
     /// The column stands beside the page: open, not floating, and the page keeps its least width beside it (else it
@@ -159,14 +174,11 @@ private struct BarRule: View {
 /// ground — the terminal's — shows there). Nothing in the pixel look, where the page's ground runs under all of it.
 private struct BarGround: View {
     let side: CGFloat
-    @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        if look.isClassic {
-            Look.chrome.frame(width: max(0, side)).frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            Color.clear
-        }
+        // Nothing in either look: the page's ground runs under the bars (the classic look's too since §8.1 — its
+        // side columns are cards that float, no longer a column of the window's own grey under the bar).
+        Color.clear
     }
 }
 

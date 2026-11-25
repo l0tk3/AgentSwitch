@@ -47,7 +47,8 @@ struct TerminalSidebar: View {
             if model.selecting { SelectFoot(model: model) }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background { if look.isClassic { Look.sidebar } else { ScanLines() } }
+        .background { if !look.isClassic { ScanLines() } }
+        .sideCard(trailing: Look.panelGap)
     }
 }
 

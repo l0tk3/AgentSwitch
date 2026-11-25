@@ -168,13 +168,13 @@ private struct RoomsColumns: View {
     var body: some View {
         HStack(spacing: 0) {
             if list {
-                RoomsList(model: model).frame(width: 236)
-                HairRule(color: Look.line, vertical: true)
+                RoomsList(model: model).frame(width: 236 + (look.isClassic ? Look.panelGap : 0))
+                HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
             }
             center.frame(maxWidth: .infinity, maxHeight: .infinity)
             if state.roomsMembers, let room = model.room {
-                HairRule(color: Look.line, vertical: true)
-                RoomMembers(model: model, room: room).frame(width: 232)
+                HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
+                RoomMembers(model: model, room: room).frame(width: 232 + (look.isClassic ? 2 * Look.panelGap : 0))
             }
         }
         .overlay { if model.sheet != nil { sheet } }
@@ -262,7 +262,8 @@ private struct RoomsList: View {
                 .padding(.bottom, 8)
             }
         }
-        .background(look.isClassic ? Look.sidebar : Look.ground)
+        .background(look.isClassic ? Color.clear : Look.ground)
+        .sideCard(trailing: Look.panelGap)
     }
 }
 
@@ -805,7 +806,8 @@ private struct RoomMembers: View {
                 .padding(.bottom, 10)
             }
         }
-        .background(look.isClassic ? Look.sidebar : Look.ground)
+        .background(look.isClassic ? Color.clear : Look.ground)
+        .sideCard(leading: Look.panelGap, trailing: Look.panelGap)
     }
 }
 

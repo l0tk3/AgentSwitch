@@ -17,14 +17,14 @@ enum Look {
     static let faint = Color.inkDim
     static let line = Color(nsColor: .barEdge)
     /// A card's ground.
-    static let panel = Color(nsColor: .dynamic(light: 0xECE8DF, dark: 0x0B0B0B, classicLight: 0xFFFFFF, classicDark: 0x141416, name: "AgentSwitchDispatchPanel"))
+    static let panel = Color(nsColor: .dynamic(light: 0xECE8DF, dark: 0x0B0B0B, classicLight: 0xF5F6F8, classicDark: 0x17181C, name: "AgentSwitchDispatchPanel"))
     /// What you said: a raised box (the signal colour is not for text backgrounds).
-    static let raised = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F0F2, classicDark: 0x232326, name: "AgentSwitchDispatchRaised"))
-    static let hover = Color(nsColor: .dynamic(light: 0xE9E5DC, dark: 0x121212, classicLight: 0xEDEDEF, classicDark: 0x18181B, name: "AgentSwitchDispatchHover"))
+    static let raised = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchRaised"))
+    static let hover = Color(nsColor: .dynamic(light: 0xE9E5DC, dark: 0x121212, classicLight: 0xE9EBF0, classicDark: 0x24252B, name: "AgentSwitchDispatchHover"))
     /// What you said, as its ground: the raised box of the pixel look; in the classic look a wash of the ink under
     /// ink text — as both agents' own desktop apps set a user's message (about 5% of the text's colour), no longer the
     /// accent's bubble with white text (docs/ui-v0.md §8, 2026-10-07).
-    static let said = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F0F1, classicDark: 0x1F1F22, name: "AgentSwitchDispatchSaid"))
+    static let said = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchSaid"))
 
     /// The highest thinking level's own colour (docs/terminal-v0.md §1 “滑块”, 2026-10-07): violet, and the deeper blue
     /// its line begins in. Nothing else is this colour.
@@ -71,19 +71,26 @@ enum Look {
     static let column: CGFloat = 760
     static let side: CGFloat = 24
 
-    /// The classic look's window chrome (§8, the concept page's `--chrome` and `--side`): the bar's and the status
-    /// bar's ground, and the rail's. The pixel look has none of its own: the page's ground runs under all of them. On
-    /// the main window's dark pages they are the terminal's black too — one surface, parted by hairlines, the cards and
-    /// what is raised a little lighter (2026-10-04; user: classic不够黑，不够一体化，和终端有些割裂; two greys before).
-    static let chrome = Color(nsColor: .dynamic(light: 0xF6F6F7, dark: 0x000000, name: "AgentSwitchClassicChrome"))
-    static let sidebar = Color(nsColor: .dynamic(light: 0xF2F2F4, dark: 0x000000, name: "AgentSwitchClassicSidebar"))
+    /// The classic look's layers (§8.1, 2026-11-26; user #428: 加一些圆角和层级, #450 chose "C"): the window's ground
+    /// is the content's — the terminal's own on Terminals, so the two stay of one piece (2026-10-04: classic不够黑，
+    /// 不够一体化，和终端有些割裂) —, with the bar, the rail and the status bar drawn on it and no lines between; a side
+    /// column (a page's list, Files, a room's members) is a card a step lighter that floats over it with round
+    /// corners (`sideCard`). `sidebar` is such a card's ground; `chrome` what the put-away rail comes out on.
+    static let chrome = Color(nsColor: .dynamic(light: 0xF3F4F7, dark: 0x191A1E, name: "AgentSwitchClassicChrome"))
+    static let sidebar = Color(nsColor: .dynamic(light: 0xF3F4F7, dark: 0x191A1E, name: "AgentSwitchClassicSidebar"))
+    /// The faint ring around a floating card.
+    static let ring = Color(nsColor: .dynamic(light: 0xDFE1E6, dark: 0x2A2B31, name: "AgentSwitchClassicRing"))
 
-    /// The classic look's corners (§8): a control's, a card's or a floating box's, a bubble's or the input's.
-    static let controlRadius: CGFloat = 6
-    static let cardRadius: CGFloat = 10
-    static let bubbleRadius: CGFloat = 15
+    /// The classic look's corners (§8.1): a control's or a row's, a card's or a floating box's, a bubble's or the
+    /// input's, the content panel's.
+    static let controlRadius: CGFloat = 8
+    static let cardRadius: CGFloat = 12
+    static let bubbleRadius: CGFloat = 16
     /// What you said: a box with round corners.
-    static let saidRadius: CGFloat = 11
+    static let saidRadius: CGFloat = 12
+    static let panelRadius: CGFloat = 12
+    /// The room between the content panel and the window's edge, and between two panels.
+    static let panelGap: CGFloat = 8
 }
 
 extension StatusLevel {
@@ -110,6 +117,12 @@ extension View {
 // MARK: - by the look
 
 extension View {
+    /// A side column in the classic look (§8.1): a card that floats on the page — its own ground, round corners, a
+    /// faint ring and a soft shadow —, this far from what is beside it. Nothing in the pixel look.
+    func sideCard(leading: CGFloat = 0, trailing: CGFloat = 0, bottom: CGFloat = 2) -> some View {
+        modifier(SideCard(leading: leading, trailing: trailing, bottom: bottom))
+    }
+
     /// A frame around a part: 1 px and square in the pixel look; a hairline with round corners in the classic one, the
     /// part clipped to them.
     func framed(_ color: Color = Look.line, radius: CGFloat = Look.cardRadius) -> some View {
@@ -119,6 +132,30 @@ extension View {
     /// A ground under a part: square in the pixel look, with round corners in the classic one.
     func grounded(_ color: Color, radius: CGFloat = Look.cardRadius) -> some View {
         modifier(LookGround(color: color, radius: radius))
+    }
+}
+
+private struct SideCard: ViewModifier {
+    let leading: CGFloat
+    let trailing: CGFloat
+    let bottom: CGFloat
+    @Environment(\.interfaceLook) private var look
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
+            let shape = RoundedRectangle(cornerRadius: Look.panelRadius, style: .continuous)
+            content
+                .background(Look.sidebar)
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(Look.ring, lineWidth: 0.5))
+                .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.08), radius: scheme == .dark ? 12 : 8, y: 2)
+                .padding(.leading, leading)
+                .padding(.trailing, trailing)
+                .padding(.bottom, bottom)
+        } else {
+            content
+        }
     }
 }
 

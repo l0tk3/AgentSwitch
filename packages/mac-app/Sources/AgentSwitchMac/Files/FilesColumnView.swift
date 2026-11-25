@@ -24,7 +24,7 @@ struct FilesColumnView: View {
             }
         }
         .background(FilesKeyHost(files: files, classic: look.isClassic))
-        .background(look.isClassic ? Look.sidebar : ground)
+        .background(look.isClassic ? (floating ? Look.sidebar : Color.clear) : ground)
         // The one box the Mac asks with before a change (files-v0 §12.2), over the column's list.
         .overlay(alignment: .top) {
             if let question = files.question {
@@ -70,7 +70,10 @@ private struct FilesChrome: ViewModifier {
     @Environment(\.interfaceLook) private var look
 
     func body(content: Content) -> some View {
-        if !floating {
+        if !floating, look.isClassic {
+            // Beside the page it is a card as the page's own list is (§8.1).
+            content.sideCard(leading: Look.panelGap, trailing: Look.panelGap)
+        } else if !floating {
             content.overlay(alignment: .leading) { Rectangle().fill(Look.line).frame(width: 1) }
         } else if look.isClassic {
             let shape = UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 12, style: .continuous)

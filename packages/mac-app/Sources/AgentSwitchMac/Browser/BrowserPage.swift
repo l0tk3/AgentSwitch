@@ -45,8 +45,8 @@ struct BrowserPage: View {
     private func column(width: Double, pageWidth: Double) -> some View {
         BrowserTabListView(model: model)
             .frame(width: width)
-            .background(look.isClassic ? Look.sidebar : Color.clear)
             .clipped()
+            .sideCard(trailing: Look.panelGap)
             .overlay(alignment: .trailing) {
                 BrowserSideEdge(dragging: dragging != nil,
                                 width: { width },

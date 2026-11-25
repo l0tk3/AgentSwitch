@@ -192,7 +192,7 @@ struct RailOut: View {
             if state.railHidden, state.railOut {
                 HStack(spacing: 0) {
                     MainRail(state: state, switchPage: switchPage, settings: settings)
-                        .background(look.isClassic ? Look.sidebar : Look.ground)
+                        .background(look.isClassic ? Look.chrome : Look.ground)
                     RailEdge(state: state)
                 }
                 .onHover { state.railPointer(rail: $0) }
@@ -211,7 +211,8 @@ struct RailEdge: View {
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        HairRule(color: Look.line, vertical: true)
+        // No line in the classic look: the rail is the window's own ground, the panel beside it floats (§8.1).
+        HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
             .overlay {
                 RailEdgeHandle(hidden: state.railHidden) { state.toggleRail() }
                     .frame(width: 5)
@@ -349,7 +350,7 @@ private struct RailMark: View {
     @ViewBuilder
     private func ring(@ViewBuilder _ content: () -> some View) -> some View {
         if look.isClassic {
-            content().frame(width: 10, height: 10).background(Circle().fill(Look.sidebar))
+            content().frame(width: 10, height: 10).background(Circle().fill(Look.ground))
         } else {
             content().frame(width: 8, height: 8).background(Look.ground)
         }
