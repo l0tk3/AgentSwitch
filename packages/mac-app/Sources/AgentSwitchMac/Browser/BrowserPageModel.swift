@@ -108,6 +108,8 @@ final class BrowserPageModel {
     /// `[ Fill Ciphertext ]` is offered: this Mac drives the tab on screen, one of your own, on an http(s) page (an
     /// agent's tab never: the daemon refuses it even while held, as the agent sees the page after the hand-back).
     var canFill: Bool {
+        // Fill Ciphertext is retired with the gate's ciphertexts (2026-11-25, user #369); DesignPreview still draws it.
+        if !BrowserFillText.stillOffered { return false }
         if windows { return current.map { BrowserWindowText.buttons($0).contains(.fill) } ?? false }
         return canDrive && current.map(BrowserFillText.offered(on:)) ?? false
     }

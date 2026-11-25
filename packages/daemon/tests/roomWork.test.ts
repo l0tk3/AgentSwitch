@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { ROOM_SECRETS } from "../src/rooms/secrets.js";
 import { mountRooms } from "../src/api/rooms.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RoomDelivery } from "../src/rooms/delivery.js";
@@ -1023,6 +1024,8 @@ describe("a session's avatar, its own in every room (2026-11-24)", () => {
 
 describe("a room's secrets: ciphertexts only (2026-11-24)", () => {
   it("takes sealed tokens, refuses a value, replaces by name, gives them to members with their use, and removes them", async () => {
+    ROOM_SECRETS.on = true;   // retired since 2026-11-25 (user #369): the old way, switched on
+    onTestFinished(() => { ROOM_SECRETS.on = false; });
     const { store, room, say, call } = made();
     const token = `enc:v1:${"A".repeat(40)}`;
     expect((await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "GitHub 登录", kind: "site", url: "https://github.com", account: "me", token: "hunter2-plain" }] })).status).toBe(400);

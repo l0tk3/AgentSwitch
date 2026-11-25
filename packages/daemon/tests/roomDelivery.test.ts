@@ -5,7 +5,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { ROOM_SECRETS } from "../src/rooms/secrets.js";
 import { mountRooms } from "../src/api/rooms.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RoomDelivery } from "../src/rooms/delivery.js";
@@ -174,7 +175,14 @@ describe("the Chatroom Kit", () => {
 
   it("says the room's secrets on each message and uses them through the gate, only the room's own (user #307, #309)", async () => {
     const calls: { tool: string; args: Record<string, unknown>; cwd: string | undefined }[] = [];
-    const { store, delivery, room } = made();
+    const { store, delivery, room, kit: retired } = made();
+    // Retired (user #369): nothing is listed or said, a call says so. The old way, switched on, below.
+    expect(retired.tools("t1").map((t) => t.name)).not.toContain("room_secret");
+    expect(JSON.stringify(retired.tools("t1"))).not.toContain("secrets");
+    expect(await retired.call("t1", "room_secret", { use: "otp" })).toMatchObject({ isError: true, text: expect.stringContaining("retired") });
+    expect(await retired.call("t1", "room_info", { show: "secrets" })).toMatchObject({ isError: true });
+    ROOM_SECRETS.on = true;
+    onTestFinished(() => { ROOM_SECRETS.on = false; });
     const seatOf = (terminal: string): SeatLive | null => ({ state: "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: null, node: null } });
     const kit = new RoomKit({ store, seat: seatOf, delivery, gate: () => async (tool, args, cwd) => { calls.push({ tool, args, cwd }); return { text: "200 ok", isError: false }; } });
     const token = `enc:v1:${"A".repeat(40)}`;
@@ -242,7 +250,7 @@ describe("a terminal's own programs", () => {
     expect(kit.has("t1")).toBe(true);
     expect((await ask("t9", { op: "tools" })).body).toEqual({ tools: [], version: "" });
     // Codex lists its tools once, at its start: it has them before it sits anywhere, and a call then says why not.
-    expect((await ask("c9", { op: "tools" })).body.tools.map((t: any) => t.name)).toEqual([...tools.body.tools.map((t: any) => t.name), "room_secret"]);
+    expect((await ask("c9", { op: "tools" })).body.tools.map((t: any) => t.name)).toEqual(tools.body.tools.map((t: any) => t.name));
     expect((await ask("c9", { op: "call", name: "room_post", args: { text: "hi" } })).body).toMatchObject({ isError: true, text: expect.stringContaining("sits in no Chat Room") });
     // Unchanged: held its while, then the same; changed: told at once.
     expect((await ask("t1", { op: "watch", version: tools.body.version })).body.version).toBe(tools.body.version);

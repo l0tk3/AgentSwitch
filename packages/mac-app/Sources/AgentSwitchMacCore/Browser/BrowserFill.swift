@@ -43,6 +43,9 @@ public struct BrowserFillResult: Sendable, Equatable, Decodable {
 
 /// What Fill Ciphertext checks and says. Short words in English, sentences in formal Chinese (ui-v0 §4.1).
 public enum BrowserFillText {
+    /// Fill Ciphertext is retired with the gate's ciphertexts (2026-11-25, user #369: secret-gate 弃用): offered
+    /// nowhere. Tests of the old way, and the design preview's pictures of it, switch it on.
+    nonisolated(unsafe) public static var stillOffered = false
     /// A whole ciphertext, as the daemon checks it (packages/daemon/src/browser/fill.ts `CIPHERTEXT`).
     public static let pattern = #"^enc:v1:[A-Za-z0-9_=-]{16,}$"#
     /// The daemon's limit on `token` (api/browser.ts `FillBody`).

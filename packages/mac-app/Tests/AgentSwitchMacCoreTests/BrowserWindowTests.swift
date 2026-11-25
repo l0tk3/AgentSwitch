@@ -53,6 +53,10 @@ final class BrowserWindowTests: XCTestCase {
     }
 
     func testWhoHasATabAndWhatCanBeDoneWithIt() {
+        // Fill Ciphertext is retired (2026-11-25): offered nowhere; the old way, switched on, below.
+        XCTAssertEqual(BrowserWindowText.buttons(tab()), [.show, .copy, .close])
+        BrowserFillText.stillOffered = true
+        defer { BrowserFillText.stillOffered = false }
         // Your own tab.
         let mine = tab()
         XCTAssertEqual(BrowserWindowText.state(mine), .yours)

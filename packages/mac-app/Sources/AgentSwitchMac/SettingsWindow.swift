@@ -21,7 +21,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// The sidebar's first block, without a header.
-    static let app: [SettingsTab] = [.pairing, .nodes, .models, .keys, .redaction, .agents, .profiles, .addons, .environment, .general, .desk]
+    // Keys (the gate's keypair) is retired (2026-11-25, user #369: secret-gate 弃用): nothing new is sealed with it.
+    static let app: [SettingsTab] = [.pairing, .nodes, .models, .redaction, .agents, .profiles, .addons, .environment, .general, .desk]
     /// The parts of the sidebar's `Dispatch` page, in the order its switch shows them.
     static let dispatch: [SettingsTab] = [.dispatchModels, .permissions, .context, .extensions, .log, .history]
     var isDispatch: Bool { Self.dispatch.contains(self) }

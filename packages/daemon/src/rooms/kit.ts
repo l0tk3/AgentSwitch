@@ -8,7 +8,7 @@ import { statSync } from "node:fs";
 import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
-import { lineOf } from "./secrets.js";
+import { lineOf, ROOM_SECRETS } from "./secrets.js";
 import { valuesIn, type GateCaller } from "./gateCall.js";
 import { classicFrom, defaultBg, LIBRARY_SAYS, pixelFrom, type ClassicAvatar, type PixelAvatar } from "./avatars.js";
 import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, handleIn, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
@@ -121,6 +121,12 @@ const TOOLS: readonly KitTool[] = [
     },
   },
 ];
+
+/** The tools while room secrets are retired: `room_info` says nothing of them. */
+const TOOLS_WITHOUT_SECRETS: readonly KitTool[] = TOOLS.map((t) => t.name !== "room_info" ? t : {
+  ...t, description: t.description.replace(" `secrets`: logins/keys as ciphertexts.", ""),
+  inputSchema: { type: "object", properties: { show: { type: "string", enum: ["members", "notes", "files", "changing", "rooms", "avatars"] }, room: ROOM_ARG } },
+});
 
 /** Only where a room has secrets (and for an agent that lists its tools once): the gate's tools for them (user #309). */
 const SECRET_TOOL: KitTool = {
@@ -325,8 +331,9 @@ export class RoomKit {
     // `always`: for an agent that lists its tools once, when it starts, and never again (Codex): it is seated long
     // after, and would sit in the room with no way to speak. Outside every room a call is answered with why not.
     const sits = this.o.store.roomsOf(terminal);
-    if (!sits.length) return always ? [...TOOLS, SECRET_TOOL] : [];
-    const own = always || sits.some((x) => this.o.store.secrets(x.room.id).length) ? [...TOOLS, SECRET_TOOL] : TOOLS;
+    const base = ROOM_SECRETS.on ? TOOLS : TOOLS_WITHOUT_SECRETS;
+    if (!sits.length) return always ? (ROOM_SECRETS.on ? [...base, SECRET_TOOL] : base) : [];
+    const own = ROOM_SECRETS.on && (always || sits.some((x) => this.o.store.secrets(x.room.id).length)) ? [...base, SECRET_TOOL] : base;
     return this.o.store.mayAdd(terminal) && this.o.org?.() ? [...own, ...ORG_TOOLS] : own;
   }
 
@@ -350,6 +357,7 @@ export class RoomKit {
         if (!this.o.store.mayAdd(terminal) || !org) throw new RoomError(403, NOT_ALLOWED);
         return { text: await this.organize(org, terminal, str(args.action) ?? "", args) };
       }
+      if (!ROOM_SECRETS.on && (name === SECRET_TOOL.name || (name === "room_info" && str(args.show) === "secrets"))) return { text: "Room secrets are retired. Ask the user (@you) for what you need to log in with: it is in their password book, and what they give you is kept from the model on its way.", isError: true };
       if (!TOOLS.some((t) => t.name === name) && name !== SECRET_TOOL.name) return { text: `There is no tool ${asked} in the Chatroom Kit.`, isError: true };
       const { room, seat } = this.where(terminal, str(args.room));
       this.o.store.count(room.id, seat.handle, { calls: 1 }, int(args.task) ?? (name === "room_tasks" ? int(args.n) : undefined));

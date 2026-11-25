@@ -7,6 +7,11 @@
 
 import { randomBytes } from "node:crypto";
 
+/** Retired (2026-11-25, user #369: 房间 secret 弃用): a room's members are told of no secrets and have no tool for
+ *  them — what they log in with is in the user's password book, a word the model never sees (vault/passwords.ts).
+ *  What rooms kept stays on disk until the code goes. Tests of the old way switch it on. */
+export const ROOM_SECRETS = { on: false };
+
 export const TOKEN = /^enc:v1:[A-Za-z0-9_-]{16,}={0,2}$/;
 export const SECRET_KINDS = ["site", "api", "exec"] as const;
 export type SecretKind = (typeof SECRET_KINDS)[number];

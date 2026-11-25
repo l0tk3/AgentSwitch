@@ -13,6 +13,7 @@
  *  it asked the user. A paused room gives nothing. What goes in carries its envelope — room, number, from whom, to
  *  whom — and is never the user's words. */
 
+import { ROOM_SECRETS } from "./secrets.js";
 import { agentName, type SeatLookup, type SeatState } from "./state.js";
 import { YOU } from "./names.js";
 import type { Message, Room, RoomStore, Seat } from "./store.js";
@@ -228,7 +229,7 @@ export class RoomDelivery {
     if (!this.told.has(terminal)) text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
     // The room's secrets, names only, once — and again when they change (user #307, #312: not on every message).
     const room = waiting[waiting.length - 1]!.room;
-    const secrets = this.o.store.secrets(room.id);
+    const secrets = ROOM_SECRETS.on ? this.o.store.secrets(room.id) : [];
     const sig = secrets.map((x) => x.id).join(",");
     const key = `${terminal}\u0000${room.id}`;
     if (sig && this.toldSecrets.get(key) !== sig) {

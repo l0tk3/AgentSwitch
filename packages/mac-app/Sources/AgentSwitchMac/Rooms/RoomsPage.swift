@@ -487,7 +487,7 @@ private struct RoomView: View {
             Menu {
                 Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
                 Button("Files…") { model.open(.files) }
-                Button("Secrets…") { model.open(.secrets) }
+                // Secrets… is retired (2026-11-25, user #369): what members log in with is in the password book.
                 if model.redactOn { Button("Words…") { model.open(.words) } }
                 Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
                 Divider()
