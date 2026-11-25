@@ -80,19 +80,19 @@ public struct RoomAvatar: Decodable, Equatable, Sendable {
     }
 }
 
-/// Where the members' pictures stand in a room's (user #412: 一个一个小气泡样式的): one in the middle, two side by
-/// side, three as one over two, four as two rows of two — never more than four. In units of the box's side.
+/// Where the members' pictures stand in a room's (user #412: 一个一个小气泡样式的; #422, of four of one size in a box:
+/// 太丑了，太死板了): bubbles of different sizes that lie loose beside each other, the first member's the biggest — one
+/// alone, two, three, four at most. No two touch, as circles or as squares. In units of the picture's side.
 public enum RoomPictureLayout {
     public struct Spot: Equatable, Sendable { public let x: Double; public let y: Double; public let side: Double }
 
     public static func spots(_ count: Int) -> [Spot] {
-        let small = 0.44, a = 0.04, b = 0.52
         switch min(max(count, 0), 4) {
         case 0: return []
-        case 1: return [Spot(x: 0.18, y: 0.18, side: 0.64)]
-        case 2: return [Spot(x: a, y: 0.28, side: small), Spot(x: b, y: 0.28, side: small)]
-        case 3: return [Spot(x: 0.28, y: a, side: small), Spot(x: a, y: b, side: small), Spot(x: b, y: b, side: small)]
-        default: return [Spot(x: a, y: a, side: small), Spot(x: b, y: a, side: small), Spot(x: a, y: b, side: small), Spot(x: b, y: b, side: small)]
+        case 1: return [Spot(x: 0.1, y: 0.1, side: 0.8)]
+        case 2: return [Spot(x: 0, y: 0.06, side: 0.58), Spot(x: 0.58, y: 0.5, side: 0.42)]
+        case 3: return [Spot(x: 0, y: 0.02, side: 0.56), Spot(x: 0.57, y: 0.26, side: 0.43), Spot(x: 0.2, y: 0.63, side: 0.35)]
+        default: return [Spot(x: 0, y: 0, side: 0.54), Spot(x: 0.57, y: 0.14, side: 0.42), Spot(x: 0.12, y: 0.57, side: 0.4), Spot(x: 0.6, y: 0.63, side: 0.32)]
         }
     }
 }
