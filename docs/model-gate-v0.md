@@ -17,9 +17,9 @@ Feasibility check: room-files `feasibility-model-gateway.md`. Design: `design-re
 | Words | `vault/words.ts` | Global list plus per-room lists.<br>Found automatically: the user name and full name (on by default) and the computer name (off by default).<br>The default placeholder is `h_` plus 10 characters of HMAC-SHA256 with a per-profile salt.<br>A user-given placeholder that is too plain is replaced one way only; a clashing one is refused. |
 | Storage | `vault/words.enc` | AES-256-GCM.<br>The key is in the macOS Keychain (`VaultKey.swift`) and is handed to the service on its stdin (`AGENTSWITCH_VAULT_STDIN=1`).<br>Elsewhere it is `vault/key` (0600). |
 | Launch | `terminals/launch.ts` | `req.gate` sets the proxy variables (both cases) to the gateway, `NODE_EXTRA_CA_CERTS` to its CA, and `SSL_CERT_FILE` to Node's roots plus its CA.<br>A profile's own proxy becomes the gateway's way on. |
-| Logs | `vault/model-gate/logs/<terminal>/<day>.{before,after}.jsonl` | **before:** what the agent sent and received (with the words).<br>**after:** what the provider received and sent.<br>Each entry is at most 1 MiB, each file at most 64 MiB. Files are kept `keepDays` days (default 3).<br>`DELETE /redaction/logs[?days=N]` cleans them. |
+| Logs | `vault/model-gate/logs/<terminal>/<day>.{before,after}.jsonl` | **before:** what the agent sent and received (with the words).<br>**after:** what the provider received and sent.<br>Each entry is at most 1 MiB, each file at most 64 MiB. Off by default (`log`; user #398). Files are kept `keepDays` days (default 3).<br>`DELETE /redaction/logs[?days=N]` cleans them. |
 | API | `api/redaction.ts` | `GET /redaction`, `PATCH /redaction/settings`, `POST/DELETE /redaction/words`, `GET/POST/DELETE /rooms/:id/redaction/words`, `GET/DELETE /redaction/logs`.<br>Not on the remote allowlist. |
-| Mac | Settings › Redaction (`RedactionView.swift`) | Switches, words, room words, logs.<br>Opening a "before" log asks for Touch ID or the login password. |
+| Mac | Settings › Redaction (`RedactionView.swift`) | Switches, words, room words, logs.<br>A log's button shows the file in the Finder (user #398). |
 
 `vault/` is read-denied to terminals and executors (`executors/protected.ts`).
 

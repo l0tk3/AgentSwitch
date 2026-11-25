@@ -47,7 +47,7 @@ export type RedactSettings = {
   readonly hosts: readonly string[];
 };
 
-export const DEFAULT_SETTINGS: RedactSettings = { enabled: true, username: true, host: false, log: true, keepDays: 3, hosts: [] };
+export const DEFAULT_SETTINGS: RedactSettings = { enabled: true, username: true, host: false, log: false, keepDays: 3, hosts: [] };
 
 type Data = {
   readonly v: 1;

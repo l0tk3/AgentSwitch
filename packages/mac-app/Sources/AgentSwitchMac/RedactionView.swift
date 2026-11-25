@@ -1,6 +1,5 @@
 import AgentSwitchMacCore
 import AppKit
-import LocalAuthentication
 import SwiftUI
 
 /// 替换词 (2026-11-25, user #318-#332): what the model never sees. Terminals started from AgentSwitch talk to their
@@ -110,8 +109,8 @@ struct RedactionView: View {
                     Text(l.day).monospacedDigit()
                     Text("终端 \(l.terminal)").foregroundStyle(.secondary)
                     Spacer()
-                    Button("Before (\(size(l.before)))") { Task { await openLog(l, side: "before") } }.buttonStyle(.borderless).disabled(l.before == 0)
-                    Button("After (\(size(l.after)))") { Task { await openLog(l, side: "after") } }.buttonStyle(.borderless).disabled(l.after == 0)
+                    Button("Before (\(size(l.before)))") { openLog(l, side: "before") }.buttonStyle(.borderless).disabled(l.before == 0)
+                    Button("After (\(size(l.after)))") { openLog(l, side: "after") }.buttonStyle(.borderless).disabled(l.after == 0)
                 }
             }
             HStack(spacing: 10) {
@@ -166,15 +165,10 @@ struct RedactionView: View {
         do { let n = try await model.client.cleanRedactLogs(olderThan: days); said = "已删除 \(n) 个日志文件。"; await load() } catch { said = (error as? CommandError)?.message ?? error.localizedDescription }
     }
 
-    /// A day's log opened in the user's own viewer; the side with the words in it after the user proves it is them.
-    private func openLog(_ l: RedactLog, side: String) async {
+    /// A day's log shown where it is kept, in the Finder (user #398: 点击打开存储位置 而不是点击直接打开日志).
+    private func openLog(_ l: RedactLog, side: String) {
         let url = URL(fileURLWithPath: logDir).appendingPathComponent(l.terminal).appendingPathComponent("\(l.day).\(side).jsonl")
-        if side == "before" {
-            let ctx = LAContext()
-            let ok = (try? await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "查看脱敏前的日志（含原词）")) ?? false
-            guard ok else { return }
-        }
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }
 
