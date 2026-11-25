@@ -102,7 +102,7 @@ jobs:
           retention-days: 7
 
   mac-tests:
-    name: macOS · swift test (mac-app, SwiftTerm patches, secret-gate-ui)
+    name: macOS · swift test (mac-app, SwiftTerm patches)
     runs-on: macos-26
     timeout-minutes: 40
     steps:
@@ -125,9 +125,6 @@ jobs:
         run: swift test
       - name: SwiftTerm (vendored, its patches)
         working-directory: packages/mac-app/Vendor/SwiftTerm
-        run: swift test
-      - name: secret-gate-ui
-        working-directory: packages/secret-gate-ui
         run: swift test
 
   mac-app:

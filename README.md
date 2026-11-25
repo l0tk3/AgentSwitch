@@ -136,7 +136,6 @@ Each one stands alone — its own dependencies, tests and README — and they ta
 | `packages/mac-app` | macOS app (SwiftUI): menu bar and main window; bundles Node, Python, the daemon and secret-gate and keeps them running; pairing, devices, keys, agents |
 | `packages/ios-app` | iPhone app (SwiftUI, iOS 17+): `AgentSwitchKit` (pairing, certificate pinning, sealing on the phone, event streams) and the screens |
 | `packages/secret-gate` | Python credential layer: keypairs, ciphertext and short references, the decrypting proxy, the browser fill gate, MCP tools for the agents |
-| `packages/secret-gate-ui` | macOS app for the gate alone: named keypairs, single and batch sealing, through the secret-gate CLI |
 | `packages/linux` | a Linux machine as a node, without a window: the same runtime the Mac app bundles, a systemd user service, the command line in place of the app's screens |
 
 ## Build
@@ -172,8 +171,8 @@ cd packages/ios-app     && swift test                # AgentSwitchKit
 cd packages/secret-gate && .venv/bin/pytest
 ```
 
-CI (`.github/workflows/ci.yml`) runs these on every push and pull request, besides the vendored SwiftTerm's tests and
-`secret-gate-ui`'s, and builds what ships: the Linux runtimes (each started once as a throw-away node), the Mac app
+CI (`.github/workflows/ci.yml`) runs these on every push and pull request, besides the vendored SwiftTerm's tests,
+and builds what ships: the Linux runtimes (each started once as a throw-away node), the Mac app
 (ad-hoc signed) and the iPhone app for the simulator. The runtimes and the Mac app are kept as the run's artifacts for
 a week.
 
