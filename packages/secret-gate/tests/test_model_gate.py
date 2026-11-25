@@ -82,3 +82,15 @@ def test_logs_are_kept_per_scope_and_day_and_bounded(tmp_path, monkeypatch):
     lines = files[0].read_text().splitlines()
     assert "log full" in lines[-1] and files[0].stat().st_size <= 400
     assert oct(files[0].stat().st_mode & 0o777) == "0o600"
+
+
+def test_an_event_that_cannot_be_read_goes_on_as_it_came():
+    # A stream is never cut for an event the gateway cannot rewrite (user #448).
+    sse = SSE(Swapper((Pair("secret-value", "h_abcdefghij", True),)))
+    sse._block = lambda block: (_ for _ in ()).throw(KeyError("x")) if b"odd" in block else SSE._block(sse, block)  # type: ignore[method-assign]
+    out = sse.feed(b'data: {"odd": 1}\n\ndata: {"type":"content_block_delta","index":0,"delta":{"text":"h_abcdefghij ok"}}\n\n')
+    assert out.startswith(b'data: {"odd": 1}\n\n')
+    assert b"secret-value ok" in out
+    assert sse.failed and "KeyError" in sse.failed
+    # Chat Completions pieces of an odd shape are read past.
+    assert Swapper.deltas({"choices": [{"delta": "text"}, {"delta": {"tool_calls": ["x", {"function": "y"}]}}]}) == []

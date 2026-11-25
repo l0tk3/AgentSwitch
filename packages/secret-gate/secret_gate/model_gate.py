@@ -154,12 +154,14 @@ class Swapper:
             for c in o["choices"]:
                 if not isinstance(c, dict):
                     continue
-                d = c.get("delta") or {}
+                d = c.get("delta") if isinstance(c.get("delta"), dict) else {}
                 for f in ("content", "reasoning_content", "reasoning"):
                     if isinstance(d.get(f), str):
                         out.append((("c", c.get("index"), f), d, f))
-                for tc in d.get("tool_calls") or []:
-                    fn = (tc or {}).get("function") or {}
+                for tc in d.get("tool_calls") if isinstance(d.get("tool_calls"), list) else []:
+                    if not isinstance(tc, dict):
+                        continue
+                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
                     if isinstance(fn.get("arguments"), str):
                         out.append((("c", c.get("index"), "tool", tc.get("index")), fn, "arguments"))
         return out
@@ -203,12 +205,26 @@ class SSE:
     def __init__(self, sw: Swapper):
         self.sw = sw
         self.buf = b""
+        # Why an event went on as it came, if one did.
+        self.failed: str | None = None
+
+    def _safe(self, block: bytes) -> bytes:
+        """An event rewritten; one that cannot be goes on as it came: a stream is never cut for it."""
+        try:
+            return self._block(block)
+        except Exception as err:  # noqa: BLE001
+            self.failed = f"{type(err).__name__}: {err}"
+            return block + b"\n\n"
 
     def feed(self, chunk: bytes) -> bytes:
         if not chunk:
             rest, self.buf = self.buf, b""
-            tail = self._block(rest) if rest.strip() else b""
-            return tail + b"".join(self._render("", e) for e in self.sw.flush())
+            tail = self._safe(rest) if rest.strip() else b""
+            try:
+                held = b"".join(self._render("", e) for e in self.sw.flush())
+            except Exception as err:  # noqa: BLE001
+                self.failed, held = f"{type(err).__name__}: {err}", b""
+            return tail + held
         self.buf = (self.buf + chunk).replace(b"\r\n", b"\n")   # a \r\n split over two chunks too
         out = b""
         while True:
@@ -216,7 +232,7 @@ class SSE:
             if i < 0:
                 break
             block, self.buf = self.buf[:i], self.buf[i + 2 :]
-            out += self._block(block)
+            out += self._safe(block)
         return out
 
     @staticmethod
@@ -362,8 +378,17 @@ class ModelGate:
         sse = SSE(Swapper(scope.pairs))
         url = f"{flow.request.method} {flow.request.pretty_url}"
 
+        said = False
+
         def rewrite(chunk: bytes) -> bytes:
+            # An event this could not read goes on as it came (what comes back holds placeholders at worst, never
+            # a word the model was kept from), and the reason is said once: an agent whose stream is cut says only
+            # "check any proxy or gateway" (user #448).
+            nonlocal said
             out = sse.feed(chunk)
+            if sse.failed and not said:
+                said = True
+                print(f"model gate: an event of {flow.request.pretty_host} was passed on unread: {sse.failed}", file=sys.stderr, flush=True)
             if scope.log:
                 if chunk:
                     self.logs.write(self.table, name, "after", {"dir": "in", "url": url, "body": chunk.decode("utf-8", "replace")})
