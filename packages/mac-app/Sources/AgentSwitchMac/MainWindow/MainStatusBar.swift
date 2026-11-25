@@ -57,7 +57,7 @@ struct MainStatusBar: View {
                     // Last: the engine's word and the browser's identity, which opens its box (docs/browser-v0.md §7.2).
                     BrowserIdentityItems(model: browser.identity)
                 }
-            case .clash, .passwords:
+            case .clash:
                 EmptyView()
             case .rooms:
                 ForEach(state.roomsStatus, id: \.self) { Text(ClassicWords.phrase($0, in: look)) }

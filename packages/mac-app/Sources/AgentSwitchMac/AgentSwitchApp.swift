@@ -47,6 +47,7 @@ enum SoftType {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     lazy var settings = SettingsWindowController(model: model)
+    lazy var passwords = PasswordsWindowController(model: model)
     /// The main window, Dispatch and Terminals (docs/dispatch-v0.md §1), and one more for each node opened in a window
     /// of its own (docs/mesh-v0.md §9 B 2).
     lazy var mainWindows = MainWindows(model: model)
@@ -151,6 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindows.openSettings = { [weak self] in self?.settings.show(nil) }
         mainWindows.openNodes = { [weak self] in self?.settings.show(.nodes) }
         SettingsOpener.show = { [weak self] tab in self?.settings.show(tab) }
+        passwords.onVisibilityChange = { [weak self] open in self?.windowVisibility("passwords", open) }
+        PasswordsOpener.show = { [weak self] node in self?.passwords.show(node: node) }
         wireWindows()
         windows.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminal-windows", open) }
         live.onSnapshot = { [weak self] snapshot in

@@ -317,8 +317,7 @@ final class MainWindowController: NSObject {
         }
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.pageView, .browser: BrowserPage.host(browser),
                                               .clash: NSHostingView(rootView: ClashPage(state: state).environment(model)),
-                                              .rooms: NSHostingView(rootView: RoomsPage(state: state).environment(model)),
-                                              .passwords: NSHostingView(rootView: PasswordsPage(state: state).environment(model))])
+                                              .rooms: NSHostingView(rootView: RoomsPage(state: state).environment(model))])
         // The Files column (docs/files-v0.md): the node's own files, remembered by node.
         let files = FilesColumn(node: node, nodeName: state.node?.name ?? "这台 Mac", client: { [model] in model.client(on: node) }, defaults: Self.filesDefaults)
         files.target = { [weak self] in self?.filesTarget() }
@@ -450,7 +449,7 @@ final class MainWindowController: NSObject {
         let page: String? = switch state.page {
         case .terminals: terminals?.title
         case .browser: browser?.current.map(BrowserTabText.title)
-        case .dispatch, .clash, .rooms, .passwords: nil
+        case .dispatch, .clash, .rooms: nil
         }
         let title = page.flatMap { $0.isEmpty ? nil : $0 } ?? "AgentSwitch"
         // Another node's pages: its name too, for the Dock's list of windows and Mission Control.
@@ -516,7 +515,7 @@ final class MainWindowController: NSObject {
             if let browser, !window.makeFirstResponder(browser.screen) { window.makeFirstResponder(nil) }
         case .terminals:
             break
-        case .clash, .rooms, .passwords:
+        case .clash, .rooms:
             window.makeFirstResponder(nil)
         }
         updateTitle()
@@ -600,7 +599,7 @@ final class MainWindowController: NSObject {
         }
         // The Chat Room page's fields too (2026-11-23: ⌘V did nothing in a room's box — neither text nor a picture —
         // because these keys were handed on only on Dispatch).
-        return (state.dispatchShown || state.page == .rooms || state.page == .clash || state.page == .passwords || (state.page == .browser && state.editingText)) && edit(press, in: window)
+        return (state.dispatchShown || state.page == .rooms || state.page == .clash || (state.page == .browser && state.editingText)) && edit(press, in: window)
     }
 
     private func perform(_ action: MainShortcut) {
@@ -619,6 +618,8 @@ final class MainWindowController: NSObject {
             terminals?.newTerminal()
         case .settings:
             openSettings()
+        case .passwords:
+            PasswordsOpener.show(state.nodeId)
         case .toggleRail:
             state.toggleRail()
         case .files:

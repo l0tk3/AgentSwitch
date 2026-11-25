@@ -12,8 +12,6 @@ public enum MainPage: String, CaseIterable, Sendable {
     // 安装打开的都是终端): the rail's order, ⌃⇥'s, and the page a new install opens on.
     // Chat Room after Dispatch (docs/chatroom-v0.md §10).
     case terminals, dispatch, rooms, browser, clash
-    /// The password book (vault/passwords.ts; user #351), after Clash.
-    case passwords
 
     /// The page's name (the rail's, the menus').
     public var title: String {
@@ -23,7 +21,6 @@ public enum MainPage: String, CaseIterable, Sendable {
         case .terminals: "Terminals"
         case .browser: "Browser"
         case .clash: "Clash"
-        case .passwords: "Passwords"
         }
     }
 
@@ -47,7 +44,6 @@ public enum MainPage: String, CaseIterable, Sendable {
         case .terminals: "Terminals ⌘1–9"
         case .browser: "Browser ⌘⇧B"
         case .clash: "Clash ⌘⇧K"
-        case .passwords: "Passwords ⌘⇧L"
         }
     }
 
@@ -239,6 +235,8 @@ public enum MainShortcut: Equatable, Sendable {
     case terminal(Int)
     case newTerminal
     case settings
+    /// ⇧⌘L: the password book, a window of its own as the settings are (user #400).
+    case passwords
     /// ⌥⌘B: the rail put away or brought back (MainRailLayout).
     case toggleRail
     /// ⇧⌘F: the Files column, at the folder of the pane in focus (docs/files-v0.md §0), on every page.
@@ -281,7 +279,7 @@ public enum MainShortcut: Equatable, Sendable {
         if press.command, press.option, !press.control, !press.shift, press.key == "b" { return .toggleRail }
         if press.command, press.shift, !press.control, !press.option, press.key == "b" { return .page(.browser) }
         if press.command, press.shift, !press.control, !press.option, press.key == "k" { return .page(.clash) }
-        if press.command, press.shift, !press.control, !press.option, press.key == "l" { return .page(.passwords) }
+        if press.command, press.shift, !press.control, !press.option, press.key == "l" { return .passwords }
         if press.command, press.shift, !press.control, !press.option, press.key == "m" { return .page(.rooms) }
         if press.command, press.shift, !press.control, !press.option, press.key == "f" { return .files }
         if press.command, press.shift, !press.control, !press.option, press.key == "t" { return page == .browser ? .browser(.hold) : nil }
@@ -298,7 +296,7 @@ public enum MainShortcut: Equatable, Sendable {
         case "b": return page == .browser ? .browser(.toggleList) : nil
         case "t":
             switch page {
-            case .dispatch, .clash, .rooms, .passwords: return .newTerminal
+            case .dispatch, .clash, .rooms: return .newTerminal
             case .browser: return .browser(.newTab)
             case .terminals: return nil
             }

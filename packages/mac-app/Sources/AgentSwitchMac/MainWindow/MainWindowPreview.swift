@@ -244,7 +244,10 @@ enum MainWindowPreview {
         for (suffix, look) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
             for (name, showing, editing) in [("", false, false), ("-shown", true, false), ("-edit", false, true)] {
                 PasswordsDemo.current = PasswordsDemo.make(showing: showing, editing: editing)
-                try await shot(model: model, page: .passwords, system: NSAppearance(named: look), to: directory.appendingPathComponent("main-passwords\(name)\(suffix).png"))
+                let window = PasswordsWindowController.makeWindow(model: model, node: nil, windowClass: PreviewWindow.self, appearance: NSAppearance(named: look))
+                try await DesignPreview.settle()
+                try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: directory.appendingPathComponent("main-passwords\(name)\(suffix).png"))
+                window.close()
             }
         }
         PasswordsDemo.current = nil
@@ -339,8 +342,7 @@ enum MainWindowPreview {
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
                                               .browser: BrowserPage.host(browser),
                                               .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model)),
-                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: .demo).environment(model)),
-                                              .passwords: NSHostingView(rootView: PasswordsPage(state: state).environment(model))])
+                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: .demo).environment(model))])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head(list: rail != .bare), model: model, content: container,
                                                                 actions: MainBarActions(), browser: browser))
         host.sizingOptions = []

@@ -21,11 +21,11 @@ final class MainWindowTests: XCTestCase {
     }
 
     func testPageWords() {
-        XCTAssertEqual(MainPage.allCases.map(\.title), ["Terminals", "Dispatch", "Chat Room", "Browser", "Clash", "Passwords"], "the rail's order")
+        XCTAssertEqual(MainPage.allCases.map(\.title), ["Terminals", "Dispatch", "Chat Room", "Browser", "Clash"], "the rail's order")
     }
 
     func testTheRailSaysEachPageWithTheKeyThatGoesThere() {
-        XCTAssertEqual(MainPage.allCases.map(\.railHelp), ["Terminals ⌘1–9", "Dispatch ⌘0", "Chat Room ⌘⇧M", "Browser ⌘⇧B", "Clash ⌘⇧K", "Passwords ⌘⇧L"])
+        XCTAssertEqual(MainPage.allCases.map(\.railHelp), ["Terminals ⌘1–9", "Dispatch ⌘0", "Chat Room ⌘⇧M", "Browser ⌘⇧B", "Clash ⌘⇧K"])
         for page in MainPage.allCases {
             let key = page.railHelp.split(separator: " ").last.map(String.init) ?? ""
             let press: MainShortcut.Press? = switch key {
@@ -47,14 +47,19 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(MainPage.allCases.filter(\.hasList), [.terminals, .browser], "the bar's list button is dimmed on Dispatch")
     }
 
+    func testThePasswordBookIsAWindowOfItsOwn() {
+        // ⇧⌘L from any page (user #400): not a page of the rail's.
+        XCTAssertEqual(MainShortcut.action(for: .init(key: "l", keyCode: 37, command: true, control: false, option: false, shift: true), on: .terminals), .passwords)
+        XCTAssertFalse(MainPage.allCases.map(\.title).contains("Passwords"))
+    }
+
     func testPagesCycleBothWays() {
         XCTAssertEqual(MainPage.terminals.next, .dispatch)
         XCTAssertEqual(MainPage.dispatch.next, .rooms)
         XCTAssertEqual(MainPage.rooms.next, .browser)
         XCTAssertEqual(MainPage.browser.next, .clash)
-        XCTAssertEqual(MainPage.clash.next, .passwords)
-        XCTAssertEqual(MainPage.passwords.next, .terminals)
-        XCTAssertEqual(MainPage.terminals.previous, .passwords)
+        XCTAssertEqual(MainPage.clash.next, .terminals)
+        XCTAssertEqual(MainPage.terminals.previous, .clash)
         XCTAssertEqual(MainPage.clash.previous, .browser)
         XCTAssertEqual(MainPage.browser.previous, .rooms)
         XCTAssertEqual(MainPage.rooms.previous, .dispatch)

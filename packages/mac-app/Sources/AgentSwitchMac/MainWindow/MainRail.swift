@@ -25,15 +25,16 @@ struct MainRail: View {
 
     var body: some View {
         VStack(spacing: Self.gap) {
-            ForEach(state.pages.filter { $0 != .passwords }, id: \.self) { page in
+            ForEach(state.pages, id: \.self) { page in
                 RailButton(rows: page.railIcon, help: page.railHelp, current: state.page == page,
                            mark: state.activity(of: page).mark) { switchPage(page) }
                     .accessibilityLabel(page.title)
             }
             RailEmptyPart(state: state)
-            // The password book at the foot, over the settings (user #358: 密码本放在这个位置吧).
-            RailButton(rows: MainPage.passwords.railIcon, help: MainPage.passwords.railHelp, current: state.page == .passwords, mark: .none) { switchPage(.passwords) }
-                .accessibilityLabel(MainPage.passwords.title)
+            // The password book at the foot, over the settings (user #358: 密码本放在这个位置吧), and a window of its own
+            // as they are (user #400).
+            RailButton(rows: PixelArt.railPasswords, help: PasswordsOpener.help, current: false, mark: .none) { PasswordsOpener.show(state.nodeId) }
+                .accessibilityLabel("Passwords")
             RailButton(rows: PixelArt.toolbarSettings, help: "Settings ⌘,", current: false, mark: .none, action: settings)
                 .accessibilityLabel("Settings")
         }
@@ -117,14 +118,14 @@ struct RailStrip: View {
 
     var body: some View {
         VStack(spacing: MainRail.gap) {
-            ForEach(state.pages.filter { $0 != .passwords }, id: \.self) { page in
+            ForEach(state.pages, id: \.self) { page in
                 StripBar(bar: .of(current: state.page == page, activity: state.activity(of: page).mark),
                          help: page.railHelp) { switchPage(page) }
                     .accessibilityLabel(page.title)
             }
             RailEmptyPart(state: state)
-            StripBar(bar: state.page == .passwords ? .of(current: true, activity: .none) : nil, help: MainPage.passwords.railHelp) { switchPage(.passwords) }
-                .accessibilityLabel(MainPage.passwords.title)
+            StripBar(bar: nil, help: PasswordsOpener.help) { PasswordsOpener.show(state.nodeId) }
+                .accessibilityLabel("Passwords")
             StripBar(bar: nil, help: "Settings ⌘,", action: settings)
                 .accessibilityLabel("Settings")
         }
@@ -270,7 +271,6 @@ extension MainPage {
         case .terminals: PixelArt.railTerminals
         case .browser: PixelArt.railBrowser
         case .clash: PixelArt.railClash
-        case .passwords: PixelArt.railPasswords
         case .rooms: PixelArt.railRooms
         }
     }

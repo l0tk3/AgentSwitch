@@ -134,7 +134,7 @@ final class MainWindowState {
         case .dispatch: dispatchActivity
         case .terminals: terminalsActivity
         case .browser: browserActivity
-        case .clash, .passwords: .none
+        case .clash: .none
         case .rooms: roomsActivity
         }
     }

@@ -26,6 +26,6 @@ Feasibility check: room-files `feasibility-model-gateway.md`. Design: `design-re
 ## Not yet
 
 - **Gateway account:** the gateway runs under the user's account. Moving it into the gate service's own account is the next step; the design stays the same.
-- **Password book:** not built yet.
+- **Password book:** built (`vault/passwords.ts`, `api/passwords.ts`). On the Mac it is a window of its own, opened from the padlock at the rail's foot or ⇧⌘L (`PasswordsWindowController`).
 - **Images:** text inside images and screenshots is not replaced.
 - **Remote nodes:** a remote node's words cannot be set from the Mac yet.

@@ -4,13 +4,105 @@ import LocalAuthentication
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The password book (design-password-book.md; user #345-#351): a page of the main window. The list never holds a
-/// password; one is fetched (`reveal`) after Touch ID, which is not asked again for five minutes, shown for twenty
-/// seconds; a copy stays on the clipboard (user #377). Each password is also a word the model never sees
-/// (Settings › Redaction).
+/// The password book's window opened from a view that has no hold of the controller: `node` nil is this Mac.
+@MainActor enum PasswordsOpener {
+    static var show: (String?) -> Void = { _ in }
+    static let help = "Passwords ⌘⇧L"
+}
+
+/// The password book's window (user #400: 和设置一样点击以后弹出来一个页面): one, as the settings' is; opened again from
+/// a window on another node it shows that node's book (user #356).
+@MainActor
+final class PasswordsWindowController {
+    private let model: AppModel
+    private(set) var window: NSWindow?
+    private var node: String?
+    /// Told when the window opens (true) or closes (false), for the Dock icon.
+    var onVisibilityChange: (Bool) -> Void = { _ in }
+    private var closeObserver: NSObjectProtocol?
+    private var keyMonitor: Any?
+
+    init(model: AppModel) { self.model = model }
+
+    static let contentSize = NSSize(width: 860, height: 560)
+
+    func show(node: String?) {
+        if let window, self.node != node { Self.fill(window, model: model, node: node) }
+        let window = self.window ?? makeWindow(node: node)
+        self.window = window
+        self.node = node
+        onVisibilityChange(true)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// The window, not yet on screen; `-designPreview` draws the same one off-screen.
+    static func makeWindow(model: AppModel, node: String?, windowClass: NSWindow.Type = NSWindow.self, appearance: NSAppearance? = nil) -> NSWindow {
+        let window = windowClass.init(contentRect: NSRect(origin: .zero, size: contentSize),
+                                      styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.appearance = appearance
+        fill(window, model: model, node: node)
+        window.setContentSize(contentSize)
+        window.contentMinSize = NSSize(width: 640, height: 400)
+        window.isReleasedWhenClosed = false
+        return window
+    }
+
+    private static func fill(_ window: NSWindow, model: AppModel, node: String?) {
+        let size = window.contentView?.frame.size
+        let host = NSHostingController(rootView: PasswordsPage(node: node).environment(model).followsWindow())
+        host.sizingOptions = []
+        window.contentViewController = host
+        if let size, size.width > 0 { window.setContentSize(size) }
+        window.title = model.nodes.node(node).map { "Passwords — \($0.name)" } ?? "Passwords"
+    }
+
+    private func makeWindow(node: String?) -> NSWindow {
+        let window = Self.makeWindow(model: model, node: node)
+        window.center()
+        window.setFrameAutosaveName("AgentSwitchPasswords")
+        closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onVisibilityChange(false) }
+        }
+        // ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z in its fields, and ⌘W: a menu bar app has no menus to send them.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            nonisolated(unsafe) let key = event
+            let taken = MainActor.assumeIsolated { self?.key(key) ?? false }
+            return taken ? nil : event
+        }
+        return window
+    }
+
+    private func key(_ event: NSEvent) -> Bool {
+        guard let window, let target = event.window, target === window || target.sheetParent === window else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else { return false }
+        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if key == "w", !flags.contains(.shift), target === window { window.performClose(nil); return true }
+        guard target.firstResponder is NSText else { return false }
+        let action: Selector? = switch (key, flags.contains(.shift)) {
+        case ("c", false): #selector(NSText.copy(_:))
+        case ("v", false): #selector(NSText.paste(_:))
+        case ("x", false): #selector(NSText.cut(_:))
+        case ("a", false): #selector(NSText.selectAll(_:))
+        case ("z", false): Selector(("undo:"))
+        case ("z", true): Selector(("redo:"))
+        default: nil
+        }
+        guard let action else { return false }
+        return NSApp.sendAction(action, to: nil, from: target)
+    }
+}
+
+/// The password book (design-password-book.md; user #345-#351), in a window of its own (PasswordsWindowController). The
+/// list never holds a password; one is fetched (`reveal`) after Touch ID, which is not asked again for five minutes,
+/// shown for twenty seconds; a copy stays on the clipboard (user #377). Each password is also a word the model never
+/// sees (Settings › Redaction).
 struct PasswordsPage: View {
-    let state: MainWindowState
+    /// The node whose book this is; nil: this Mac (user #356).
+    let node: String?
     @Environment(AppModel.self) private var app
+    @Environment(\.onScreen) private var onScreen
     @State private var model = PasswordsModel()
 
     var body: some View {
@@ -20,13 +112,11 @@ struct PasswordsPage: View {
             detail.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Look.ground)
-        // Another node's book when the window is on that node (user #356).
-        .task(id: "\(state.page == .passwords && state.windowVisible)|\(state.nodeId ?? "")") {
-            let node = state.nodeId
+        .task(id: onScreen) {
             if model.node != node { model.switchNode(node) }
-            model.client = { [app] in app.client(on: node) }
+            model.client = { [app, node] in app.client(on: node) }
             if let demo = PasswordsDemo.current { model.show(demo: demo); return }
-            guard state.page == .passwords && state.windowVisible else { return }
+            guard onScreen else { return }
             await model.load()
         }
     }
