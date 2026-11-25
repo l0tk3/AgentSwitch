@@ -1,6 +1,6 @@
 import Foundation
 
-/// One block of model output. Executors and the router write Markdown; the phone shows it by blocks, with
+/// One block of model output. Agents write Markdown; the phone shows it by blocks, with
 /// Foundation's inline parser (bold, italics, code, links) inside each. Images are never loaded: only their alt text.
 public enum MarkdownBlock: Equatable, Sendable {
     case heading(level: Int, text: String)

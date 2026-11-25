@@ -25,7 +25,6 @@ struct RoomPage: View {
     /// The tasks sheet opens on a new task (`+ 新任务` in the drawer).
     @State private var newTask = false
     @State private var files = false
-    @State private var secrets = false
     @State private var drawer = false
     @State private var searching = false
     /// A file of the shared folder's sheet asked for on the Files page (`Show in Files`): shown there once the sheet is gone.
@@ -106,7 +105,6 @@ struct RoomPage: View {
                     Button(detail?.notes == nil ? "Notes" : "Notes ·", systemImage: "pin") { notes = true }
                     Button(detail.map { $0.openTasks > 0 ? "Tasks · \($0.openTasks)" : "Tasks" } ?? "Tasks", systemImage: "checklist") { newTask = false; tasks = true }
                     Button("Files", systemImage: "folder") { files = true }
-                    Button(detail.map { $0.secrets > 0 ? "Secrets · \($0.secrets)" : "Secrets" } ?? "Secrets", systemImage: "key") { secrets = true }
                     Button("Add Sessions…", systemImage: "plus") { adding = true }
                     Button("Rename…", systemImage: "pencil") { editing = true }
                     // 解散 (user #230); not the 调度台, which goes with the dispatch turned off on the Mac.
@@ -157,7 +155,6 @@ struct RoomPage: View {
         .sheet(isPresented: $files, onDismiss: { if let path = fileToShow { fileToShow = nil; showFile(path) } }) {
             RoomFilesSheet(room: model.id, folder: detail?.folder ?? "") { fileToShow = $0 }.followsLook()
         }
-        .sheet(isPresented: $secrets) { RoomSecretsSheet(model: model).followsLook() }
         .sheet(isPresented: $searching) {
             RoomSearchPage(model: model, initial: Self.sampleScreen == "roomsearch" ? "接口" : "") { seq in
                 Task { await model.reveal(seq, api: app.api) }
@@ -177,7 +174,6 @@ struct RoomPage: View {
                 case "roomnotes": notes = true
                 case "roomtasks", "roomtaskadd": tasks = true
                 case "roomfiles": files = true
-                case "roomsecrets": secrets = true
                 case "roomdrawer": withAnimation { drawer = true }
                 case "roomsearch": searching = true
                 case "roomtask": model.taskFilter = 4

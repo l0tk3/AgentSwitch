@@ -1,19 +1,7 @@
 import Foundation
 
-/// The gate's current keypair as the Mac hands it over (`GET /gate/pubkey` has the same shape).
-public struct GateKey: Codable, Sendable, Hashable {
-    public let publicKey: String   // base64url, 32 bytes
-    public let keypair: String
-
-    public init(publicKey: String, keypair: String) {
-        self.publicKey = publicKey
-        self.keypair = keypair
-    }
-
-    public var isValid: Bool { (try? TokenMinter(publicKeyBase64URL: publicKey)) != nil }
-}
-
-/// The JSON inside `agentswitch://pair?p=…` (app-v0 §2), version 1.
+/// The JSON inside `agentswitch://pair?p=…` (app-v0 §2), version 1. A Mac may still put its old gate key in it
+/// (`gate`); it is not read.
 public struct PairingPayload: Codable, Sendable, Equatable {
     public let v: Int
     public let name: String
@@ -23,11 +11,9 @@ public struct PairingPayload: Codable, Sendable, Equatable {
     public let lan: [String]
     public let tailnet: [String]
     public let bonjour: String
-    /// Optional here so a Mac without a gate keypair can still pair; the phone then asks `GET /gate/pubkey`.
-    public let gate: GateKey?
 
     public init(v: Int = 1, name: String, port: Int, fp: String, code: String, lan: [String], tailnet: [String],
-                bonjour: String, gate: GateKey?) {
+                bonjour: String) {
         self.v = v
         self.name = name
         self.port = port
@@ -36,7 +22,6 @@ public struct PairingPayload: Codable, Sendable, Equatable {
         self.lan = lan
         self.tailnet = tailnet
         self.bonjour = bonjour
-        self.gate = gate
     }
 
     public init(from decoder: Decoder) throws {
@@ -49,7 +34,6 @@ public struct PairingPayload: Codable, Sendable, Equatable {
         lan = try c.decodeIfPresent([String].self, forKey: .lan) ?? []
         tailnet = try c.decodeIfPresent([String].self, forKey: .tailnet) ?? []
         bonjour = try c.decodeIfPresent(String.self, forKey: .bonjour) ?? ""
-        gate = try c.decodeIfPresent(GateKey.self, forKey: .gate)
     }
 }
 
@@ -110,9 +94,8 @@ public enum PairingLink {
         guard p.lan.allSatisfy(HostAddress.isValid) else { throw PairingLinkError.invalidField("lan") }
         guard p.tailnet.allSatisfy(HostAddress.isValid) else { throw PairingLinkError.invalidField("tailnet") }
         guard !(p.lan.isEmpty && p.tailnet.isEmpty && p.bonjour.isEmpty) else { throw PairingLinkError.invalidField("lan/tailnet/bonjour") }
-        if let gate = p.gate, !gate.isValid { throw PairingLinkError.invalidField("gate.publicKey") }
         return PairingPayload(v: p.v, name: name, port: p.port, fp: fp, code: code, lan: p.lan, tailnet: p.tailnet,
-                              bonjour: p.bonjour, gate: p.gate)
+                              bonjour: p.bonjour)
     }
 
     /// `XXXX-XXXX`, decoded like the daemon's normalizeCode (remote/pairing.ts): case-insensitive, dashes and spaces

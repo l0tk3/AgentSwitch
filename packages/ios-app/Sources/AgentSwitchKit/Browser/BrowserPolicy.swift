@@ -170,10 +170,8 @@ public enum BrowserNotice {
     /// Two minutes without input gave the tab back.
     public static let idleHandBack = "2 分钟无操作，已自动交还。"
     /// Said once when a person takes over an agent's tab: what is typed stays on the page for the agent to see after
-    /// the hand-back, and Fill Ciphertext is only on one's own tabs (docs/browser-v0.md §2 安全, §6).
+    /// the hand-back (docs/browser-v0.md §2 安全, §6).
     public static let takeOver = "接手期间你输入的内容，交还后 agent 能在页面上看到；密码请在自己的标签里填写。"
-    /// Fill Ciphertext asked for on an agent's tab (the key is not offered there).
-    public static let fillOwnTabsOnly = "只能在你自己的标签中填入密文。"
 }
 
 /// Where a tab is held: the screen ids carry their kind (`mac-…`, `phone-…`, `web-…`); without one the Mac records the

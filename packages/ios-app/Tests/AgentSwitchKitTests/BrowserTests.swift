@@ -206,50 +206,6 @@ final class BrowserTests: XCTestCase {
         XCTAssertTrue(queue.isEmpty)
     }
 
-    func testFillingACiphertextAndAMacWithoutIt() async throws {
-        let tab = String(data: json(["tab": Self.codexTab]), encoding: .utf8)!
-        let transport = FakeTransport { req, n in
-            if n == 0 { return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url)) }
-            // An older Mac: no fill route, the tab itself there.
-            if req.url?.path == "/browser/tabs/a1" { return (Data(tab.utf8), httpResponse(req.url)) }
-            return (Data(#"{"error":"not found"}"#.utf8), httpResponse(req.url, status: 404))
-        }
-        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        let filled = try await api.fillBrowserTab("a1", token: "enc:v1:abc", screen: "phone-1")
-        XCTAssertTrue(filled)
-        XCTAssertEqual(try body(transport.requests[0]) as NSDictionary, ["token": "enc:v1:abc", "screen": "phone-1"])
-        let older = try await api.fillBrowserTab("a1", token: "enc:v1:abc", screen: "phone-1")
-        XCTAssertFalse(older, "404 while the tab is there: this Mac cannot fill yet")
-        XCTAssertEqual(transport.paths, ["/browser/tabs/a1/fill", "/browser/tabs/a1/fill", "/browser/tabs/a1"])
-    }
-
-    /// 2026-10-02 review: a 404 from a tab closed meanwhile is not taken for an older Mac (which would hide the key).
-    func testFillingATabThatIsGoneSaysSo() async throws {
-        let transport = FakeTransport { req, _ in (Data(#"{"error":"not found"}"#.utf8), httpResponse(req.url, status: 404)) }
-        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        do {
-            _ = try await api.fillBrowserTab("gone", token: "enc:v1:abc", screen: "phone-1")
-            XCTFail("a closed tab is an error, not an older Mac")
-        } catch {
-            XCTAssertEqual(error as? APIError, .http(status: 404, message: "此标签已关闭。"))
-        }
-        XCTAssertEqual(transport.paths, ["/browser/tabs/gone/fill", "/browser/tabs/gone"])
-    }
-
-    /// The Mac's refusals are shown in its words: 400 for a field that takes no ciphertext, 409 on an agent's tab.
-    func testAFillRefusalCarriesTheMacsWords() async throws {
-        let transport = FakeTransport { req, _ in
-            (Data(#"{"error":"只能填入密码或验证码输入框。"}"#.utf8), httpResponse(req.url, status: 400))
-        }
-        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        do {
-            _ = try await api.fillBrowserTab("a1", token: "enc:v1:abc", screen: "phone-1")
-            XCTFail("refused")
-        } catch {
-            XCTAssertEqual(error.localizedDescription, "只能填入密码或验证码输入框。")
-        }
-    }
-
     func testLocalServersDecode() async throws {
         let transport = FakeTransport { req, _ in
             (Data(#"{"servers":[{"port":5173,"bind":"loopback","pid":42,"name":"vite","cwd":"/Users/me/Projects/site","url":"http://localhost:5173/"},{"port":3000}]}"#.utf8), httpResponse(req.url))

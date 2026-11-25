@@ -45,12 +45,4 @@ public enum JSONValue: Sendable, Hashable, Codable {
     public var array: [JSONValue]? { if case .array(let a) = self { return a }; return nil }
     public var object: [String: JSONValue]? { if case .object(let o) = self { return o }; return nil }
     public var isNull: Bool { self == .null }
-
-    /// Compact JSON text with sorted keys, for "show the raw payload" lines.
-    public var compactText: String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        guard let data = try? encoder.encode(self), let text = String(data: data, encoding: .utf8) else { return "" }
-        return text
-    }
 }

@@ -9,7 +9,6 @@ private struct InputBody: Encodable { let screen: String?; let events: [BrowserI
 private struct HoldBody: Encodable { let screen: String? }
 private struct HistoryBody: Encodable { let action: BrowserHistoryAction; let screen: String? }
 private struct ViewportBody: Encodable { let width: Int; let height: Int; let scale: Double; let mobile: Bool; let screen: String? }
-private struct FillBody: Encodable { let token: String; let screen: String? }
 
 /// Where to navigate a tab, and from which screen: the target's one field beside `screen`.
 private struct NavigateBody: Encodable {
@@ -114,8 +113,6 @@ extension AgentSwitchAPI {
     /// answers 404.
     public func browserTabs() async throws -> BrowserTabList { try await get(browserPath + ["tabs"]) }
 
-    public func browserTab(_ id: String) async throws -> BrowserTabInfo { (try await get(browserPath + ["tabs", id]) as TabEnvelope).tab }
-
     /// A new tab of yours; a refusal (403), a missing file (404) or an address the Mac cannot read (400) carries its
     /// reason in words.
     public func openBrowserTab(_ target: BrowserTarget) async throws -> BrowserTabInfo {
@@ -196,25 +193,6 @@ extension AgentSwitchAPI {
     }
 
     private static func seconds(_ d: Duration) -> Double { Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18 }
-
-    /// A saved ciphertext into the field that has the focus; the gate checks it against the page's site and only the
-    /// Mac sees the value. Only on a person's own tab, and only into a password or one-time-code field (the Mac's 409
-    /// and 400 carry the reason in words). False: this Mac cannot fill yet — its fill route is missing (404) while the
-    /// tab itself is there; a 404 for a tab that is gone is thrown as such (`BrowserClosedReason.closed`'s words).
-    @discardableResult
-    public func fillBrowserTab(_ id: String, token: String, screen: String?) async throws -> Bool {
-        do {
-            let _: OKReply = try await post(browserPath + ["tabs", id, "fill"], body: FillBody(token: token, screen: screen))
-            return true
-        } catch APIError.http(status: 404, message: _) {
-            do {
-                _ = try await browserTab(id)
-            } catch APIError.http(status: 404, message: _) {
-                throw APIError.http(status: 404, message: BrowserClosedReason.closed.said)
-            }
-            return false
-        }
-    }
 
     /// A tab's picture and what happens to it: `tab`, then frames and changes. Frames are the newest only twice over:
     /// the Mac sends at the rate asked for, and a frame the page has not read yet when the next comes is dropped

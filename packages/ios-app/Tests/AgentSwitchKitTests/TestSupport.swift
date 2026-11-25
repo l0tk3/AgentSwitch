@@ -96,9 +96,9 @@ final class FakeProber: EndpointProber, @unchecked Sendable {
 extension PairingPayload {
     static let sampleKey = Base64URL.encode(Data(repeating: 7, count: 32))
 
-    static func sample(gate: GateKey? = GateKey(publicKey: PairingPayload.sampleKey, keypair: "default")) -> PairingPayload {
+    static func sample() -> PairingPayload {
         PairingPayload(name: "Mac mini", port: 4713, fp: String(repeating: "ab", count: 32), code: "7K3M-9QZX",
                        lan: ["192.168.1.5"], tailnet: ["100.101.102.103", "mac.tail1234.ts.net"],
-                       bonjour: "AgentSwitch on Mac mini", gate: gate)
+                       bonjour: "AgentSwitch on Mac mini")
     }
 }

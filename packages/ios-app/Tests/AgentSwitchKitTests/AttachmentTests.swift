@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import AgentSwitchKit
 
-/// Attachments (app-v0 §5): multipart upload, task files, downloads, the image preparation that strips location
-/// metadata, and the text a voice may read.
+/// Attachments (app-v0 §5): multipart upload, the image preparation that strips location metadata, and the text a
+/// voice may read.
 final class AttachmentTests: XCTestCase {
     private let lan = APIEndpoint(host: "192.168.1.5", port: 4713, kind: .lan)
 
@@ -18,25 +18,19 @@ final class AttachmentTests: XCTestCase {
         XCTAssertTrue(text.hasSuffix("--B--\r\n"))
     }
 
-    func testUploadIsOneMultipartPostAndCreateCarriesTheIds() async throws {
+    func testUploadIsOneMultipartPost() async throws {
         let transport = FakeTransport { req, _ in
-            if req.url?.path == "/uploads" {
-                return (json(["files": [["id": "u1", "name": "a.png", "size": 2, "type": "image/png"]]]), httpResponse(req.url))
-            }
-            return (try Fixture.data("task.json"), httpResponse(req.url, status: 201))
+            (json(["files": [["id": "u1", "name": "a.png", "size": 2, "type": "image/png"]]]), httpResponse(req.url))
         }
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
         let staged = try await api.upload([UploadFile(name: "a.png", type: "image/png", data: Data([1, 2]))])
         XCTAssertEqual(staged.map(\.id), ["u1"])
-        _ = try await api.createTask(NewTaskRequest(task: "看图", attachments: staged.map(\.id)))
-
+        XCTAssertEqual(transport.paths, ["/uploads"])
         let upload = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(upload.httpMethod, "POST")
         XCTAssertEqual(upload.timeoutInterval, AgentSwitchAPI.uploadTimeout)
         let type = try XCTUnwrap(upload.value(forHTTPHeaderField: "Content-Type"))
         XCTAssertTrue(type.hasPrefix("multipart/form-data; boundary="))
-        let body = try XCTUnwrap(transport.requests.last?.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
-        XCTAssertEqual(body["attachments"] as? [String], ["u1"])
     }
 
     func testUploadIsNeverResent() async {
@@ -44,23 +38,6 @@ final class AttachmentTests: XCTestCase {
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
         do { _ = try await api.upload([UploadFile(name: "a", type: "", data: Data([1]))]); XCTFail() } catch {}
         XCTAssertEqual(transport.requests.count, 1)
-    }
-
-    func testTaskFilesAndDownloadPaths() async throws {
-        let transport = FakeTransport { req, _ in
-            if req.url?.path == "/tasks/t1/files" {
-                return (json(["root": "cwd", "files": [["path": "in/a.png", "size": 2, "mtime": 1], ["path": "out/报告 1.pdf", "size": 9, "mtime": 2]]]), httpResponse(req.url))
-            }
-            return (Data([7, 8, 9]), httpResponse(req.url, contentType: "application/pdf"))
-        }
-        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        let files = try await api.taskFiles("t1")
-        XCTAssertEqual(files.map(\.path), ["in/a.png", "out/报告 1.pdf"])
-        XCTAssertEqual(files.map(\.isDeliverable), [false, true])
-        XCTAssertEqual(files[1].name, "报告 1.pdf")
-        let data = try await api.download(taskId: "t1", path: "out/报告 1.pdf")
-        XCTAssertEqual(data, Data([7, 8, 9]))
-        XCTAssertEqual(transport.requests.last?.url?.absoluteString, "https://192.168.1.5:4713/tasks/t1/files/out/%E6%8A%A5%E5%91%8A%201.pdf")
     }
 
     // MARK: - images
@@ -125,17 +102,5 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(ImagePrep.prepare(gif), gif, "a GIF would lose its animation")
         let svg = UploadFile(name: "a.svg", type: "image/svg+xml", data: Data("<svg/>".utf8))
         XCTAssertEqual(ImagePrep.prepare(svg), svg)
-    }
-
-    func testCachePathsStayInsideTheTaskFolder() {
-        XCTAssertEqual(TaskFile.cacheSegments(taskId: "t1", path: "out/sub/报告.pdf"), ["t1", "out", "sub", "报告.pdf"])
-        XCTAssertEqual(TaskFile.cacheSegments(taskId: "t1", path: "../../etc/./passwd"), ["t1", "etc", "passwd"])
-        XCTAssertEqual(TaskFile.cacheSegments(taskId: "../x", path: ""), ["x", "file"])
-    }
-
-    func testPreviewableAndSourceOnlyFiles() {
-        XCTAssertTrue(TaskFile(path: "out/a.pdf", size: 1, isDeliverable: true).opensInPreview)
-        XCTAssertFalse(TaskFile(path: "out/page.html", size: 1, isDeliverable: true).opensInPreview, "HTML/SVG could load remote resources")
-        XCTAssertFalse(TaskFile(path: "out/logo.SVG", size: 1, isDeliverable: true).opensInPreview)
     }
 }

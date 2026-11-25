@@ -7,19 +7,19 @@ struct AgentSwitchApp: App {
     @State private var model = AgentSwitchApp.makeModel()
 
     init() {
-        FileCache.clear()   // downloaded task files are for looking at now, not kept on the phone
+        FileCache.clear()   // downloaded files are for looking at now, not kept on the phone
     }
 
     private static func makeModel() -> AppModel {
         #if DEBUG
-        // Screens with sample data and no Mac: `-uiDemo YES`, optionally `-uiDemoScreen settings|task|done|onboarding|
-        // stale|interrupted|mac|offline|offlinemac|tasks|search|sessions|transcript|terminals|terminal|terminalsealed|
+        // Screens with sample data and no Mac: `-uiDemo YES`, optionally `-uiDemoScreen settings|onboarding|
+        // mac|offline|offlinemac|sessions|transcript|terminals|terminal|terminalsealed|
         // terminalslash|terminalclose|terminalmenu|terminaldelete|terminalselect|terminaldeletemany|terminalsearch|terminalsmany|terminalquestion|terminallink|newterminal|newterminalbypass|
         // browser|browserpage|browsertook|browserfile|browserlocal|browserdenied|browsernew|browserclose|browserzoom|
         // browserzoomwatch|linkedpage|proxies|clash|clashservice|clashrules|clashcheck|clashnodes|clashtext|clashsource|
         // proxybrowser|proxyprofile|files|fileshome|filesopen|filespreview|filespreviewlong|filesimage|filesselect|fileschoose|filessensitive|
         // filesscoped|filessheet|filesreply|filesnew|filesnameerror|filestrash|filestrashbusy|filesselectbar|filesshare|filesupload|
-        // filesclash|filesgone|transcriptfiles|terminalpath|rooms|room|roompaused|roommembers|roomcard|roomavatar|roomavatarclassic|roomsecrets|roomnew|roomadd|roomrounds|roomnotes|
+        // filesclash|filesgone|transcriptfiles|terminalpath|rooms|room|roompaused|roommembers|roomcard|roomavatar|roomavatarclassic|roomnew|roomadd|roomrounds|roomnotes|
         // roomdrawer|roomsearch|roomtask|roomattention`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
@@ -31,23 +31,8 @@ struct AgentSwitchApp: App {
             let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
             let model = AppModel.demo(offline: screen == "offline" || screen == "offlinemac")
             switch screen {
-            case "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript", "transcriptfiles",
+            case "settings", "mac", "offlinemac", "sessions", "transcript", "transcriptfiles",
                  "proxies", "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource", "clashsubscription", "clashallnodes", "proxybrowser", "proxyprofile": model.tab = .settings
-            case "task": model.tab = .tasks; model.openTaskRequest = "t2"
-            case "done": model.tab = .tasks; model.openTaskRequest = "t3"
-            case "running": model.tab = .tasks; model.openTaskRequest = "t1"
-            case "stale": model.tab = .tasks; model.openTaskRequest = "t4"
-            case "interrupted": model.tab = .tasks; model.openTaskRequest = "t6"
-            // The Dispatch page itself (the app opens on the terminals).
-            case "home", "offline": model.tab = .tasks
-            case "keptfiles":
-                model.tab = .tasks
-                model.demoKeptFiles = KeptFiles(tasks: [
-                    .init(id: "t3", title: "整理下载目录里的重复文件", createdAt: Date().timeIntervalSince1970 * 1000 - 3_600_000,
-                          files: [TaskFile(path: "out/report.md", size: 4_096, isDeliverable: true), TaskFile(path: "out/dupes.txt", size: 1_024, isDeliverable: true)]),
-                    .init(id: "t1", title: "把这张截图里的表格转成 Excel", createdAt: Date().timeIntervalSince1970 * 1000 - 2 * 86_400_000,
-                          files: [TaskFile(path: "out/table.xlsx", size: 58_000, isDeliverable: true), TaskFile(path: "in/shot.png", size: 401_000, isDeliverable: false)])])
-                model.openKeptFilesRequest = true
             case "terminals", "terminalsconnecting", "terminalmenu", "terminalmenuprofile", "terminaldelete", "terminalselect", "terminaldeletemany", "terminalsearch", "terminalprofiles": model.tab = .terminals
             // A long tree read again as the Mac's is (TerminalsListProbe).
             case "terminalsmany": model.tab = .terminals; TerminalsListProbe.start(model)
@@ -72,7 +57,7 @@ struct AgentSwitchApp: App {
                                                                           MacPick(path: "\(DemoFiles.project)/.env", isFolder: false, sensitive: true)])
             // Chat Room (docs/chatroom-v0.md): the list, a room, its members, a member's card, a new room.
             case "rooms", "roomnew", "roomattention": model.tab = .rooms
-            case "room", "roompaused", "roomrounds", "roomnotes", "roomtasks", "roomtaskadd", "roomfiles", "roommembers", "roomcard", "roomavatar", "roomavatarclassic", "roomsecrets", "roomadd", "roomdrawer", "roomsearch", "roomtask": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
+            case "room", "roompaused", "roomrounds", "roomnotes", "roomtasks", "roomtaskadd", "roomfiles", "roommembers", "roomcard", "roomavatar", "roomavatarclassic", "roomadd", "roomdrawer", "roomsearch", "roomtask": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)
             // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
             case "linkedpage":
@@ -106,7 +91,7 @@ struct AgentSwitchApp: App {
                 // Any link without the system's "Open in" prompt: `-openLink agentswitch://terminal/<id>`.
                 .task { if let link = UserDefaults.standard.string(forKey: "openLink"), let url = URL(string: link) { open(url) } }
                 // A sample Live Activity for looking at the island and the lock screen: `-liveDemo YES`.
-                .task { if UserDefaults.standard.bool(forKey: "liveDemo") { await model.live.sync(LiveDemo.state, ended: nil, macName: "Mac mini") } }
+                .task { if UserDefaults.standard.bool(forKey: "liveDemo") { await model.live.sync(LiveDemo.state, macName: "Mac mini") } }
                 #endif
         }
         .onChange(of: scenePhase) { _, phase in
@@ -118,12 +103,10 @@ struct AgentSwitchApp: App {
         }
     }
 
-    /// A Live Activity's agentswitch://task/<id> or …/terminal/<id> opens that task or terminal; an agentswitch://pair
-    /// link opens pairing, the same as a scanned QR code.
+    /// A Live Activity's agentswitch://terminal/<id> opens that terminal; an agentswitch://pair link opens pairing, the
+    /// same as a scanned QR code.
     private func open(_ url: URL) {
-        if let id = LiveLink.taskId(from: url) {
-            model.openTask(id)
-        } else if let id = LiveLink.terminalId(from: url) {
+        if let id = LiveLink.terminalId(from: url) {
             model.openTerminal(id)
         } else {
             model.receivePairingLink(url.absoluteString)

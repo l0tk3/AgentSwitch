@@ -15,8 +15,6 @@ final class BrowserStore {
     private(set) var unsupported = false
     /// The last read failed (the kept list is shown); cleared by the next good one.
     var error: String?
-    /// This Mac cannot fill ciphertexts into a page yet (its fill route answered 404): the key is not offered.
-    var fillUnavailable = false
     /// Addresses typed on this phone, newest first.
     private(set) var recent: [String] = UserDefaults.standard.stringArray(forKey: BrowserStore.recentKey) ?? []
     /// The page zoom this phone remembers, a site at a time (browser-v0 §1 页面缩放, 2026-10-03; user: 然后我发现
@@ -124,7 +122,6 @@ final class BrowserStore {
         servers = []
         unsupported = false
         error = nil
-        fillUnavailable = false
         browsers = [.shared]
         key = nil
     }

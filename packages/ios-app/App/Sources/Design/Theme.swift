@@ -61,18 +61,6 @@ enum Theme {
     /// What is written on the primary button's fill.
     static let onFill = Color(light: 0xF3F1EA, dark: 0x000000, classicLight: 0xFFFFFF, classicDark: 0xFFFFFF)
     static let card = Color.clear
-
-    static func color(_ status: TaskStatus) -> Color {
-        switch status {
-        case .done: return done
-        case .failed: return failed
-        case .waitingApproval: return waiting
-        case .partial, .blocked: return waiting
-        case .cancelled, .other: return .secondary
-        case .queued: return .secondary
-        case .routing, .running: return busy
-        }
-    }
 }
 
 extension Color {
@@ -90,21 +78,6 @@ extension Color {
 extension UIColor {
     convenience init(rgb: UInt32) {
         self.init(red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255, blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
-    }
-}
-
-/// A status: its pixel mark (a square, hollow once ended without success, the spinner while busy) and its word, in
-/// the status colour. `waiting` overrides (a pending question on a running task).
-struct StatusLabel: View {
-    let task: AgentTask
-    var waiting = false
-
-    var body: some View {
-        let color = waiting ? Theme.waiting : Theme.color(task.status)
-        HStack(spacing: 6) {
-            StatusMark(status: waiting ? .waitingApproval : task.status)
-            LookWord(waiting ? TaskStatus.waitingApproval.label : task.statusLabel).mono(12, weight: .medium).foregroundStyle(color)
-        }
     }
 }
 

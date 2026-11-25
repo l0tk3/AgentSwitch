@@ -31,13 +31,6 @@ public enum PixelArt {
     /// (waiting) or red (error), or dithered to half (off).
     public enum MarkState: Sendable, Equatable { case idle, busy, waiting, error, off }
 
-    /// The phone's state for the mark: the Mac out of reach first, then what waits for the user, then work under way.
-    public static func markState(reachable: Bool, waiting: Int, busy: Bool) -> MarkState {
-        if !reachable { return .off }
-        if waiting > 0 { return .waiting }
-        return busy ? .busy : .idle
-    }
-
     /// Off: every other cell, a checkerboard.
     public static func dithered(_ cell: Cell) -> Bool { (cell.x + cell.y) % 2 == 1 }
 

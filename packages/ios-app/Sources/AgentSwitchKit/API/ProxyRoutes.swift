@@ -4,6 +4,12 @@ import Foundation
 /// a profile's own proxy, the shared browser's. A Mac from before these were a phone's answers 403 or 404: then there
 /// is nothing to show, said as nil.
 extension AgentSwitchAPI {
+    /// A secret sealed by the Mac under its own vault key (`POST /vault/seal`): what a proxy keeps of its password.
+    public func vaultSeal(_ value: String) async throws -> String {
+        struct Sealed: Decodable { let token: String }
+        return (try await post(["vault", "seal"], body: ["value": value]) as Sealed).token
+    }
+
     // MARK: Clash
 
     public func clash() async throws -> ClashView? {

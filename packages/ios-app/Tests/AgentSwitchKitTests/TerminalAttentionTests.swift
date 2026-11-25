@@ -47,21 +47,19 @@ final class TerminalAttentionTests: XCTestCase {
     }
 
     func testAWaitingTerminalIsARowAndStartsTheSummaryOnItsOwn() throws {
-        XCTAssertNil(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("b", .idle), terminal("c", .exited)]),
+        XCTAssertNil(LiveSummary.state(terminals: [terminal("b", .idle), terminal("c", .exited)]),
                      "an idle or ended terminal is not in it")
-        let state = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a", asks: ["p1"])]))
+        let state = try XCTUnwrap(LiveSummary.state(terminals: [terminal("a", asks: ["p1"])]))
         XCTAssertEqual(state.phase, .needsYou)
         XCTAssertEqual(state.waiting, 1)
         XCTAssertEqual(state.running, 0)
-        XCTAssertFalse(state.hasTasks, "no conclusion to show once it is answered")
         let row = try XCTUnwrap(state.lead)
-        XCTAssertEqual(row.kind, .terminal)
         XCTAssertEqual(row.title, "修复登录")
         XCTAssertEqual(row.step, "Bash: npm test")
         XCTAssertEqual(row.model, "Claude Code")
         XCTAssertEqual(row.startedAt, Date(timeIntervalSince1970: 1_700_000_000), "the clock counts from the request")
         XCTAssertEqual(row.link, LiveLink.terminal("a"))
-        let screen = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a", .waiting)])?.lead)
+        let screen = try XCTUnwrap(LiveSummary.state(terminals: [terminal("a", .waiting)])?.lead)
         XCTAssertEqual(screen.step, "等你处理")
         XCTAssertEqual(screen.startedAt, Date(timeIntervalSince1970: 1_600_000_000), "no request: since its last output")
     }
@@ -70,49 +68,42 @@ final class TerminalAttentionTests: XCTestCase {
     func testATerminalAtWorkIsARowInProgressSayingWhatItUses() throws {
         let busy = TerminalInfo(id: "k1", harness: "codex", cwd: "/p", name: "api-refactor", status: .working, createdAt: 1, lastOutputAt: 9,
                                 activity: TerminalActivity(tool: "Bash", target: "/bin/zsh -lc 'npm test'"), statusSince: 1_700_000_000_000)
-        let state = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [busy, terminal("b", .idle)]))
+        let state = try XCTUnwrap(LiveSummary.state(terminals: [busy, terminal("b", .idle)]))
         XCTAssertEqual(state.phase, .running)
         XCTAssertEqual(state.running, 1)
         XCTAssertEqual(state.waiting, 0)
         let row = try XCTUnwrap(state.lead)
-        XCTAssertEqual(row.kind, .terminal)
         XCTAssertFalse(row.needsYou)
         XCTAssertEqual(row.title, "api-refactor")
         XCTAssertEqual(row.step, "运行 npm test")
         XCTAssertEqual(row.model, "Codex")
         XCTAssertEqual(row.startedAt, Date(timeIntervalSince1970: 1_700_000_000), "since this turn began")
-        let quiet = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a")])?.lead)
+        let quiet = try XCTUnwrap(LiveSummary.state(terminals: [terminal("a")])?.lead)
         XCTAssertEqual(quiet.step, "进行中", "no tool reported yet")
     }
 
-    func testTerminalsAndTasksWaitingComeFirstNewestFirst() throws {
-        let running = try JSONDecoder().decode(AgentTask.self, from: JSONSerialization.data(withJSONObject: [
-            "id": "t1", "createdAt": 1_800_000_000_000, "updatedAt": 1_800_000_000_000, "status": "running", "task": "整理下载目录"]))
-        let state = try XCTUnwrap(LiveSummary.state(tasks: [running], approvals: [], threadTitles: [:],
-                                                    terminals: [terminal("old", asks: ["p"], at: 1_000), terminal("new", asks: ["p"], at: 2_000)]))
-        XCTAssertEqual(state.rows.map(\.id), ["new", "old", "t1"])
+    func testTerminalsWaitingComeFirstNewestFirst() throws {
+        let state = try XCTUnwrap(LiveSummary.state(terminals: [terminal("busy"), terminal("old", asks: ["p"], at: 1_000), terminal("new", asks: ["p"], at: 2_000)]))
+        XCTAssertEqual(state.rows.map(\.id), ["new", "old", "busy"])
         XCTAssertEqual(state.waiting, 2)
         XCTAssertEqual(state.running, 1)
-        XCTAssertTrue(state.hasTasks)
-        XCTAssertEqual(state.rows.last?.link, LiveLink.task("t1"))
     }
 
-    func testTerminalLinksGoBothWaysAndAreNotTaskLinks() throws {
+    func testTerminalLinksGoBothWays() throws {
         let url = LiveLink.terminal("a1b2c3d4")
         XCTAssertEqual(url.absoluteString, "agentswitch://terminal/a1b2c3d4")
         XCTAssertEqual(LiveLink.terminalId(from: url), "a1b2c3d4")
-        XCTAssertNil(LiveLink.taskId(from: url))
-        XCTAssertNil(LiveLink.terminalId(from: LiveLink.task("a1b2c3d4")))
+        XCTAssertNil(LiveLink.terminalId(from: try XCTUnwrap(URL(string: "agentswitch://task/a1b2c3d4"))))
+        XCTAssertNil(LiveLink.terminalId(from: try XCTUnwrap(URL(string: "agentswitch://pair?p=abc"))))
         XCTAssertNil(LiveLink.terminalId(from: try XCTUnwrap(URL(string: "agentswitch://terminal/"))))
     }
 
-    func testAStateSavedBeforeRowsHadAKindReadsAsTasks() throws {
-        let old = #"{"rows":[{"id":"t1","title":"x","step":"y","startedAt":0,"needsYou":false}],"running":1,"waiting":0}"#
+    /// A state from an earlier version (a row's `kind`, the last conclusion) still reads.
+    func testAStateSavedByAnEarlierVersionStillReads() throws {
+        let old = #"{"rows":[{"id":"t1","title":"x","step":"y","startedAt":0,"needsYou":false,"kind":"terminal"}],"running":1,"waiting":0,"ended":null}"#
         let state = try JSONDecoder().decode(LiveState.self, from: Data(old.utf8))
-        XCTAssertEqual(state.rows.first?.kind, .task)
-        let again = try JSONDecoder().decode(LiveState.self, from: JSONEncoder().encode(
-            LiveState(rows: [.init(id: "a", title: "x", step: "y", model: nil, startedAt: Date(), needsYou: true, kind: .terminal)], running: 0, waiting: 1)))
-        XCTAssertEqual(again.rows.first?.kind, .terminal)
+        XCTAssertEqual(state.rows.first?.link, LiveLink.terminal("t1"))
+        XCTAssertEqual(state.phase, .running)
     }
 
     func testATurnThatEndedIsToldOnceAndNotOnTheFirstLook() {

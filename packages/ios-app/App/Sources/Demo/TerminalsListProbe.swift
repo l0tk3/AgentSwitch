@@ -136,7 +136,7 @@ enum TerminalsListProbe {
         await pause(9)
         say("after two reads \(place())")
 
-        model.tab = .tasks
+        model.tab = .dispatch
         say("to Dispatch")
         await pause(5)
         model.tab = .terminals

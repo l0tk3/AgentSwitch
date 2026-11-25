@@ -1,35 +1,28 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// Where 设置 can lead by value: the Mac's details, the history, the Mac's coding sessions and one of them. The demo
-/// screens open straight onto them (`-uiDemoScreen mac|tasks|search|sessions|transcript`).
+/// Where 设置 can lead by value: the Mac's details, the Mac's coding sessions and one of them. The demo
+/// screens open straight onto them (`-uiDemoScreen mac|sessions|transcript`).
 enum SettingsRoute: Hashable {
-    case mac, tasks, sessions
+    case mac, sessions
     case session(SessionSummary)
     /// Proxies: the Clash page, and a proxy's form (the shared browser's or a profile's).
     case clash
     case proxy(ProxyTarget)
 }
 
-/// Everything behind the gear (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top, then the executors' usage
-/// (§4.2); the look (Appearance, docs/ui-v0.md §8); what every task reads (CONTEXT.md, ciphertexts); sounds and reading;
-/// the proxies (Clash, the browser's, each profile's; docs/clash-v0.md §9); the Mac app's new version; the
-/// history (every task; clear history deletes it all) and the models; the permission mode
-/// (changed on the Mac); the Face ID lock; re-pairing. Rows carry no icons (the usage rows' tiles are content, not
-/// row icons); footers are one sentence. Pull to refresh re-reads the usage.
+/// The Settings tab (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top; the look (Appearance, docs/ui-v0.md
+/// §8); the proxies (Clash, the browser's, each profile's; docs/clash-v0.md §9); sounds and reading; the Mac app's new
+/// version; the Face ID lock; re-pairing. Rows carry no icons; footers are one sentence. Pull to refresh re-reads the
+/// proxies.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(AppLock.self) private var lock
     @State private var confirmForget = false
     @State private var addingMac = false
     @State private var path: [SettingsRoute] = SettingsView.initialPath
-    @State private var policy: ApprovalPolicyInfo?
     /// What the Mac has of proxies; read again when coming back from one of their pages.
     @State private var proxies = ProxiesOverview()
-    /// clear history: confirmed first (DeleteRequest), then done or why not.
-    @State private var clearing: DeleteRequest?
-    @State private var clearError: String?
-    @State private var cleared = false
 
     private static var initialPath: [SettingsRoute] {
         #if DEBUG
@@ -56,48 +49,11 @@ struct SettingsView: View {
                     } footer: {
                         if model.macs.servers.count > 1 { Text("同一时间只连接一台 Mac。") }
                     }
-                    if let quota = model.quota { UsageSection(readings: quota) }
                 }
                 AppearanceSection()
-                Section {
-                    // What every task of the old dispatch reads: off with it (OldDispatch). The ciphertexts stay, the
-                    // terminals use them too.
-                    NavigationLink("Context") { ContextEditorView() }
-                        .disabled(OldDispatch.off)
-                    NavigationLink("Ciphertexts") { CiphertextsView() }
-                } header: {
-                    SectionLabel("Dispatch")
-                } footer: {
-                    Text(OldDispatch.off ? "环境说明供旧调度的任务参考。\(OldDispatch.note)" : "环境说明记录站点、账号和偏好，供每个任务参考。")
-                }
-                .disabled(!connected)
                 if connected, !proxies.isEmpty { ProxiesSection(overview: proxies).id("proxies") }
                 FeedbackSection()
                 if connected { MacAppSection() }
-                Section {
-                    // The old dispatch's tasks (each opens a task page), the router's model, and clearing that
-                    // history: off with it (OldDispatch).
-                    Group {
-                        NavigationLink("History", value: SettingsRoute.tasks)
-                        NavigationLink("Models") { ModelsView() }
-                        Button("Clear History", role: .destructive) { cleared = false; clearing = .history }
-                    }
-                    .disabled(OldDispatch.off)
-                    if let clearError { Text(clearError).font(.footnote).foregroundStyle(Theme.failed) }
-                    if cleared { Text("记录已清空。").font(.footnote).foregroundStyle(.secondary) }
-                } header: {
-                    SectionLabel("Manage")
-                } footer: {
-                    Text((OldDispatch.off ? OldDispatch.note : "") + "Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。")
-                }
-                .disabled(!connected)
-                if let policy {
-                    Section {
-                        LabeledContent("Permissions") { Text(policy.policy.mode.label).mono(13) }
-                    } footer: {
-                        Text(policy.policy.mode.explanation + "。在 Mac 上修改。")
-                    }
-                }
                 Section {
                     Toggle("Unlock with \(lock.biometryName)", isOn: Binding(get: { lock.enabled },
                                                                         set: { on in Task { await lock.setEnabled(on) } }))
@@ -110,7 +66,7 @@ struct SettingsView: View {
                 Section {
                     Button("Remove This Mac", role: .destructive) { confirmForget = true }
                 } footer: {
-                    Text("删除此 iPhone 与这台 Mac 的配对，已保存的密文不受影响。")
+                    Text("删除此 iPhone 与这台 Mac 的配对。")
                 }
             }
             #if DEBUG
@@ -122,8 +78,6 @@ struct SettingsView: View {
             .tint(.accentColor)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            // Task pages opened from 任务记录 link on to other tasks (a hand-off) by id.
-            .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: SettingsRoute.self) { route in destination(route) }
             .confirmationDialog("移除「\(model.profile?.name ?? "Mac")」？", isPresented: $confirmForget, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { model.forget() }
@@ -131,21 +85,8 @@ struct SettingsView: View {
                 Text(model.macs.servers.count > 1 ? "将切换到其他已配对的 Mac。" : "之后需要重新扫码配对。")
             }
             .sheet(isPresented: $addingMac) { AddMacSheet() }
-            .deleteConfirmation($clearing, error: $clearError) { _ in cleared = true }
-            .task(id: connected) {
-                async let usage: Void = model.refreshQuota()
-                async let ways: Void = loadProxies()
-                await loadPolicy()
-                await usage
-                await ways
-            }
-            .refreshable {
-                async let usage: Void = model.refreshQuota(force: true)
-                async let ways: Void = loadProxies()
-                await loadPolicy()
-                await usage
-                await ways
-            }
+            .task(id: connected) { await loadProxies() }
+            .refreshable { await loadProxies() }
             // Back from a proxy's page: what it changed is on its row.
             .onChange(of: path) { old, new in
                 if new.isEmpty, !old.isEmpty { Task { await loadProxies() } }
@@ -158,7 +99,6 @@ struct SettingsView: View {
         switch route {
         case .mac:
             if let profile = model.profile { MacDetailsView(profile: profile) }
-        case .tasks: TasksManageView()
         case .sessions: SessionsView()
         case .session(let session): SessionTranscriptView(session: session)
         case .clash: ClashScreen()
@@ -175,18 +115,6 @@ struct SettingsView: View {
         }
         guard connected else { return }
         proxies = await ProxiesOverview.load(api, keeping: proxies)
-    }
-
-    /// The permission mode, read-only here (control-v0 §1); a Mac without the route shows no row.
-    private func loadPolicy() async {
-        guard let api = model.api else {
-            #if DEBUG
-            policy = DemoData.policy
-            #endif
-            return
-        }
-        guard connected else { return }
-        policy = try? await api.approvalPolicy()
     }
 
     private var connected: Bool {
@@ -277,7 +205,7 @@ private struct FeedbackSection: View {
         } header: {
             SectionLabel("Alerts & Voice")
         } footer: {
-            Text("Read Aloud 开启时自动朗读回复和任务通知；Live Activity 显示在锁定屏幕和灵动岛上。")
+            Text("Read Aloud 开启时自动朗读回复和终端的提醒；Live Activity 显示在锁定屏幕和灵动岛上。")
         }
         .onAppear { liveOn = model.live.enabled }
     }

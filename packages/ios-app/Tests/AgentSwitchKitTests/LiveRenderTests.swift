@@ -29,11 +29,9 @@ final class LiveRenderTests: XCTestCase {
         ], running: 1, waiting: 1)),
         ("terminal", LiveState(rows: [
             .init(id: "a", title: "fix-login", step: "Bash: npm test -- --watch=false", model: "Claude Code",
-                  startedAt: now.addingTimeInterval(-42), needsYou: true, kind: .terminal, doing: "Allow?"),
+                  startedAt: now.addingTimeInterval(-42), needsYou: true, doing: "Allow?"),
             .init(id: "b", title: "整理下载目录", step: "交给 DeepSeek Flash", model: "DeepSeek Flash", startedAt: now.addingTimeInterval(-40), needsYou: false),
         ], running: 1, waiting: 1)),
-        ("endedOK", .finished(.init(taskId: "a", title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", ok: true))),
-        ("endedFail", .finished(.init(taskId: "a", title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。", ok: false))),
     ]
 
     private func renderDir() throws -> URL {
@@ -54,7 +52,7 @@ final class LiveRenderTests: XCTestCase {
     /// The status word and the count in Apple's title case (ui-v0 §7.2.7), as in the app; no rendering needed.
     func testTheWordsAreInTitleCase() {
         let state = { (name: String) in Self.states.first { $0.0 == name }!.1 }
-        XCTAssertEqual(["running3", "needsYou", "endedOK", "endedFail"].map { LiveLook.word(state($0)) }, ["Busy", "Waiting", "Done", "Incomplete"])
+        XCTAssertEqual(["running3", "needsYou"].map { LiveLook.word(state($0)) }, ["Busy", "Waiting"])
         XCTAssertEqual(LiveLook.others(state("running3")), "+2 More")
         XCTAssertNil(LiveLook.others(state("routing")))
     }
@@ -69,7 +67,6 @@ final class LiveRenderTests: XCTestCase {
         XCTAssertNotEqual(state.looking(classic: true), state, "a change of look is a change of state: the activity is drawn again")
         XCTAssertEqual(LiveLook.word(state.looking(classic: true)), "Needs You")
         XCTAssertEqual(LiveLook.word(Self.states.first { $0.0 == "running3" }!.1.looking(classic: true)), "Working")
-        XCTAssertEqual(LiveLook.word(Self.states.first { $0.0 == "endedOK" }!.1.looking(classic: true)), "Done")
         let saved = try JSONEncoder().encode(state)
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("classic"), "the pixel look adds nothing to the state")
         XCTAssertFalse(try JSONDecoder().decode(LiveState.self, from: saved).isClassic)

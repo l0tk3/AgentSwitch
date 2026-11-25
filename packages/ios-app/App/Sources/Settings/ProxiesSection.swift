@@ -8,13 +8,6 @@ enum ProxyTarget: Hashable {
     /// One of an agent's profiles (never the Mac's own, which has no proxy of its own).
     case profile(agent: String, profile: ProfileChoice)
 
-    var owner: ProxyOwner {
-        switch self {
-        case .browser: return .browser
-        case .profile(let agent, let profile): return .profile(agent: agent, id: profile.id)
-        }
-    }
-
     var title: String {
         switch self {
         case .browser: return "Browser"
@@ -194,13 +187,9 @@ struct ProxyFormView: View {
     private func apply(_ api: AgentSwitchAPI) async throws {
         let typed = draft.split()
         draft = typed
+        // A typed password is sealed by the Mac that keeps it, under its own vault key; the token is what is sent.
         var ciphertext: String?
-        if let payload = try typed.sealing(label: target.owner.sealLabel) {
-            // The Mac's key as it is now (it may have changed since pairing); the one kept from pairing otherwise.
-            let key = (try? await api.gatePubkey())?.publicKey ?? model.profile?.gate?.publicKey
-            guard let key else { throw TokenError.badPublicKey }
-            ciphertext = try TokenMinter(publicKeyBase64URL: key).mint(payload)
-        }
+        if let password = typed.passwordToSeal { ciphertext = try await api.vaultSeal(password) }
         try await send(api, typed.request(ciphertext: ciphertext, current: current))
     }
 

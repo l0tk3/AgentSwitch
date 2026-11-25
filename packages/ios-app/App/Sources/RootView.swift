@@ -1,7 +1,7 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// Onboarding until a Mac is paired, then the home screen; the Face ID cover sits on top of both when enabled.
+/// Onboarding until a Mac is paired, then the tabs; the Face ID cover sits on top of both when enabled.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(AppLock.self) private var lock
@@ -50,35 +50,24 @@ struct RootView: View {
     }
 }
 
-/// Settings, ciphertexts, the loose approvals and adding a Mac, opened as sheets from the home screen.
+/// Adding a Mac (pairing again), opened as a sheet over the tabs.
 private struct HomeSheetContent: View {
     let sheet: HomeSheet
-    @Environment(AppModel.self) private var model
 
     var body: some View {
         switch sheet {
-        case .pickCiphertext:
-            CiphertextPicker { token in model.insertIntoCompose(token) }
-        case .makeCiphertext:
-            NavigationStack {
-                CiphertextsView()
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { model.sheet = nil } } }
-            }
-        case .approvals:
-            ApprovalsView()
         case .addMac:
             AddMacSheet()
         }
     }
 }
 
-/// The entries side by side (docs/terminal-v0.md §1, browser-v0 §1): `Dispatch` (the conversation), `Terminals` and
-/// `Browser`; their icons are pixel marks (§7.3: the app's mark for tasks, a framed terminal window for terminals — `>_`
-/// alone means Codex — and a globe for the browser).
+/// The entries side by side (docs/terminal-v0.md §1, browser-v0 §1): `Terminals`, `Dispatch` (the dispatch desk, a Chat
+/// Room), `Rooms`, `Browser` and `Settings`; their icons are pixel marks (§7.3: the app's mark for the dispatch, a
+/// framed terminal window for terminals — `>_` alone means Codex — and a globe for the browser).
 ///
 /// No push: while the app is open the terminals are followed from every tab and page (the badge, the waiting cue, the
-/// Live Activity), and the tasks from the terminals tab too (their cues); the home screen follows them itself. The
-/// browser's tabs are read from every tab too (the badge counts the agents waiting for you), more often on its own.
+/// Live Activity). The rooms and the browser's tabs are read from every tab too (their badges), more often on their own.
 struct MainTabs: View {
     @Environment(AppModel.self) private var model
     /// The classic look's tabs: line icons (the system's; the app's mark drawn as lines), the one in use in the accent.
@@ -100,12 +89,12 @@ struct MainTabs: View {
                 .tabItem { Label { Text("Terminals") } icon: { look.isClassic ? Image(systemName: "terminal") : Image(uiImage: TabIcons.shaded(.terminals, on: model.tab == .terminals, dark: scheme == .dark)) } }
                 .badge(model.terminals.waiting)
                 .tag(MainTab.terminals)
-            // The old dispatch is off (OldDispatch): the tab shows the new one, the dispatch desk's room (DispatchDeskTab).
-            // The badge: the desk's unseen messages while one of them names the user.
-            Group { if OldDispatch.off { DispatchDeskTab() } else { HomeView() } }
-                .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .tasks, dark: scheme == .dark)) } }
-                .badge(OldDispatch.off ? model.rooms.rooms.first(where: \.desk).map { $0.forYou ? max($0.unread, 1) : 0 } ?? 0 : 0)
-                .tag(MainTab.tasks)
+            // The dispatch: the dispatch desk's room (DispatchDeskTab). The badge: the desk's unseen messages while one of
+            // them names the user.
+            DispatchDeskTab()
+                .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .dispatch, dark: scheme == .dark)) } }
+                .badge(model.rooms.rooms.first(where: \.desk).map { $0.forYou ? max($0.unread, 1) : 0 } ?? 0)
+                .tag(MainTab.dispatch)
             // Chat Room (docs/chatroom-v0.md §10; 2026-11-22, user: iPhone/安卓上的file图标放到terminal顶栏，做成弹出式的……
             // 空出来的放这个chatroom): Files left the bar for the Terminals page's top bar, where it comes up as a sheet.
             // The badge: messages not seen yet.
@@ -124,10 +113,7 @@ struct MainTabs: View {
                 .tag(MainTab.settings)
         }
         .tint(look.isClassic ? Theme.signal : Theme.ink)
-        // Not on the Dispatch page: its reply box sits on the bar, and with the bar made small the box was left above an
-        // empty strip with one round button in its corner (2026-10-07, user's screenshot). Apple moves an accessory in
-        // line with the small bar; a reply box cannot be one (it grows, and must rise with the keyboard).
-        .minimizesTabBarOnScroll(OldDispatch.off || model.tab != .tasks)
+        .minimizesTabBarOnScroll()
         // The Mac's files (docs/files-v0.md §5), up from the foot over whatever tab is shown: `Done` or a swipe down
         // puts it away.
         .sheet(isPresented: $model.filesShown) { FilesTab(inSheet: true).followsLook() }
@@ -136,7 +122,7 @@ struct MainTabs: View {
             while !Task.isCancelled {
                 await model.rooms.refresh(model.api)
                 let every = model.rooms.unsupported ? RoomsStore.unsupportedInterval
-                    : model.tab == .rooms || (model.tab == .tasks && OldDispatch.off && !model.rooms.rooms.contains(where: \.desk))
+                    : model.tab == .rooms || (model.tab == .dispatch && !model.rooms.rooms.contains(where: \.desk))
                     ? RoomsStore.pollInterval : RoomsStore.backgroundInterval
                 try? await Task.sleep(for: every)
             }
@@ -165,14 +151,6 @@ struct MainTabs: View {
                 try? await Task.sleep(for: every)
             }
         }
-        .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
-            guard model.tab != .tasks, !OldDispatch.off else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: HomeView.pollInterval)
-                guard !Task.isCancelled else { break }
-                await model.refreshAll()
-            }
-        }
     }
 }
 
@@ -187,8 +165,8 @@ extension View {
     ///   app. If you hide the tab bar, people can forget which area of the app they're in" — so it is made smaller, never
     ///   taken away, and a page of one thing (a terminal, a task) still hides it as before.
     /// Before iOS 26 the bar has no such state and stays as it is.
-    @ViewBuilder func minimizesTabBarOnScroll(_ on: Bool = true) -> some View {
-        if #available(iOS 26.0, *) { tabBarMinimizeBehavior(on ? .onScrollDown : .never) } else { self }
+    @ViewBuilder func minimizesTabBarOnScroll() -> some View {
+        if #available(iOS 26.0, *) { tabBarMinimizeBehavior(.onScrollDown) } else { self }
     }
 }
 

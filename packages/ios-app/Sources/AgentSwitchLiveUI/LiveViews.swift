@@ -19,20 +19,15 @@ public enum LiveLook {
     static let rule = Color.white.opacity(0.16)
     public static let background = Color.black.opacity(0.82)
 
-    /// docs/ui-v0.md §7.3's status colours (dark set: the island and the card are dark): waiting amber, busy cyan, ok
-    /// green, failed red.
+    /// docs/ui-v0.md §7.3's status colours (dark set: the island and the card are dark): waiting amber, busy cyan.
     public static let waiting = Color(red: 1, green: 0.69, blue: 0)
     public static let busy = Color(red: 0.18, green: 0.9, blue: 1)
-    public static let ok = Color(red: 0.61, green: 0.89, blue: 0.18)
-    public static let failed = Color(red: 1, green: 0.29, blue: 0.24)
     /// The open button's lower edge, a key cap's (§7).
     static let waitingEdge = Color(red: 0.64, green: 0.44, blue: 0)
 
     // The classic look's (docs/ui-v0.md §8): the system's status colours and its blue for what is at work.
     public static func waiting(in classic: Bool) -> Color { classic ? Color(red: 1, green: 0.62, blue: 0.04) : waiting }
     public static func busy(in classic: Bool) -> Color { classic ? Color(red: 0.04, green: 0.52, blue: 1) : busy }
-    public static func ok(in classic: Bool) -> Color { classic ? Color(red: 0.19, green: 0.82, blue: 0.35) : ok }
-    public static func failed(in classic: Bool) -> Color { classic ? Color(red: 1, green: 0.27, blue: 0.23) : failed }
     /// The card's ground: near black; a dark grey in the classic look.
     public static func background(_ state: LiveState) -> Color {
         state.isClassic ? Color(red: 0.17, green: 0.17, blue: 0.19).opacity(0.86) : background
@@ -43,7 +38,6 @@ public enum LiveLook {
         switch state.phase {
         case .needsYou: return waiting(in: classic)
         case .running: return busy(in: classic)
-        case .ended: return state.ended?.ok == true ? ok(in: classic) : failed(in: classic)
         }
     }
 
@@ -53,7 +47,6 @@ public enum LiveLook {
         switch state.phase {
         case .needsYou: return classic ? "Needs You" : "Waiting"
         case .running: return classic ? "Working" : "Busy"
-        case .ended: return state.ended?.ok == true ? "Done" : "Incomplete"
         }
     }
 
@@ -63,9 +56,9 @@ public enum LiveLook {
     /// The expanded island's clock: room for `1:02:25` in either look's 13 pt digits.
     public static let islandClock: CGFloat = 57
 
-    /// A tap opens what matters most: the task or terminal waiting for you, the newest task, or the one that ended last.
+    /// A tap opens what matters most: the terminal waiting for you, else the newest.
     public static func link(_ state: LiveState) -> URL? {
-        state.lead?.link ?? state.ended.map { LiveLink.task($0.taskId) }
+        state.lead?.link
     }
 
     /// "+2 More" when the island shows one of several.
@@ -164,7 +157,6 @@ public struct LiveMark: View {
     private var pixelMark: some View {
         let end: Color? = switch state.phase {
         case .needsYou: LiveLook.waiting
-        case .ended: LiveLook.tint(state)
         case .running: LiveLook.busy
         }
         // A whole number of pixels a cell: 3 in the island (17 pt with the shadow, clear of the 37 pt circle's edge),
@@ -267,7 +259,7 @@ public struct LiveClock: View {
     }
 }
 
-/// How many wait and how many run, by their marks (■ 1 ⠋ 2): tasks and terminals together.
+/// How many wait and how many run, by their marks (■ 1 ⠋ 2).
 struct Tally: View {
     let state: LiveState
 
@@ -296,7 +288,7 @@ struct Tally: View {
     }
 }
 
-/// `└─` and what it is doing, what it asks (amber), or how it ended.
+/// `└─` and what it is doing, or what it asks (amber).
 struct StepLine: View {
     let text: String
     let asks: Bool
@@ -321,17 +313,16 @@ struct HairRule: View {
     }
 }
 
-/// Who works on the lead row: a terminal's agent by its mark and name, a task's model by its short name, as its maker
-/// writes it (Sonnet 4.6, DeepSeek Flash); `Routing` before the router has picked one.
+/// Who works on the lead row: the terminal's agent by its mark and name.
 struct Worker: View {
     let row: LiveState.Row
 
     var body: some View {
         HStack(spacing: 6) {
-            if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model) {
+            if let model = row.model, let harness = LiveArt.harness(named: model) {
                 LiveSprite(harness: harness)
             }
-            Text(row.model ?? "Routing").lineLimit(1)
+            if let model = row.model { Text(model).lineLimit(1) }
         }
     }
 }
@@ -396,9 +387,9 @@ public struct IslandMinimal: View {
     }
 }
 
-/// Compact island, right of the camera: what the one task or terminal is doing in a word (amber while it waits for you;
+/// Compact island, right of the camera: what the one terminal is doing in a word (amber while it waits for you;
 /// 2026-10-01, user: 这个计时有点没用，换成更实用点的信息 — the clock stays in the expanded island), the counts when
-/// several run, or how it ended.
+/// several run.
 public struct IslandCompactTrailing: View {
     let state: LiveState
     public init(state: LiveState) { self.state = state }
@@ -406,9 +397,7 @@ public struct IslandCompactTrailing: View {
     public var body: some View {
         let classic = state.isClassic
         Group {
-            if state.phase == .ended {
-                if classic { Circle().fill(LiveLook.tint(state)).frame(width: 8, height: 8) } else { LiveKey(color: LiveLook.tint(state), side: 8) }
-            } else if state.running + state.waiting > 1 {
+            if state.running + state.waiting > 1 {
                 Tally(state: state)
             } else if let lead = state.lead {
                 Text(lead.doing ?? (lead.needsYou ? (classic ? "Needs You" : "Waiting") : (classic ? "Working" : "Busy")))
@@ -460,7 +449,7 @@ public struct IslandTrailing: View {
 }
 
 /// Expanded island, the wide bottom, aligned left: the title, `└─` what it is doing or asks, then under a rule
-/// who works on it, how many more, and `[ Open ]` when it waits for you; or how it ended.
+/// who works on it, how many more, and `[ Open ]` when it waits for you.
 public struct IslandBottom: View {
     let state: LiveState
     let linked: Bool
@@ -485,9 +474,6 @@ public struct IslandBottom: View {
                 .font(LiveLook.mono(12, classic: state.isClassic))
                 .foregroundStyle(LiveLook.faint)
                 .frame(minHeight: 26)
-            } else if let ended = state.ended {
-                Text(ended.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)
-                StepLine(text: ended.line, asks: false, lines: 2).padding(.top, 3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -500,8 +486,7 @@ public struct IslandBottom: View {
 // MARK: - the lock screen
 
 /// The lock screen: the mark, `AgentSwitch · <Mac>` and the counts (or the word); a rule; then up to three
-/// rows — tasks and terminals waiting for you first, their question in amber, then tasks in progress — or the last
-/// conclusion.
+/// rows — the terminals waiting for you first, what they ask in amber, then the ones at work.
 public struct LockScreenCard: View {
     let state: LiveState
     let mac: String
@@ -528,13 +513,6 @@ public struct LockScreenCard: View {
                 }
             }
             HairRule().padding(.top, 11).padding(.bottom, 9)
-            if let ended = state.ended, state.rows.isEmpty {
-                HStack(spacing: 8) {
-                    RowGlyph(color: LiveLook.tint(state), busy: false)
-                    Text(ended.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)
-                }
-                StepLine(text: ended.line, asks: false, lines: 2, size: 13).padding(.leading, 20).padding(.top, 1)
-            }
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(state.rows) { row in
                     VStack(alignment: .leading, spacing: 1) {
@@ -542,7 +520,7 @@ public struct LockScreenCard: View {
                             RowGlyph(color: LiveLook.waiting(in: classic), busy: !row.needsYou)
                             Text(row.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)
                             Spacer(minLength: 4)
-                            if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model) {
+                            if let model = row.model, let harness = LiveArt.harness(named: model) {
                                 LiveSprite(harness: harness)
                             }
                             LiveClock(since: row.startedAt, width: 48).font(LiveLook.mono(13, .medium, classic: classic)).foregroundStyle(LiveLook.secondary)

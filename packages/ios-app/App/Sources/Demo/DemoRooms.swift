@@ -79,7 +79,7 @@ enum DemoRooms {
          "reads":{"31":["daemon"],"36":["ios-app"],"38":["ios-app"]},
          "taskStats":{"1":{"wakes":4,"chars":8210,"posts":6,"calls":19},"2":{"wakes":3,"chars":5120,"posts":4,"calls":12},"4":{"wakes":5,"chars":23400,"posts":7,"calls":41}},
          "notes":{"text":"接口\\n- GET /clash 多一个 phone：on、listening、links、problem\\n- links 里局域网在前，Tailscale 在后\\n\\n待办\\n- [ ] 文档里的地址跟着改（@web）\\n- [x] 手机上去掉 PROCESS-NAME 规则","at":\(now - 1_300_000),"by":"daemon"},
-         "folder":"\(folder)","secrets":3,
+         "folder":"\(folder)",
          "tasks":[
           {"n":1,"title":"定下手机订阅的接口","state":"done","owner":"daemon","by":"you","createdAt":\(now - 90_000_000),"updatedAt":\(now - 86_000_000),"note":"GET /clash 多一个 phone，写进置顶笔记了"},
           {"n":2,"title":"Mac 上的订阅卡片","detail":"局域网和 Tailscale 两个地址，局域网在前","state":"doing","owner":"mac-app","by":"daemon","createdAt":\(now - 86_000_000),"updatedAt":\(now - 1_500_000),"after":[1]},
@@ -106,13 +106,6 @@ enum DemoRooms {
         """)
         return made.items
     }
-
-    /// The room's secrets, as `GET /rooms/:id/secrets` would give them (made-up ciphertexts).
-    static let secrets: [RoomSecret] = [
-        RoomSecret(id: "s1", name: "GitHub 登录", kind: .site, url: "https://github.com", account: "me@example.com", token: "enc:v1:q8Zt3mVf0LxK9aWb2RcN7hYe4UjPs6Dg1oTi5Ek", addedAt: 1),
-        RoomSecret(id: "s2", name: "OpenAI key", kind: .api, url: "https://api.openai.com", token: "enc:v1:Hn4Lw8Qa2Vz6Xc0Bm5Kr9Ts3Ye7Ud1Gi", addedAt: 2),
-        RoomSecret(id: "s3", name: "部署令牌", kind: .exec, env: "DEPLOY_TOKEN", token: "enc:v1:Pk7Ff2Jd9Ss4Aa0Ll6Qq1Ww8Ee3Rr5", addedAt: 3),
-    ]
 
     static let folder = "/Users/me/.agentswitch/room-files/\(roomId)"
 

@@ -5,8 +5,7 @@ import SwiftUI
 /// lock and the place; tap to edit) with `⋯` (Copy URL, Reload, Close Tab); under it who holds the tab — the agent and
 /// what it is doing, or `You`; the live picture, the agent's last action outlined on it; the bar at the bottom — `‹ ›
 /// ↻`, the keyboard, the zoom (`100%`), and on an agent's tab `[ Take Over ]` / `[ Hand Back ]`. Typing brings the
-/// system keyboard and the key bar (`esc tab ⏎ ⌫ ← →`, as the terminal page's caps, and on your own tabs `⚿ Fill
-/// Ciphertext`); the zoom key opens the zoom row in its place (`− 100% +`, BrowserZoomBar).
+/// system keyboard and the key bar (`esc tab ⏎ ⌫ ← →`, as the terminal page's caps); the zoom key opens the zoom row in its place (`− 100% +`, BrowserZoomBar).
 struct BrowserPage: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -17,8 +16,6 @@ struct BrowserPage: View {
     @FocusState private var addressFocused: Bool
     @State private var composing = ""
     @State private var confirmClose = false
-    @State private var pickingCiphertext = false
-    @State private var makingCiphertext = false
     /// On screen (another tab of the app hides it without leaving it): only then does coming back to the app restart
     /// the stream.
     @State private var visible = false
@@ -108,10 +105,6 @@ struct BrowserPage: View {
                      message: "关闭「\(page.tab.displayTitle)」？\(page.agentName) 正在使用此标签，关闭后它对此标签的操作将失败。",
                      actions: [.init(label: "Close", role: .primary) { Task { await close() } }])
         }
-        .sheet(isPresented: $pickingCiphertext) {
-            CiphertextPicker(title: "Fill Ciphertext") { token in Task { if !(await page.fill(token)) { model.browser.fillUnavailable = true } } }
-        }
-        .sheet(isPresented: $makingCiphertext) { NavigationStack { CiphertextsView() } }
     }
 
     /// What the stream asks for on this link: the local network the screen's device pixels; Tailscale by the speed
@@ -360,7 +353,7 @@ struct BrowserPage: View {
                 .glitch(on: words, onAppear: true)
             }
             if page.typing {
-                keyBar(store)
+                keyBar()
             } else if zooming {
                 BrowserZoomBar(percent: page.zoomPercent, canZoomOut: page.canZoomOut, canZoomIn: page.canZoomIn, pictureOnly: !page.zoomsPage,
                                onOut: { page.zoomOut() }, onReset: { page.zoomToStandard() }, onIn: { page.zoomIn() })
@@ -377,29 +370,13 @@ struct BrowserPage: View {
         }
     }
 
-    private func keyBar(_ store: BrowserStore) -> some View {
+    private func keyBar() -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             // The keyboard goes away from the bar's own key under this one.
             HStack(spacing: 5) {
                 ForEach(Self.keys, id: \.0) { key, label in
                     Button { page.press(key) } label: { Text(label).mono(13, weight: key == .enter ? .semibold : .regular) }
                         .buttonStyle(KeyCapStyle(solid: key == .enter, compact: true))
-                }
-                // Your own tabs only: an agent sees its page again after the hand-back (the Mac refuses it there).
-                if !store.fillUnavailable && page.canFill {
-                    Button {
-                        page.typing = false
-                        if model.ciphertexts.isEmpty { makingCiphertext = true } else { pickingCiphertext = true }
-                    } label: {
-                        HStack(spacing: 5) {
-                            PixelSprite(rows: PixelArt.lock, pixel: 2, color: Theme.signal, strength: 0.9, shadow: false, picture: .lockSmall)
-                            Text("Fill Ciphertext").mono(12)
-                        }
-                        .foregroundStyle(Theme.signal)
-                    }
-                    .buttonStyle(KeyCapStyle(compact: true))
-                    .overlay(Rectangle().strokeBorder(Theme.signal, lineWidth: 1).padding(.bottom, 0))
-                    .accessibilityLabel("从密文填入")
                 }
                 if !composing.isEmpty { Text(composing).mono(13).foregroundStyle(.secondary).padding(.leading, 4) }
             }

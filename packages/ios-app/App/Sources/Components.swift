@@ -1,16 +1,6 @@
 import AgentSwitchKit
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
-
-/// The status of a task where a small mark is enough (lists, links): the dot and word of StatusLabel.
-struct StatusBadge: View {
-    let task: AgentTask
-
-    var body: some View {
-        StatusLabel(task: task)
-    }
-}
 
 /// The connection line shown on top of the lists (control-v0 §5): 连接中 → 重连中 → 无法连接（第 N 次）→ 未找到 Mac →
 /// 配对已失效, so a blip and a Mac that is gone read differently. The phone keeps retrying on its own; 重试 only does
@@ -87,13 +77,6 @@ enum Keyboard {
 }
 
 enum Clipboard {
-    /// Ciphertext only: kept on this device (no Universal Clipboard) and expiring after two minutes. Plaintext secrets
-    /// never go through here.
-    static func copyToken(_ token: String) {
-        UIPasteboard.general.setItems([[UTType.plainText.identifier: token]],
-                                      options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)])
-    }
-
     static func pastedText() -> String? { UIPasteboard.general.string }
 }
 

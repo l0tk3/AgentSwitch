@@ -109,8 +109,6 @@ final class BrowserPageModel {
     var heldElsewhere: BrowserHolder? { tab.heldBy.flatMap { $0 == screenId ? nil : BrowserHolder($0) } }
     /// The page is at this phone's size.
     var phoneSized: Bool { tab.viewport.by == screenId }
-    /// `Fill Ciphertext` is offered: this phone drives the tab — an agent's too, once taken over (user #312): the service keeps the value out of the agent's answers.
-    var canFill: Bool { canDrive }
 
     var layout: BrowserLayout? {
         guard let frameSize, area.width > 0, area.height > 0 else { return nil }
@@ -613,24 +611,6 @@ final class BrowserPageModel {
         guard let api else { return }
         guard canDrive else { refuse(); return }
         do { tab = try await api.browserHistory(id, action, screen: screenId) } catch { self.error = error.localizedDescription }
-    }
-
-    /// A saved ciphertext into the focused field, checked by the gate against the page's site; your own tabs only, and
-    /// only a password or one-time-code field (the Mac's refusal is shown as it is). False: the Mac cannot do it yet.
-    func fill(_ token: String) async -> Bool {
-        guard let api else { return true }
-        guard canDrive else { refuse(); return true }
-        guard canFill else { error = BrowserNotice.fillOwnTabsOnly; return true }
-        do {
-            guard try await api.fillBrowserTab(id, token: token, screen: screenId) else {
-                error = "此 Mac 上的 AgentSwitch 版本尚不支持填入密文，请先更新。"
-                return false
-            }
-            say("已填入密文。")
-        } catch {
-            self.error = error.localizedDescription
-        }
-        return true
     }
 
     func close() async -> Bool {

@@ -3,9 +3,9 @@ import AgentSwitchKit
 import SwiftUI
 import UIKit
 
-/// Sound and haptic feedback (assistant-v0 §3): the input box must feel received, handed on, finished — without
-/// looking. Short synthesized tones, no audio files; they follow the silent switch unless the user chose otherwise
-/// (or voice mode is on, which is for listening).
+/// Sound and haptic feedback (assistant-v0 §3): what needs you is heard and felt without looking. Short synthesized
+/// tones, no audio files; they follow the silent switch unless the user chose otherwise (or voice mode is on, which is
+/// for listening).
 @MainActor
 @Observable
 final class FeedbackSettings {
@@ -14,7 +14,7 @@ final class FeedbackSettings {
     var sound: Bool { didSet { defaults.set(sound, forKey: "feedbackSound") } }
     var haptics: Bool { didSet { defaults.set(haptics, forKey: "feedbackHaptics") } }
     var audibleInSilent: Bool { didSet { defaults.set(audibleInSilent, forKey: "feedbackAudibleInSilent") } }
-    /// Reads aloud: the task's result when it ends, a question when one needs you, a short line when a task is taken.
+    /// Reads aloud: what a terminal that newly waits for you asks.
     var voiceMode: Bool { didSet { defaults.set(voiceMode, forKey: "feedbackVoiceMode") } }
 
     init() {
@@ -35,11 +35,7 @@ final class Feedback {
 
     /// (frequency in Hz — 0 is a pause, milliseconds) per cue.
     static let tones: [Cue: [(Double, Double)]] = [
-        .sent: [(880, 55)],
-        .accepted: [(660, 70), (990, 95)],
         .needsYou: [(880, 110), (0, 60), (880, 110), (0, 60), (1175, 170)],
-        .done: [(523, 90), (659, 90), (784, 170)],
-        .failed: [(440, 150), (330, 230)],
     ]
 
     /// `speaking`: a voice is reading; the audio session is left as the speaker set it.
@@ -64,10 +60,7 @@ final class Feedback {
 
     private func haptic(_ cue: Cue) {
         switch cue {
-        case .sent: UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        case .accepted, .done: UINotificationFeedbackGenerator().notificationOccurred(.success)
         case .needsYou: UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        case .failed: UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
     }
 

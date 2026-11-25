@@ -1,55 +1,35 @@
 # ios-app
 
-iPhone client for AgentSwitch (`docs/app-v0.md` §3, §5): pair with the Mac by QR code, then one input box and the log
-of what the agents do. Threads are filed by the router, never chosen on the phone; approvals and questions are answered
-inside the log. SwiftUI, iOS 17+, Swift 6.
-
-```
-┌ Mac mini ───────────── ⚙ ┐ ┌ 设置 ────────────────────┐
-│        整理 docs 的表格 ▐ │ │ 环境说明（CONTEXT.md）  › │
-│ ✓ 已完成 claude/sonnet-5  │ │ 密文                   › │
-│   表格已按日期排好…       │ │ 高级                      │
-│   登录 fin 用 🔒密文 查 ▐ │ │   会话（左滑删除）      › │
-│ ● 执行中 codex/gpt-6-astra│ │   任务日志（左滑删除）  › │
-│   工具 shell: curl …      │ │   模型                  › │
-│ 需要审批 [拒绝] [允许]    │ │ Mac · 连接 · Face ID      │
-│ (+) 让 Mac 上的 agent…  ↑ │ │ 移除此 Mac（可配多台）    │
-└──────────────────────────┘ └──────────────────────────┘
-```
+iPhone client for AgentSwitch (`docs/app-v0.md` §3, §5): pair with the Mac by QR code, then its terminals, the
+dispatch desk and the other Chat Rooms, its browser, and the settings. SwiftUI, iOS 17+, Swift 6.
 
 ## Layout
 
 | path | what |
 |---|---|
 | `Package.swift`, `Sources/AgentSwitchKit/` | pure logic, `swift test` on the Mac (macOS 14 + iOS 17 platforms) |
-| `Tests/AgentSwitchKitTests/` | unit tests, fixtures, a real-TLS pinning test, the opt-in Python gate cross-check |
+| `Tests/AgentSwitchKitTests/` | unit tests, fixtures, a real-TLS pinning test |
 | `App/` | SwiftUI app target: sources, `Info.plist`, asset catalog (placeholder icon) |
 | `project.yml` | xcodegen spec; `AgentSwitch.xcodeproj` is generated and git-ignored |
 | `scripts/build-sim.sh` | xcodegen + xcodebuild for the iOS Simulator |
-| `scripts/crypto-crosscheck.sh` | Swift-minted tokens opened by `packages/secret-gate` |
 
 AgentSwitchKit, by folder:
 
 - `Pairing/` — `agentswitch://pair?p=<base64url JSON>` parsing and validation (v1, fingerprint, Crockford code,
-  addresses, optional gate key), `ServerProfile`, `PairingService` (find an address, `POST /pair`, fetch the gate key if
-  the QR code had none).
-- `Secrets/` — `GatePolicy` (label, host with port and `*.` wildcard, TOTP base32, uses; mirrors `policy.py`),
-  `SecretPayload` (byte-identical to Python's `to_json()`), `TokenMinter` (libsodium `crypto_box_seal` →
-  `enc:v1:` + base64url), `SecretDraft` (the mint form).
-- `API/` — models (`AgentTask`, `TaskEvent`, `Approval`, `AgentThread`, `QuotaReading`, `Targets`, `Me`, `GatePubkey`),
-  `AgentSwitchAPI` (async/await), `SSEParser` and the reconnecting event stream (`?after=<seq>`), `CertificatePin` and
-  `PinnedSessionTransport` (URLSession accepting only the paired leaf-certificate SHA-256), `EventDescriber` (one line
-  per event, like the web console). control-v0: `ControlModels` (permission mode, default folder, search hits),
-  `SessionModels` (the Mac's Claude Code / Codex / OpenCode sessions, grouped by folder), `ControlRoutes`
-  (`/approvals/policy`, `/settings/workdir`, `/sessions`, `/tasks/:id/ack`, `/search`); the event stream drops a
-  connection that has sent no byte for 30 s (the daemon pings every 10 s) and resumes from the last seq.
+  addresses; a `gate` key a Mac may still send is not read), `ServerProfile`, `PairingService` (find an address,
+  `POST /pair`).
+- `API/` — models (`Me`, `MacAddresses`…), `AgentSwitchAPI` (async/await), `SSEParser`, `ReconnectPolicy` and the
+  idle guard of the event streams, `CertificatePin` and `PinnedSessionTransport` (URLSession accepting only the
+  paired leaf-certificate SHA-256), `ToolDisplay` (a tool as people say it). control-v0: `ControlModels` (default
+  folder), `SessionModels` (the Mac's Claude Code / Codex / OpenCode sessions, grouped by folder), `ControlRoutes`
+  (`/settings/workdir`, `/sessions`); an event stream drops a connection that has sent no byte for 30 s (the daemon
+  pings every 10 s) and connects again.
   Terminals and what goes with them: `TerminalModels` / `TerminalRoutes` (terminals and their events;
   the profiles to choose between and the one a terminal runs under, `ProfileChoice`, `TerminalProfile`).
   Proxies (docs/clash-v0.md §9, profiles-v0 §4.2, browser-v0 §7.6): `ClashModels` (the Mac's Clash page, the same
   models as the Mac app's), `ProxyModels` (`ProxySetting`, `ProxyExit`, `ProxyDraft` — the form's rules, a proxy
-  written whole in one field taken apart, and a typed password as the payload to seal: for the proxy's own
-  `host:port`, uses `http` + `fill` — `BrowserProxyState`), `ProxyRoutes` (`/clash…`, `/profiles/:agent/:id/proxy`
-  and `/check`, `/browser/identity`; a Mac from before these were a phone's answers 403 or 404, read as nothing to
+  written whole in one field taken apart, and a typed password for the Mac to seal — `BrowserProxyState`),
+  `ProxyRoutes` (`/vault/seal`, `/clash…`, `/profiles/:agent/:id/proxy` and `/check`, `/browser/identity`; a Mac from before these were a phone's answers 403 or 404, read as nothing to
   show). The Mac's files (docs/files-v0.md §7): `FileModels` (a level, an entry's details, a text preview, the Mac's
   refusals and what the phone says for each, `MacPath`, the orders of `Sort By`, short sizes and times, a pick and the
   question before one that may hold a password) and `FileRoutes` (`/files` sent with the version the page has — a 304
@@ -62,38 +42,26 @@ AgentSwitchKit, by folder:
   every 5 minutes while connected, and `ServerProfile.updated(with:)` keeps the LAN addresses the Mac had before
   behind the current ones, up to 8, so a Mac that moves between networks is found on each), `ConnectionProgress` (连接中 → 重连中 → 无法连接（第 N 次）→ 未找到 Mac after 6 minutes → 配对已失效),
   `Troubleshooting` (设置 › Mac › 排障), Bonjour and path monitor adapters behind protocols.
-- `Feed/` — the home log's pure parts: `ActivityFeed` (oldest-first timeline, which active tasks get one of the 3 live
-  streams, approvals outside the log), `EventTail` (the last lines under a running task), `MessageDisplay` (the
-  sealer's legend cut off, ciphertexts shown as 🔒密文), `Markdown` (model output split into blocks — headings, lists,
-  quotes, code, tables — with Foundation's inline parser inside; images are never loaded). control-v0: `Attention`
-  (read marks, who-needs-you order, `Staleness` for a running task quiet for 10 minutes), `ProcessFolding` (tool
-  calls in a row as one line, `TaskDuration`), `SearchSnippet` (⟦⟧ hits, and a local search for a Mac without
-  `/search`). ui-v0 §4.2: `Usage` (`GET /quota` as 设置 › 用量 rows — Claude Code and Codex with fixed 5h / 7d slots,
-  a window past its reset reads as none; OpenCode with its balance).
-- `Files/` — `UploadFile` / `Multipart` (the `POST /uploads` body), `TaskFile` (a task's `in/` and `out/`), `ImagePrep`
-  (images shrunk to 2048 px, re-encoded without metadata, JPEG unless PNG).
-- `Storage/` — `KeychainTokenVault` (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), `LocalStore` (profile and saved
-  ciphertexts as JSON, ciphertext + note only), `NotificationSink` (placeholder, no push in v0).
+- `Feed/` — `MessageDisplay` (the sealer's legend cut off, ciphertexts shown as 🔒密文), `Markdown` (model output
+  split into blocks — headings, lists, quotes, code, tables — with Foundation's inline parser inside; images are
+  never loaded), `LiveSummary` (the terminals at work or waiting, as the Live Activity's state), the terminals' and
+  the records' display (`RecordDisplay`, `TerminalTree`, `TerminalAttention`, `TerminalLinks`…), `Speech`, `Cues`.
+- `Files/` — `UploadFile` / `Multipart` (the `POST /uploads` body), `ImagePrep` (images shrunk to 2048 px, re-encoded
+  without metadata, JPEG unless PNG).
+- `Storage/` — `KeychainTokenVault` (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), `LocalStore` (the paired Macs
+  as JSON).
 
 ## Dependencies
 
-- [`jedisct1/swift-sodium`](https://github.com/jedisct1/swift-sodium) ≥ 0.11.0 (libsodium 1.0.22, prebuilt
-  xcframework with iOS, simulator and macOS slices), for `crypto_box_seal`. It is libsodium itself, the same primitive
-  PyNaCl's `SealedBox` uses in the gate; nothing cryptographic is hand-written here. CryptoKit only hashes (SHA-256 of
-  the certificate).
+AgentSwitchKit has none. The app adds SwiftTerm (below). CryptoKit only hashes (SHA-256 of the certificate); a
+secret that has to be sealed (a proxy's password) is sealed by the Mac, `POST /vault/seal`.
 
 ## Test
 
 ```bash
 cd packages/ios-app
 swift test                          # AgentSwitchKit unit tests (+ real TLS pinning against a local Python HTTPS server)
-scripts/crypto-crosscheck.sh        # needs packages/secret-gate/.venv; throw-away SECRET_GATE_HOME, never ~/.secret-gate
 ```
-
-The cross-check mints tokens in Swift for a keypair made by the Python gate, then asserts that `secret-gate check`
-reports the right label, kind, hosts and uses, that the decrypted payload bytes equal Swift's and Python's canonical
-`to_json()` (compared by SHA-256, no value printed), that tampered and foreign tokens are rejected, and that host,
-label and base32 validation agree with `policy.py` case by case.
 
 ## Build and run
 
@@ -161,39 +129,20 @@ Signing & Capabilities and press Run — but `xcodegen generate` (also run by th
 
 ## Screens
 
-- **配对** — scan the Mac's QR code (AVFoundation) or paste / tap the link; shows the Mac name, certificate fingerprint,
-  addresses and gate keypair before anything is sent; pairs over TLS pinned to that fingerprint; token → Keychain.
-- **首页** — the only main screen: the log of the last 30 tasks, oldest first (what you said, state and executor, the
-  live tail of up to 3 running tasks over SSE, result or error), this task's approvals and questions answered in
-  place; a 6 s refresh while visible. The input box sends with no thread (the router files it); its "+" adds
-  attachments (camera, photos, files, a pasted image; shown as removable thumbnails, uploaded on send), inserts a
-  saved ciphertext, mints a new one, or pins the next task to an executor. Long press on an entry: 朗读 (the task's
-  spoken script, offline system voice, heard with the silent switch on), delete. "还有 N 项待处理" gathers approvals of
-  tasks no longer in the log.
-- **任务详情** — tap a log entry: 文件 (what the executor handed back and what you sent; a tap downloads and opens
-  the system preview, which shares or saves), 朗读 in the toolbar, the full live event stream (resumes from the last seq), approvals and questions
-  (options, free text, ciphertext for `secret` questions), result, cancel, hand off (router's choice or a pinned
-  target).
-- **设置** (gear) — 环境说明: edit the Mac's CONTEXT.md (`PUT /context`, the Mac's lint strips plaintext credential
-  lines and the warnings are shown; insert a ciphertext; load the example when empty). 密文: mint from label, sites,
-  kind, uses and value with the gate key from pairing (refreshed from `/gate/pubkey`); the value field is cleared after
-  minting; saved list (ciphertext + note), copy (local-only clipboard, 2-minute expiry), insert into the input box.
-  用量 (docs/ui-v0.md §4.2): right under the Mac, one row per executor with thin 5h / 7d bars (OpenCode: its
-  balance) and when they were read; pull to refresh re-reads (`POST /quota/refresh`). 管理: 会话 and 任务记录 (swipe
-  to delete, confirmed; a running one is refused with the reason), 模型 (the scheduling model and each executor's
-  models). Then Mac info and fingerprint, the path in use (Bonjour / LAN / Tailscale) and re-selection, Face ID lock,
-  re-pair.
-  control-v0: 任务记录 sorted by who needs you, with search; 编码会话 (the Mac's coding sessions by folder, a read-only
-  transcript each, refreshed every 10 s while one runs); 权限 (the mode, changed on the Mac); Mac › 排障 and the
-  default work folder. Opening a task marks it read; unread tasks carry an accent dot; the process folds tool calls
-  in a row and ends with how long the task took.
+- **配对** — scan the Mac's QR code (AVFoundation) or paste / tap the link; shows the Mac name, certificate fingerprint
+  and addresses before anything is sent; pairs over TLS pinned to that fingerprint; token → Keychain.
+- **Dispatch** (tab) — the dispatch desk: the Chat Room the Mac flags as the desk (`desk: true` in `GET /rooms`), its
+  page as the tab's own. No desk: the dispatch is turned on on the Mac (its Settings › Dispatch).
+- **Settings** (tab) — the Mac, its connection and the other paired Macs; Appearance (the look, the text size);
+  Proxies; Alerts & Voice (sound, haptics, read aloud, the voice, the Live Activity); the Mac app's new version; the
+  Face ID lock; removing the Mac. Mac › Troubleshooting and the default work folder.
   Proxies (2026-10-09): a section with one row for `Clash` (its state in a word), one for the shared `Browser` and
   one for each profile that is not the Mac's own (its colour, and where it leaves from). `Clash` is the Mac's Clash
   page: status, the subscription (a link pasted in, one of Clash Verge's own, a file; update, replace, remove), the
   nodes for Claude and for OpenAI with what each group uses now (a tap changes it; `Nodes` chooses and orders them,
   `Test` times them), rule templates and DNS with their text, the addresses that go direct, the routing check. A
-  proxy's form is one for both: `Server`, `User Name`, `Password`, its exit; the password is sealed on the phone
-  with the Mac's gate key as it is now and never leaves in the clear. Adding AgentSwitch's subscription to Clash
+  proxy's form is one for both: `Server`, `User Name`, `Password`, its exit; a typed password is sealed by the
+  Mac under its own key (`POST /vault/seal`, over the pinned connection) and the proxy is set with the token. Adding AgentSwitch's subscription to Clash
   Verge, a browser's fingerprint, and making or removing a profile stay on the Mac.
 - **Files** (tab, docs/files-v0.md §5) — the Mac's files, one level a page: the folder in the bar with the Mac under
   it, its whole path under the bar (every level a button; the middle folds into `…`, a menu of those levels), iOS
@@ -218,8 +167,7 @@ the record), `simplebusy` (at work: what it is doing, its sub-agents, a queued m
 `simpledaybreak` (a Codex terminal with its Daybreak switch on; `simpledaybreakclash`: on a model Codex lists without it),
 `simpleidle` (at rest: the model under the reply box opens the menu that changes it), `simplequestion`,
 `simpleprompt` (waiting on a screen of its own: the keys come out) and `simplechanges` (what the last turn
-changed), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
-`interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
+changed), `newterminal`, `settings`, `onboarding`, `mac`, `offline` (the Mac unreachable), `offlinemac`, `sessions`,
 `transcript`; profiles as `terminalprofiles` (a terminal's dot), `newterminalprofile` and `terminalmenuprofile`
 (`Resume As`); proxies as `proxies` (Settings scrolled to the section), `clash`, `clashservice`, `clashrules`,
 `clashcheck` (parts of the Clash page), `clashnodes`, `clashtext`, `clashsource` (the pages behind it),
@@ -230,11 +178,10 @@ changed), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `browsertook` (taken over, the keyboard and key bar up), `browserfile`, `browserlocal`, `browserdenied`, `browsernew`,
 `browserclose`, `browserzoom` (your dev server's page at 50%, the zoom row open; its `−` `+` draw the mock page
 again) and `browserzoomwatch` (watching codex, the row stepping the picture on the phone, at 150%) — mock pages drawn
-on the phone; `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
+on the phone; `-uiDemoOpenTools YES` opens every step of a record; `-uiDemoScroll route` (with `mac` or
 `offlinemac`) opens the Mac page scrolled to the end of 排障 with 常见原因 open.
 
 ## Not in v0
 
-Push notifications (`NotificationSink` is the seam; also what automatic read-aloud waits for), choosing or renaming
-threads (the router files them; the phone only deletes), multiple Macs, release signing. Your own attachments of a
-task in a temporary work dir are gone once it ends (only its `out/` is kept).
+Push notifications (the phone posts local ones while it runs: a terminal that waits or whose turn ended, something
+in a room waiting for you), release signing.

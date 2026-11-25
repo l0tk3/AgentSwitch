@@ -1,30 +1,18 @@
 import AgentSwitchLive
 import Foundation
 
-/// Tasks, pending approvals, the live event tails and the terminals waiting for you, as the Live Activity's state
-/// (assistant-v0 §4).
+/// The terminals at work or waiting for you, as the Live Activity's state (assistant-v0 §4).
 public enum LiveSummary {
     public static let maxRows = 3
     static let titleChars = 28
     static let stepChars = 60
-    static let endedChars = 90
 
-    /// The tasks in progress and the terminals at work or waiting for you (terminal-v0 §1), the ones waiting first, then
-    /// the newest; nil when there are none. A terminal at work counts as a task in progress (2026-09-30, user: 实时活动应该
-    /// 包括终端里的活动); an idle or ended one does not.
-    public static func state(tasks: [AgentTask], approvals: [Approval], threadTitles: [String: String],
-                             tails: [String: [TaskEvent]] = [:], terminals: [TerminalInfo] = []) -> LiveState? {
-        let active = tasks.filter(\.status.isActive)
-        let asking = terminals.filter { $0.waitsForYou || $0.status == .working }
-        guard !active.isEmpty || !asking.isEmpty else { return nil }
-        let pending = Dictionary(grouping: approvals.filter { $0.status == .pending }, by: \.taskId)
-        let rows = active.map { task -> LiveState.Row in
-            let waitingOn = pending[task.id]?.first
-            let needsYou = waitingOn != nil || task.status == .waitingApproval
-            return LiveState.Row(id: task.id, title: title(task, threadTitles, tasks), step: step(task, waitingOn, tails[task.id] ?? []),
-                                 model: task.model.map(ModelName.display), startedAt: task.created, needsYou: needsYou,
-                                 doing: doing(task, needsYou: needsYou, waitingOn, tails[task.id] ?? []))
-        } + asking.map(row)
+    /// The terminals at work or waiting for you (terminal-v0 §1), the ones waiting first, then the newest; nil when
+    /// there are none. A terminal at work counts (2026-09-30, user: 实时活动应该包括终端里的活动); an idle or ended one
+    /// does not.
+    public static func state(terminals: [TerminalInfo]) -> LiveState? {
+        let rows = terminals.filter { $0.waitsForYou || $0.status == .working }.map(row)
+        guard !rows.isEmpty else { return nil }
         let ordered = rows.sorted { ($0.needsYou ? 0 : 1, $1.startedAt) < ($1.needsYou ? 0 : 1, $0.startedAt) }
         let waiting = rows.filter(\.needsYou).count
         return LiveState(rows: Array(ordered.prefix(maxRows)), running: rows.count - waiting, waiting: waiting)
@@ -37,121 +25,16 @@ public enum LiveSummary {
         guard terminal.waitsForYou else {
             return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
                                  step: clip(terminal.activity.map { MessageDisplay.readable($0.phrase) } ?? "进行中", stepChars), model: agent,
-                                 startedAt: Date(milliseconds: terminal.statusSince ?? terminal.lastOutputAt), needsYou: false, kind: .terminal,
+                                 startedAt: Date(milliseconds: terminal.statusSince ?? terminal.lastOutputAt), needsYou: false,
                                  doing: terminal.activity.map { ToolDisplay.word($0.tool) } ?? "Think")
         }
         let ask = terminal.permissions.first
         let since = ask.map(\.at).flatMap { $0 > 0 ? $0 : nil } ?? terminal.statusSince ?? terminal.lastOutputAt
         return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
                              step: clip(ask.map { MessageDisplay.readable($0.summary) } ?? "等你处理", stepChars), model: agent,
-                             startedAt: Date(milliseconds: since), needsYou: true, kind: .terminal,
+                             startedAt: Date(milliseconds: since), needsYou: true,
                              doing: ask?.tool == "AskUserQuestion" ? "Answer" : "Allow?")
     }
-
-    /// What a task is doing now in one word (the compact island): waiting on a question or an approval, else the latest
-    /// event that says something — a tool by its word, the model writing, planning, choosing a model — else its state.
-    static func doing(_ task: AgentTask, needsYou: Bool, _ waitingOn: Approval?, _ tail: [TaskEvent]) -> String {
-        if needsYou { return waitingOn?.questionEvidence?.questions.isEmpty == false ? "Answer" : "Allow?" }
-        for event in tail.reversed() {
-            let p = event.payload
-            switch event.type {
-            case "tool_call" where p["denied"] == nil: return ToolDisplay.word(p["tool"]?.string ?? "")
-            case "text": return "Reply"
-            case "routed": return p["clarify"]?.string?.isEmpty == false ? "Answer" : "Start"
-            case "dispatched", "redispatch": return "Start"
-            case "step":
-                switch p["action"]?.string {
-                case "plan": return "Plan"
-                case "ask_user": return "Answer"
-                case "finish": return "Check"
-                case "dispatch": return "Start"
-                default: continue
-                }
-            default: continue
-            }
-        }
-        switch task.status {
-        case .queued: return "Queued"
-        case .routing: return "Route"
-        default: return "Busy"
-        }
-    }
-
-    /// The conclusion to show once nothing runs: the task that ended last (a cancelled one too, said as such).
-    public static func ended(tasks: [AgentTask], threadTitles: [String: String]) -> LiveState.Ended? {
-        guard let last = tasks.filter(\.status.isTerminal).max(by: { $0.updatedAt < $1.updatedAt }) else { return nil }
-        let said = [last.spoken, last.speech, last.status == .done ? last.result : last.error ?? last.result]
-            .compactMap { $0.map(Speech.speakable) }.first { !$0.isEmpty }
-        return LiveState.Ended(taskId: last.id, title: title(last, threadTitles, tasks), line: clip(said ?? last.status.label, endedChars),
-                               ok: last.status == .done)
-    }
-
-    static func title(_ task: AgentTask, _ threadTitles: [String: String], _ tasks: [AgentTask]) -> String {
-        clip(TaskTitle.of(task, threadTitle: task.threadId.flatMap { threadTitles[$0] }, tasks: tasks), titleChars)
-    }
-
-    /// What it waits for; else what it is doing, in plain words, from the latest event that says something (not raw
-    /// tool input or internal state names); else its state, said the same way.
-    static func step(_ task: AgentTask, _ waitingOn: Approval?, _ tail: [TaskEvent]) -> String {
-        if let approval = waitingOn {
-            let asked = approval.questionEvidence?.questions.first?.text ?? approval.action
-            return clip(MessageDisplay.readable(asked), stepChars)
-        }
-        for event in tail.reversed() {
-            if let line = plainLine(event) { return clip(line, stepChars) }
-        }
-        return plainStatus(task.status)
-    }
-
-    /// What a running task is doing now, in plain words, for a card (the same line the Live Activity shows).
-    public static func currentStep(_ task: AgentTask, tail: [TaskEvent]) -> String? {
-        for event in tail.reversed() {
-            if let line = plainLine(event) { return clip(line, stepChars * 2) }
-        }
-        return task.spoken.map { clip($0, stepChars * 2) }
-    }
-
-    static func plainStatus(_ status: TaskStatus) -> String {
-        switch status {
-        case .queued: return TaskStatus.queued.label
-        case .routing: return "选择模型"
-        case .running: return TaskStatus.running.label
-        case .waitingApproval: return TaskStatus.waitingApproval.label
-        default: return status.label
-        }
-    }
-
-    /// One event as a short plain line for the island, or nil when it says nothing worth showing there.
-    static func plainLine(_ event: TaskEvent) -> String? {
-        let p = event.payload
-        switch event.type {
-        case "text":
-            let text = MessageDisplay.readable(p["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text.split(separator: "\n").first.map(String.init)
-        case "tool_call":
-            return p["denied"] == nil ? MessageDisplay.readable(ToolDisplay.line(p)) : nil
-        case "dispatched": return p["model"]?.string.map { "已交给 " + ModelName.display($0) } ?? "开始执行"
-        case "routed":
-            if let clarify = p["clarify"]?.string, !clarify.isEmpty { return "等你回答：" + clarify }
-            return p["verdict"]?["model"]?.string.map { "已选定 " + ModelName.display($0) } ?? "已选定模型"
-        case "step":
-            switch p["action"]?.string {
-            case "intake": return "已接收"
-            case "plan": return "多步任务，规划中"
-            case "dispatch":
-                let model = p["target"]?["model"]?.string.map(ModelName.display)
-                return "第 \(p["n"]?.int ?? 1) 步" + (model.map { "：交由 \($0) 执行" } ?? "")
-            case "ask_user": return p["question"]?.string.map { "等你回答：" + $0 }
-            case "finish": return "收尾检查"
-            default: return nil
-            }
-        case "redispatch": return "重试"
-        case "attempt_failed": return "一次尝试失败"
-        case "queued": return TaskStatus.queued.label
-        default: return nil
-        }
-    }
-
 
     static func clip(_ text: String, _ limit: Int) -> String {
         let one = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)

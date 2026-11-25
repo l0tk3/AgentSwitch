@@ -26,9 +26,7 @@ public struct PairingOutcome: Sendable {
     public let endpoint: APIEndpoint
 }
 
-/// Pairing (app-v0 §2, §5): find a reachable address from the payload, `POST /pair` over the pinned connection, and
-/// fill in the gate key from `GET /gate/pubkey` if the QR code had none (`gate: null` when the Mac could not read it;
-/// the endpoint then answers 503 and the app asks again later).
+/// Pairing (app-v0 §2, §5): find a reachable address from the payload and `POST /pair` over the pinned connection.
 public struct PairingService: Sendable {
     public let transport: any HTTPTransport
     public let discovery: (any ServiceDiscovery)?
@@ -69,13 +67,7 @@ public struct PairingService: Sendable {
         }
         guard !result.token.isEmpty, !result.deviceId.isEmpty else { throw PairingError.failed("empty token") }
 
-        var gate = payload.gate
-        if gate == nil {
-            let authed = AgentSwitchAPI(endpoints: FixedEndpoint(endpoint), transport: transport, token: result.token)
-            gate = try? await authed.gatePubkey()
-            if let key = gate, !key.isValid { gate = nil }
-        }
-        let profile = ServerProfile(payload: payload, deviceId: result.deviceId, gate: gate)
+        let profile = ServerProfile(payload: payload, deviceId: result.deviceId)
         return PairingOutcome(profile: profile, token: result.token, endpoint: endpoint)
     }
 }

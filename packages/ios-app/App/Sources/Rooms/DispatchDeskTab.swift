@@ -1,7 +1,7 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// The Dispatch tab while the old dispatch is off (OldDispatch): the new dispatch, the room the Mac flags as the
+/// The Dispatch tab: the room the Mac flags as the
 /// dispatch desk (调度台, `desk: true` in `GET /rooms`) — its page as the Rooms tab pushes it, here as the tab's own,
 /// titled `Dispatch`. The rooms list is the one the tabs' root reads (MainTabs). No desk: the dispatch is not on, and
 /// only the Mac turns it on (its Settings › Dispatch; `/dispatch/desk` is the Mac's own).

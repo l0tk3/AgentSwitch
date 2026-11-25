@@ -53,7 +53,6 @@ struct MacDetailsView: View {
                 LabeledContent("Port") { Text(String(profile.port)).mono(13) }
                 if !profile.lan.isEmpty { LabeledContent("LAN") { Text(profile.lan.joined(separator: ", ")).mono(13) } }
                 if !profile.tailnet.isEmpty { LabeledContent("Tailscale", value: profile.tailnet.joined(separator: ", ")) }
-                LabeledContent("Keypair") { Text(profile.gate?.keypair ?? "—").mono(13) }
                 LabeledContent("This Device", value: model.me?.name ?? profile.deviceId)
                 LabeledContent("Paired", value: profile.pairedAt.formatted(date: .abbreviated, time: .shortened))
             }

@@ -1,38 +1,5 @@
 import Foundation
 
-/// A token saved on the phone: the ciphertext and the user's note, nothing else. It is not a secret (only the Mac's
-/// gate can open it), but it is still kept out of logs and the shared clipboard.
-public struct SavedCiphertext: Codable, Sendable, Hashable, Identifiable {
-    public let id: UUID
-    public let token: String
-    public let note: String
-    public let createdAt: Date
-    /// Fingerprint of the Mac whose gate key sealed it: only that Mac can open it. Nil for tokens saved before the
-    /// phone knew several Macs.
-    public let mac: String?
-
-    public init(id: UUID = UUID(), token: String, note: String, createdAt: Date = Date(), mac: String? = nil) {
-        self.id = id
-        self.token = token
-        self.note = note
-        self.createdAt = createdAt
-        self.mac = mac
-    }
-
-    /// Worth offering while `current` is the Mac in use: made for it, untagged, or made for a Mac no longer paired
-    /// (a Mac set up again after a reinstall comes back with a new fingerprint and most likely the same gate).
-    public func usable(with current: String?, paired: [String]) -> Bool {
-        guard let mac else { return true }
-        return mac == current || !paired.contains(mac)
-    }
-
-    /// `enc:v1:AbCd…wXyZ`, enough to tell tokens apart.
-    public var shortToken: String {
-        guard token.count > 24 else { return token }
-        return "\(token.prefix(15))…\(token.suffix(6))"
-    }
-}
-
 public enum StoreError: Error, LocalizedError {
     case io(String)
 
@@ -42,8 +9,8 @@ public enum StoreError: Error, LocalizedError {
     }
 }
 
-/// JSON files under Application Support: the paired Macs and the saved ciphertexts. No plaintext secret
-/// and no device token ever goes here (the token is in the Keychain).
+/// JSON files under Application Support: the paired Macs. No device token ever goes here (the token is in the
+/// Keychain).
 public struct LocalStore: Sendable {
     public let directory: URL
 
@@ -62,7 +29,6 @@ public struct LocalStore: Sendable {
     private var macsURL: URL { directory.appendingPathComponent("macs.json") }
     /// The one Mac of the versions before 2026-09-27, moved into `macs.json` on first load.
     private var legacyProfileURL: URL { directory.appendingPathComponent("server.json") }
-    private var ciphertextsURL: URL { directory.appendingPathComponent("ciphertexts.json") }
 
     public func loadMacs() throws -> PairedMacs {
         if let saved = try read(PairedMacs.self, from: macsURL) { return PairedMacs(servers: saved.servers, active: saved.active) }
@@ -74,9 +40,6 @@ public struct LocalStore: Sendable {
     }
 
     public func saveMacs(_ macs: PairedMacs) throws { try write(macs, to: macsURL) }
-
-    public func loadCiphertexts() throws -> [SavedCiphertext] { try read([SavedCiphertext].self, from: ciphertextsURL) ?? [] }
-    public func saveCiphertexts(_ items: [SavedCiphertext]) throws { try write(items, to: ciphertextsURL) }
 
     // MARK: - files
 

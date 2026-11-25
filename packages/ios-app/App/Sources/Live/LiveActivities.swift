@@ -5,8 +5,7 @@ import Foundation
 import os
 
 /// The one summary Live Activity (assistant-v0 §4) — lock screen and Dynamic Island — kept by the app while it runs:
-/// started when a task is in progress or a terminal waits for you, updated when the summary changes, and once everything
-/// has ended it shows the last conclusion for a minute and goes (at once when it held only terminals). No push (a free developer team cannot): once iOS suspends the app the activity
+/// started when a terminal is at work or waits for you, updated when the summary changes, and gone once none is. No push (a free developer team cannot): once iOS suspends the app the activity
 /// keeps its last state, its clocks keep counting, and after `staleAfter` it says to open the app.
 ///
 /// Not on the main actor: ActivityKit's `Activity` values are not Sendable, so they are fetched and used in the same
@@ -14,7 +13,6 @@ import os
 final class LiveActivities: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.agentswitch.ios", category: "live")
     static let staleAfter: TimeInterval = 10 * 60
-    static let lingerAfterEnd: TimeInterval = 60
     private static let enabledKey = "liveActivities"
 
     private let lock = NSLock()
@@ -30,14 +28,14 @@ final class LiveActivities: @unchecked Sendable {
         get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
         set {
             UserDefaults.standard.set(newValue, forKey: Self.enabledKey)
-            if !newValue { Task { await self.endAll(nil) } }
+            if !newValue { Task { await self.endAll() } }
         }
     }
 
     /// Whether iOS lets this app show Live Activities (the user can turn them off per app).
     var allowed: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
-    func sync(_ summary: LiveState?, ended: LiveState.Ended?, macName: String) async {
+    func sync(_ summary: LiveState?, macName: String) async {
         // The look rides with the state: the widget extension reads none of the app's settings (docs/ui-v0.md §8).
         let classic = InterfaceLook.current.isClassic
         let state = summary?.looking(classic: classic)
@@ -48,8 +46,7 @@ final class LiveActivities: @unchecked Sendable {
         for extra in live().dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
         let exists = !live().isEmpty
         guard let state else {
-            // A terminal's answer is no task's end: the last conclusion only after tasks were in it.
-            if let current = live().first { await endAll(current.content.state.hasTasks ? ended : nil) }
+            if exists { await endAll() }
             shown = nil
             return
         }
@@ -70,15 +67,7 @@ final class LiveActivities: @unchecked Sendable {
         }
     }
 
-    /// The last conclusion for a minute (when there is one), then nothing.
-    private func endAll(_ ended: LiveState.Ended?) async {
-        for activity in Activity<AgentActivityAttributes>.activities {
-            if let ended {
-                let content = ActivityContent(state: LiveState.finished(ended).looking(classic: InterfaceLook.current.isClassic), staleDate: nil)
-                await activity.end(content, dismissalPolicy: .after(Date().addingTimeInterval(Self.lingerAfterEnd)))
-            } else {
-                await activity.end(nil, dismissalPolicy: .immediate)
-            }
-        }
+    private func endAll() async {
+        for activity in Activity<AgentActivityAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 }

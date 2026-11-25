@@ -1,9 +1,8 @@
-import Sodium
 import XCTest
 @testable import AgentSwitchKit
 
 /// Proxies from the phone (docs/clash-v0.md §9, docs/profiles-v0.md §4.2, docs/browser-v0.md §7.6): the Clash page's
-/// models, the proxy form, the password sealed here, and the calls as the Mac's service takes them.
+/// models, the proxy form, the password the Mac seals, and the calls as the Mac's service takes them.
 final class ProxyTests: XCTestCase {
     private let lan = APIEndpoint(host: "192.168.1.5", port: 4713, kind: .lan)
 
@@ -182,31 +181,31 @@ final class ProxyTests: XCTestCase {
         XCTAssertEqual(kept, ProxyRequest(server: "http://proxy.example:8080", username: "me", password: nil, keepPassword: true))
         let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(kept)) as? [String: Any])
         XCTAssertEqual(Set(sent.keys), ["server", "username", "keepPassword"])
-        // A new one typed: it goes as a ciphertext and nothing is kept.
+        // A new one typed: it goes as the token the Mac sealed it into and nothing is kept.
         var typed = ProxyDraft(current)
         typed.password = "hunter2"
-        XCTAssertEqual(typed.request(ciphertext: "enc:v1:abc", current: current), ProxyRequest(server: "http://proxy.example:8080", username: "me", password: "enc:v1:abc"))
+        XCTAssertEqual(typed.request(ciphertext: "asv:1:abc", current: current), ProxyRequest(server: "http://proxy.example:8080", username: "me", password: "asv:1:abc"))
         // No user: nobody's password to keep.
         XCTAssertNil(ProxyDraft(server: "http://proxy.example:8080").request(ciphertext: nil, current: current).keepPassword)
     }
 
-    func testThePasswordIsSealedForTheProxyItselfAndNowhereElse() throws {
-        let draft = ProxyDraft(server: "http://Proxy.Example:8080", username: "me", password: "hunter2-x")
-        let payload = try XCTUnwrap(try draft.sealing(label: ProxyOwner.profile(agent: "claude-code", id: "abc").sealLabel))
-        XCTAssertEqual(payload.hosts, ["proxy.example:8080"])
-        XCTAssertEqual(payload.uses, [.fill, .http])
-        XCTAssertEqual(payload.label, "profile/proxy")
-        XCTAssertEqual(payload.value, "hunter2-x")
-        XCTAssertThrowsError(try ProxyDraft(server: "http://proxy.example:8080", username: "me", password: "hunter2").sealing(label: "browser/proxy")) {
-            XCTAssertEqual($0 as? GatePolicyError, .valueTooShort)
+    /// A typed password is sealed by the Mac (`POST /vault/seal`) and its token is what the proxy is set with.
+    func testATypedPasswordIsSealedByTheMac() async throws {
+        XCTAssertEqual(ProxyDraft(server: "http://Proxy.Example:8080", username: "me", password: "hunter2").passwordToSeal, "hunter2")
+        XCTAssertNil(ProxyDraft(server: "http://proxy.example:8080", username: "me").passwordToSeal, "none typed")
+        XCTAssertNil(ProxyDraft(server: "proxy.example", username: "me", password: "hunter2").passwordToSeal, "not a proxy's address")
+
+        let transport = FakeTransport { req, _ in
+            switch (req.httpMethod ?? "", req.url?.path ?? "") {
+            case ("POST", "/vault/seal"): return (json(["token": "asv:1:sealed"]), httpResponse(req.url))
+            default: return (json(["error": "not found"]), httpResponse(req.url, status: 404))
+            }
         }
-        XCTAssertEqual(ProxyOwner.browser.sealLabel, "browser/proxy")
-        XCTAssertNil(try ProxyDraft(server: "http://proxy.example:8080", username: "me").sealing(label: "browser/proxy"))
-        // What it becomes is a ciphertext the gate's own format, and the value is not in it.
-        let keys = try XCTUnwrap(Sodium().box.keyPair())
-        let token = try TokenMinter(publicKey: keys.publicKey).mint(payload)
-        XCTAssertTrue(TokenMinter.looksLikeToken(token))
-        XCTAssertFalse(token.contains("hunter2"))
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let token = try await api.vaultSeal("hunter2")
+        XCTAssertEqual(token, "asv:1:sealed")
+        let sent = try XCTUnwrap(transport.requests.first?.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: String] })
+        XCTAssertEqual(sent, ["value": "hunter2"])
     }
 
     // MARK: whose proxy

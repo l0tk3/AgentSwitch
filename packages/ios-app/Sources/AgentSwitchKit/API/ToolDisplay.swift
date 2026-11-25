@@ -1,17 +1,9 @@
 import Foundation
 
-/// A tool call said as people say it (2026-09-25): the tool as a verb and the one thing it works on in the process
-/// list ("运行 git log -n 3", "浏览器 · 打开 https://…"), and its input field by field when the call is opened. The
-/// three executors name tools differently: Claude `Bash`, `mcp__playwright__browser_click`; Codex `commandExecution`,
+/// A tool said as people say it (2026-09-25): as a verb ("运行", "浏览器 · 打开") and as one short word. The
+/// three agents name tools differently: Claude `Bash`, `mcp__playwright__browser_click`; Codex `commandExecution`,
 /// `playwright.browser_click`; OpenCode `bash`, `playwright_browser_click`.
 public enum ToolDisplay {
-    /// The list line of a `tool_call` event's payload.
-    public static func line(_ payload: JSONValue) -> String {
-        let label = label(payload["tool"]?.string ?? "?")
-        guard let target = target(payload) else { return label }
-        return "\(label) \(target)"
-    }
-
     public static func label(_ tool: String) -> String {
         if let verb = verbs[tool] ?? verbs[tool.lowercased()] { return verb }
         let (server, name) = split(tool)
@@ -46,34 +38,6 @@ public enum ToolDisplay {
         "compact": "Compact",
     ]
 
-    /// The one thing a call works on: its command (without Codex's shell wrapper), page, file, pattern or query.
-    public static func target(_ payload: JSONValue) -> String? {
-        if let command = payload["command"]?.string ?? payload["input"]?["command"]?.string {
-            return clip(EventDescriber.unwrapShell(command))
-        }
-        let input = payload["input"]
-        for key in targetKeys {
-            if let value = input?[key]?.string, !value.isEmpty { return clip(value) }
-        }
-        if let files = input?["files"]?.array?.compactMap(\.string), !files.isEmpty { return clip(files.joined(separator: ", ")) }
-        return nil
-    }
-
-    /// The input of an opened call, field by field; a plain string input is one field.
-    public static func fields(_ input: JSONValue?) -> [(name: String, value: String)] {
-        switch input {
-        case .object(let fields)?:
-            let keys = fields.keys.sorted { (rank($0), $0) < (rank($1), $1) }
-            return keys.compactMap { key in
-                guard let value = fields[key], value != .null else { return nil }
-                return (key, value.string ?? value.compactText)
-            }
-        case .string(let text)?: return [("输入", text)]
-        case nil, .null?: return []
-        case let other?: return [("输入", other.compactText)]
-        }
-    }
-
     private static let verbs: [String: String] = [
         "Bash": "运行", "bash": "运行", "shell": "运行", "commandExecution": "运行",
         "Read": "读取", "read": "读取", "Write": "写入", "write": "写入",
@@ -95,14 +59,6 @@ public enum ToolDisplay {
         "secret_fill": "填入密文", "secret_type": "填入密文", "secret_repair": "修复密文", "credential_repair": "修复密文",
     ]
 
-    private static let targetKeys = ["url", "file_path", "filePath", "notebook_path", "path", "pattern", "query", "element",
-                                     "description", "skill", "prompt"]
-
-    /// Where the fields of an opened call come first: what it runs or opens, then the rest by name.
-    private static func rank(_ key: String) -> Int {
-        targetKeys.firstIndex(of: key).map { $0 + 1 } ?? (key == "command" ? 0 : targetKeys.count + 1)
-    }
-
     /// `mcp__server__name`, `server.name`, `server_name` (a known server only: `apply_patch` is not one).
     private static func split(_ tool: String) -> (server: String?, name: String) {
         if tool.hasPrefix("mcp__") {
@@ -115,10 +71,5 @@ public enum ToolDisplay {
         }
         if tool.hasPrefix("browser_") { return ("playwright", tool) }
         return (nil, tool)
-    }
-
-    private static func clip(_ text: String) -> String {
-        let line = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
-        return line.count > 160 ? String(line.prefix(159)) + "…" : line
     }
 }

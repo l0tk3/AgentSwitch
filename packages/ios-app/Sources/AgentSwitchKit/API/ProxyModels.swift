@@ -37,7 +37,7 @@ public struct ProxyExit: Decodable, Sendable, Hashable {
     public var text: String { [place, ip].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ") }
 }
 
-/// A proxy to set: `password` is a ciphertext for the proxy's own `host:port`, made on this phone (the service takes
+/// A proxy to set: `password` is the token the Mac sealed the typed one into (`POST /vault/seal`; the service takes
 /// no other); `keepPassword`: none is sent because the one stored stays.
 public struct ProxyRequest: Encodable, Sendable, Equatable {
     public let server: String
@@ -58,7 +58,7 @@ public struct ProxyRequest: Encodable, Sendable, Equatable {
 public struct ProxyDraft: Sendable, Equatable {
     public var server: String
     public var username: String
-    /// As typed; sealed on this phone before anything is sent.
+    /// As typed; the Mac seals it (`POST /vault/seal`) before the proxy is set with it.
     public var password: String
 
     public init(server: String = "", username: String = "", password: String = "") {
@@ -74,7 +74,7 @@ public struct ProxyDraft: Sendable, Equatable {
 
     var user: String { username.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// The proxy's own `host:port`: what its password is sealed for.
+    /// The proxy's own `host:port`.
     public var site: String? { ProxyText.site(server) }
 
     /// What stands in the way of `Apply`, once something has been typed.
@@ -128,29 +128,9 @@ public struct ProxyDraft: Sendable, Equatable {
                      keepPassword: ciphertext == nil && keepsPassword(of: current) ? true : nil)
     }
 
-    /// A typed password as the gate is to have it: for the proxy's own `host:port` and nowhere else, to be put into
-    /// requests and typed (the uses the Mac seals it with). Nil: no password was typed. Throws what the gate's rules
-    /// say no to (a host it does not take).
-    public func sealing(label: String) throws -> SecretPayload? {
-        guard !password.isEmpty, let site else { return nil }
-        return try SecretPayload.make(value: password, hosts: [site], uses: [.http, .fill], label: label)
-    }
-}
-
-/// Whose proxy a form sets.
-public enum ProxyOwner: Sendable, Hashable {
-    /// The browser everything shares.
-    case browser
-    /// One of an agent's profiles.
-    case profile(agent: String, id: String)
-
-    /// The name its password is sealed under (the Mac's).
-    public var sealLabel: String {
-        switch self {
-        case .browser: return "browser/proxy"
-        case .profile: return "profile/proxy"
-        }
-    }
+    /// A typed password, for the Mac to seal (`POST /vault/seal`) before it is sent. Nil: none was typed, or the
+    /// server is not a proxy's `scheme://host:port`.
+    public var passwordToSeal: String? { password.isEmpty || site == nil ? nil : password }
 }
 
 public enum ProxyText {

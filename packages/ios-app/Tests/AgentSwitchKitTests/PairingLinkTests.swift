@@ -19,7 +19,6 @@ final class PairingLinkTests: XCTestCase {
         XCTAssertEqual(p.fp, String(repeating: "ab", count: 32))
         XCTAssertEqual(p.code, "7K3M-9QZX")
         XCTAssertEqual(p.tailnet, ["100.101.102.103", "mac.tail1234.ts.net"])
-        XCTAssertEqual(p.gate?.keypair, "default")
     }
 
     func testCodeDecodesLikeTheDaemon() {
@@ -38,13 +37,18 @@ final class PairingLinkTests: XCTestCase {
         XCTAssertEqual(try PairingLink.parse(PairingLink.make(p)), p)
     }
 
-    func testGateIsOptionalButMustBeValidWhenPresent() throws {
+    /// A Mac may still put its old gate key in the link: there or not, whatever it holds, the link reads the same.
+    func testTheOldGateKeyIsNotRead() throws {
+        let with = try PairingLink.parse(link(docExample))
         var noGate = docExample
         noGate.removeValue(forKey: "gate")
-        XCTAssertNil(try PairingLink.parse(link(noGate)).gate)
-        var badGate = docExample
-        badGate["gate"] = ["publicKey": "AAAA", "keypair": "default"]
-        XCTAssertThrowsError(try PairingLink.parse(link(badGate))) { XCTAssertEqual($0 as? PairingLinkError, .invalidField("gate.publicKey")) }
+        XCTAssertEqual(try PairingLink.parse(link(noGate)), with)
+        var nullGate = docExample
+        nullGate["gate"] = NSNull()
+        XCTAssertEqual(try PairingLink.parse(link(nullGate)), with)
+        var oddGate = docExample
+        oddGate["gate"] = ["publicKey": "AAAA"]
+        XCTAssertEqual(try PairingLink.parse(link(oddGate)), with)
     }
 
     func testRejections() {
@@ -85,12 +89,9 @@ final class PairingLinkTests: XCTestCase {
     }
 
     func testProfileFromPayload() {
-        let profile = ServerProfile(payload: .sample(), deviceId: "dev1", gate: nil)
-        XCTAssertEqual(profile.gate?.keypair, "default", "falls back to the payload's key")
+        let profile = ServerProfile(payload: .sample(), deviceId: "dev1")
         XCTAssertEqual(profile.tokenAccount, profile.fingerprint)
+        XCTAssertEqual(profile.deviceId, "dev1")
         XCTAssertEqual(ServerProfile.grouped("abcdef012345"), "abcd ef01 2345")
-        let rotated = profile.with(gate: GateKey(publicKey: PairingPayload.sampleKey, keypair: "work"))
-        XCTAssertEqual(rotated.gate?.keypair, "work")
-        XCTAssertEqual(rotated.deviceId, "dev1")
     }
 }

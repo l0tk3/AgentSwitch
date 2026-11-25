@@ -306,12 +306,9 @@ extension AppModel {
     /// The agent's name as people call it (`Codex`, `Claude Code`), else the owner's label.
     func agentName(of owner: BrowserTabOwner) -> String { owner.agentName(harness: harness(of: owner)) }
 
-    /// The agent behind a tab: its terminal's or its task's, else as its label names it.
+    /// The agent behind a tab: its terminal's, else as its label names it.
     func harness(of owner: BrowserTabOwner) -> String? {
-        switch owner.kind {
-        case .terminal: return terminals.terminals.first { $0.id == owner.id }?.harness ?? owner.namedHarness
-        case .task: return tasks.first { $0.id == owner.id }?.harness ?? owner.namedHarness
-        default: return owner.namedHarness
-        }
+        guard owner.kind == .terminal else { return owner.namedHarness }
+        return terminals.terminals.first { $0.id == owner.id }?.harness ?? owner.namedHarness
     }
 }

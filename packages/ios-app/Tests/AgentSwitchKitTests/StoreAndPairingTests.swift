@@ -3,32 +3,36 @@ import XCTest
 @testable import AgentSwitchKit
 
 final class LocalStoreTests: XCTestCase {
-    func testMacsAndCiphertextsRoundTrip() throws {
+    func testMacsRoundTrip() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("as-store-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = LocalStore(directory: dir)
         XCTAssertTrue(try store.loadMacs().isEmpty)
-        XCTAssertEqual(try store.loadCiphertexts(), [])
 
-        let profile = ServerProfile(payload: .sample(), deviceId: "dev1", gate: nil, pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
+        let profile = ServerProfile(payload: .sample(), deviceId: "dev1", pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
         let other = Self.profile(fp: "cd", name: "MacBook")
         let macs = PairedMacs().adding(profile).adding(other)
         try store.saveMacs(macs)
         XCTAssertEqual(try store.loadMacs(), macs)
         XCTAssertEqual(try store.loadMacs().current, other)
 
-        let saved = [SavedCiphertext(token: "enc:v1:" + String(repeating: "A", count: 40), note: "公司 VPN", createdAt: Date(timeIntervalSince1970: 1_790_000_000)),
-                     SavedCiphertext(token: "enc:v1:" + String(repeating: "B", count: 40), note: "家里 NAS", createdAt: Date(timeIntervalSince1970: 1_790_000_000), mac: other.fingerprint)]
-        try store.saveCiphertexts(saved)
-        XCTAssertEqual(try store.loadCiphertexts(), saved)
-        let onDisk = try String(contentsOf: dir.appendingPathComponent("ciphertexts.json"), encoding: .utf8)
-        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(onDisk.utf8)) as? [[String: Any]])
-        XCTAssertEqual(Set(rows[0].keys), ["id", "token", "note", "createdAt"], "ciphertext and note only")
-        XCTAssertEqual(Set(rows[1].keys), ["id", "token", "note", "createdAt", "mac"], "plus the Mac it was made for")
-
         try store.saveMacs(PairedMacs())
         XCTAssertTrue(try store.loadMacs().isEmpty)
-        XCTAssertEqual(saved[0].shortToken, "enc:v1:AAAAAAAA…AAAAAA")
+    }
+
+    /// A profile saved while the Mac still handed out its gate key carries it (`gate`): it is read as before, without it.
+    func testAProfileSavedWithTheOldGateKeyStillLoads() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("as-store-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fp = String(repeating: "ab", count: 32)
+        let saved: [String: Any] = ["active": fp, "servers": [[
+            "name": "Mac mini", "port": 4713, "fingerprint": fp, "lan": ["192.168.1.5"], "tailnet": [], "bonjour": "AgentSwitch on Mac mini",
+            "gate": ["publicKey": PairingPayload.sampleKey, "keypair": "default"], "deviceId": "dev1", "pairedAt": "2026-09-22T14:13:20Z"]]]
+        try json(saved).write(to: dir.appendingPathComponent("macs.json"))
+        let macs = try LocalStore(directory: dir).loadMacs()
+        XCTAssertEqual(macs.current?.name, "Mac mini")
+        XCTAssertEqual(macs.current?.deviceId, "dev1")
     }
 
     /// A phone updated from the one-Mac version keeps its pairing: `server.json` becomes a one-Mac `macs.json`.
@@ -36,7 +40,7 @@ final class LocalStoreTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("as-store-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let profile = ServerProfile(payload: .sample(), deviceId: "dev1", gate: nil, pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
+        let profile = ServerProfile(payload: .sample(), deviceId: "dev1", pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let legacy = dir.appendingPathComponent("server.json")
@@ -81,19 +85,9 @@ final class LocalStoreTests: XCTestCase {
         XCTAssertEqual(PairedMacs(servers: [a], active: "gone").current, a, "a stale current Mac falls back to the first")
     }
 
-    func testCiphertextsFollowTheirMac() {
-        let untagged = SavedCiphertext(token: "enc:v1:A", note: "")
-        let mine = SavedCiphertext(token: "enc:v1:B", note: "", mac: "aa")
-        let other = SavedCiphertext(token: "enc:v1:C", note: "", mac: "bb")
-        let orphan = SavedCiphertext(token: "enc:v1:D", note: "", mac: "gone")
-        let paired = ["aa", "bb"]
-        XCTAssertEqual([untagged, mine, other, orphan].filter { $0.usable(with: "aa", paired: paired) }, [untagged, mine, orphan])
-        XCTAssertEqual([untagged, mine, other, orphan].filter { $0.usable(with: "bb", paired: paired) }, [untagged, other, orphan])
-    }
-
     private static func profile(fp: String, name: String, deviceId: String = "dev1") -> ServerProfile {
         ServerProfile(name: name, port: 4713, fingerprint: String(repeating: fp, count: 32), lan: ["192.168.1.5"], tailnet: [],
-                      bonjour: "AgentSwitch on \(name)", gate: nil, deviceId: deviceId, pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
+                      bonjour: "AgentSwitch on \(name)", deviceId: deviceId, pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
     }
 
     func testVaults() throws {
@@ -111,15 +105,13 @@ final class LocalStoreTests: XCTestCase {
 }
 
 final class PairingServiceTests: XCTestCase {
-    private func transport(pairStatus: Int = 200, gateKey: String? = nil) -> FakeTransport {
+    private func transport(pairStatus: Int = 200) -> FakeTransport {
         FakeTransport { req, _ in
             switch req.url?.path {
             case "/healthz": return (json(["ok": true]), httpResponse(req.url))
             case "/pair":
                 if pairStatus != 200 { return (json(["error": "invalid code"]), httpResponse(req.url, status: pairStatus)) }
                 return (json(["deviceId": "dev-9", "token": "tok-9"]), httpResponse(req.url))
-            case "/gate/pubkey":
-                return (json(["publicKey": gateKey ?? "", "keypair": "work"]), httpResponse(req.url))
             default: return (json(["error": "not found"]), httpResponse(req.url, status: 404))
             }
         }
@@ -130,21 +122,12 @@ final class PairingServiceTests: XCTestCase {
         let outcome = try await PairingService(transport: t, discovery: nil).pair(.sample(), deviceName: "我的 iPhone")
         XCTAssertEqual(outcome.token, "tok-9")
         XCTAssertEqual(outcome.profile.deviceId, "dev-9")
-        XCTAssertEqual(outcome.profile.gate?.keypair, "default")
         XCTAssertEqual(outcome.endpoint.kind, .lan)
         let pair = try XCTUnwrap(t.requests.first { $0.url?.path == "/pair" })
         XCTAssertNil(pair.value(forHTTPHeaderField: "Authorization"))
         let body = try XCTUnwrap(pair.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: String] })
         XCTAssertEqual(body, ["code": "7K3M-9QZX", "name": "我的 iPhone", "platform": "ios"])
-        XCTAssertFalse(t.paths.contains("/gate/pubkey"), "the QR code already had the key")
-    }
-
-    func testFetchesTheGateKeyWhenTheQRCodeHadNone() async throws {
-        let t = transport(gateKey: PairingPayload.sampleKey)
-        let outcome = try await PairingService(transport: t, discovery: nil).pair(.sample(gate: nil), deviceName: "")
-        XCTAssertEqual(outcome.profile.gate, GateKey(publicKey: PairingPayload.sampleKey, keypair: "work"))
-        let pubkey = try XCTUnwrap(t.requests.first { $0.url?.path == "/gate/pubkey" })
-        XCTAssertEqual(pubkey.value(forHTTPHeaderField: "Authorization"), "Bearer tok-9")
+        XCTAssertEqual(Set(t.paths), ["/healthz", "/pair"], "the Mac's gate key is not asked for")
     }
 
     func testRejectedCode() async {

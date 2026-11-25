@@ -15,6 +15,7 @@ extension PairingPayload: ServerAddressBook {
 }
 
 /// The paired Mac, saved on the phone. Holds no secret: the device token lives in the Keychain, keyed by `fingerprint`.
+/// A profile saved by an earlier version may carry the Mac's old gate key (`gate`); it is not read.
 public struct ServerProfile: Codable, Sendable, Equatable, ServerAddressBook {
     public let name: String
     public let port: Int
@@ -23,33 +24,24 @@ public struct ServerProfile: Codable, Sendable, Equatable, ServerAddressBook {
     public let lan: [String]
     public let tailnet: [String]
     public let bonjour: String
-    public let gate: GateKey?
     public let deviceId: String
     public let pairedAt: Date
 
     public init(name: String, port: Int, fingerprint: String, lan: [String], tailnet: [String], bonjour: String,
-                gate: GateKey?, deviceId: String, pairedAt: Date) {
+                deviceId: String, pairedAt: Date) {
         self.name = name
         self.port = port
         self.fingerprint = fingerprint
         self.lan = lan
         self.tailnet = tailnet
         self.bonjour = bonjour
-        self.gate = gate
         self.deviceId = deviceId
         self.pairedAt = pairedAt
     }
 
-    public init(payload: PairingPayload, deviceId: String, gate: GateKey?, pairedAt: Date = Date()) {
+    public init(payload: PairingPayload, deviceId: String, pairedAt: Date = Date()) {
         self.init(name: payload.name, port: payload.port, fingerprint: payload.fp, lan: payload.lan,
-                  tailnet: payload.tailnet, bonjour: payload.bonjour, gate: gate ?? payload.gate, deviceId: deviceId,
-                  pairedAt: pairedAt)
-    }
-
-    /// A copy with a new gate key (the user rotated the gate key on the Mac).
-    public func with(gate: GateKey?) -> ServerProfile {
-        ServerProfile(name: name, port: port, fingerprint: fingerprint, lan: lan, tailnet: tailnet, bonjour: bonjour,
-                      gate: gate, deviceId: deviceId, pairedAt: pairedAt)
+                  tailnet: payload.tailnet, bonjour: payload.bonjour, deviceId: deviceId, pairedAt: pairedAt)
     }
 
     /// How many LAN addresses are kept: the Mac's current ones and the ones it had on networks it was on before.
@@ -71,7 +63,7 @@ public struct ServerProfile: Codable, Sendable, Equatable, ServerAddressBook {
         let next = (lan: current.isEmpty ? self.lan : lan, tailnet: tailnet.isEmpty ? self.tailnet : tailnet)
         guard next.lan != self.lan || next.tailnet != self.tailnet else { return nil }
         return ServerProfile(name: name, port: port, fingerprint: fingerprint, lan: next.lan, tailnet: next.tailnet,
-                             bonjour: bonjour, gate: gate, deviceId: deviceId, pairedAt: pairedAt)
+                             bonjour: bonjour, deviceId: deviceId, pairedAt: pairedAt)
     }
 
     /// Keychain account for this server's device token.

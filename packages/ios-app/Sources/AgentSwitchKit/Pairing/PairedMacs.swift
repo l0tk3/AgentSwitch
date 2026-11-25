@@ -27,7 +27,7 @@ public struct PairedMacs: Codable, Sendable, Equatable {
         return PairedMacs(servers: next, active: profile.fingerprint)
     }
 
-    /// A saved Mac with new details (addresses, gate key); unknown fingerprints change nothing.
+    /// A saved Mac with new details (addresses); unknown fingerprints change nothing.
     public func updating(_ profile: ServerProfile) -> PairedMacs {
         guard let i = servers.firstIndex(where: { $0.fingerprint == profile.fingerprint }) else { return self }
         var next = servers

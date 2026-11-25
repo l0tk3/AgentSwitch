@@ -125,24 +125,6 @@ struct PixelMarkView: View {
     }
 }
 
-/// A task's status in pixels: the braille spinner while it runs, a square while it waits (blinking) or once done,
-/// hollow once it ended otherwise (cancelled, incomplete, failed keep their colour).
-/// In the classic look: the system's spinner, a dot (its ring breathing while it waits), a ring.
-struct StatusMark: View {
-    let status: TaskStatus
-    @Environment(\.interfaceLook) private var look
-
-    var body: some View {
-        switch status {
-        case .routing, .running: BrailleSpinner()
-        case .queued, .cancelled, .other: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Theme.color(status))
-        case .waitingApproval:
-            if look.isClassic { ClassicWaitingDot() } else { PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink() }
-        default: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.color(status))
-        }
-    }
-}
-
 /// In progress, everywhere the same (web page, Mac, phone): ⠋⠙⠹…; a still first frame under Reduce Motion. It turns
 /// only while the app is in front, every spinner on the same beat (ui-v0 §7.4, 2026-10-03).
 struct BrailleSpinner: View {

@@ -93,7 +93,7 @@ final class ConnectionManagerTests: XCTestCase {
     /// connected it takes the Mac's current addresses; the next selection off the LAN finds the Tailscale one.
     func testAddressesLearnedLaterAreUsedOffTheLan() async throws {
         let saved = ServerProfile(name: "Mac", port: 4713, fingerprint: String(repeating: "ab", count: 32), lan: ["192.168.1.5"], tailnet: [],
-                                  bonjour: "AgentSwitch on Mac", gate: nil, deviceId: "d", pairedAt: Date())
+                                  bonjour: "AgentSwitch on Mac", deviceId: "d", pairedAt: Date())
         let prober = FakeProber(["192.168.1.5": .ok, "100.101.102.103": .ok])
         let manager = ConnectionManager(book: saved, token: "t", discovery: nil, prober: prober)
         let home = try await manager.endpoint()
@@ -109,7 +109,7 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testAnEmptyKindKeepsTheSavedAddressesAndNothingNewChangesNothing() {
         let saved = ServerProfile(name: "Mac", port: 4713, fingerprint: String(repeating: "ab", count: 32), lan: ["192.168.1.5"], tailnet: ["100.101.102.103"],
-                                  bonjour: "b", gate: nil, deviceId: "d", pairedAt: Date())
+                                  bonjour: "b", deviceId: "d", pairedAt: Date())
         XCTAssertNil(saved.updated(with: MacAddresses(lan: ["192.168.1.5"], tailnet: [])), "Tailscale off for a moment keeps the saved address")
         XCTAssertNil(saved.updated(with: MacAddresses(lan: [], tailnet: ["100.101.102.103"])))
         XCTAssertEqual(saved.updated(with: MacAddresses(lan: ["192.168.1.20", "bad host!"], tailnet: []))?.lan, ["192.168.1.20", "192.168.1.5"],
@@ -122,7 +122,7 @@ final class ConnectionManagerTests: XCTestCase {
     func testAMacThatMovesBetweenNetworksIsFoundOnEitherOne() async throws {
         let fp = String(repeating: "ab", count: 32)
         let home = ServerProfile(name: "Mac", port: 4713, fingerprint: fp, lan: ["192.168.31.137"], tailnet: ["100.77.168.100"],
-                                 bonjour: "b", gate: nil, deviceId: "d", pairedAt: Date())
+                                 bonjour: "b", deviceId: "d", pairedAt: Date())
         // At the office, reached over Tailscale: the phone is told the address there.
         let office = try XCTUnwrap(home.updated(with: MacAddresses(lan: ["10.38.120.101"], tailnet: ["100.77.168.100"])))
         XCTAssertEqual(office.lan, ["10.38.120.101", "192.168.31.137"])

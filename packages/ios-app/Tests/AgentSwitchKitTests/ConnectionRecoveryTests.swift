@@ -55,8 +55,7 @@ final class ConnectionRecoveryTests: XCTestCase {
         XCTAssertEqual(connected.map(\.ok), [true, true, nil], "Tailscale was not needed")
         XCTAssertEqual(connected.map(\.detail), ["已通过 LAN 连接", "OK", "Unused · 已通过其他线路连接"])
 
-        let noTailnet = ServerProfile(name: "Mac", port: 4713, fingerprint: book.fp, lan: ["192.168.1.5"], tailnet: [], bonjour: "b", gate: nil,
-                                      deviceId: "d", pairedAt: Date())
+        let noTailnet = ServerProfile(name: "Mac", port: 4713, fingerprint: book.fp, lan: ["192.168.1.5"], tailnet: [], bonjour: "b", deviceId: "d", pairedAt: Date())
         let missing = Troubleshooting.checks(state: .unreachable, reports: [reports[0]], book: noTailnet)
         XCTAssertEqual(missing[2].ok, false)
         XCTAssertTrue(missing[2].detail.contains("无 Tailscale 地址"))
@@ -129,16 +128,20 @@ final class ConnectionRecoveryTests: XCTestCase {
 
     // MARK: - half-open event streams
 
-    func testASilentStreamIsDroppedAndResumed() async throws {
-        let transport = SilentStreamTransport()
-        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        let policy = ReconnectPolicy(initial: .milliseconds(5), maximum: .milliseconds(10), idleTimeout: 0.15)
-        var got: [Int64] = []
+    func testASilentStreamIsDropped() async throws {
+        let (body, sink) = AsyncThrowingStream<Data, Error>.makeStream()
+        sink.yield(Data("a".utf8))
+        var got = Data()
         let started = Date()
-        for try await ev in api.events(taskId: "t1", policy: policy) { got.append(ev.seq) }
-        XCTAssertEqual(got, [1, 2])
-        XCTAssertEqual(transport.queries, ["after=0", "after=1"], "resumed after the last event before the silence")
+        do {
+            for try await chunk in AgentSwitchAPI.idleGuarded(body, limit: .milliseconds(150)) { got.append(chunk) }
+            XCTFail("a stream gone silent must end as a network failure")
+        } catch {
+            XCTAssertEqual(error as? APIError, .transport(AgentSwitchAPI.idleMessage))
+        }
+        XCTAssertEqual(got, Data("a".utf8))
         XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        sink.finish()   // held until here: the silent stream is never finished by being released
     }
 
     func testIdleGuardPassesBytesThrough() async throws {
@@ -149,36 +152,5 @@ final class ConnectionRecoveryTests: XCTestCase {
         var out = Data()
         for try await chunk in AgentSwitchAPI.idleGuarded(body, limit: .seconds(5)) { out.append(chunk) }
         XCTAssertEqual(String(decoding: out, as: UTF8.self), "ab")
-    }
-}
-
-/// First connection: one event, then nothing at all (a half-open socket). Second: the end.
-private final class SilentStreamTransport: HTTPTransport, @unchecked Sendable {
-    private let log = LockedBox<[String]>([])
-    /// Kept so the silent stream is never finished by being released.
-    private let held = LockedBox<[AsyncThrowingStream<Data, Error>.Continuation]>([])
-
-    var queries: [String] { log.value }
-
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        (json(["id": "t1", "createdAt": 0, "updatedAt": 0, "status": "running", "task": "x"]), httpResponse(request.url))
-    }
-
-    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
-        let n = log.withLock { $0.append(request.url?.query ?? ""); return $0.count - 1 }
-        let (body, sink) = AsyncThrowingStream<Data, Error>.makeStream()
-        if n == 0 {
-            sink.yield(Self.frame(1, "text"))
-            held.withLock { $0.append(sink) }
-        } else {
-            sink.yield(Self.frame(2, "done"))
-            sink.finish()
-        }
-        return (httpResponse(request.url, contentType: "text/event-stream"), body)
-    }
-
-    static func frame(_ seq: Int, _ type: String) -> Data {
-        let obj: [String: Any] = ["taskId": "t1", "seq": seq, "ts": seq, "type": type, "payload": ["text": "x"]]
-        return Data("data: \(String(decoding: json(obj), as: UTF8.self))\n\n".utf8)
     }
 }

@@ -24,10 +24,6 @@ final class PixelArtTests: XCTestCase {
     }
 
     func testStates() {
-        XCTAssertEqual(PixelArt.markState(reachable: true, waiting: 0, busy: false), .idle)
-        XCTAssertEqual(PixelArt.markState(reachable: true, waiting: 2, busy: true), .waiting)
-        XCTAssertEqual(PixelArt.markState(reachable: true, waiting: 0, busy: true), .busy)
-        XCTAssertEqual(PixelArt.markState(reachable: false, waiting: 1, busy: true), .off)
         // off: dithered to half
         let kept = PixelArt.markCells.filter { !PixelArt.dithered($0) }.count
         XCTAssertTrue(kept > 0 && kept < PixelArt.markCells.count)

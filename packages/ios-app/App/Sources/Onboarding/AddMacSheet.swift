@@ -45,28 +45,9 @@ struct MacSwitchRows: View {
     }
 }
 
-/// The current Mac as the home screen's title, with the other paired Macs to switch to.
-struct MacSwitcher: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Menu {
-            MacSwitchRows()
-        } label: {
-            HStack(spacing: 4) {
-                Text(model.profile?.name ?? "AgentSwitch").font(.headline)
-                Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            }
-            .foregroundStyle(.primary)
-        }
-        .accessibilityLabel("切换 Mac，当前为 \(model.profile?.name ?? "Mac")")
-    }
-}
-
 /// Which Mac a page shows, as the small line under its title (`@ Mac mini`; `On Mac mini` in the classic look, as the
-/// Files pages write it). With more than one Mac paired the line is the menu to switch to another — the one Dispatch's
-/// title has, on every page (docs/mesh-v0.md §5.1; 2026-11-10, user: 手机上现在选择连接的机器只能在dispatch里选，
-/// 这样不好，在terminal里应该也能选才对). `switches: false`: the line alone (a page that is not a tab's first).
+/// Files pages write it). With more than one Mac paired the line is the menu to switch to another, on every
+/// page (docs/mesh-v0.md §5.1; 2026-11-10, user: 手机上现在选择连接的机器只能在dispatch里选，这样不好，在terminal里应该也能选才对). `switches: false`: the line alone (a page that is not a tab's first).
 struct MacLine: View {
     var switches = true
     @Environment(AppModel.self) private var model

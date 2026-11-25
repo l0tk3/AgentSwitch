@@ -3,9 +3,13 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// What the attach menus bring in (the task composer's "+", a terminal's "+"): photos, files from the Files app, images
-/// on the clipboard — as files to upload.
+/// What the attach menus bring in (a terminal's "+", a room's): photos, files from the Files app, images on the
+/// clipboard — as files to upload.
 enum PickedFiles {
+    /// The Mac takes no larger file (`POST /uploads`).
+    static let maxFileBytes = 50 * 1024 * 1024
+
+
     /// Photos as their original bytes (HEIC or JPEG); ImagePrep shrinks and re-encodes them.
     static func photos(_ items: [PhotosPickerItem]) async -> [UploadFile] {
         var files: [UploadFile] = []
@@ -25,7 +29,7 @@ enum PickedFiles {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard size <= PendingAttachment.maxFileBytes, let data = try? Data(contentsOf: url) else {
+            guard size <= maxFileBytes, let data = try? Data(contentsOf: url) else {
                 skipped.append(url.lastPathComponent)
                 continue
             }

@@ -7,10 +7,8 @@ final class SSEParserTests: XCTestCase {
         let messages = parser.feed(try Fixture.data("events.sse"))
         XCTAssertEqual(messages.map(\.event), ["queued", "dispatched", "text", "approval_request", "done"])
         XCTAssertEqual(messages.map(\.id), ["1", "2", "3", "4", "5"])
-        let events = messages.compactMap { AgentSwitchAPI.taskEvent(from: $0, taskId: "t_1") }
-        XCTAssertEqual(events.map(\.seq), [1, 2, 3, 4, 5])
-        XCTAssertEqual(events[2].payload["text"]?.string, "第一行\n第二行 ✓")
-        XCTAssertTrue(events[4].endsStream)
+        let text = try JSONDecoder().decode(JSONValue.self, from: Data(messages[2].data.utf8))
+        XCTAssertEqual(text["payload"]?["text"]?.string, "第一行\n第二行 ✓")
     }
 
     func testAnyChunkingGivesTheSameEvents() throws {
@@ -51,11 +49,5 @@ final class SSEParserTests: XCTestCase {
         var parser = SSEParser()
         XCTAssertEqual(parser.feed(Data("event: only\n\ndata: half".utf8)), [])
         XCTAssertEqual(parser.lastId, nil)
-    }
-
-    func testForeignOrBrokenFramesAreSkipped() {
-        XCTAssertNil(AgentSwitchAPI.taskEvent(from: SSEMessage(id: "1", event: "text", data: "{bad"), taskId: "t"))
-        let other = #"{"taskId":"other","seq":1,"ts":1,"type":"text","payload":{}}"#
-        XCTAssertNil(AgentSwitchAPI.taskEvent(from: SSEMessage(id: "1", event: "text", data: other), taskId: "t"))
     }
 }

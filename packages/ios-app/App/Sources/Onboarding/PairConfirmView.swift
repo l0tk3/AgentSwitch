@@ -43,13 +43,6 @@ struct PairConfirmView: View {
                 ForEach(payload.tailnet, id: \.self) { LabeledContent("Tailscale", value: "\($0):\(payload.port)") }
                 if !payload.bonjour.isEmpty { LabeledContent("Bonjour", value: payload.bonjour) }
             }
-            Section(label: "Gate Key") {
-                if let gate = payload.gate {
-                    LabeledContent("Keypair") { Text(gate.keypair).mono(13) }
-                } else {
-                    Text("二维码中无公钥，将在配对后向 Mac 获取").font(.footnote).foregroundStyle(.secondary)
-                }
-            }
             Section(label: "This Device") {
                 TextField("设备名称", text: $deviceName)
                 if let known = model.macs.server(payload.fp) {

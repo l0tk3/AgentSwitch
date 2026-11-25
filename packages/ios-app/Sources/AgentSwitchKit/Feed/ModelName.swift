@@ -42,8 +42,3 @@ public enum ModelName {
         word.prefix(1).uppercased() + word.dropFirst()
     }
 }
-
-extension TargetRef {
-    /// "Opus 5.5 · Claude Code": a choice of model in a menu.
-    public var displayName: String { "\(ModelName.display(model)) · \(ModelName.harness(harness))" }
-}
