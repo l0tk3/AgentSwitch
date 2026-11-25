@@ -26,6 +26,16 @@ enum DesignPreview {
         Task {
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "redaction" {
+                    // docs/model-gate-v0.md: Settings › Redaction over sample words and logs.
+                    RedactionDemo.current = RedactionDemo.make()
+                    for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
+                        try await renderSettings(.redaction, model: model, appearance: NSAppearance(named: appearance), height: 1500,
+                                                 to: directory.appendingPathComponent("settings-redaction\(suffix).png"))
+                    }
+                    FileHandle.standardError.write(Data("design preview (Redaction) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "browser" {
                     try await MainWindowPreview.renderBrowser(model: model, into: directory)
                     FileHandle.standardError.write(Data("design preview (Browser) written to \(directory.path)\n".utf8))

@@ -42,7 +42,10 @@ struct RedactionView: View {
                 Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.help("Refresh")
             }
         }
-        .task { await load() }
+        .task {
+            if let d = RedactionDemo.current { state = d.state; logs = d.logs; logDir = "/demo"; rooms = d.rooms; room = d.rooms.first?.id ?? ""; roomWords = d.roomWords; said = d.said; return }
+            await load()
+        }
     }
 
     // MARK: settings
@@ -74,11 +77,12 @@ struct RedactionView: View {
         Section {
             ForEach(s.words) { w in wordRow(w) { Task { await remove(w, room: nil) } } }
             HStack(spacing: 8) {
-                TextField("要替换的词", text: $value)
-                TextField("替换成（留空：加盐哈希）", text: $replace)
+                TextField("", text: $value, prompt: Text("要替换的词"))
+                TextField("", text: $replace, prompt: Text("替换成（留空：加盐哈希）"))
                 Button("Add") { Task { await add(value, replace, room: nil) } }
                     .disabled(value.trimmingCharacters(in: .whitespaces).count < 3)
             }
+            .labelsHidden()
             if let said { Text(said).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         } header: {
             SectionLabel("Words")
@@ -110,11 +114,12 @@ struct RedactionView: View {
             if !room.isEmpty {
                 ForEach(roomWords) { w in wordRow(w) { Task { await remove(w, room: room) } } }
                 HStack(spacing: 8) {
-                    TextField("这个房间额外替换的词", text: $roomValue)
-                    TextField("替换成（留空：加盐哈希）", text: $roomReplace)
+                    TextField("", text: $roomValue, prompt: Text("这个房间额外替换的词"))
+                    TextField("", text: $roomReplace, prompt: Text("替换成（留空：加盐哈希）"))
                     Button("Add") { Task { await add(roomValue, roomReplace, room: room) } }
                         .disabled(roomValue.trimmingCharacters(in: .whitespaces).count < 3)
                 }
+                .labelsHidden()
             }
         } header: {
             SectionLabel("Room Words")
@@ -138,11 +143,12 @@ struct RedactionView: View {
                     Button("After (\(size(l.after)))") { Task { await openLog(l, side: "after") } }.buttonStyle(.borderless).disabled(l.after == 0)
                 }
             }
-            HStack {
-                Button("Clean All") { Task { await clean(nil) } }.disabled(logs.isEmpty)
+            HStack(spacing: 10) {
+                Button("Clean All") { Task { await clean(nil) } }.disabled(logs.isEmpty).fixedSize()
                 Spacer()
-                Stepper("\(cleanDays) 天前的", value: $cleanDays, in: 1...365).fixedSize()
-                Button("Clean Older") { Task { await clean(cleanDays) } }.disabled(logs.isEmpty)
+                Text("清理 \(cleanDays) 天前的").monospacedDigit()
+                Stepper("", value: $cleanDays, in: 1...365).labelsHidden().fixedSize()
+                Button("Clean Older") { Task { await clean(cleanDays) } }.disabled(logs.isEmpty).fixedSize()
             }
         } header: {
             SectionLabel("Logs")
@@ -171,6 +177,7 @@ struct RedactionView: View {
     }
 
     private func loadRoom(_ id: String) async {
+        if RedactionDemo.current != nil { return }
         guard !id.isEmpty else { roomWords = []; return }
         roomWords = (try? await model.client.roomRedactWords(id)) ?? []
     }
@@ -207,5 +214,35 @@ struct RedactionView: View {
             guard ok else { return }
         }
         NSWorkspace.shared.open(url)
+    }
+}
+
+/// Sample data for the design preview (`-designPreviewOnly redaction`): no service is asked.
+enum RedactionDemo {
+    struct Data { let state: RedactionState; let logs: [RedactLog]; let rooms: [RoomSummary]; let roomWords: [RedactWord]; let said: String? }
+    nonisolated(unsafe) static var current: Data?
+
+    static func make() -> Data? {
+        func decode<T: Decodable>(_ t: T.Type, _ json: String) -> T? { try? JSONDecoder().decode(t, from: Foundation.Data(json.utf8)) }
+        guard let state = decode(RedactionState.self, """
+            {"settings":{"enabled":true,"username":true,"host":false,"log":true,"keepDays":3,"hosts":[]},
+             "words":[{"id":"a1","value":"sk-live-51Hx••••9fQ","restore":true,"addedAt":0},
+                      {"id":"a2","value":"张三丰","replace":"PERSON_A","restore":true,"addedAt":0},
+                      {"id":"a3","value":"13800138000","replace":"A","restore":false,"addedAt":0}],
+             "gateway":true,"logDir":"/demo"}
+            """),
+              let logs = decode([RedactLog].self, """
+            [{"terminal":"3f9a2c1b","day":"2026-11-25","before":1843200,"after":1839104},
+             {"terminal":"7d01e4aa","day":"2026-11-25","before":524288,"after":522240},
+             {"terminal":"3f9a2c1b","day":"2026-11-24","before":9437184,"after":9420800}]
+            """),
+              let rooms = decode([RoomSummary].self, """
+            [{"id":"df8433f731","name":"聊天室功能设计探讨","topic":"","paused":false,"members":3,"last":null,"unread":0,"forYou":false,"rounds":null,"terminals":[]}]
+            """),
+              let roomWords = decode([RedactWord].self, """
+            [{"id":"r1","value":"project-falcon","restore":true,"addedAt":0}]
+            """)
+        else { return nil }
+        return Data(state: state, logs: logs, rooms: rooms, roomWords: roomWords, said: "「A」少于 6 个字符，换回时没法和普通文字区分：只替换，不还原（模型看到它，你看到的也是它）。")
     }
 }
