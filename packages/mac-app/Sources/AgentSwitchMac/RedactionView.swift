@@ -75,8 +75,9 @@ struct RedactionView: View {
         Section {
             ForEach(s.words) { w in wordRow(w) { Task { await remove(w, room: nil) } } }
             HStack(spacing: 8) {
-                TextField("", text: $value, prompt: Text("要替换的词"))
-                TextField("", text: $replace, prompt: Text("替换成（留空：加盐哈希）"))
+                TextField("", text: $value, prompt: Text("Word"))
+                Image(systemName: "arrow.right").foregroundStyle(.tertiary)
+                TextField("", text: $replace, prompt: Text("Replacement (Empty: Hash)"))
                 Button("Add") { Task { await add(value, replace, room: nil) } }
                     .disabled(value.trimmingCharacters(in: .whitespaces).count < 3)
             }
@@ -91,8 +92,8 @@ struct RedactionView: View {
         HStack(spacing: 10) {
             Text(w.value).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
             Image(systemName: "arrow.right").foregroundStyle(.tertiary)
-            Text(w.replace ?? "加盐哈希").foregroundStyle(w.replace == nil ? .secondary : .primary).lineLimit(1)
-            if !w.restore { Text("只替换").font(.caption).foregroundStyle(.orange) }
+            Text(w.replace ?? "Hash").foregroundStyle(w.replace == nil ? .secondary : .primary).lineLimit(1)
+            if !w.restore { Text("Replace Only").font(.caption).foregroundStyle(.orange) }
             Spacer()
             Button("Remove", action: remove).buttonStyle(.borderless)
         }

@@ -388,8 +388,9 @@ struct RoomWordsSheet: View {
             .background(look.isClassic ? Color.clear : Look.raised)
             HairRule(color: Look.line)
             HStack(spacing: 8) {
-                TextField("", text: $value, prompt: Text("要替换的词")).textFieldStyle(.roundedBorder)
-                TextField("", text: $replace, prompt: Text("替换成（留空：加盐哈希）")).textFieldStyle(.roundedBorder)
+                TextField("", text: $value, prompt: Text("Word")).textFieldStyle(.roundedBorder)
+                Image(systemName: "arrow.right").foregroundStyle(.tertiary)
+                TextField("", text: $replace, prompt: Text("Replacement (Empty: Hash)")).textFieldStyle(.roundedBorder)
                 Button {
                     let v = value, r = replace
                     Task { if await model.addRoomWord(v, replace: r) { value = ""; replace = "" } }
@@ -427,8 +428,8 @@ struct RoomWordsSheet: View {
         HStack(spacing: 10) {
             Text(w.value).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
             Text("→").foregroundStyle(Look.faint)
-            Text(w.replace ?? "加盐哈希").font(.system(size: 12.5)).foregroundStyle(w.replace == nil ? Look.ink2 : Look.ink).lineLimit(1)
-            if !w.restore { Text("只替换").font(.system(size: 11)).foregroundStyle(Color.waiting) }
+            Text(w.replace ?? "Hash").font(.system(size: 12.5)).foregroundStyle(w.replace == nil ? Look.ink2 : Look.ink).lineLimit(1)
+            if !w.restore { Text("Replace Only").font(.system(size: 11)).foregroundStyle(Color.waiting) }
             Spacer()
             Button { model.removeRoomWord(w) } label: { BracketLabel(word: "Remove") }.buttonStyle(BracketButtonStyle(size: 12))
         }
