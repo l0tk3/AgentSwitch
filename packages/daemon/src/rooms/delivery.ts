@@ -51,6 +51,10 @@ const hm = (at: number): string => { const t = new Date(at); return `${String(t.
 /** States in which a message waits for the seat (it will take it later by itself). */
 const LATER: ReadonlySet<SeatState> = new Set(["busy", "waiting", "reconnecting", "limited", "error", "offline", "blocked"]);
 
+/** How many things a member has said in a room before it is told, once, that its picture and name are its own. */
+export const AVATAR_TIP_AFTER = 10;
+export const AVATAR_TIP = " Tip (said once): you still have the default avatar here. Members pick their own, and a name they like: room_info show=avatars lists the library, room_update what=avatar sets yours (it follows you into every room), what=rename changes your name in this room.";
+
 export class RoomDelivery {
   private readonly waiters = new Map<string, (answer: Waited) => void>();
   /** Terminals whose agent has a program that waits: they can be woken. */
@@ -226,6 +230,12 @@ export class RoomDelivery {
     let text = this.textOf(waiting);
     if (!this.told.has(terminal)) text += ` New here, or taking work over? The room's record is in ${this.o.store.recordDir(waiting[waiting.length - 1]!.room.id)} (README.md first).`;
     if (!this.told.has(terminal)) text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
+    // A member that has said ten things here and never chose a picture is told once that it may (user #417: 每个人交流
+    // 10回合左右没换过头像的就发送一次tips).
+    const last = waiting[waiting.length - 1]!;
+    const stats = last.room.stats[last.seat.handle];
+    const chosen = this.o.store.avatarOf(last.seat);
+    if (stats && stats.posts >= AVATAR_TIP_AFTER && !stats.tips && !chosen?.pixel && !chosen?.classic) text += AVATAR_TIP;
     if (taken) this.counted(terminal, waiting, text);
     return text;
   }
@@ -235,7 +245,7 @@ export class RoomDelivery {
   private counted(terminal: string, waiting: readonly { room: Room; seat: Seat; message: Message }[], text: string): void {
     this.told.add(terminal);
     const last = waiting[waiting.length - 1]!;
-    this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length }, last.message.task);
+    this.o.store.count(last.room.id, last.seat.handle, { wakes: 1, chars: text.length, ...(text.endsWith(AVATAR_TIP) ? { tips: 1 } : {}) }, last.message.task);
     // Read: the one it was given whole. The earlier ones it saw a line of are read when it reads the room.
     this.o.store.markRead(last.room.id, last.seat.handle, [last.message.seq]);
   }

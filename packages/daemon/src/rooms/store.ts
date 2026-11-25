@@ -155,7 +155,9 @@ const stamp = (at: number): string => { const t = new Date(at); const p = (n: nu
 /** How many of the newest messages keep who has read them. */
 export const MAX_READS = 300;
 
-export type SeatStats = { readonly wakes: number; readonly chars: number; readonly posts: number; readonly calls: number };
+export type SeatStats = { readonly wakes: number; readonly chars: number; readonly posts: number; readonly calls: number;
+  /** It was told, once, that it may choose its avatar and its name (user #417). */
+  readonly tips?: number };
 
 export type Room = {
   readonly id: string;
@@ -578,7 +580,8 @@ export class RoomStore {
     if (!room) return;
     const plus = (was: SeatStats | undefined): SeatStats => {
       const w = was ?? { wakes: 0, chars: 0, posts: 0, calls: 0 };
-      return { wakes: w.wakes + (add.wakes ?? 0), chars: w.chars + (add.chars ?? 0), posts: w.posts + (add.posts ?? 0), calls: w.calls + (add.calls ?? 0) };
+      const tips = (w.tips ?? 0) + (add.tips ?? 0);
+      return { wakes: w.wakes + (add.wakes ?? 0), chars: w.chars + (add.chars ?? 0), posts: w.posts + (add.posts ?? 0), calls: w.calls + (add.calls ?? 0), ...(tips ? { tips } : {}) };
     };
     const onTask = task !== undefined && room.tasks.some((t) => t.n === task);
     this.all().set(id, { ...room, stats: { ...room.stats, [handle]: plus(room.stats[handle]) }, ...(onTask ? { taskStats: { ...room.taskStats, [String(task)]: plus(room.taskStats[String(task)]) } } : {}) });

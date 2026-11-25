@@ -106,6 +106,30 @@ describe("giving a room's messages to sessions", () => {
     expect(receipts()[1]).toMatchObject({ "mac-app": "ended" });
   });
 
+  it("tells a member once, after ten things said with the default avatar, that it may choose one (user #417)", async () => {
+    const pushed: string[] = [];
+    const { store, delivery, room } = made(async (terminal, text) => { if (terminal === "t3") pushed.push(text); return true; });
+    const ask = async () => { store.post(room.id, { from: "you", text: "@ios 继续" }); delivery.look(); await new Promise((r) => setTimeout(r, 0)); };
+    for (let i = 0; i < 9; i++) store.post(room.id, { from: "ios", text: `第 ${i} 句` });
+    await ask();
+    expect(pushed.at(-1)).not.toContain("default avatar");
+    store.post(room.id, { from: "ios", text: "第十句" });
+    await ask();
+    expect(pushed.at(-1)).toContain("you still have the default avatar");
+    expect(store.get(room.id).stats.ios).toMatchObject({ posts: 10, tips: 1 });
+    await ask();
+    expect(pushed.at(-1)).not.toContain("default avatar");
+    // One that chose its own is never told.
+    store.setAvatar("t1", { classic: { kind: "emoji", emoji: "🦊", bg: 1 } });
+    for (let i = 0; i < 12; i++) store.post(room.id, { from: "daemon", text: `第 ${i} 句` });
+    const mine: string[] = [];
+    const d2 = new RoomDelivery({ store, seat: () => ({ state: "idle", card: { agent: "claude-code", name: "daemon", cwd: "/w", model: "m", profile: "p", mode: "default", node: null } }), home: "/Users/x", push: async (_t, text) => { mine.push(text); return true; } });
+    store.post(room.id, { from: "you", text: "@daemon 继续" });
+    d2.look();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mine.join("")).not.toContain("default avatar");
+  });
+
   it("uses the other way in for an agent that leaves no program waiting", async () => {
     const pushed: string[] = [];
     const { store, delivery, room, receipts } = made(async (terminal, text) => { pushed.push(`${terminal}: ${text.split("\n")[0]}`); return terminal === "t3"; });
