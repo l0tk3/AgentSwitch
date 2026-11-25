@@ -200,8 +200,11 @@ struct TerminalRecordPane: View {
                     }
                 }
                 if let side {
-                    HairRule(color: Look.line, vertical: true)
+                    // The classic look: the side pane is a card as the page's own columns are (§8.1).
+                    HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
                     RecordSidePane(record: record, files: files)
+                        .sideCard(leading: 0, trailing: Look.panelGap, bottom: Look.panelGap)
+                        .padding(.top, look.isClassic ? Look.panelGap : 0)
                         .frame(width: side)
                         .contextMenu { Button("Hide Side Pane") { sideShown = false } }
                 }

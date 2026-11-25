@@ -321,9 +321,15 @@ struct PaneHeader: View {
         .padding(.leading, 10)
         .padding(.trailing, 4)
         .frame(height: Self.height(look))
-        .background(look.isClassic ? (focused ? Color.signal.opacity(0.16) : Look.ink.opacity(0.05)) : Color.clear)
+        // The classic look (§8.1): the pane in focus has a tinted bar with round corners that stands clear of the
+        // pane's edges; no bar on the others, and no line under any — the terminal runs on from its title.
+        .background {
+            if look.isClassic, focused {
+                RoundedRectangle(cornerRadius: Look.controlRadius, style: .continuous).fill(Color.signal.opacity(0.16)).padding(.horizontal, 3).padding(.vertical, 1)
+            }
+        }
         .overlay(alignment: .top) { if focused, !look.isClassic { Rectangle().fill(Color.signal).frame(height: 2) } }
-        .overlay(alignment: .bottom) { Rectangle().fill(Look.line).frame(height: 1) }
+        .overlay(alignment: .bottom) { if !look.isClassic { Rectangle().fill(Look.line).frame(height: 1) } }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { model.toggleZoom() }
         .simultaneousGesture(TapGesture().onEnded { model.focus(pane: pane) })
