@@ -11,7 +11,7 @@ import SwiftUI
 final class RoomsModel {
     /// What floats over the page: a room being made, sessions being added to the one on screen, or its name and topic
     /// being changed.
-    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models, avatar, secrets }
+    enum Sheet: Equatable { case new, add, edit, notes, tasks, files, models, avatar, secrets, words }
 
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// A made-up page for the design preview: shown as it is, the service never asked.
@@ -137,6 +137,47 @@ final class RoomsModel {
     // secrets (2026-11-24, user #194)
     /// Seals values with this Mac's gate; nil where the rooms are another node's (its values are sealed there).
     @ObservationIgnored var sealer: (([RoomSecretDraft]) async throws -> [Result<String, CommandError>])?
+    // MARK: the room's replacement words (docs/model-gate-v0.md; user #343: in each room, only while the switch is on)
+
+    /// The global switch of Settings › Redaction: off, a room has no words to set. This Mac's rooms only.
+    private(set) var redactOn = false
+    private(set) var roomWords: [RedactWord]?
+    var wordsSaid: String?
+    @ObservationIgnored private var redactLooked = Date.distantPast
+
+    func lookRedact() async {
+        guard onThisMac, !demo else { redactOn = demo; return }
+        guard Date().timeIntervalSince(redactLooked) > 10 else { return }
+        redactLooked = Date()
+        redactOn = (try? await client().redaction().settings.enabled) ?? false
+    }
+
+    func loadRoomWords() {
+        guard let id = selected else { return }
+        Task { roomWords = (try? await client().roomRedactWords(id)) ?? [] }
+    }
+
+    func addRoomWord(_ value: String, replace: String) async -> Bool {
+        guard let id = selected else { return false }
+        do {
+            let (_, warning) = try await client().addRedactWord(value.trimmingCharacters(in: .whitespaces), replace: replace.trimmingCharacters(in: .whitespaces), room: id)
+            wordsSaid = warning
+            roomWords = try await client().roomRedactWords(id)
+            return true
+        } catch {
+            wordsSaid = (error as? CommandError)?.message ?? error.localizedDescription
+            return false
+        }
+    }
+
+    func removeRoomWord(_ w: RedactWord) {
+        guard let id = selected else { return }
+        Task {
+            do { try await client().removeRedactWord(w.id, room: id); roomWords = try await client().roomRedactWords(id) }
+            catch { wordsSaid = (error as? CommandError)?.message ?? error.localizedDescription }
+        }
+    }
+
     private(set) var secrets: [RoomSecret]?
     /// What the last add or import came to, in a line; and a plaintext file just read, to be put in the Trash.
     private(set) var secretsSaid: String?
@@ -229,6 +270,7 @@ final class RoomsModel {
 
     /// The design preview: secrets as they are.
     func show(demoSecrets: [RoomSecret]) { secrets = demoSecrets }
+    func show(demoWords: [RedactWord], said: String?) { roomWords = demoWords; wordsSaid = said }
 
     // avatars (2026-11-24, user #203)
     /// The member whose avatar the sheet chooses.
@@ -355,6 +397,7 @@ final class RoomsModel {
     /// The list and the room on screen; what the user had not seen of it is seen now.
     func load() async {
         guard !demo else { return }
+        await lookRedact()
         await loadList()
         if attentionCount > 0 || !attention.isEmpty { await loadAttention() }
         guard let id = selected else { return }
@@ -873,6 +916,7 @@ final class RoomsModel {
         if sheet == .files { shared = demo ? RoomsDemo.files : nil; loadShared() }
         if sheet == .models { if demo { adminModels = RoomsDemo.models }; loadAdminModels() }
         if sheet == .secrets { secretsSaid = nil; plainFile = nil; loadSecrets() }
+        if sheet == .words { wordsSaid = nil; roomWords = nil; loadRoomWords() }
         guard sheet == .new || sheet == .add, !demo else { return }
         Task {
             if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
@@ -900,7 +944,7 @@ final class RoomsModel {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
-                case .notes, .tasks, .files, .models, .avatar, .secrets: break
+                case .notes, .tasks, .files, .models, .avatar, .secrets, .words: break
                 case .edit:
                     guard let id else { break }
                     try await client().updateRoom(id, name: name, topic: topic)

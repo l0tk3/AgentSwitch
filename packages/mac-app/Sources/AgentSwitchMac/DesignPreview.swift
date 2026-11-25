@@ -33,6 +33,25 @@ enum DesignPreview {
                         try await renderSettings(.redaction, model: model, appearance: NSAppearance(named: appearance), height: 1500,
                                                  to: directory.appendingPathComponent("settings-redaction\(suffix).png"))
                     }
+                    // Switched off: the switch alone (user #343).
+                    if let d = RedactionDemo.current {
+                        RedactionDemo.current = .init(state: d.state.turnedOff, logs: d.logs, rooms: d.rooms, roomWords: d.roomWords, said: nil)
+                        try await renderSettings(.redaction, model: model, appearance: NSAppearance(named: .aqua), to: directory.appendingPathComponent("settings-redaction-off.png"))
+                        // A room's words, in the room's own menu (Words…).
+                        for (suffix, appearance) in [("", NSAppearance.Name.aqua)] {
+                            let rooms = RoomsModel()
+                            rooms.show(demoWords: d.roomWords + d.state.words.filter { $0.replace != nil }, said: d.said)
+                            let host = NSHostingView(rootView: RoomWordsSheet(model: rooms).padding(24).background(Color(nsColor: .windowBackgroundColor)))
+                            host.appearance = NSAppearance(named: appearance)
+                            host.frame = NSRect(x: 0, y: 0, width: 648, height: 520)
+                            let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                            window.contentView = host
+                            window.appearance = host.appearance
+                            try await settle()
+                            try write(host, to: directory.appendingPathComponent("room-words\(suffix).png"))
+                            window.close()
+                        }
+                    }
                     FileHandle.standardError.write(Data("design preview (Redaction) written to \(directory.path)\n".utf8))
                     exit(0)
                 }

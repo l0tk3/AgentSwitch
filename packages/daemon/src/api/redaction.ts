@@ -40,6 +40,8 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
   const addTo = (room?: string) => async (c: Context) => {
     const r = deps.redaction;
     if (!r) return c.json(off, 503);
+    // Off, the whole of it is (user #343): no words are added, a room's neither.
+    if (!r.store.settings().enabled) return c.json({ error: "替换词功能已关闭：先在「设置 › Redaction」打开。" }, 409);
     const body = await parseBody(c, AddWord);
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {

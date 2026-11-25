@@ -233,6 +233,7 @@ private struct RoomsColumns: View {
             case .models: RoomModelsSheet(model: model)
             case .avatar: RoomAvatarSheet(model: model)
             case .secrets: RoomSecretsSheet(model: model)
+            case .words: RoomWordsSheet(model: model)
             default: RoomSheet(model: model, kind: model.sheet ?? .new)
             }
         }
@@ -487,6 +488,7 @@ private struct RoomView: View {
                 Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
                 Button("Files…") { model.open(.files) }
                 Button("Secrets…") { model.open(.secrets) }
+                if model.redactOn { Button("Words…") { model.open(.words) } }
                 Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
                 Divider()
                 Button("Edit Room…") { model.open(.edit) }
@@ -868,6 +870,7 @@ private struct RoomSheet: View {
         case .models: "Models"
         case .avatar: "Avatar"
         case .secrets: "Secrets"
+        case .words: "Words"
         }
     }
 
@@ -907,7 +910,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
-        case .notes, .tasks, .files, .models, .avatar, .secrets: false
+        case .notes, .tasks, .files, .models, .avatar, .secrets, .words: false
         }
     }
 

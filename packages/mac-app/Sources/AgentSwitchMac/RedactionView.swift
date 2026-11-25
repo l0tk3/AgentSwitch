@@ -14,11 +14,6 @@ struct RedactionView: View {
     @State private var said: String?
     @State private var value = ""
     @State private var replace = ""
-    @State private var rooms: [RoomSummary] = []
-    @State private var room: String = ""
-    @State private var roomWords: [RedactWord] = []
-    @State private var roomValue = ""
-    @State private var roomReplace = ""
     @State private var logs: [RedactLog] = []
     @State private var logDir = ""
     @State private var cleanDays = 3
@@ -27,9 +22,11 @@ struct RedactionView: View {
         Form {
             if let state {
                 settings(state)
-                words(state)
-                roomSection
-                logSection(state)
+                // Off: nothing of it is there to use (user #343), the rooms' words neither.
+                if state.settings.enabled {
+                    words(state)
+                    logSection(state)
+                }
             } else if let problem {
                 Text(problem).foregroundStyle(.secondary)
             } else {
@@ -43,7 +40,7 @@ struct RedactionView: View {
             }
         }
         .task {
-            if let d = RedactionDemo.current { state = d.state; logs = d.logs; logDir = "/demo"; rooms = d.rooms; room = d.rooms.first?.id ?? ""; roomWords = d.roomWords; said = d.said; return }
+            if let d = RedactionDemo.current { state = d.state; logs = d.logs; logDir = "/demo"; said = d.said; return }
             await load()
         }
     }
@@ -53,15 +50,17 @@ struct RedactionView: View {
     private func settings(_ s: RedactionState) -> some View {
         Section {
             Toggle("Replace Words in Model Traffic", isOn: bind(\.enabled, "enabled"))
-            Toggle("Replace My User Name", isOn: bind(\.username, "username"))
-            Toggle("Replace This Computer's Name", isOn: bind(\.host, "host"))
+            if s.settings.enabled {
+                Toggle("Replace My User Name", isOn: bind(\.username, "username"))
+                Toggle("Replace This Computer's Name", isOn: bind(\.host, "host"))
+            }
             if !s.gateway && s.settings.enabled {
                 Text("这台机器上没有找到网关程序，终端照常启动、不经过网关。").foregroundStyle(.orange)
             }
         } header: {
             SectionLabel("Model Traffic")
         } footer: {
-            Footer("从 AgentSwitch 启动的终端（Claude Code、Codex、OpenCode、pi）访问模型时经过内置网关：下面的词在发给模型前换成占位符，回来时换回原词。只对之后启动的终端生效；不改你的任何配置，原来的代理照常是出口。")
+            Footer(s.settings.enabled ? "从 AgentSwitch 启动的终端（Claude Code、Codex、OpenCode、pi）访问模型时经过内置网关：下面的词和各房间（房间菜单 › Words…）的词，在发给模型前换成占位符，回来时换回原词。只对之后启动的终端生效；不改你的任何配置，原来的代理照常是出口。" : "已关闭：新开的终端不经过网关，替换词和各房间的替换词都不可用。")
         }
     }
 
@@ -99,32 +98,6 @@ struct RedactionView: View {
             if !w.restore { Text("只替换").font(.caption).foregroundStyle(.orange) }
             Spacer()
             Button("Remove", action: remove).buttonStyle(.borderless)
-        }
-    }
-
-    // MARK: a room's words
-
-    private var roomSection: some View {
-        Section {
-            Picker("Room", selection: $room) {
-                Text("—").tag("")
-                ForEach(rooms) { r in Text(r.name).tag(r.id) }
-            }
-            .onChange(of: room) { _, id in Task { await loadRoom(id) } }
-            if !room.isEmpty {
-                ForEach(roomWords) { w in wordRow(w) { Task { await remove(w, room: room) } } }
-                HStack(spacing: 8) {
-                    TextField("", text: $roomValue, prompt: Text("这个房间额外替换的词"))
-                    TextField("", text: $roomReplace, prompt: Text("替换成（留空：加盐哈希）"))
-                    Button("Add") { Task { await add(roomValue, roomReplace, room: room) } }
-                        .disabled(roomValue.trimmingCharacters(in: .whitespaces).count < 3)
-                }
-                .labelsHidden()
-            }
-        } header: {
-            SectionLabel("Room Words")
-        } footer: {
-            Footer("坐在这个房间里的成员，除了上面的词，还会替换这里的词。")
         }
     }
 
@@ -169,17 +142,9 @@ struct RedactionView: View {
             let l = try await model.client.redactLogs()
             logs = l.logs
             logDir = l.dir
-            rooms = (try? await model.client.rooms())??.value ?? rooms
-            if !room.isEmpty { await loadRoom(room) }
         } catch {
             problem = (error as? CommandError)?.message ?? error.localizedDescription
         }
-    }
-
-    private func loadRoom(_ id: String) async {
-        if RedactionDemo.current != nil { return }
-        guard !id.isEmpty else { roomWords = []; return }
-        roomWords = (try? await model.client.roomRedactWords(id)) ?? []
     }
 
     private func patch(_ p: [String: Any]) async {
@@ -190,7 +155,7 @@ struct RedactionView: View {
         do {
             let (_, warning) = try await model.client.addRedactWord(v.trimmingCharacters(in: .whitespaces), replace: r.trimmingCharacters(in: .whitespaces), room: room)
             said = warning
-            if room == nil { value = ""; replace = "" } else { roomValue = ""; roomReplace = "" }
+            value = ""; replace = ""
             await load()
         } catch {
             said = (error as? CommandError)?.message ?? error.localizedDescription
@@ -214,6 +179,22 @@ struct RedactionView: View {
             guard ok else { return }
         }
         NSWorkspace.shared.open(url)
+    }
+}
+
+extension RedactionState {
+    /// The same, switched off (the design preview's second picture).
+    var turnedOff: RedactionState {
+        let json = (try? JSONEncoder().encode(Shadow(self, enabled: false))) ?? Data()
+        return (try? JSONDecoder().decode(RedactionState.self, from: json)) ?? self
+    }
+    private struct Shadow: Encodable {
+        let settings: RedactSettings; let words: [W]; let gateway: Bool; let logDir: String
+        struct W: Encodable { let id: String; let value: String; let replace: String?; let restore: Bool; let addedAt: Int64 }
+        init(_ s: RedactionState, enabled: Bool) {
+            var set = s.settings; set.enabled = enabled
+            settings = set; words = s.words.map { W(id: $0.id, value: $0.value, replace: $0.replace, restore: $0.restore, addedAt: $0.addedAt) }; gateway = s.gateway; logDir = s.logDir
+        }
     }
 }
 

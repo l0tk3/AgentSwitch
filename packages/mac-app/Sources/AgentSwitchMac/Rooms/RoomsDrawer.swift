@@ -491,3 +491,73 @@ struct RoomSecretsSheet: View {
         do { try write(url) } catch { NSSound.beep() }
     }
 }
+
+/// The room's replacement words (docs/model-gate-v0.md; user #343): besides the global ones of Settings › Redaction,
+/// the members sitting in this room have these replaced on their way to the model too. Offered while the global switch
+/// is on.
+struct RoomWordsSheet: View {
+    @Bindable var model: RoomsModel
+    @State private var value = ""
+    @State private var replace = ""
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Words").mono(look.isClassic ? 14 : 12.5, weight: .semibold).foregroundStyle(Look.ink)
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(look.isClassic ? Color.clear : Look.raised)
+            HairRule(color: Look.line)
+            Text("坐在这个房间里的成员访问模型时，除了「设置 › Redaction」里的全局替换词，还会替换这里的词：发出去前换成占位符，回来时换回原词。留空「替换成」就用加盐哈希。")
+                .font(.system(size: 12)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.top, 10)
+            HStack(spacing: 8) {
+                TextField("", text: $value, prompt: Text("要替换的词")).textFieldStyle(.roundedBorder)
+                TextField("", text: $replace, prompt: Text("替换成（留空：加盐哈希）")).textFieldStyle(.roundedBorder)
+                Button {
+                    let v = value, r = replace
+                    Task { if await model.addRoomWord(v, replace: r) { value = ""; replace = "" } }
+                } label: { BracketLabel(word: "Add") }
+                .buttonStyle(BracketButtonStyle(role: .primary, size: 12))
+                .disabled(value.trimmingCharacters(in: .whitespaces).count < 3)
+            }
+            .labelsHidden()
+            .padding(.horizontal, 16).padding(.top, 10)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let list = model.roomWords {
+                        if list.isEmpty { Text("这个房间还没有额外的替换词。").font(.system(size: 12.5)).foregroundStyle(Look.ink2).padding(.vertical, 16) }
+                        ForEach(list) { w in row(w); HairRule(color: Look.line) }
+                    } else {
+                        BrailleSpinner().padding(.vertical, 24).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .frame(height: 260)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            HairRule(color: Look.line)
+            HStack(spacing: 10) {
+                if let said = model.wordsSaid { Text(said).font(.system(size: 12)).foregroundStyle(Color.waiting).lineLimit(3) }
+                Spacer()
+                Button { model.sheet = nil } label: { BracketLabel(word: "Close", key: "esc") }.buttonStyle(BracketButtonStyle()).keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+        .frame(width: 600)
+        .roomFloat()
+    }
+
+    private func row(_ w: RedactWord) -> some View {
+        HStack(spacing: 10) {
+            Text(w.value).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
+            Text("→").foregroundStyle(Look.faint)
+            Text(w.replace ?? "加盐哈希").font(.system(size: 12.5)).foregroundStyle(w.replace == nil ? Look.ink2 : Look.ink).lineLimit(1)
+            if !w.restore { Text("只替换").font(.system(size: 11)).foregroundStyle(Color.waiting) }
+            Spacer()
+            Button { model.removeRoomWord(w) } label: { BracketLabel(word: "Remove") }.buttonStyle(BracketButtonStyle(size: 12))
+        }
+        .padding(.vertical, 8)
+    }
+}

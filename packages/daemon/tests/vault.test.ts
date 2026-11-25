@@ -176,6 +176,10 @@ describe("over HTTP (this Mac's screens only)", () => {
     expect((await call("POST", "/rooms/r1/redaction/words", { value: "project-falcon" })).status).toBe(201);
     expect((await call("POST", "/rooms/r9/redaction/words", { value: "project-falcon" })).status).toBe(404);
     expect((await call("GET", "/rooms/r1/redaction/words")).json.words.map((w: { value: string }) => w.value)).toEqual(["project-falcon"]);
+    await call("PATCH", "/redaction/settings", { enabled: false });
+    expect((await call("POST", "/rooms/r1/redaction/words", { value: "another-word" })).status).toBe(409);
+    expect((await call("POST", "/redaction/words", { value: "another-word" })).status).toBe(409);
+    await call("PATCH", "/redaction/settings", { enabled: true });
     expect((await call("GET", "/redaction/logs")).json).toEqual({ dir: gate.logDir, logs: [] });
     expect((await call("DELETE", "/redaction/logs?days=x")).status).toBe(400);
     expect((await call("DELETE", "/redaction/logs?days=3")).json).toEqual({ removed: 0 });
