@@ -154,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsOpener.show = { [weak self] tab in self?.settings.show(tab) }
         passwords.onVisibilityChange = { [weak self] open in self?.windowVisibility("passwords", open) }
         PasswordsOpener.show = { [weak self] node in self?.passwords.show(node: node) }
+        PasswordsOpener.showRoom = { [weak self] node, id, name in self?.passwords.show(node: node, room: .init(id: id, name: name)) }
         wireWindows()
         windows.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminal-windows", open) }
         live.onSnapshot = { [weak self] snapshot in

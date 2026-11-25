@@ -61,6 +61,34 @@ struct RoomFaceView: View {
     }
 }
 
+/// A room's picture (user #412: 根据群成员头像生成一个群头像…一个一个小气泡样式的): its first members' own, small, in a
+/// rounded box — a handful of pictures, never taken for one member's. A room with no session yet: its name's first
+/// letter.
+struct RoomPictureView: View {
+    let seats: [RoomSeat]
+    let name: String
+    var side: CGFloat = 34
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        let spots = RoomPictureLayout.spots(seats.count)
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: look.isClassic ? side * 0.26 : 0, style: .continuous).fill(Look.raised)
+            if spots.isEmpty {
+                Text(String(name.prefix(1)).uppercased()).font(.system(size: side * 0.44, weight: .semibold)).foregroundStyle(Look.ink2)
+                    .frame(width: side, height: side)
+            }
+            ForEach(Array(zip(seats, spots).enumerated()), id: \.offset) { _, pair in
+                let s = (CGFloat(pair.1.side) * side).rounded()
+                RoomFaceView(seat: pair.0, side: s, cell: max(1, (s / 5).rounded(.down)))
+                    .offset(x: (CGFloat(pair.1.x) * side).rounded(), y: (CGFloat(pair.1.y) * side).rounded())
+            }
+        }
+        .frame(width: side, height: side)
+        .accessibilityHidden(true)
+    }
+}
+
 /// A 5 × 5 face: squares that touch.
 struct RoomFacePattern: View {
     let face: RoomFace

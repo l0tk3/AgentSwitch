@@ -40,6 +40,7 @@ struct RoomsPage: View {
                 let node = state.nodeId
                 model.client = { [app] in app.client(on: node) }
                 model.onThisMac = node == nil
+                model.nodeId = node
                 if let demo {
                     model.show(demo: demo.rooms, room: demo.room)
                     if let sheet = RoomsDemo.opens { model.open(sheet) }
@@ -254,8 +255,8 @@ private struct RoomsList: View {
             RoomAttentionEntry(model: model)
             ScrollView {
                 LazyVStack(spacing: look.isClassic ? 2 : 0) {
-                    ForEach(Array(model.rooms.enumerated()), id: \.element.id) { index, room in
-                        RoomListRow(room: room, index: index, current: room.id == model.selected) { model.selected = room.id }
+                    ForEach(model.rooms) { room in
+                        RoomListRow(room: room, current: room.id == model.selected) { model.selected = room.id }
                     }
                 }
                 .padding(.bottom, 8)
@@ -267,7 +268,6 @@ private struct RoomsList: View {
 
 private struct RoomListRow: View {
     let room: RoomSummary
-    let index: Int
     let current: Bool
     let action: () -> Void
     @State private var hovering = false
@@ -275,12 +275,13 @@ private struct RoomListRow: View {
 
     var body: some View {
         Button(action: action) {
+            HStack(spacing: 10) {
+            // The room's picture, of its members' (user #412); the 调度台 keeps its own mark.
+            if !room.desk { RoomPictureView(seats: room.faces, name: room.name) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     if room.desk {
                         LookGlyph(glyph: "◆", symbol: "person.crop.circle.badge.checkmark", size: 12).foregroundStyle(current ? Color.signal : Look.ink2).help("调度台：你和调度说话的地方")
-                    } else if !look.isClassic {
-                        Text(String(format: "%02d", index + 1)).code(13).foregroundStyle(current ? Color.signal : Look.faint)
                     }
                     Text(room.name).mono(13, weight: look.isClassic ? .semibold : .regular).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
@@ -299,6 +300,7 @@ private struct RoomListRow: View {
                     if room.unread > 0 { count }
                 }
                 Text(room.lastLine).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
+            }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, look.isClassic ? 10 : 12)
@@ -458,7 +460,8 @@ private struct RoomView: View {
         return HStack(spacing: 10) {
             Button { model.drawer.toggle() } label: {
                 HStack(spacing: 6) {
-                    Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? "# " + room.room.name)
+                    if task == nil, room.room.desk != true { RoomPictureView(seats: Array(room.seats.filter { !$0.isUser && $0.left == nil }.prefix(4)), name: room.room.name, side: 24) }
+                    Text(task.map { RoomTaskLabel.word($0.n, $0.title) } ?? (room.room.desk == true ? "# " : "") + room.room.name)
                         .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
                     LookGlyph(glyph: model.drawer ? "▴" : "▾", symbol: model.drawer ? "chevron.up" : "chevron.down", size: 10).foregroundStyle(Look.ink2)
                 }
@@ -482,6 +485,8 @@ private struct RoomView: View {
                 Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
                 Button("Files…") { model.open(.files) }
                 if model.redactOn { Button("Words…") { model.open(.words) } }
+                // The room's own password book, a window of its own (user #416).
+                Button("Passwords…") { PasswordsOpener.showRoom(model.nodeId, room.room.id, room.room.name) }
                 Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
                 Divider()
                 Button("Edit Room…") { model.open(.edit) }

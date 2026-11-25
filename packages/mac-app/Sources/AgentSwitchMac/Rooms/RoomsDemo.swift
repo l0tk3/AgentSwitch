@@ -54,11 +54,11 @@ extension RoomsDemo {
         """
         let room = try! JSONDecoder().decode(Room.self, from: Data(json.utf8))
         let list = try! JSONDecoder().decode([RoomSummary].self, from: Data("""
-        [{"id":"login","name":"重构登录模块","topic":"接口先定，三端跟着改","paused":false,"members":5,"unread":1,"forYou":true,"attention":3,
+        [{"id":"login","name":"重构登录模块","topic":"接口先定，三端跟着改","paused":false,"members":5,"unread":1,"forYou":true,"attention":3,"faces":[{"handle":"daemon","face":{"rows":["#...#", ".###.", "#.#.#", ".###.", "#...#"],"color":2}},{"handle":"mac-app","face":{"rows":[".###.", "#.#.#", "#####", "..#..", ".#.#."],"color":6}},{"handle":"ios-app","face":{"rows":["##.##", "#...#", "..#..", "#...#", "##.##"],"color":4}},{"handle":"web","face":{"rows":["..#..", ".###.", "#####", ".#.#.", "#...#"],"color":8}}],
           "last":{"seq":6,"from":"mac-app","text":"@you 模型加好了，要不要现在就发一版？","at":\(at(2))}},
-         {"id":"release","name":"发布检查","topic":"每次发版前过一遍","paused":true,"members":3,"unread":0,"forYou":false,
+         {"id":"release","name":"发布检查","topic":"每次发版前过一遍","paused":true,"members":3,"unread":0,"forYou":false,"faces":[{"handle":"ios-app","face":{"rows":["##.##", "#...#", "..#..", "#...#", "##.##"],"color":4}},{"handle":"web","face":{"rows":["..#..", ".###.", "#####", ".#.#.", "#...#"],"color":8}}],
           "last":{"seq":9,"from":"you","text":"@all 先停一下","at":\(at(180))}},
-         {"id":"docs","name":"文档","topic":"clash-v0 第 12 节","paused":false,"members":2,"unread":0,"forYou":false,"rounds":7,"last":null}]
+         {"id":"docs","name":"文档","topic":"clash-v0 第 12 节","paused":false,"members":2,"unread":0,"forYou":false,"rounds":7,"faces":[{"handle":"mac-app","face":{"rows":[".###.", "#.#.#", "#####", "..#..", ".#.#."],"color":6}},{"handle":"daemon","face":{"rows":["#...#", ".###.", "#.#.#", ".###.", "#...#"],"color":2}},{"handle":"web","face":{"rows":["..#..", ".###.", "#####", ".#.#.", "#...#"],"color":8}}],"last":null}]
         """.utf8))
         return RoomsDemo(rooms: list, room: room)
     }()

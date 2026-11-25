@@ -42,16 +42,21 @@ public struct PasswordDraft: Equatable, Sendable {
 }
 
 public extension DaemonClient {
-    func passwords() async throws -> [PasswordItem] {
+    /// `?room=<id>` for a room's own book (user #416); nothing for the book of everything.
+    static func passwordsQuery(_ room: String?) -> String {
+        room.flatMap { $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) }.map { "?room=\($0)" } ?? ""
+    }
+
+    func passwords(room: String? = nil) async throws -> [PasswordItem] {
         struct A: Decodable { let entries: [PasswordItem] }
-        return try decode(A.self, try await call("GET", "/passwords", timeout: 10)).entries
+        return try decode(A.self, try await call("GET", "/passwords" + DaemonClient.passwordsQuery(room), timeout: 10)).entries
     }
 
     @discardableResult
-    func savePassword(_ draft: PasswordDraft, id: String?) async throws -> PasswordItem {
+    func savePassword(_ draft: PasswordDraft, id: String?, room: String? = nil) async throws -> PasswordItem {
         struct A: Decodable { let entry: PasswordItem }
         let body = try JSONSerialization.data(withJSONObject: draft.body(new: id == nil))
-        let path = id.map { "/passwords/\(DaemonClient.segment($0))" } ?? "/passwords"
+        let path = id.map { "/passwords/\(DaemonClient.segment($0))" } ?? "/passwords" + DaemonClient.passwordsQuery(room)
         return try decode(A.self, try await call(id == nil ? "POST" : "PATCH", path, body: body, timeout: 10)).entry
     }
 
@@ -61,9 +66,9 @@ public extension DaemonClient {
         try decode(PasswordSecret.self, try await call("POST", "/passwords/\(DaemonClient.segment(id))/reveal", timeout: 10))
     }
 
-    func importPasswords(csv: String) async throws -> (added: Int, replaced: Int, skipped: Int) {
+    func importPasswords(csv: String, room: String? = nil) async throws -> (added: Int, replaced: Int, skipped: Int) {
         struct A: Decodable { let added: Int; let replaced: Int; let skipped: Int }
-        let a = try decode(A.self, try await call("POST", "/passwords/import", body: try JSONSerialization.data(withJSONObject: ["csv": csv]), timeout: 60))
+        let a = try decode(A.self, try await call("POST", "/passwords/import" + DaemonClient.passwordsQuery(room), body: try JSONSerialization.data(withJSONObject: ["csv": csv]), timeout: 60))
         return (a.added, a.replaced, a.skipped)
     }
 

@@ -21,17 +21,19 @@ export function mountPasswords(app: Hono, deps: ApiDeps): void {
     throw err;
   };
   const changed = () => deps.redaction?.gate.changed();
+  // `?room=<id>`: that room's own book (user #416); without it the book of everything.
+  const roomOf = (c: Context): string | undefined => { const r = c.req.query("room"); return r && /^[A-Za-z0-9_-]{1,64}$/.test(r) ? r : undefined; };
 
   app.get("/passwords", (c) => {
     const b = deps.passwords;
-    return b ? c.json({ entries: b.list() }) : c.json(off, 503);
+    return b ? c.json({ entries: b.list(roomOf(c)) }) : c.json(off, 503);
   });
   app.post("/passwords", async (c) => {
     const b = deps.passwords;
     if (!b) return c.json(off, 503);
     const body = await parseBody(c, Entry);
     if (!body.ok) return c.json({ error: body.error }, 400);
-    try { const entry = b.add(clean(body.data)); changed(); return c.json({ entry }, 201); } catch (err) { return failed(c, err); }
+    try { const entry = b.add(clean(body.data), roomOf(c)); changed(); return c.json({ entry }, 201); } catch (err) { return failed(c, err); }
   });
   app.patch("/passwords/:id", async (c) => {
     const b = deps.passwords;
@@ -58,7 +60,7 @@ export function mountPasswords(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       const { entries, skipped } = parseCsv(body.data.csv);
-      const done = b.addMany(entries);
+      const done = b.addMany(entries, roomOf(c));
       changed();
       return c.json({ ...done, skipped });
     } catch (err) { return failed(c, err); }

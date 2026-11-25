@@ -187,7 +187,9 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       // The sessions seated here: a screen that offers sessions to seat says which rooms each already sits in
       // (it may sit in several).
       terminals: seats.flatMap((s) => (s.terminal ? [s.terminal] : [])),
-      faces: seats.filter((s) => s.kind === "session").slice(0, 4).map((s) => ({ handle: s.handle, face: s.face })),
+      // The room's picture is made of its first members' (user #412: 根据群成员头像生成一个群头像): four at most, in
+      // the order they sat down, each with the avatar its session chose.
+      faces: seats.filter((s) => s.kind === "session").slice(0, 4).map((s) => ({ handle: s.handle, kind: s.kind, face: s.face, avatar: rooms.avatarOf(s) })),
       last: last ? { seq: last.seq, from: last.from, text: last.deleted ? "（已删除）" : last.text.slice(0, 200), at: last.at } : null,
       unread: unread.count, forYou: unread.forYou,
       // Its sessions at work right now: the list marks the room (user #269).
@@ -330,6 +332,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const id = c.req.param("id");
       const org = deps.callLocal ? roomOrg(deps.callLocal) : null;
       const ended = await dissolveRoom(rooms, (t) => (org ? org.stop(t) : Promise.resolve(false)), id);
+      // Its own password book goes with it (user #416).
+      deps.passwords?.dropRoom(id);
       deps.roomsChanged?.(id);
       return c.json({ ok: true, ended: ended.length });
     } catch (err) { return refused(c, err); }

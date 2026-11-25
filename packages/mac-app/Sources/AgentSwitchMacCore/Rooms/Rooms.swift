@@ -80,6 +80,23 @@ public struct RoomAvatar: Decodable, Equatable, Sendable {
     }
 }
 
+/// Where the members' pictures stand in a room's (user #412: 一个一个小气泡样式的): one in the middle, two side by
+/// side, three as one over two, four as two rows of two — never more than four. In units of the box's side.
+public enum RoomPictureLayout {
+    public struct Spot: Equatable, Sendable { public let x: Double; public let y: Double; public let side: Double }
+
+    public static func spots(_ count: Int) -> [Spot] {
+        let small = 0.44, a = 0.04, b = 0.52
+        switch min(max(count, 0), 4) {
+        case 0: return []
+        case 1: return [Spot(x: 0.18, y: 0.18, side: 0.64)]
+        case 2: return [Spot(x: a, y: 0.28, side: small), Spot(x: b, y: 0.28, side: small)]
+        case 3: return [Spot(x: 0.28, y: a, side: small), Spot(x: a, y: b, side: small), Spot(x: b, y: b, side: small)]
+        default: return [Spot(x: a, y: a, side: small), Spot(x: b, y: a, side: small), Spot(x: a, y: b, side: small), Spot(x: b, y: b, side: small)]
+        }
+    }
+}
+
 /// The library a picker offers (`GET /rooms/avatars`).
 public struct RoomAvatarLibrary: Decodable, Equatable, Sendable {
     public struct Face: Decodable, Equatable, Sendable, Identifiable { public let id: String; public let rows: [String]; public let color: Int }
@@ -474,8 +491,10 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public let desk: Bool
     /// How many of its sessions are at work now (user #269); 0 from a service that does not say.
     public let working: Int
+    /// Its first members, four at most, as they sat down: the room's picture is made of theirs (user #412).
+    public let faces: [RoomSeat]
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention, desk, working }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention, desk, working, faces }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -492,6 +511,7 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
         attention = (try? c.decodeIfPresent(Int.self, forKey: .attention)) ?? 0
         desk = (try? c.decodeIfPresent(Bool.self, forKey: .desk)) ?? false
         working = (try? c.decodeIfPresent(Int.self, forKey: .working)) ?? 0
+        faces = (try? c.decodeIfPresent([RoomSeat].self, forKey: .faces)) ?? []
     }
 
     /// The list's second line: who said the last thing and what, on one line; the topic before anything is said.

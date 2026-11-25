@@ -26,6 +26,8 @@ export type PasswordEntry = {
   readonly note?: string;
   readonly tags: readonly string[];
   readonly updatedAt: number;
+  /** The room whose own book it is in (user #416: 每个room里应该还有个私有的密码本); none: the book of everything. */
+  readonly room?: string;
 };
 
 /** An entry as the list shows it: no password, no seed, no note — only whether there is one. */
@@ -149,8 +151,9 @@ export class PasswordBook {
     renameSync(tmp, this.file);
   }
 
-  list(): ShownEntry[] {
-    return [...this.entries].sort((a, b) => a.name.localeCompare(b.name, "zh")).map(({ password, totp, note, ...rest }) => ({ ...rest, hasTotp: !!totp, hasNote: !!note, length: [...password].length }));
+  /** One book's entries: a room's own, or (no room) the book of everything. */
+  list(room?: string): ShownEntry[] {
+    return this.entries.filter((e) => e.room === room).sort((a, b) => a.name.localeCompare(b.name, "zh")).map(({ password, totp, note, ...rest }) => ({ ...rest, hasTotp: !!totp, hasNote: !!note, length: [...password].length }));
   }
 
   private must(id: string): PasswordEntry {
@@ -165,7 +168,7 @@ export class PasswordBook {
     return { password: e.password, ...(e.note ? { note: e.note } : {}), ...(e.totp ? { totp: totpNow(e.totp, this.now()) } : {}) };
   }
 
-  private made(input: EntryInput, was?: PasswordEntry): PasswordEntry {
+  private made(input: EntryInput, was?: PasswordEntry, room: string | undefined = was?.room): PasswordEntry {
     const name = (input.name ?? was?.name ?? "").trim().slice(0, 200);
     const password = input.password ?? was?.password ?? "";
     if (!name) throw new PasswordError(400, "要有名称。");
@@ -179,15 +182,16 @@ export class PasswordBook {
       id: was?.id ?? randomUUID().slice(0, 12), name, sites, account: (input.account ?? was?.account ?? "").trim().slice(0, 300), password,
       ...(totp ? { totp } : {}), ...(note ? { note } : {}),
       tags: (input.tags ?? was?.tags ?? []).map((t) => t.trim()).filter(Boolean).slice(0, 20), updatedAt: this.now(),
+      ...(room ? { room } : {}),
     };
   }
 
-  add(input: EntryInput): ShownEntry {
+  add(input: EntryInput, room?: string): ShownEntry {
     if (this.entries.length >= MAX_ENTRIES) throw new PasswordError(400, `最多 ${MAX_ENTRIES} 条。`);
-    const e = this.made(input);
+    const e = this.made(input, undefined, room);
     this.entries.push(e);
     this.save();
-    return this.list().find((x) => x.id === e.id)!;
+    return this.list(room).find((x) => x.id === e.id)!;
   }
 
   update(id: string, input: EntryInput): ShownEntry {
@@ -195,7 +199,7 @@ export class PasswordBook {
     if (at < 0) throw new PasswordError(404, "没有这一条。");
     this.entries[at] = this.made(input, this.entries[at]);
     this.save();
-    return this.list().find((x) => x.id === id)!;
+    return this.list(this.entries[at]!.room).find((x) => x.id === id)!;
   }
 
   remove(id: string): void {
@@ -205,18 +209,26 @@ export class PasswordBook {
   }
 
   /** Many at once (an import): an entry with the same name and account as one there replaces it. */
-  addMany(inputs: readonly EntryInput[]): { added: number; replaced: number } {
+  addMany(inputs: readonly EntryInput[], room?: string): { added: number; replaced: number } {
     let added = 0, replaced = 0;
     for (const input of inputs) {
-      const was = this.entries.findIndex((x) => x.name === input.name?.trim() && x.account === (input.account ?? "").trim());
+      const was = this.entries.findIndex((x) => x.room === room && x.name === input.name?.trim() && x.account === (input.account ?? "").trim());
       if (was >= 0) { this.entries[was] = this.made(input, this.entries[was]); replaced += 1; }
-      else if (this.entries.length < MAX_ENTRIES) { this.entries.push(this.made(input)); added += 1; }
+      else if (this.entries.length < MAX_ENTRIES) { this.entries.push(this.made(input, undefined, room)); added += 1; }
     }
     this.save();
     return { added, replaced };
   }
 
-  /** What the model never sees of the book: every password (four characters at least, a shorter one would hit plain
+  /** A room dissolved: its own book goes with it. */
+  dropRoom(room: string): void {
+    const kept = this.entries.filter((e) => e.room !== room);
+    if (kept.length === this.entries.length) return;
+    this.entries = kept;
+    this.save();
+  }
+
+  /** What the model never sees of the books, the rooms' own too: every password (four characters at least, a shorter one would hit plain
    *  text). */
   words(): string[] {
     return [...new Set(this.entries.map((e) => e.password).filter((p) => p.length >= 4))];

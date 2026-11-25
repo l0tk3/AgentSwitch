@@ -56,6 +56,27 @@ describe("the book", () => {
     expect(b.addMany(parseCsv(chrome).entries)).toEqual({ added: 0, replaced: 1 });
   });
 
+  it("keeps a room's own book apart from the book of everything, and drops it with the room (user #416)", () => {
+    const h = home();
+    const b = new PasswordBook(h, [KEY]);
+    b.add({ name: "everywhere", password: "global-pass-1" });
+    const mine = b.add({ name: "staging", password: "room-pass-22" }, "r1");
+    expect(b.list().map((e) => e.name)).toEqual(["everywhere"]);
+    expect(b.list("r1").map((e) => e.name)).toEqual(["staging"]);
+    expect(b.list("r2")).toEqual([]);
+    // Changed, it stays in its room's book; read again from the file too.
+    expect(b.update(mine.id, { account: "ops" })).toMatchObject({ room: "r1", account: "ops" });
+    expect(new PasswordBook(h, [KEY]).list("r1").map((e) => e.name)).toEqual(["staging"]);
+    // An import into a room replaces that room's entries only.
+    expect(b.addMany([{ name: "everywhere", password: "other-pass-3" }], "r1")).toEqual({ added: 1, replaced: 0 });
+    expect(b.list()).toHaveLength(1);
+    // The model sees none of them, whichever book.
+    expect(b.words().sort()).toEqual(["global-pass-1", "other-pass-3", "room-pass-22"]);
+    b.dropRoom("r1");
+    expect(b.list("r1")).toEqual([]);
+    expect(b.words()).toEqual(["global-pass-1"]);
+  });
+
   it("is what the model never sees: its passwords are the gateway's words too", () => {
     const h = home();
     const words = new RedactionStore(h, [KEY], () => 1, { user: "lkz" });
@@ -87,6 +108,10 @@ describe("over HTTP (this Mac's screens only)", () => {
     expect((await call("DELETE", `/passwords/${made.json.entry.id}`)).status).toBe(200);
     expect((await call("DELETE", "/passwords/nope")).status).toBe(404);
     expect(changed).toBe(4);
+    // A room's own book, by `?room=`.
+    expect((await call("POST", "/passwords?room=r1", { name: "Staging", password: "room-only-pw" })).json.entry.room).toBe("r1");
+    expect((await call("GET", "/passwords?room=r1")).json.entries.map((e: any) => e.name)).toEqual(["Staging"]);
+    expect((await call("GET", "/passwords")).json.entries.map((e: any) => e.name)).toEqual(["Mail"]);
     // Another node's book is seen from a paired Mac (user #356).
     expect(remoteAllowed("GET", "/passwords")).toBe(true);
     expect(remoteAllowed("POST", "/passwords/x/reveal")).toBe(true);

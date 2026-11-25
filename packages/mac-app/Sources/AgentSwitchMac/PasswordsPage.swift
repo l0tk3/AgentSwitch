@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 /// The password book's window opened from a view that has no hold of the controller: `node` nil is this Mac.
 @MainActor enum PasswordsOpener {
     static var show: (String?) -> Void = { _ in }
+    /// A room's own book (user #416): the node, the room's id and its name.
+    static var showRoom: (String?, String, String) -> Void = { _, _, _ in }
     static let help = "Passwords ⌘⇧L"
 }
 
@@ -14,12 +16,18 @@ import UniformTypeIdentifiers
 /// a window on another node it shows that node's book (user #356).
 @MainActor
 final class PasswordsWindowController {
+    /// A room's own book (user #416: 每个room里应该还有个私有的密码本…也是弹出式的).
+    struct RoomBook: Equatable { let id: String; let name: String }
+
     private let model: AppModel
+    /// The book of everything's window.
     private(set) var window: NSWindow?
     private var node: String?
-    /// Told when the window opens (true) or closes (false), for the Dock icon.
+    /// The rooms' own, a window each, by node and room.
+    private var roomWindows: [String: NSWindow] = [:]
+    /// Told when a window opens (true) or the last closes (false), for the Dock icon.
     var onVisibilityChange: (Bool) -> Void = { _ in }
-    private var closeObserver: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
     private var keyMonitor: Any?
 
     init(model: AppModel) { self.model = model }
@@ -27,54 +35,81 @@ final class PasswordsWindowController {
     static let contentSize = NSSize(width: 860, height: 560)
 
     func show(node: String?) {
-        if let window, self.node != node { Self.fill(window, model: model, node: node) }
-        let window = self.window ?? makeWindow(node: node)
+        if let window, self.node != node { Self.fill(window, model: model, node: node, room: nil) }
+        let window = self.window ?? made(node: node, room: nil, autosave: "AgentSwitchPasswords")
         self.window = window
         self.node = node
+        front(window)
+    }
+
+    func show(node: String?, room: RoomBook) {
+        let key = "\(node ?? "")|\(room.id)"
+        let window = roomWindows[key] ?? made(node: node, room: room, autosave: "AgentSwitchRoomPasswords")
+        roomWindows[key] = window
+        // The room may have been renamed since.
+        window.title = Self.title(model: model, node: node, room: room)
+        front(window)
+    }
+
+    private func front(_ window: NSWindow) {
         onVisibilityChange(true)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
+    private var all: [NSWindow] { (window.map { [$0] } ?? []) + roomWindows.values }
+
     /// The window, not yet on screen; `-designPreview` draws the same one off-screen.
-    static func makeWindow(model: AppModel, node: String?, windowClass: NSWindow.Type = NSWindow.self, appearance: NSAppearance? = nil) -> NSWindow {
+    static func makeWindow(model: AppModel, node: String?, room: RoomBook? = nil, windowClass: NSWindow.Type = NSWindow.self, appearance: NSAppearance? = nil) -> NSWindow {
         let window = windowClass.init(contentRect: NSRect(origin: .zero, size: contentSize),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.appearance = appearance
-        fill(window, model: model, node: node)
+        fill(window, model: model, node: node, room: room)
         window.setContentSize(contentSize)
         window.contentMinSize = NSSize(width: 640, height: 400)
         window.isReleasedWhenClosed = false
         return window
     }
 
-    private static func fill(_ window: NSWindow, model: AppModel, node: String?) {
+    private static func title(model: AppModel, node: String?, room: RoomBook?) -> String {
+        let book = room.map { "Passwords · \($0.name)" } ?? "Passwords"
+        return model.nodes.node(node).map { "\(book) — \($0.name)" } ?? book
+    }
+
+    private static func fill(_ window: NSWindow, model: AppModel, node: String?, room: RoomBook?) {
         let size = window.contentView?.frame.size
-        let host = NSHostingController(rootView: PasswordsPage(node: node).environment(model).followsWindow())
+        let host = NSHostingController(rootView: PasswordsPage(node: node, room: room?.id).environment(model).followsWindow())
         host.sizingOptions = []
         window.contentViewController = host
         if let size, size.width > 0 { window.setContentSize(size) }
-        window.title = model.nodes.node(node).map { "Passwords — \($0.name)" } ?? "Passwords"
+        window.title = title(model: model, node: node, room: room)
     }
 
-    private func makeWindow(node: String?) -> NSWindow {
-        let window = Self.makeWindow(model: model, node: node)
+    private func made(node: String?, room: RoomBook?, autosave: String) -> NSWindow {
+        let window = Self.makeWindow(model: model, node: node, room: room)
         window.center()
-        window.setFrameAutosaveName("AgentSwitchPasswords")
-        closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onVisibilityChange(false) }
-        }
+        if room == nil || roomWindows.isEmpty { window.setFrameAutosaveName(autosave) }
+        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] note in
+            nonisolated(unsafe) let closing = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.roomWindows = self.roomWindows.filter { $0.value !== closing }
+                if !self.all.contains(where: { $0 !== closing && $0.isVisible }) { self.onVisibilityChange(false) }
+            }
+        })
         // ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z in its fields, and ⌘W: a menu bar app has no menus to send them.
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            nonisolated(unsafe) let key = event
-            let taken = MainActor.assumeIsolated { self?.key(key) ?? false }
-            return taken ? nil : event
+        if keyMonitor == nil {
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                nonisolated(unsafe) let key = event
+                let taken = MainActor.assumeIsolated { self?.key(key) ?? false }
+                return taken ? nil : event
+            }
         }
         return window
     }
 
     private func key(_ event: NSEvent) -> Bool {
-        guard let window, let target = event.window, target === window || target.sheetParent === window else { return false }
+        guard let target = event.window, let window = all.first(where: { $0 === target || target.sheetParent === $0 }) else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else { return false }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
@@ -101,6 +136,8 @@ final class PasswordsWindowController {
 struct PasswordsPage: View {
     /// The node whose book this is; nil: this Mac (user #356).
     let node: String?
+    /// A room's own book (user #416); nil: the book of everything.
+    var room: String? = nil
     @Environment(AppModel.self) private var app
     @Environment(\.onScreen) private var onScreen
     @State private var model = PasswordsModel()
@@ -113,7 +150,7 @@ struct PasswordsPage: View {
         }
         .background(Look.ground)
         .task(id: onScreen) {
-            if model.node != node { model.switchNode(node) }
+            if model.node != node || model.room != room { model.switchNode(node); model.room = room }
             model.client = { [app, node] in app.client(on: node) }
             if let demo = PasswordsDemo.current { model.show(demo: demo); return }
             guard onScreen else { return }
@@ -320,6 +357,8 @@ final class PasswordsModel {
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
     /// The node whose book this is; nil: this Mac.
     @ObservationIgnored private(set) var node: String?
+    /// The room whose own book this is (user #416); nil: the book of everything.
+    @ObservationIgnored var room: String?
 
     /// Another node: nothing of the last one's is kept on screen.
     func switchNode(_ id: String?) { node = id; items = []; loaded = false; selected = nil; secret = nil; showing = false; editing = false; said = nil; provedAt = .distantPast }
@@ -353,7 +392,7 @@ final class PasswordsModel {
 
     func load() async {
         guard !demo else { return }
-        do { items = try await client().passwords(); loaded = true } catch { said = (error as? CommandError)?.message ?? error.localizedDescription }
+        do { items = try await client().passwords(room: room); loaded = true } catch { said = (error as? CommandError)?.message ?? error.localizedDescription }
     }
 
     func select(_ id: String) {
@@ -370,7 +409,7 @@ final class PasswordsModel {
 
     func save() async {
         do {
-            let e = try await client().savePassword(draft, id: selected)
+            let e = try await client().savePassword(draft, id: selected, room: room)
             editing = false; draft = PasswordDraft(); generated = nil
             await load()
             select(e.id)
@@ -434,7 +473,7 @@ final class PasswordsModel {
         guard panel.runModal() == .OK, let url = panel.url, let text = try? String(contentsOf: url, encoding: .utf8) else { return }
         Task {
             do {
-                let r = try await client().importPasswords(csv: text)
+                let r = try await client().importPasswords(csv: text, room: room)
                 await load()
                 said = "导入 \(r.added) 条，更新 \(r.replaced) 条\(r.skipped > 0 ? "，跳过 \(r.skipped) 条没有密码的" : "")。"
                 let alert = NSAlert()

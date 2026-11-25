@@ -18,6 +18,8 @@ final class RoomsModel {
     @ObservationIgnored var demo = false
     /// The rooms are this Mac's own: a file's path is one this Mac has, so files can be picked and shown in Finder.
     var onThisMac = true
+    /// The node the rooms are on; nil: this Mac.
+    @ObservationIgnored var nodeId: String?
 
     private(set) var rooms: [RoomSummary] = []
     private(set) var room: Room?
