@@ -40,11 +40,6 @@ struct RoomsPage: View {
                 let node = state.nodeId
                 model.client = { [app] in app.client(on: node) }
                 model.onThisMac = node == nil
-                // A room on another node is sealed for that node's gate, where its members run (user #304).
-                model.sealer = { [app] drafts in
-                    let key = node == nil ? nil : try await app.client(on: node).profileGateKey().publicKey
-                    return try await app.gateCLI.seal(drafts: drafts, publicKey: key)
-                }
                 if let demo {
                     model.show(demo: demo.rooms, room: demo.room)
                     if let sheet = RoomsDemo.opens { model.open(sheet) }
@@ -232,7 +227,6 @@ private struct RoomsColumns: View {
             case .files: RoomFilesSheet(model: model)
             case .models: RoomModelsSheet(model: model)
             case .avatar: RoomAvatarSheet(model: model)
-            case .secrets: RoomSecretsSheet(model: model)
             case .words: RoomWordsSheet(model: model)
             default: RoomSheet(model: model, kind: model.sheet ?? .new)
             }
@@ -487,7 +481,6 @@ private struct RoomView: View {
             Menu {
                 Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
                 Button("Files…") { model.open(.files) }
-                // Secrets… is retired (2026-11-25, user #369): what members log in with is in the password book.
                 if model.redactOn { Button("Words…") { model.open(.words) } }
                 Button(room.notes == nil ? "Notes…" : "Notes · \(room.notes!.who)…") { model.open(.notes) }
                 Divider()
@@ -869,7 +862,6 @@ private struct RoomSheet: View {
         case .files: "Files"
         case .models: "Models"
         case .avatar: "Avatar"
-        case .secrets: "Secrets"
         case .words: "Words"
         }
     }
@@ -910,7 +902,7 @@ private struct RoomSheet: View {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
         case .add: !picked.isEmpty
-        case .notes, .tasks, .files, .models, .avatar, .secrets, .words: false
+        case .notes, .tasks, .files, .models, .avatar, .words: false
         }
     }
 

@@ -71,20 +71,6 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(list.map(\.desk), [true, false])
     }
 
-    func testAFilledSecretsTemplateIsReadAndEachDraftChecked() {
-        let read = RoomSecretDraft.parse(csv: RoomSecretDraft.template + "坏的,web,,,,x\n\"带,逗号\",site,https://a.example/login,me,,password123\n")
-        XCTAssertEqual(read.problems, ["第 5 行：kind 要是 site、api 或 exec"])
-        XCTAssertEqual(read.drafts.map(\.name), ["GitHub 登录", "OpenAI", "部署密钥", "带,逗号"])
-        XCTAssertEqual(read.drafts[3].hosts, ["a.example"])
-        XCTAssertNil(read.drafts[3].problem)
-        XCTAssertEqual(read.drafts[0].label, "GitHub")
-        XCTAssertEqual(read.drafts[2].kind.uses, ["exec"])
-        XCTAssertNotNil(RoomSecretDraft(name: "x", kind: .site, url: "https://x.example", value: "short").problem)
-        XCTAssertNotNil(RoomSecretDraft(name: "x", kind: .exec, env: "lower", value: "long-enough").problem)
-        let item = RoomSecretDraft(name: "Deploy", kind: .exec, env: "DEPLOY_TOKEN", value: "secret-value").item(token: "enc:v1:abc")
-        XCTAssertNil(item["value"]); XCTAssertEqual(item["env"] as? String, "DEPLOY_TOKEN")
-    }
-
     func testAQuotedMessageKeepsItsMarkdownOnOneLine() {
         XCTAssertEqual(RoomText.quoteHead("## 结论\n- **接口** 改好了，见 `T3/api.md`", handles: []), "结论 **接口** 改好了，见 `T3/api.md`")
         let cut = RoomText.quoteHead("开头 **" + String(repeating: "长", count: 80) + "** 结尾", handles: [])

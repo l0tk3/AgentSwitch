@@ -203,7 +203,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   const whole = (room: Room, messages: readonly Message[]) => ({
     room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, ...(room.desk ? { desk: true } : {}), createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
-    seats: seatsOf(room), messages, receipts: room.receipts, secrets: rooms.secrets(room.id).length, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, taskStats: room.taskStats, claims: rooms.claims(room.id), reads: room.reads,
+    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes, folder: rooms.folder(room.id), tasks: room.tasks, taskStats: room.taskStats, claims: rooms.claims(room.id), reads: room.reads,
   });
 
   const seat = (roomId: string, terminal: string, canAdd: boolean | undefined): Seat => {
@@ -386,30 +386,6 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const avatar = rooms.setAvatar(seat.terminal, change);
       deps.roomsChanged?.(id);
       return c.json({ avatar });
-    } catch (err) { return refused(c, err); }
-  });
-
-  // The room's secrets (rooms/secrets.ts): ciphertexts sealed on the Mac, never values. Read and removed from any
-  // screen; added (and imported) with tokens only.
-  app.get("/rooms/:id/secrets", (c) => {
-    try { return c.json({ secrets: rooms.secrets(c.req.param("id")) }); } catch (err) { return refused(c, err); }
-  });
-  app.post("/rooms/:id/secrets", async (c) => {
-    const body = await parseBody(c, z.object({ items: z.array(z.record(z.string(), z.unknown())).min(1).max(100) }).strict());
-    if (!body.ok) return c.json({ error: body.error }, 400);
-    try {
-      const id = c.req.param("id");
-      const added = rooms.addSecrets(id, body.data.items);
-      deps.roomsChanged?.(id);
-      return c.json({ added: added.length, secrets: rooms.secrets(id) }, 201);
-    } catch (err) { return refused(c, err); }
-  });
-  app.delete("/rooms/:id/secrets/:sid", (c) => {
-    try {
-      const id = c.req.param("id");
-      rooms.removeSecret(id, c.req.param("sid"));
-      deps.roomsChanged?.(id);
-      return c.json({ ok: true });
     } catch (err) { return refused(c, err); }
   });
 

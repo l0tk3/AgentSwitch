@@ -5,8 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { describe, expect, it, onTestFinished } from "vitest";
-import { ROOM_SECRETS } from "../src/rooms/secrets.js";
+import { describe, expect, it } from "vitest";
 import { mountRooms } from "../src/api/rooms.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RoomDelivery } from "../src/rooms/delivery.js";
@@ -171,44 +170,6 @@ describe("the Chatroom Kit", () => {
     expect(await kit.call("t1", "room_post", { text: "@ios x", files: ["relative.md"] })).toMatchObject({ isError: true });
     expect(store.messages(room.id)[0]!.files).toEqual(["/w/api.md"]);
     expect(delivery.atTurnEnd("t3")).toContain("20:41\nFiles: /w/api.md\n\n@ios 看这个");
-  });
-
-  it("says the room's secrets on each message and uses them through the gate, only the room's own (user #307, #309)", async () => {
-    const calls: { tool: string; args: Record<string, unknown>; cwd: string | undefined }[] = [];
-    const { store, delivery, room, kit: retired } = made();
-    // Retired (user #369): nothing is listed or said, a call says so. The old way, switched on, below.
-    expect(retired.tools("t1").map((t) => t.name)).not.toContain("room_secret");
-    expect(JSON.stringify(retired.tools("t1"))).not.toContain("secrets");
-    expect(await retired.call("t1", "room_secret", { use: "otp" })).toMatchObject({ isError: true, text: expect.stringContaining("retired") });
-    expect(await retired.call("t1", "room_info", { show: "secrets" })).toMatchObject({ isError: true });
-    ROOM_SECRETS.on = true;
-    onTestFinished(() => { ROOM_SECRETS.on = false; });
-    const seatOf = (terminal: string): SeatLive | null => ({ state: "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: null, node: null } });
-    const kit = new RoomKit({ store, seat: seatOf, delivery, gate: () => async (tool, args, cwd) => { calls.push({ tool, args, cwd }); return { text: "200 ok", isError: false }; } });
-    const token = `enc:v1:${"A".repeat(40)}`;
-    expect(kit.tools("t1").map((t) => t.name)).not.toContain("room_secret");
-    store.addSecrets(room.id, [{ name: "Janus 登录", kind: "site", url: "https://janus.example", account: "ops", token }]);
-    expect(kit.tools("t1").map((t) => t.name)).toContain("room_secret");
-    store.post(room.id, { from: "you", text: "@ios 试试", to: ["ios"] });
-    expect(delivery.atTurnEnd("t3")).toContain("The room has 1 secret (Janus 登录): room_info show=secrets");
-    store.post(room.id, { from: "you", text: "@ios 再试", to: ["ios"] });
-    expect(delivery.atTurnEnd("t3")).not.toContain("secret");
-    store.addSecrets(room.id, [{ name: "Janus API", kind: "api", url: "https://janus.example/api", token: `enc:v1:${"C".repeat(40)}` }]);
-    store.post(room.id, { from: "you", text: "@ios 又加了一个", to: ["ios"] });
-    expect(delivery.atTurnEnd("t3")).toContain("The room has 2 secrets (Janus 登录, Janus API)");
-    expect((await kit.call("t1", "room_info", { show: "secrets" })).text).toContain("type the token into the password field");
-    expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login" })).toMatchObject({ isError: true, text: expect.stringContaining("No token of the room") });
-    expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login", body: `p=enc:v1:${"B".repeat(40)}` })).toMatchObject({ isError: true, text: expect.stringContaining("Only the tokens of") });
-    expect(await kit.call("t1", "room_secret", { use: "http", method: "POST", url: "https://janus.example/login", body: `p=${token}` })).toEqual({ text: "200 ok" });
-    expect(await kit.call("t1", "room_secret", { use: "exec", argv: ["sh", "-c", "curl -u ops:$P x"], env: { P: token } })).toEqual({ text: "200 ok" });
-    expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/api/login", body: { user: "ops", password: token } })).toEqual({ text: "200 ok" });
-    expect(calls).toEqual([
-      { tool: "secret_http", args: { method: "POST", url: "https://janus.example/login", body: `p=${token}` }, cwd: "/w/t1" },
-      { tool: "secret_exec", args: { argv: ["sh", "-c", "curl -u ops:$P x"], env: { P: token } }, cwd: "/w/t1" },
-      { tool: "secret_http", args: { method: "POST", url: "https://janus.example/api/login", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user: "ops", password: token }) }, cwd: "/w/t1" },
-    ]);
-    const without = new RoomKit({ store, seat: seatOf, delivery });
-    expect(await without.call("t1", "room_secret", { use: "otp", token })).toMatchObject({ isError: true, text: expect.stringContaining("not set up") });
   });
 
   it("gives what the user says naming nobody to the room's admins; with no admin it calls nobody (user #363)", () => {

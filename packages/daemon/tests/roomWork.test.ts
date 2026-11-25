@@ -4,8 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { describe, expect, it, onTestFinished } from "vitest";
-import { ROOM_SECRETS } from "../src/rooms/secrets.js";
+import { describe, expect, it } from "vitest";
 import { mountRooms } from "../src/api/rooms.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RoomDelivery } from "../src/rooms/delivery.js";
@@ -1022,27 +1021,3 @@ describe("a session's avatar, its own in every room (2026-11-24)", () => {
   });
 });
 
-describe("a room's secrets: ciphertexts only (2026-11-24)", () => {
-  it("takes sealed tokens, refuses a value, replaces by name, gives them to members with their use, and removes them", async () => {
-    ROOM_SECRETS.on = true;   // retired since 2026-11-25 (user #369): the old way, switched on
-    onTestFinished(() => { ROOM_SECRETS.on = false; });
-    const { store, room, say, call } = made();
-    const token = `enc:v1:${"A".repeat(40)}`;
-    expect((await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "GitHub 登录", kind: "site", url: "https://github.com", account: "me", token: "hunter2-plain" }] })).status).toBe(400);
-    expect(store.secrets(room.id)).toEqual([]);
-    const added = await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "GitHub 登录", kind: "site", url: "https://github.com", account: "me", token }, { name: "OPENAI", kind: "exec", env: "OPENAI_API_KEY", token }] });
-    expect(added.status).toBe(201);
-    expect(added.body.secrets).toHaveLength(2);
-    await call("POST", `/rooms/${room.id}/secrets`, { items: [{ name: "OPENAI", kind: "api", url: "https://api.openai.com", token }] });
-    expect(store.secrets(room.id).map((s) => `${s.name}:${s.kind}`)).toEqual(["GitHub 登录:site", "OPENAI:api"]);
-    const read = (await say("api", "room_info", { show: "secrets" })).text;
-    expect(read).toContain("GitHub 登录 · website login · https://github.com · account me");
-    expect(read).toContain(token);
-    expect(read).toContain("the gate puts the key in");
-    expect((await call("GET", `/rooms/${room.id}`)).body.secrets).toBe(2);
-    const sid = store.secrets(room.id)[0]!.id;
-    expect((await call("DELETE", `/rooms/${room.id}/secrets/${sid}`)).status).toBe(200);
-    expect((await call("GET", `/rooms/${room.id}/secrets`)).body.secrets).toHaveLength(1);
-    expect((await call("DELETE", `/rooms/${room.id}/secrets/${sid}`)).status).toBe(404);
-  });
-});

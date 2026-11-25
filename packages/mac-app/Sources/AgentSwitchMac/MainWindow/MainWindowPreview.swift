@@ -116,7 +116,6 @@ enum MainWindowPreview {
             ("search", { $0.searching = true; $0.query = "毫秒"; $0.show(demoFound: demo.room.messages.filter { $0.text.contains("毫秒") }.reversed(), attention: []) }),
             ("attention", { $0.show(demoFound: [], attention: RoomsDemo.attention); $0.attentionShown = true }),
             ("avatar", { $0.show(demoLibrary: RoomsDemo.library); $0.chooseAvatar("daemon") }),
-            ("secrets", { $0.open(.secrets); $0.show(demoSecrets: RoomsDemo.secrets) }),
         ]
         for (tail, setup) in steps {
             RoomsDemo.setup = setup

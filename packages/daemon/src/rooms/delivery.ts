@@ -13,7 +13,6 @@
  *  it asked the user. A paused room gives nothing. What goes in carries its envelope — room, number, from whom, to
  *  whom — and is never the user's words. */
 
-import { ROOM_SECRETS } from "./secrets.js";
 import { agentName, type SeatLookup, type SeatState } from "./state.js";
 import { YOU } from "./names.js";
 import type { Message, Room, RoomStore, Seat } from "./store.js";
@@ -227,15 +226,6 @@ export class RoomDelivery {
     let text = this.textOf(waiting);
     if (!this.told.has(terminal)) text += ` New here, or taking work over? The room's record is in ${this.o.store.recordDir(waiting[waiting.length - 1]!.room.id)} (README.md first).`;
     if (!this.told.has(terminal)) text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
-    // The room's secrets, names only, once — and again when they change (user #307, #312: not on every message).
-    const room = waiting[waiting.length - 1]!.room;
-    const secrets = ROOM_SECRETS.on ? this.o.store.secrets(room.id) : [];
-    const sig = secrets.map((x) => x.id).join(",");
-    const key = `${terminal}\u0000${room.id}`;
-    if (sig && this.toldSecrets.get(key) !== sig) {
-      text += ` ${this.secretsLine(secrets)}`;
-      if (taken) this.toldSecrets.set(key, sig);
-    }
     if (taken) this.counted(terminal, waiting, text);
     return text;
   }
@@ -297,13 +287,6 @@ export class RoomDelivery {
         : "If an answer is needed, give it in the room with room_post (@ whoever it is for); if none is, go on with your own work.";
     const how = `${whose} ${read} ${answer}`;
     return `${this.envelope(last.room, last.message, last.seat)}${before}\n\n---\n\n${how}`;
-  }
-
-  private readonly toldSecrets = new Map<string, string>();
-
-  private secretsLine(all: readonly { readonly name: string }[]): string {
-    const names = all.slice(0, 6).map((x) => x.name).join(", ") + (all.length > 6 ? `, … ${all.length - 6} more` : "");
-    return `The room has ${all.length} secret${all.length === 1 ? "" : "s"} (${names}): room_info show=secrets says how to use each.`;
   }
 
   /** One message as its addressee gets it (§3). */
