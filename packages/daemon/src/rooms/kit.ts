@@ -130,7 +130,7 @@ const SECRET_TOOL: KitTool = {
       type: "object",
       properties: {
         use: { type: "string", enum: ["http", "exec", "otp", "describe"] },
-        token: { type: "string" }, method: { type: "string" }, url: { type: "string" }, headers: { type: "object" }, body: { type: "string" },
+        token: { type: "string" }, method: { type: "string" }, url: { type: "string" }, headers: { type: "object" }, body: { description: "Text, or a JSON object (sent as JSON)." },
         argv: { type: "array", items: { type: "string" } }, env: { type: "object" }, room: ROOM_ARG,
       },
       required: ["use"],
@@ -391,7 +391,12 @@ export class RoomKit {
     const gate = this.o.gate?.();
     if (!gate) return { text: "The credential gate is not set up on this node: ask the user (@you) to install it (设置 › 环境 › Gateway Service).", isError: true };
     const use = str(args.use);
-    const call = use === "http" ? { tool: "secret_http" as const, args: { method: str(args.method) ?? "GET", url: str(args.url) ?? "", ...(args.headers && typeof args.headers === "object" ? { headers: args.headers } : {}), ...(typeof args.body === "string" ? { body: args.body } : {}) } }
+    // A JSON body may come as an object (an agent's client turns a JSON-looking string into one, user #316): sent as
+    // its JSON text, as JSON. Header values as text.
+    const body = typeof args.body === "string" ? args.body : args.body !== undefined && args.body !== null ? JSON.stringify(args.body) : undefined;
+    const given = args.headers && typeof args.headers === "object" && !Array.isArray(args.headers) ? Object.fromEntries(Object.entries(args.headers).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])) : {};
+    const headers = body !== undefined && typeof args.body !== "string" && !Object.keys(given).some((k) => k.toLowerCase() === "content-type") ? { ...given, "Content-Type": "application/json" } : given;
+    const call = use === "http" ? { tool: "secret_http" as const, args: { method: str(args.method) ?? (body === undefined ? "GET" : "POST"), url: str(args.url) ?? "", ...(Object.keys(headers).length ? { headers } : {}), ...(body === undefined ? {} : { body }) } }
       : use === "exec" ? { tool: "secret_exec" as const, args: { argv: Array.isArray(args.argv) ? args.argv : [], env: args.env && typeof args.env === "object" ? args.env : {} } }
       : use === "otp" ? { tool: "secret_otp" as const, args: { token: str(args.token) ?? "" } }
       : use === "describe" ? { tool: "secret_describe" as const, args: { token: str(args.token) ?? "" } }

@@ -8,7 +8,7 @@ public struct RoomSecret: Codable, Equatable, Sendable, Identifiable {
         public var word: String { switch self { case .site: "网站登录"; case .api: "API Key"; case .exec: "命令用" } }
         /// What the gate lets the value be used for (gate-simple-v0 §2): a site's password into requests and pages,
         /// a key into requests only, a command's value into its environment only.
-        public var uses: [String] { switch self { case .site: ["http", "fill"]; case .api: ["http"]; case .exec: ["exec"] } }
+        public var uses: [String] { switch self { case .site: ["http", "fill", "exec"]; case .api: ["http", "exec"]; case .exec: ["exec"] } }
     }
     public let id: String
     public let name: String

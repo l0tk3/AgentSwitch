@@ -193,9 +193,11 @@ describe("the Chatroom Kit", () => {
     expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login", body: `p=enc:v1:${"B".repeat(40)}` })).toMatchObject({ isError: true, text: expect.stringContaining("Only the tokens of") });
     expect(await kit.call("t1", "room_secret", { use: "http", method: "POST", url: "https://janus.example/login", body: `p=${token}` })).toEqual({ text: "200 ok" });
     expect(await kit.call("t1", "room_secret", { use: "exec", argv: ["sh", "-c", "curl -u ops:$P x"], env: { P: token } })).toEqual({ text: "200 ok" });
+    expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/api/login", body: { user: "ops", password: token } })).toEqual({ text: "200 ok" });
     expect(calls).toEqual([
       { tool: "secret_http", args: { method: "POST", url: "https://janus.example/login", body: `p=${token}` }, cwd: "/w/t1" },
       { tool: "secret_exec", args: { argv: ["sh", "-c", "curl -u ops:$P x"], env: { P: token } }, cwd: "/w/t1" },
+      { tool: "secret_http", args: { method: "POST", url: "https://janus.example/api/login", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user: "ops", password: token }) }, cwd: "/w/t1" },
     ]);
     const without = new RoomKit({ store, seat: seatOf, delivery });
     expect(await without.call("t1", "room_secret", { use: "otp", token })).toMatchObject({ isError: true, text: expect.stringContaining("not set up") });
