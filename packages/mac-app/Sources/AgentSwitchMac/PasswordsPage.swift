@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 /// The password book (design-password-book.md; user #345-#351): a page of the main window. The list never holds a
 /// password; one is fetched (`reveal`) after Touch ID, which is not asked again for five minutes, shown for twenty
-/// seconds, and copied to a clipboard that is cleared after thirty. Each password is also a word the model never sees
+/// seconds; a copy stays on the clipboard (user #377). Each password is also a word the model never sees
 /// (Settings › Redaction).
 struct PasswordsPage: View {
     let state: MainWindowState
@@ -323,27 +323,19 @@ final class PasswordsModel {
     func copyPassword() async {
         guard let s = await fetch("复制密码") else { return }
         copySecret(s.password)
-        said = "已复制，30 秒后从剪贴板清除。"
+        said = "已复制。"
     }
 
     func copyCode() async {
         guard let s = await fetch("复制两步验证码"), let code = s.totp?.code else { return }
         copySecret(code)
-        said = "验证码已复制，30 秒后从剪贴板清除。"
+        said = "验证码已复制。"
     }
 
     func copyPlain(_ text: String) { Clipboard.copy(text) }
 
-    /// Copied as concealed (clipboard managers that honour it keep nothing), cleared after thirty seconds unless
-    /// something else was copied meanwhile.
-    private func copySecret(_ text: String) {
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.setString(text, forType: .string)
-        board.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-        let count = board.changeCount
-        Task { try? await Task.sleep(for: .seconds(30)); if board.changeCount == count { board.clearContents() } }
-    }
+    /// Copied as any text is; it stays on the clipboard until something else is copied (user #377).
+    private func copySecret(_ text: String) { Clipboard.copy(text) }
 
     /// A CSV a browser or a password manager exported; the plain file is offered to the Trash after.
     func importCSV() {
