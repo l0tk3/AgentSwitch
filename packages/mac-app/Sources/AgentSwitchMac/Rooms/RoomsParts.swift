@@ -84,7 +84,9 @@ struct RoomPictureView: View {
                     .offset(x: (CGFloat(pair.1.x) * side).rounded(), y: (CGFloat(pair.1.y) * side).rounded())
             }
         }
-        .frame(width: side, height: side)
+        // From the box's own corner: laid out in the middle, the stack — as big as its biggest bubble only — put every
+        // bubble right of and under its place (user #426: 头像排列都是偏右下角的).
+        .frame(width: side, height: side, alignment: .topLeading)
         .accessibilityHidden(true)
     }
 }
