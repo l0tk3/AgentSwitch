@@ -398,7 +398,7 @@ struct RoomSecretsSheet: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(look.isClassic ? Color.clear : Look.raised)
             HairRule(color: Look.line)
-            Text("成员只看到密文和用法。密码在这台 Mac 上当场由网关封装，明文不进房间、不进记录。网站登录的密文只能用在填写的网址上。")
+            Text("成员只看到密文和用法。密码在这台 Mac 上当场封装（房间在别的节点时，封给那台节点的网关），明文不进房间、不进记录。网站登录的密文只能用在填写的网址上。")
                 .font(.system(size: 12)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 16).padding(.top, 10)
             if adding { form.padding(.horizontal, 16).padding(.top, 10) }

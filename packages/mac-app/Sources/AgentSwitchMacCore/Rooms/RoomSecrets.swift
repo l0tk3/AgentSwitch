@@ -98,10 +98,11 @@ public struct RoomSecretDraft: Sendable, Equatable {
 
 extension GateCLI {
     /// Many values sealed in one `enc --batch` (each on stdin, never in argv): a token for each, or the gate's reason.
-    public func seal(drafts: [RoomSecretDraft]) async throws -> [Result<String, CommandError>] {
+    /// `publicKey`: another node's gate key, for a room on that node (user #304) — its members' gate opens them, not this Mac's.
+    public func seal(drafts: [RoomSecretDraft], publicKey: String? = nil) async throws -> [Result<String, CommandError>] {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw CommandError("未找到内置 secret-gate：\(executable.path)") }
         let entries: [[String: Any]] = drafts.map { ["label": $0.label, "hosts": $0.hosts, "uses": $0.kind.uses, "kind": "secret", "value": $0.value] }
-        let result = try await ProcessRunner.run(executable, ["enc", "--batch"], environment: environment, stdin: try JSONSerialization.data(withJSONObject: entries), timeout: GateCLI.timeout)
+        let result = try await ProcessRunner.run(executable, ["enc", "--batch"] + (publicKey.map { ["--pubkey", $0] } ?? []), environment: environment, stdin: try JSONSerialization.data(withJSONObject: entries), timeout: GateCLI.timeout)
         guard !result.timedOut, result.status == 0 || result.status == 1 else {
             let text = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
             // A gate service older than this app publishes several keys; this app's gate reads one (2026-11-24).

@@ -40,7 +40,11 @@ struct RoomsPage: View {
                 let node = state.nodeId
                 model.client = { [app] in app.client(on: node) }
                 model.onThisMac = node == nil
-                model.sealer = node == nil ? { [app] drafts in try await app.gateCLI.seal(drafts: drafts) } : nil
+                // A room on another node is sealed for that node's gate, where its members run (user #304).
+                model.sealer = { [app] drafts in
+                    let key = node == nil ? nil : try await app.client(on: node).profileGateKey().publicKey
+                    return try await app.gateCLI.seal(drafts: drafts, publicKey: key)
+                }
                 if let demo {
                     model.show(demo: demo.rooms, room: demo.room)
                     if let sheet = RoomsDemo.opens { model.open(sheet) }
