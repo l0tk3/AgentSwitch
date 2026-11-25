@@ -2013,14 +2013,18 @@ describe("terminal pieces", () => {
     expect(launch({ id: "t8", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).toContain('-a on-request -c default_permissions="agentswitch" -c permissions.agentswitch={ extends = ":read-only", filesystem = {} }');
     expect(claude.env).toMatchObject({ AGENTSWITCH_TERMINAL_ID: "t1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "tok", AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:4711", TERM: "xterm-256color" });
     const settings = JSON.parse(readFileSync(join(stateDir, "t1", "settings.json"), "utf8"));
-    expect(settings).toEqual(claudeHookSettings('"/n/node" "/h/hook.js"'));
+    // Its hooks, and no update notice of its own (user #460).
+    expect(settings).toEqual({ ...claudeHookSettings('"/n/node" "/h/hook.js"'), env: { DISABLE_AUTOUPDATER: "1" } });
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);
     // Left waiting when it comes to rest, for a Chat Room message to wake it with (docs/chatroom-v0.md §12).
     for (const event of ["Stop", "SessionStart"]) expect(settings.hooks[event][0].hooks).toEqual([{ type: "command", command: '"/n/node" "/h/hook.js"', timeout: settings.hooks.Stop[0].hooks[0].timeout }, { type: "command", command: '"/n/node" "/h/hook.js" wait', asyncRewake: true, timeout: 12 * 3600 }]);
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
     // "Continue" goes on in the same session; a fork only when asked for.
     const codex = launch({ id: "t2", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
-    expect(codex.args).toEqual(["resume", "-C", "/tmp", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, ...codexRoomArgs("/n/node", ROOM_KIT_SCRIPT), "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
+    // No look for a new version of its own at start (user #460).
+    const noCheck = codex.args.indexOf("check_for_update_on_startup=false");
+    expect(codex.args[noCheck - 1]).toBe("-c");
+    expect(codex.args.filter((_, i) => i !== noCheck && i !== noCheck - 1)).toEqual(["resume", "-C", "/tmp", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, ...codexRoomArgs("/n/node", ROOM_KIT_SCRIPT), "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
     // The terminal's folder is named (`-C`): Codex does not ask whether to use the one the session ran in, which may be
     // gone (docs/terminal-v0.md §5).
     expect(launch({ id: "t9", harness: "codex", cwd: "/tmp", resume: "abc", fork: true, mode: "manual", hookToken: "tok" }).args.slice(0, 4)).toEqual(["fork", "-C", "/tmp", "abc"]);

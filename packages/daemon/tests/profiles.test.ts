@@ -349,12 +349,12 @@ describe("a profile's own proxy", () => {
     const own = launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", proxy: via });
     expect(own.env).toMatchObject({ HTTPS_PROXY: via, HTTP_PROXY: via, ALL_PROXY: via, https_proxy: via, NO_PROXY: "127.0.0.1,localhost,::1", no_proxy: "127.0.0.1,localhost,::1" });
     const settings = JSON.parse(readFileSync(join(stateDir, "c1", "settings.json"), "utf8")) as { env?: Record<string, string>; hooks: object };
-    expect(settings.env).toEqual({ ...proxyEnv(via), DISABLE_ERROR_REPORTING: "1" });
+    expect(settings.env).toEqual({ ...proxyEnv(via), DISABLE_AUTOUPDATER: "1", DISABLE_ERROR_REPORTING: "1" });
     expect(settings.hooks).toBeTruthy();
     // Without a proxy of its own nothing is set or laid over: what the user's environment has stays.
     const plain = launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(plain.env.HTTPS_PROXY).toBe("http://old:1");
-    expect(JSON.parse(readFileSync(join(stateDir, "c2", "settings.json"), "utf8")).env).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(stateDir, "c2", "settings.json"), "utf8")).env).toEqual({ DISABLE_AUTOUPDATER: "1" });
     // Through the model traffic gateway (user #320-#332): it is the way out, the profile's proxy its way on; its CA
     // trusted besides the usual roots.
     const gate = { proxy: "http://s:c3@127.0.0.1:50999", ca: "/as/vault/model-gate/ca.pem", bundle: "/as/vault/model-gate/trust.pem" };
@@ -702,15 +702,17 @@ esac
     const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/n/hook.js", env: { PATH: "/usr/bin", HOME: "/Users/u" } });
     const quiet = launch({ id: "q1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", telemetryOff: true });
     expect(quiet.env.DISABLE_TELEMETRY).toBe("1");
-    expect(JSON.parse(readFileSync(join(stateDir, "q1", "settings.json"), "utf8")).env).toEqual({ DISABLE_TELEMETRY: "1", DISABLE_ERROR_REPORTING: "1" });
+    expect(JSON.parse(readFileSync(join(stateDir, "q1", "settings.json"), "utf8")).env).toEqual({ DISABLE_AUTOUPDATER: "1", DISABLE_TELEMETRY: "1", DISABLE_ERROR_REPORTING: "1" });
     const loud = launch({ id: "q2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home" });
     expect(loud.env.DISABLE_TELEMETRY).toBeUndefined();
     // Error reports are not sent under any profile but the Mac's own, whatever its telemetry (2026-11-22).
     expect(loud.env.DISABLE_ERROR_REPORTING).toBe("1");
-    expect(JSON.parse(readFileSync(join(stateDir, "q2", "settings.json"), "utf8")).env).toEqual({ DISABLE_ERROR_REPORTING: "1" });
+    expect(JSON.parse(readFileSync(join(stateDir, "q2", "settings.json"), "utf8")).env).toEqual({ DISABLE_AUTOUPDATER: "1", DISABLE_ERROR_REPORTING: "1" });
     const own = launch({ id: "q3", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(own.env.DISABLE_ERROR_REPORTING).toBeUndefined();
-    expect(JSON.parse(readFileSync(join(stateDir, "q3", "settings.json"), "utf8")).env).toBeUndefined();
+    // No update notice of its own under any profile, the Mac's own too (user #460): the Agents page says it.
+    expect(own.env.DISABLE_AUTOUPDATER).toBe("1");
+    expect(JSON.parse(readFileSync(join(stateDir, "q3", "settings.json"), "utf8")).env).toEqual({ DISABLE_AUTOUPDATER: "1" });
   });
 
   it("starts Codex with what it reports of itself off under a profile, and as it is under the Mac's own", () => {
@@ -721,7 +723,9 @@ esac
     const keyed = launch({ id: "c2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", api: { name: "Relay", baseUrl: "https://relay.example/v1" } }).args;
     for (const args of [account, keyed]) for (const flag of off) expect(args[args.indexOf(flag) - 1], flag).toBe("-c");
     const own = launch({ id: "c3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args;
-    for (const flag of off) expect(own).not.toContain(flag);
+    for (const flag of off.slice(0, 2)) expect(own).not.toContain(flag);
+    // The look for a new version at start is off under the Mac's own too (user #460).
+    expect(own[own.indexOf("check_for_update_on_startup=false") - 1]).toBe("-c");
   });
 
   it("gives one made before profiles had colours a colour, once, and keeps it", () => {
@@ -886,7 +890,7 @@ describe("a profile that pays by a key (§3.6)", () => {
     expect(claude.args.slice(claude.args.indexOf("--model"), claude.args.indexOf("--model") + 2)).toEqual(["--model", "claude-made-up"]);
     // Anthropic's own address is not named; the model chosen for the terminal goes before the profile's.
     const plain = launch({ id: "k2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", model: "opus", api: { name: "Key", model: "claude-made-up" } });
-    expect(JSON.parse(readFileSync(join(stateDir, "k2", "settings.json"), "utf8")).env).toEqual({ DISABLE_ERROR_REPORTING: "1" });
+    expect(JSON.parse(readFileSync(join(stateDir, "k2", "settings.json"), "utf8")).env).toEqual({ DISABLE_AUTOUPDATER: "1", DISABLE_ERROR_REPORTING: "1" });
     expect(plain.args).toContain("opus");
     expect(plain.args).not.toContain("claude-made-up");
     const codex = launch({ id: "k3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", api: { name: "Key" } });

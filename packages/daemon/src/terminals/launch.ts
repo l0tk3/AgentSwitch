@@ -136,7 +136,8 @@ export function browserServer(bridge: readonly string[]): BrowserServer | null {
 
 /** Codex with what it reports of itself switched off (config keys of 0.171: `analytics.enabled`, `feedback.enabled`,
  *  `check_for_update_on_startup`). */
-export const CODEX_QUIET: readonly string[] = ["-c", "analytics.enabled=false", "-c", "feedback.enabled=false", "-c", "check_for_update_on_startup=false"];
+export const CODEX_NO_UPDATE_CHECK: readonly string[] = ["-c", "check_for_update_on_startup=false"];
+export const CODEX_QUIET: readonly string[] = ["-c", "analytics.enabled=false", "-c", "feedback.enabled=false", ...CODEX_NO_UPDATE_CHECK];
 
 /** Codex's `-c` overrides for the browser server (its session config, never the user's config.toml). */
 export function codexBrowserArgs(server: BrowserServer): string[] {
@@ -354,7 +355,9 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // Under any profile but the Mac's own, crash and error reports are not sent either (2026-11-22): they carry
         // the machine's own (OS release, paths in stack traces) whoever is signed in. Its own switch in Claude Code,
         // which the telemetry one does not cover.
-        const quiet = { ...(req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {}), ...(req.configHome ? { DISABLE_ERROR_REPORTING: "1" } : {}) };
+        // No look for a new version of its own, and no word of one at start, under any profile (user #460: 应该劫持所有
+        // agent自己的开启时的更新提醒): AgentSwitch's Agents page says when there is one, and installs it.
+        const quiet = { DISABLE_AUTOUPDATER: "1", ...(req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {}), ...(req.configHome ? { DISABLE_ERROR_REPORTING: "1" } : {}) };
         Object.assign(env, quiet);
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}), ...vendorAliases(req.api) };
         writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected, opts.roomFiles), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
@@ -396,6 +399,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // the look for a new version at start (AgentSwitch's Agents page does that). As flags, for this terminal:
         // the profile's config.toml may be the Mac's own, linked.
         if (req.configHome || req.api) args.push(...CODEX_QUIET);
+        // The look for a new version at start is off under the Mac's own profile too (user #460).
+        else args.push(...CODEX_NO_UPDATE_CHECK);
         for (const name of opts.codexMcpOff?.(req.configHome) ?? []) args.push("-c", `mcp_servers.${name}.enabled=false`);
         const hooked = opts.codexHooks?.(req.configHome) ?? false;
         if (hooked) args.push(...codexHookArgs(hookCommand, QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S));
@@ -443,6 +448,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         return { file, args, env, hooks: hooked, ...(companion ? { companion } : {}) };
       }
       case "opencode": {
+        // No look for a new version of its own at start (user #460): the Agents page says when there is one.
+        env.OPENCODE_DISABLE_AUTOUPDATE = "1";
         // A private server — the service's own, which it watches (opencodeTerminal.ts), else the TUI's `--standalone` one:
         // by default OpenCode 2 runs the session in the user's shared background service, where this terminal's
         // environment (its config, the gate) never arrives.
