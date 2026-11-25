@@ -16,7 +16,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExitInfo, ExitProbe } from "./exit.js";
-import { CIPHERTEXT, type FillResolver } from "./fill.js";
+import { SEALED, type FillResolver } from "./fill.js";
 
 export type FingerprintConfig = Readonly<Record<string, unknown>>;
 export type ProxySetting = { readonly server: string; readonly username?: string | undefined; readonly password?: string | undefined };
@@ -124,6 +124,16 @@ export class BrowserIdentity {
     this.upstreamUrl = this.read().proxy ? (this.read().proxy!.password ? undefined : this.read().proxy!.server) : null;
   }
 
+  /** The proxy's password as kept (sealed), and a way to keep it sealed anew (vault/seal.ts). */
+  sealedPassword(): { server: string; password: string } | null {
+    const p = this.read().proxy;
+    return p?.password ? { server: p.server, password: p.password } : null;
+  }
+  moveSealedPassword(password: string): void {
+    const now = this.read();
+    if (now.proxy?.password) this.write({ ...now, proxy: { ...now.proxy, password } });
+  }
+
   private read(): Stored {
     if (this.stored) return this.stored;
     try {
@@ -215,7 +225,7 @@ export class BrowserIdentity {
     const username = proxy.username?.trim() || undefined;
     // `keepPassword`: the person changed something else; the ciphertext stored stays (it is never sent back to them).
     const password = proxy.password?.trim() || (opts.keepPassword ? this.read().proxy?.password : undefined) || undefined;
-    if (password && !CIPHERTEXT.test(password)) throw new IdentityError("代理密码请以密文（enc:v1:）提供。");
+    if (password && !SEALED.test(password)) throw new IdentityError("代理密码请以密文提供。");
     if (password && !username) throw new IdentityError("带密码的代理需要用户名。");
     const setting: ProxySetting = { server, ...(username ? { username } : {}), ...(password ? { password } : {}) };
     const upstream = await this.withPassword(setting);
@@ -241,7 +251,7 @@ export class BrowserIdentity {
     if (!proxy.username && !proxy.password) return proxy.server;
     let secret = "";
     if (proxy.password) {
-      if (!this.opts.resolve) throw new IdentityError("凭据网关不可用，无法使用带密码的代理。");
+      if (!this.opts.resolve) throw new IdentityError("无法打开代理的密码（加密存储不可用）。");
       // The gate checks the ciphertext against the proxy's own host, as it would a page's.
       secret = (await this.opts.resolve(proxy.password, [`http://${place.host}:${place.port}/`])).value;
     }

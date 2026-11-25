@@ -167,12 +167,14 @@ final class BrowserPageModel {
     /// `defaults`: where the recent addresses, the list's column and the sites' zoom are kept (nil: not kept, the design
     /// preview). `sealer`: this Mac's gate, for `New…` in Fill Ciphertext.
     init(service: @escaping () -> any BrowserService, state: MainWindowState?, defaults: UserDefaults? = .standard, recents: [String]? = nil,
-         sealer: BrowserSealer? = nil) {
+         sealer: BrowserSealer? = nil, vaultSealer: BrowserSealer? = nil) {
         let scope = BrowserScope()
         self.scope = scope
         baseService = service
         self.sealer = sealer
-        identity = BrowserIdentityModel(service: { scope.scoped(service()) as? any BrowserIdentityService }, sealer: sealer)
+        // The proxy's password is sealed by the node that keeps it (its vault key), on this Mac or another.
+        identity = BrowserIdentityModel(service: { scope.scoped(service()) as? any BrowserIdentityService },
+                                        sealer: vaultSealer ?? sealer)
         self.state = state
         self.defaults = defaults
         self.recents = recents ?? defaults?.stringArray(forKey: BrowserRecents.storeKey) ?? []

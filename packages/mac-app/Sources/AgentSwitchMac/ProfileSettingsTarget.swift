@@ -61,11 +61,11 @@ struct AgentsSettingsView: View {
 }
 
 extension AppModel {
-    /// Ciphertext must belong to the selected node's gate, not this Mac's keypair.
+    /// Sealed by the node that keeps it, under its own vault key (2026-11-25, user #369: secret-gate 弃用); the
+    /// gate's keypair is no part of it.
     func sealProfile(_ request: GateSealRequest, on node: String?) async throws -> String {
-        var key: String?
-        if let node { key = try await client(on: node).profileGateKey().publicKey }
-        return try await gateCLI.seal(request, publicKey: key)
+        if let problem = request.problem { throw CommandError(problem) }
+        return try await client(on: node).vaultSeal(request.value)
     }
 }
 

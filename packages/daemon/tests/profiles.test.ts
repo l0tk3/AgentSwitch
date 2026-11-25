@@ -243,7 +243,7 @@ describe("a profile's own proxy", () => {
     await expect(exits.address("k", { server: "proxy.example" })).rejects.toThrow(/scheme:\/\/host:port/);
     await expect(exits.address("k", { server: far.server, username: "me", password: "hunter2" })).rejects.toThrow(/密文/);
     await expect(exits.address("k", { server: far.server, password: "enc:v1:abcdefghijklmnopqrstuvwx" })).rejects.toThrow(/用户名/);
-    await expect(pool().address("k", sealed)).rejects.toThrow(/凭据网关不可用/);
+    await expect(pool().address("k", sealed)).rejects.toThrow(/加密存储不可用/);
   });
 
   it("keeps its forwarder when the proxy is changed or saved again: what already runs under it goes the new way, not nowhere", async () => {
@@ -782,7 +782,7 @@ describe("a profile that pays by a key (§3.6)", () => {
     expect(existsSync(join(home, "profiles", "codex"))).toBe(false);
     expect(() => store.create("pi", "Key", "api", { key: SEALED })).toThrow(ProfileError);
     // Without the gate no key is handed over.
-    await expect(new ApiKeys({ store, models: NO_LIST }).plain("codex", own.id)).rejects.toThrow(/网关/);
+    await expect(new ApiKeys({ store, models: NO_LIST }).plain("codex", own.id)).rejects.toThrow(/加密存储不可用/);
   });
 
   it("refuses a model that is plainly another spelling of one the address lists, saying which; keeps an alias or an unlisted one, and anything when forced or when the address lists none", async () => {

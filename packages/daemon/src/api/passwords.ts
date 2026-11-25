@@ -63,6 +63,14 @@ export function mountPasswords(app: Hono, deps: ApiDeps): void {
       return c.json({ ...done, skipped });
     } catch (err) { return failed(c, err); }
   });
+  // A secret a screen is about to hand over (a profile's API key, a proxy's password, a session key), sealed under
+  // the vault's key: what the profile then keeps (vault/seal.ts; user #369).
+  app.post("/vault/seal", async (c) => {
+    if (!deps.seal) return c.json({ error: "这个节点的服务没有加密存储（需要更新 AgentSwitch）。" }, 503);
+    const body = await parseBody(c, z.object({ value: z.string().min(1).max(10_000) }).strict());
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    return c.json({ token: deps.seal(body.data.value) });
+  });
   app.get("/passwords/generate", (c) => {
     const length = Number(c.req.query("length") ?? 20);
     return c.json({ password: generatePassword(Number.isFinite(length) ? length : 20, c.req.query("symbols") !== "0") });

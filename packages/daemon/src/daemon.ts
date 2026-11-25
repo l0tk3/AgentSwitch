@@ -132,6 +132,8 @@ import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
 import { gateCaller } from "./rooms/gateCall.js";
 import { fileKey, vaultKey } from "./vault/key.js";
+import { sealValue, vaultOpener, type Opener } from "./vault/seal.js";
+import { moveSealed } from "./sealedMove.js";
 import { RedactionStore } from "./vault/words.js";
 import { ModelGate } from "./vault/modelGate.js";
 import { PasswordBook } from "./vault/passwords.js";
@@ -452,6 +454,14 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   };
   void codexTrust()?.ensure();
   // docs/browser-v0.md: the shared browser; AgentSwitch's own ports are never opened in it nor listed as local servers.
+  const vaultKeys = cfg.terminals && !overrides.terminalLauncher ? ((): Buffer[] => {
+    const k = vaultKey(cfg.home);
+    const old = k.where === "keychain" ? fileKey(cfg.home) : null;
+    return old ? [k.key, old] : [k.key];
+  })() : null;
+  // What a profile and the browser keep sealed (API key, proxy password, session key) is opened by the vault's own
+  // key; a gate's ciphertext from before by the gate while there is one (vault/seal.ts; user #369).
+  const opener: Opener | null = vaultKeys ? vaultOpener(vaultKeys, gate ? gateFill(gate) : null) : gate ? gateFill(gate) : null;
   // People fill ciphertexts in through the gate; agents get it through the agent bridge (terminals below).
   const gateProxyPort = proxyEndpoint(gate?.proxy ?? process.env.SECRET_GATE_PROXY ?? "http://127.0.0.1:8080")?.port;
   // With every OpenCode server the daemon runs now: the executors' resident one and the terminals' companions (port 0).
@@ -461,7 +471,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const engineKit = cfg.browserHost ? newEngineKit(cfg.home) : undefined;
   engineKit?.start();
   const browserOptions = { home: cfg.home, userHome: process.env.HOME ?? homedir(), protected: prot, ownPorts, ...(engineKit ? { kit: engineKit } : {}), headless: !cfg.browserWindow, ...(gate ? { gateHome: gate.home } : {}), ...(overrides.browserDriver ? { driver: overrides.browserDriver } : {}),
-      ...(overrides.browserEngine ? { engine: overrides.browserEngine } : {}), ...(gate ? { fill: gateFill(gate) } : {}),
+      ...(overrides.browserEngine ? { engine: overrides.browserEngine } : {}), ...(opener ? { fill: opener } : {}),
       ...(clones ? { afterExit: () => clones.schedule() } : {}) };
   const browser = cfg.browserHost || overrides.browserDriver ? sharedBrowser(browserOptions) : undefined;
   // Profiles' own proxies (docs/profiles-v0.md §4): a forwarder each, checked before anything starts under one. And
@@ -469,7 +479,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // forwarder when the profile has a proxy, straight out when it has none.
   const profiles = new ProfileStore({ home: cfg.home });
   { const old = profiles.removeOldSystemHomes(); if (old) console.error(`profiles: removed ${old} private home folders isolated profiles no longer use`); }
-  const exits = new ExitPool({ ownPorts, ...(gate ? { resolve: gateFill(gate) } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
+  const exits = new ExitPool({ ownPorts, ...(opener ? { resolve: opener } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
   const profileBrowsers = browser
     ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder,
           zone: () => { const p = profileOfKey(key); return p ? profiles.all()[p.agent].profiles.find((x) => x.id === p.id)?.exit?.timezone ?? null : null; },
@@ -485,10 +495,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   }
   // An address asked for its models with a profile's key is asked the way the profile's agent would send it: through
   // the forwarder of its proxy when it has one (docs/profiles-v0.md §4), straight out when it has none.
-  const apiKeys = new ApiKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
+  const apiKeys = new ApiKeys({ store: profiles, ...(opener ? { resolve: opener } : {}),
     through: async (agent, id) => { const proxy = profiles.proxyOf(agent, id); return proxy ? exits.address(exitKey(agent, id), proxy) : null; } });
-  const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
+  const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(opener ? { resolve: opener } : {}),
     browser: (agent, id) => profileBrowsers?.get(`${agent}.${id}`)?.host ?? null });
+  // The gate's ciphertexts kept from before are sealed anew under the vault's key, the gate opening each one last time.
+  if (vaultKeys && gate) void moveSealed({ key: vaultKeys[0]!, gate: gateFill(gate), profiles, identity: browser?.identity, log: (line) => console.error(line) }).catch((err: Error) => console.error(`vault: moving kept secrets: ${err.message}`));
   const profileHealth = new ProfileHealthChecks(profiles, apiKeys, subscriptionHealth(profiles, exits, agentBinaries));
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
   // The profiles' own browsers run on the same copy: stopped with it, back with their tabs after.
@@ -526,11 +538,6 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
   const rooms = new RoomStore(cfg.home);
   // The model traffic gateway and the words it replaces (vault/; user #320-#332): with real terminals only.
-  const vaultKeys = cfg.terminals && !overrides.terminalLauncher ? ((): Buffer[] => {
-    const k = vaultKey(cfg.home);
-    const old = k.where === "keychain" ? fileKey(cfg.home) : null;
-    return old ? [k.key, old] : [k.key];
-  })() : null;
   const vault = vaultKeys ? new RedactionStore(cfg.home, vaultKeys) : null;
   const passwords = vaultKeys ? new PasswordBook(cfg.home, vaultKeys) : null;
   const modelGate = vault ? new ModelGate({ home: cfg.home, bin: gateBin(), store: vault, roomsOf: (t) => rooms.roomsOf(t).map((x) => x.room.id), more: () => passwords?.words() ?? [], log: (line) => console.error(line) }) : null;
@@ -693,7 +700,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     noteProfile: (session, profile, agent = "claude-code") => { const a = PROFILE_AGENTS.find((x) => x === agent); if (a) profiles.noteSession(a, session, profile); },
     sessionOf: seatSessionOf, wasOf: seatWasOf, changed: () => roomDelivery.look(),
   });
-  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), ...(passwords ? { passwords } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
+  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), ...(passwords ? { passwords } : {}), ...(vaultKeys ? { seal: (value: string) => sealValue(vaultKeys[0]!, value) } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

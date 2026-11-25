@@ -15,7 +15,7 @@ import { API_HOME, apiSite, type Profile, type ProfileAgent, type ProfileApi, ty
  *  wires it). */
 export type KeyResolver = (token: string, sites: readonly string[]) => Promise<{ readonly value: string }>;
 /** A ciphertext of the gate's, as it is written. */
-const CIPHERTEXT = /^enc:v1:[A-Za-z0-9_=-]{16,}$/;
+const CIPHERTEXT = /^(?:asv:1:|enc:v1:)[A-Za-z0-9_=-]{16,}$/;
 
 /** The part of the profile store this needs. */
 export type ApiKeyStore = {
@@ -181,13 +181,13 @@ export class ApiKeys {
   }
 
   private async open(agent: ProfileAgent, sealed: string, baseUrl: string | undefined): Promise<string> {
-    if (!CIPHERTEXT.test(sealed)) throw new ApiKeyError("API key 请以密文（enc:v1:）提供。");
-    if (!this.o.resolve) throw new ApiKeyError("凭据网关不可用，无法使用 API key。");
+    if (!CIPHERTEXT.test(sealed)) throw new ApiKeyError("API key 请以密文提供。");
+    if (!this.o.resolve) throw new ApiKeyError("无法打开 API key（加密存储不可用）。");
     let site: string;
     try { site = apiSite(agent, baseUrl?.trim() || undefined); } catch { throw new ApiKeyError("地址不是一个 http(s) 地址。"); }
     let value: string;
     try { value = (await this.o.resolve(sealed, [site])).value.trim(); }
-    catch { throw new ApiKeyError(`凭据网关没有给出这个 API key（它须是为 ${new URL(site).host} 加密的）。`); }
+    catch { throw new ApiKeyError(`这个 API key 打不开（它是为 ${new URL(site).host} 保存的），请重新填写。`); }
     if (!KEY.test(value)) throw new ApiKeyError("这不像一个 API key。");
     return value;
   }

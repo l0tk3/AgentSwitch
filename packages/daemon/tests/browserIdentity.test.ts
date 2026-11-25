@@ -136,7 +136,7 @@ describe("a proxy (docs/browser-v0.md §7.2 第 5 条)", () => {
     await expect(id.setProxy({ server: "nonsense" })).rejects.toThrow("代理地址");
     expect(id.upstream()).toBeNull();
     const none = identity({ resolve: undefined as never });
-    await expect(none.id.setProxy({ server: "http://proxy.example.net:3128", username: "u", password: TOKEN })).rejects.toThrow("凭据网关");
+    await expect(none.id.setProxy({ server: "http://proxy.example.net:3128", username: "u", password: TOKEN })).rejects.toThrow("加密存储不可用");
   });
 
   it("a stored proxy whose password has not been turned into its value yet lets nothing out: not straight either", async () => {

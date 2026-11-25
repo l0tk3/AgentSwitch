@@ -193,6 +193,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/passwords/:id/reveal"],
   ["POST", "/passwords/import"],
   ["GET", "/passwords/generate"],
+  ["POST", "/vault/seal"],
   ["GET", "/rooms/:id/secrets"],
   // Ciphertexts only (a value is refused): another Mac seals them for this node's gate (user #304).
   ["POST", "/rooms/:id/secrets"],

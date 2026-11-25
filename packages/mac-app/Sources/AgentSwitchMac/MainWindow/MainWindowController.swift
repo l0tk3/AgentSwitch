@@ -324,7 +324,8 @@ final class MainWindowController: NSObject {
         let ownSealer: BrowserSealer = { [model] request in try await model.gateCLI.seal(request) }
         let sealer: BrowserSealer? = node == nil ? ownSealer : nil
         let kept: UserDefaults? = node == nil ? .standard : nil
-        let browser = BrowserPageModel(service: { [model] in model.client(on: node) }, state: state, defaults: kept, sealer: sealer)
+        let browser = BrowserPageModel(service: { [model] in model.client(on: node) }, state: state, defaults: kept, sealer: sealer,
+                                       vaultSealer: { [model] request in try await model.client(on: node).vaultSeal(request.value) })
         if node != nil {
             browser.remote = true
             browser.screenID = TerminalSizeHolder.screen(onNodeAs: model.client(on: node).screenOwner, unique: "main")

@@ -21,6 +21,9 @@ export class FillRefused extends Error {
 
 /** A whole ciphertext, as people pick one (references belong to one task's run, never to a person). */
 export const CIPHERTEXT = /^enc:v1:[A-Za-z0-9_=-]{16,}$/;
+/** What a profile or the browser keeps of a secret: sealed under the vault's key (vault/seal.ts `asv:1:`), or, from
+ *  before 2026-11-25, a gate's ciphertext. */
+export const SEALED = /^(?:asv:1:|enc:v1:)[A-Za-z0-9_=-]{16,}$/;
 /** The gate's reason is quoted up to this length. */
 const REASON_CHARS = 300;
 

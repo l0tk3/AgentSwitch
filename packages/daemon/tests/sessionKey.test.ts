@@ -109,7 +109,7 @@ describe("a profile's session key", () => {
     await keys.set("claude-code", "default", SEALED);
     expect(store.sessionKeyOf("claude-code", "default")?.sealed).toBe(SEALED);
     // Without the gate nothing can be kept.
-    await expect(new SessionKeys({ store, browser: () => null }).set("claude-code", profile.id, SEALED)).rejects.toThrow(/凭据网关不可用/);
+    await expect(new SessionKeys({ store, browser: () => null }).set("claude-code", profile.id, SEALED)).rejects.toThrow(/加密存储不可用/);
     await browser.host.open({ kind: "you", id: "you", label: "You" }, "https://example.com/");
     await keys.set("claude-code", profile.id, SEALED);
     await keys.set("claude-code", profile.id, null);

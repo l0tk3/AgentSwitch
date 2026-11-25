@@ -6,7 +6,7 @@
  *  The plaintext is in this process for the moment the gate hands it over, and in the browser's own cookies. */
 
 import type { DriverCookie } from "./driver.js";
-import { CIPHERTEXT, type FillResolver } from "./fill.js";
+import { SEALED, type FillResolver } from "./fill.js";
 
 /** Where the keys are kept (profiles/store.ts): the ciphertext, and whether the browser is still to be given it
  *  whatever it has. Setting refuses a profile that is not there, and the Mac's own. */
@@ -49,7 +49,7 @@ export class SessionKeys {
    *  otherwise when it next starts. */
   async set(agent: string, id: string, sealed: string | null): Promise<void> {
     if (sealed === null) { this.o.store.setSessionKey(agent, id, null); return; }
-    if (!CIPHERTEXT.test(sealed)) throw new SessionKeyError("Session key 请以密文（enc:v1:）提供。");
+    if (!SEALED.test(sealed)) throw new SessionKeyError("Session key 请以密文提供。");
     const value = await this.plain(sealed);
     this.o.store.setSessionKey(agent, id, sealed);   // refuses a profile that is not there, and `Default`
     await this.give(agent, id, value, false);
@@ -69,10 +69,10 @@ export class SessionKeys {
   }
 
   private async plain(sealed: string): Promise<string> {
-    if (!this.o.resolve) throw new SessionKeyError("凭据网关不可用，无法保存 session key。");
+    if (!this.o.resolve) throw new SessionKeyError("无法打开 session key（加密存储不可用）。");
     let value: string;
     try { value = (await this.o.resolve(sealed, [CLAUDE_SITE])).value.trim(); }
-    catch { throw new SessionKeyError("凭据网关没有给出这个 session key（它须是为 claude.ai 加密的）。"); }
+    catch { throw new SessionKeyError("这个 session key 打不开，请重新填写。"); }
     if (!SESSION_KEY.test(value)) throw new SessionKeyError("这不是 claude.ai 的 session key（应以 sk-ant-sid 开头）。");
     return value;
   }

@@ -279,6 +279,23 @@ export class ProfileStore {
     this.change(agent, id, (p) => { const { exit: _was, ...rest } = p; return exit ? { ...rest, exit } : rest; });
   }
 
+  /** What `id` keeps sealed is sealed anew (vault/seal.ts: moved off the gate's ciphertexts, 2026-11-25); nothing
+   *  else of it changes — a session key due to its browser stays due. */
+  moveSealed(agent: ProfileAgent, id: string, now: { readonly apiKey?: string; readonly proxyPassword?: string; readonly sessionKey?: string }): void {
+    this.change(agent, id, (p) => ({
+      ...p,
+      ...(now.apiKey && p.api ? { api: { ...p.api, key: now.apiKey } } : {}),
+      ...(now.proxyPassword && p.proxy ? { proxy: { ...p.proxy, password: now.proxyPassword } } : {}),
+      ...(now.sessionKey && p.sessionKey ? { sessionKey: now.sessionKey } : {}),
+    }));
+  }
+
+  /** Every profile kept, by agent: their ids (Default among them where it keeps anything). */
+  kept(): { agent: ProfileAgent; id: string }[] {
+    const file = this.read();
+    return PROFILE_AGENTS.flatMap((agent) => (file.agents?.[agent]?.profiles ?? []).map((p) => ({ agent, id: p.id })));
+  }
+
   private change(agent: ProfileAgent, id: string, edit: (p: NonNullable<Stored["profiles"]>[number]) => NonNullable<Stored["profiles"]>[number]): void {
     const file = this.read();
     const stored = file.agents?.[agent];

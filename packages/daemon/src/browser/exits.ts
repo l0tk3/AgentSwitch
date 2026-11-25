@@ -7,7 +7,7 @@
  *  the traffic comes out — or that it does not. */
 
 import { exitProbe, type ExitInfo } from "./exit.js";
-import { CIPHERTEXT, type FillResolver } from "./fill.js";
+import { SEALED, type FillResolver } from "./fill.js";
 import { Forwarder, type ForwarderAddress } from "./forwarder.js";
 import { proxyPlace, type ProxySetting } from "./identity.js";
 
@@ -38,7 +38,7 @@ export function checkedProxy(proxy: ProxySetting): ProxySetting {
   const server = proxy.server.trim();
   if (!proxyPlace(server)) throw new ExitError("代理地址须写作 scheme://host:port（http、https、socks4、socks5）。");
   const username = proxy.username?.trim() || undefined, password = proxy.password?.trim() || undefined;
-  if (password && !CIPHERTEXT.test(password)) throw new ExitError("代理密码请以密文（enc:v1:）提供。");
+  if (password && !SEALED.test(password)) throw new ExitError("代理密码请以密文提供。");
   if (password && !username) throw new ExitError("带密码的代理需要用户名。");
   return { server, ...(username ? { username } : {}), ...(password ? { password } : {}) };
 }
@@ -134,10 +134,10 @@ export class ExitPool {
     if (!proxy.username && !proxy.password) return proxy.server;
     let secret = "";
     if (proxy.password) {
-      if (!this.opts.resolve) throw new ExitError("凭据网关不可用，无法使用带密码的代理。");
+      if (!this.opts.resolve) throw new ExitError("无法打开代理的密码（加密存储不可用）。");
       // The gate checks the ciphertext against the proxy's own host, as it would a page's.
       try { secret = (await this.opts.resolve(proxy.password, [`http://${place.host}:${place.port}/`])).value; }
-      catch { throw new ExitError("凭据网关没有给出这个代理的密码。"); }
+      catch { throw new ExitError("代理的密码打不开，请重新填写。"); }
     }
     const user = encodeURIComponent(proxy.username ?? "");
     return `${place.scheme}://${user}${secret ? `:${encodeURIComponent(secret)}` : ""}@${place.host}:${place.port}`;
