@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { plannerFor } from "../src/daemon.js";
 import { nextAction } from "../src/router/loop.js";
-import { loadTargets } from "../src/router/targets.js";
+import { loadTargets } from "../src/models/targets.js";
 
 const targets = loadTargets(join(import.meta.dirname, "..", "config", "targets.yaml"));
 // The router's pick comes from argv (harness/model), else targets.yaml's default.

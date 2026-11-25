@@ -16,7 +16,7 @@ import type { Uploads } from "../files/uploads.js";
 import type { QuotaService } from "../quota/index.js";
 import type { RoutingLog } from "../router/log.js";
 import type { RouteDeps } from "../router/route.js";
-import type { Targets } from "../router/targets.js";
+import type { Targets } from "../models/targets.js";
 import { zodIssues } from "../util/zod.js";
 import type { CwdRules } from "./cwdPolicy.js";
 import type { SessionMonitor } from "../sessions/monitor.js";

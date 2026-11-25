@@ -4,7 +4,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { opencodeRouter } from "../src/router/routers/opencode.js";
-import { loadTargets } from "../src/router/targets.js";
+import { loadTargets } from "../src/models/targets.js";
 import { routerSummarizer } from "../src/threads/summary.js";
 
 const HERE = new URL(".", import.meta.url).pathname;

@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { route, type RouteResult } from "../src/router/route.js";
 import { opencodeRouter } from "../src/router/routers/opencode.js";
-import { loadTargets, modelSpec, type Targets } from "../src/router/targets.js";
+import { loadTargets, modelSpec, type Targets } from "../src/models/targets.js";
 
 type Sample = { id: string; input: string; expect: { harness?: string | string[]; cost?: string[]; needs_browser?: boolean }; tags: string[] };
 

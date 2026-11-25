@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogText, markUnavailable, modelKey, modelSpec, parseTargets } from "../src/router/targets.js";
+import { catalogText, markUnavailable, modelKey, modelSpec, parseTargets } from "../src/models/targets.js";
 import { realTargets } from "./helpers.js";
 
 describe("targets.yaml", () => {

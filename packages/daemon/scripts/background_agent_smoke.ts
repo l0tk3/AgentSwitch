@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { realExecutors } from "../src/daemon.js";
-import { loadTargets } from "../src/router/targets.js";
+import { loadTargets } from "../src/models/targets.js";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const targets = loadTargets(join(HERE, "..", "config", "targets.yaml"));

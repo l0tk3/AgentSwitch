@@ -2,7 +2,7 @@
 
 import type { Decision } from "./decision.js";
 import type { Guards } from "./record.js";
-import { allowedFor, modelSpec, type Targets } from "./targets.js";
+import { allowedFor, modelSpec, type Targets } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 
 /** Fraction of quota left per harness, 0..1. Missing harness = unknown = treated as available. */

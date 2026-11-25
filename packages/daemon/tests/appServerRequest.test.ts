@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexQuota } from "../src/quota/codex.js";
 import { appServerRequest } from "../src/harness/appserver.js";
-import { discoverCodexModels } from "../src/router/discovery.js";
+import { discoverCodexModels } from "../src/models/discovery.js";
 
 // A local stand-in for `codex app-server`: JSON-RPC over stdio, never a model or the network. FAKE_MODE picks the
 // behaviour; the default answers initialize, asks the client one server→client question, then answers the call.

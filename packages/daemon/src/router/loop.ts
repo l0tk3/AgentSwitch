@@ -8,7 +8,7 @@ import { loopSection, stepsMessage, type StepRecord } from "./prompt.js";
 import { routerSystem, verdictFor, type RouteDeps, type RouteRequest } from "./route.js";
 import type { Router } from "../core/modelCall.js";
 import type { TransferGrant } from "../core/transfer.js";
-import { markUnavailable } from "./targets.js";
+import { markUnavailable } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import type { Verdict } from "./validate.js";
 import { zodIssues } from "../util/zod.js";

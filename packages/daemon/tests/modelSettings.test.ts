@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { buildDaemon, defaultConfig, remotePort, type DaemonConfig } from "../src/daemon.js";
-import { applyModelOverlay, modelSettings, overlayProblems, readModelOverlay, withModelOverlay, writeModelOverlay } from "../src/router/modelOverlay.js";
-import { markUnavailable, parseTargets, type Targets } from "../src/router/targets.js";
+import { applyModelOverlay, modelSettings, overlayProblems, readModelOverlay, withModelOverlay, writeModelOverlay } from "../src/models/modelOverlay.js";
+import { markUnavailable, parseTargets, type Targets } from "../src/models/targets.js";
 import { realTargets, TARGETS_PATH } from "./helpers.js";
 
 /** A catalog with a wildcard entry and an unavailable model, to check what counts as selectable. */

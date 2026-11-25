@@ -1,7 +1,7 @@
 /** The four gates of background-v0 §1: a global cap, the parent task, one task per thread and per cwd, and one
  *  slot per harness `max_concurrent`. Waiting is announced with a `waiting` event; cancelling a waiter works. */
 
-import type { Targets } from "../router/targets.js";
+import type { Targets } from "../models/targets.js";
 import type { EngineContext } from "./context.js";
 import { KeyedLock, Semaphore, type Release } from "./locks.js";
 import { TERMINAL, type Task } from "./types.js";

@@ -8,7 +8,7 @@ import type { ExtensionsSummary, ThreadBrief } from "../router/prompt.js";
 import type { RouteDeps } from "../router/route.js";
 import type { Router } from "../core/modelCall.js";
 import type { RefusalSource } from "../router/refusal.js";
-import type { Targets } from "../router/targets.js";
+import type { Targets } from "../models/targets.js";
 import type { Quota } from "../router/validate.js";
 import { loadMemory } from "../threads/memory.js";
 import { RECORD_WINDOW_MS } from "../router/record.js";

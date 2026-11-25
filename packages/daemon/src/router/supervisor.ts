@@ -12,19 +12,12 @@ import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
 
 /** A run silent this long gets a check-in (targets.yaml `router.supervisor.watchdog_ms` default). */
 /** 2026-09-24: 3 min (was 8) — a phone user reads 8 silent minutes as a hang; a check-in is one cheap call. */
-const DEFAULT_WATCHDOG_MS = 3 * 60_000;
 /** How often the watchdog may say "continue" before the user is asked (`max_continues` default). */
-const DEFAULT_MAX_CONTINUES = 3;
 /** Characters of each piece of material in the supervisor's messages. */
 const BUDGET = { brief: 4000, userMessage: 6000, context: 6000, evidence: 2000, result: 8000, diff: 3000 } as const;
 
-export const SupervisorConfig = z.object({
-  approvals: z.boolean().default(true),
-  watchdog_ms: z.number().int().min(0).default(DEFAULT_WATCHDOG_MS),
-  acceptance: z.boolean().default(true),
-  max_continues: z.number().int().min(0).default(DEFAULT_MAX_CONTINUES),
-});
-export type SupervisorConfig = z.infer<typeof SupervisorConfig>;
+export { SupervisorConfig } from "../models/targets.js";
+import type { SupervisorConfig } from "../models/targets.js";
 
 /** Actions the router may never approve on the user's behalf: irreversible or outside any brief. */
 const DESTRUCTIVE = [

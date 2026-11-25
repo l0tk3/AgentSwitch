@@ -19,7 +19,7 @@ import { narrowTransfer, pinTransfer, type TransferGrant } from "../core/transfe
 import { defaultTargetExcluding, route, type RouteDeps, type RouteRequest, type RouteResult } from "../router/route.js";
 import type { Router } from "../core/modelCall.js";
 import { routerSupervisor } from "../router/supervisor.js";
-import { categoryOf } from "../router/targets.js";
+import { categoryOf } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import type { Verdict } from "../router/validate.js";
 import { gitDiffSummary } from "../threads/handoff.js";

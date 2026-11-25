@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const ROOT = "(root)";
 
-const UPPER = ["util", "core", "harness", "files", "extensions", "secrets", "quota", "sessions"] as const;
+const UPPER = ["util", "core", "harness", "files", "extensions", "secrets", "quota", "sessions", "models"] as const;
 
 /** Which layers each layer may import (besides itself). Peers not listed may not import each other: router and
  *  executors, router and threads, threads and secrets. */
@@ -33,7 +33,9 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   vault: [],
   /** profiles-v0: each agent's sign-ins and their folders; a leaf like sessions. */
   profiles: ["util", "core"],
-  router: ["util", "core", "harness"],
+  /** The catalog of models and what each agent offers: the terminals' menus too. */
+  models: ["util", "core", "harness"],
+  router: ["util", "core", "harness", "models"],
   executors: [...UPPER],
   engine: [...UPPER, "threads", "router", "executors"],
   /** assistant-v0 §1.1: the router as the user's assistant; above the engine, below the API. */

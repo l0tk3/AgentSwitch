@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Decision } from "../src/router/decision.js";
 import { validateDecision, validatePin, type Context } from "../src/router/validate.js";
-import { markUnavailable } from "../src/router/targets.js";
+import { markUnavailable } from "../src/models/targets.js";
 import { realTargets } from "./helpers.js";
 
 const targets = realTargets();

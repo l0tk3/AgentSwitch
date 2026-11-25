@@ -4,12 +4,20 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
 import { TargetRef } from "../core/target.js";
-import { SupervisorConfig } from "./supervisor.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
 
 /** targets.yaml defaults: one router-model call, and one planner call (process start and a JSON correction included). */
 const ROUTER_TIMEOUT_MS = 20_000;
 const PLANNER_TIMEOUT_MS = 120_000;
+
+/** docs/supervisor-v0.md (kept with the catalog's schema: targets.yaml may carry it). */
+export const SupervisorConfig = z.object({
+  approvals: z.boolean().default(true),
+  watchdog_ms: z.number().int().min(0).default(3 * 60_000),
+  acceptance: z.boolean().default(true),
+  max_continues: z.number().int().min(0).default(3),
+});
+export type SupervisorConfig = z.infer<typeof SupervisorConfig>;
 
 export const Cost = z.enum(["free", "low", "mid", "high", "top"]);
 

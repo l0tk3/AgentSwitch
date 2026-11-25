@@ -4,7 +4,7 @@ import { defaultTarget } from "../src/router/defaultPolicy.js";
 import { systemPrompt } from "../src/router/prompt.js";
 import { route } from "../src/router/route.js";
 import { echoRouter } from "../src/router/routers/echo.js";
-import { allowedFor, catalogText, categoryOf, parseTargets } from "../src/router/targets.js";
+import { allowedFor, catalogText, categoryOf, parseTargets } from "../src/models/targets.js";
 import { validateDecision, validatePin } from "../src/router/validate.js";
 import { decisionJson, realTargets } from "./helpers.js";
 

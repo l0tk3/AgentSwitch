@@ -4,7 +4,7 @@ import { withHostNote } from "../util/hostNote.js";
 import { contextSection } from "./context.js";
 import { EMPTY_CONTEXT, type LoadedContext } from "../core/contextDoc.js";
 import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
-import { type Targets, catalogText } from "./targets.js";
+import { type Targets, catalogText } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import { evidenceExcerpt } from "../core/evidence.js";
 import type { TransferGrant } from "../core/transfer.js";

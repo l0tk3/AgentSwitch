@@ -5,8 +5,8 @@
  *  redesign). GET still returns `default`, equal to the router target, for older Mac apps; PUT refuses it. */
 
 import type { Hono } from "hono";
-import { applyModelOverlay, ModelOverlayChange, modelSettings, overlayProblems, readModelOverlay, writeModelOverlay } from "../router/modelOverlay.js";
-import type { Targets } from "../router/targets.js";
+import { applyModelOverlay, ModelOverlayChange, modelSettings, overlayProblems, readModelOverlay, writeModelOverlay } from "../models/modelOverlay.js";
+import type { Targets } from "../models/targets.js";
 import { issues, type ApiDeps } from "./shared.js";
 
 /** The router model: the only thing the overlay changes (the fallback target follows it). */

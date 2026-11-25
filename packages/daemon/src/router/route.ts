@@ -8,7 +8,7 @@ import { classify, defaultTarget } from "./defaultPolicy.js";
 import { askJson } from "./ask.js";
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "../core/modelCall.js";
-import { categoryOf, markUnavailable, type Targets } from "./targets.js";
+import { categoryOf, markUnavailable, type Targets } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import { validateDecision, validatePin, validateTarget, type Quota, type Verdict } from "./validate.js";
 

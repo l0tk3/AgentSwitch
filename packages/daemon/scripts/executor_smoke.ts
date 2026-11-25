@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { realExecutors } from "../src/daemon.js";
-import { loadTargets } from "../src/router/targets.js";
+import { loadTargets } from "../src/models/targets.js";
 import { classifyFailure } from "../src/router/failure.js";
 
 const HERE = new URL(".", import.meta.url).pathname;

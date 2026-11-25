@@ -1,6 +1,6 @@
 /** Where a task goes when the router is unavailable or not trusted. Coarse, deterministic. */
 
-import { categoryOf, modelKey, type Targets } from "./targets.js";
+import { categoryOf, modelKey, type Targets } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import type { Quota } from "./validate.js";
 

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { parseTargets, type Targets } from "../src/router/targets.js";
+import { parseTargets, type Targets } from "../src/models/targets.js";
 
 /** A task folder of its own beside the daemon's temporary home. Not "/tmp": on Linux that is the temporary folder
  *  itself, so it holds the daemon's home and the cwd policy rightly refuses it (macOS's is under /var/folders). */

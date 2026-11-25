@@ -4,7 +4,7 @@
 import { existsSync, rmSync } from "node:fs";
 import type { Decision } from "../router/decision.js";
 import { kindOf } from "../router/route.js";
-import type { Targets } from "../router/targets.js";
+import type { Targets } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import { foldThread } from "../threads/fold.js";
 import { buildHandoff, gitDiffSummary, renderHandoff } from "../threads/handoff.js";

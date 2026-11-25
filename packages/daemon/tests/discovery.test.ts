@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferCost, mergeDiscovered } from "../src/router/discovery.js";
+import { inferCost, mergeDiscovered } from "../src/models/discovery.js";
 import { realTargets } from "./helpers.js";
 
 describe("model discovery", () => {

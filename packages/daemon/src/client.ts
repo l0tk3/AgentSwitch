@@ -5,7 +5,7 @@ import type { Approval, Task, TaskEvent } from "./engine/types.js";
 import type { AgentProfiles, Profile, ProfileAgent, ProfileKind } from "./profiles/store.js";
 import type { Leftover } from "./terminals/leftovers.js";
 import type { ModelProbe } from "./profiles/apiKeys.js";
-import type { ModelSettings } from "./router/modelOverlay.js";
+import type { ModelSettings } from "./models/modelOverlay.js";
 import type { DiscoveredSkill, McpServer, Skill } from "./extensions/types.js";
 import type { PlatformMemory } from "./threads/platformMemory.js";
 

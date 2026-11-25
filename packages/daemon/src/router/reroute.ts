@@ -3,7 +3,7 @@
 
 import type { Decision } from "./decision.js";
 import { hasSideEffects, type FailureKind, type RefusalSignal, type SideEffects } from "../core/outcome.js";
-import { markUnavailable, type Targets } from "./targets.js";
+import { markUnavailable, type Targets } from "../models/targets.js";
 import type { TargetRef } from "../core/target.js";
 import { validateDecision, validateTarget, type Quota } from "./validate.js";
 

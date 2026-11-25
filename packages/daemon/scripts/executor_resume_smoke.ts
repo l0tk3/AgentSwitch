@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { realExecutors } from "../src/daemon.js";
 import type { ExecutionInput } from "../src/executors/types.js";
-import { loadTargets } from "../src/router/targets.js";
+import { loadTargets } from "../src/models/targets.js";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const [harness] = process.argv.slice(2);
