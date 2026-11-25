@@ -30,6 +30,23 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (Passwords) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "lights" {
+                    // One settings window gone through every page, as a person does: where the window's lights and
+                    // its content's top are on each (user #401: 红绿灯的位置不一致). The same on all, or it fails.
+                    let navigation = SettingsNavigation(wizardStore: SetupWizardStore(defaults: nil))
+                    let window = SettingsWindowController.makeWindow(model: model, navigation: navigation, windowClass: PreviewWindow.self, appearance: NSAppearance(named: .darkAqua))
+                    var seen = Set<String>()
+                    for tab in SettingsTab.allCases + SettingsTab.allCases.reversed() {
+                        navigation.tab = tab
+                        try await settle()
+                        let close = window.standardWindowButton(.closeButton)
+                        let at = close.map { $0.convert($0.bounds, to: nil) } ?? .zero
+                        let line = "lights \(Int(at.minX)),\(Int(window.frame.height - at.maxY)) bar \(Int(window.frame.height - window.contentLayoutRect.maxY)) items \(window.toolbar?.items.count ?? -1)"
+                        seen.insert(line.components(separatedBy: " items").first!)
+                        FileHandle.standardError.write(Data("\(tab.rawValue): \(line)\n".utf8))
+                    }
+                    exit(seen.count == 1 ? 0 : 1)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "redaction" {
                     // docs/model-gate-v0.md: Settings › Redaction over sample words and logs.
                     RedactionDemo.current = RedactionDemo.make()

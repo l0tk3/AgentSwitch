@@ -232,6 +232,9 @@ struct SettingsView: View {
                 page(navigation.tab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            // Every page has something in the toolbar: a page with nothing there had a lower bar, with the window's
+            // lights and its title somewhere else than on the pages with a button (user #401).
+            .toolbar { ToolbarKeeper() }
         }
         .navigationTitle(navigation.tab.title)
         .background(WindowTitle(title: navigation.tab.title))
@@ -264,6 +267,19 @@ struct SettingsView: View {
         case .general: GeneralView()
         }
     }
+}
+
+/// Something in the toolbar that is not seen, so that the window keeps its toolbar on every page.
+private struct ToolbarKeeper: ToolbarContent {
+    var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .navigation) { nothing }.sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .navigation) { nothing }
+        }
+    }
+
+    private var nothing: some View { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
 }
 
 /// The page title in the toolbar, as System Settings does (the hosting controller does not bridge a split view's title).
