@@ -87,6 +87,8 @@ describe("over HTTP (this Mac's screens only)", () => {
     expect((await call("DELETE", `/passwords/${made.json.entry.id}`)).status).toBe(200);
     expect((await call("DELETE", "/passwords/nope")).status).toBe(404);
     expect(changed).toBe(4);
-    for (const p of ["/passwords", "/passwords/x/reveal"]) { expect(remoteAllowed("GET", p)).toBe(false); expect(remoteAllowed("POST", p)).toBe(false); }
+    // Another node's book is seen from a paired Mac (user #356).
+    expect(remoteAllowed("GET", "/passwords")).toBe(true);
+    expect(remoteAllowed("POST", "/passwords/x/reveal")).toBe(true);
   });
 });

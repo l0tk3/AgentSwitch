@@ -1,5 +1,5 @@
-/** The password book (vault/passwords.ts; user #345-#351): this Mac's screens only — none of it is on the remote
- *  allowlist. The list goes out without its secrets; `POST /passwords/:id/reveal` gives one entry's password, note and
+/** The password book (vault/passwords.ts; user #345-#351): this node's screens, and a paired Mac's (remote/routes.ts,
+ *  user #356). The list goes out without its secrets; `POST /passwords/:id/reveal` gives one entry's password, note and
  *  current 2FA code, asked by the Mac once the user passed Touch ID. */
 
 import type { Context, Hono } from "hono";
@@ -15,7 +15,7 @@ const Entry = z.object({
 const clean = (d: z.infer<typeof Entry>): EntryInput => Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined)) as EntryInput;
 
 export function mountPasswords(app: Hono, deps: ApiDeps): void {
-  const off = { error: "密码本只在这台 Mac 的服务上可用。" };
+  const off = { error: "这个节点的服务没有密码本（需要更新 AgentSwitch）。" };
   const failed = (c: Context, err: unknown) => {
     if (err instanceof PasswordError) return c.json({ error: err.message }, err.status);
     throw err;

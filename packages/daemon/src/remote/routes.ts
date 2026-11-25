@@ -185,6 +185,14 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/rooms"],
   ["GET", "/rooms/attention"],
   ["GET", "/rooms/avatars"],
+  // The password book (vault/passwords.ts; user #356: 我可以看另一个节点的吗): a paired Mac or phone sees this node's.
+  ["GET", "/passwords"],
+  ["POST", "/passwords"],
+  ["PATCH", "/passwords/:id"],
+  ["DELETE", "/passwords/:id"],
+  ["POST", "/passwords/:id/reveal"],
+  ["POST", "/passwords/import"],
+  ["GET", "/passwords/generate"],
   ["GET", "/rooms/:id/secrets"],
   // Ciphertexts only (a value is refused): another Mac seals them for this node's gate (user #304).
   ["POST", "/rooms/:id/secrets"],

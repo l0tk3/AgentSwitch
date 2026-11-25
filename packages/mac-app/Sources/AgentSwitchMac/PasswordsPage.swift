@@ -20,8 +20,11 @@ struct PasswordsPage: View {
             detail.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Look.ground)
-        .task(id: state.page == .passwords && state.windowVisible) {
-            model.client = { [app] in app.client }
+        // Another node's book when the window is on that node (user #356).
+        .task(id: "\(state.page == .passwords && state.windowVisible)|\(state.nodeId ?? "")") {
+            let node = state.nodeId
+            if model.node != node { model.switchNode(node) }
+            model.client = { [app] in app.client(on: node) }
             if let demo = PasswordsDemo.current { model.show(demo: demo); return }
             guard state.page == .passwords && state.windowVisible else { return }
             await model.load()
@@ -227,6 +230,11 @@ private struct PasswordEditor: View {
 @Observable
 final class PasswordsModel {
     @ObservationIgnored var client: () -> DaemonClient = { fatalError("no client") }
+    /// The node whose book this is; nil: this Mac.
+    @ObservationIgnored private(set) var node: String?
+
+    /// Another node: nothing of the last one's is kept on screen.
+    func switchNode(_ id: String?) { node = id; items = []; loaded = false; selected = nil; secret = nil; showing = false; editing = false; said = nil; provedAt = .distantPast }
     private(set) var items: [PasswordItem] = []
     private(set) var loaded = false
     var query = ""
