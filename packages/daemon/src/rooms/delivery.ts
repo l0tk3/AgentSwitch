@@ -289,6 +289,13 @@ export class RoomDelivery {
     return `${this.envelope(last.room, last.message, last.seat)}${before}\n\n---\n\n${how}`;
   }
 
+  private secretsLine(room: Room): string[] {
+    const all = this.o.store.secrets(room.id);
+    if (!all.length) return [];
+    const names = all.slice(0, 6).map((x) => x.name).join(", ") + (all.length > 6 ? `, … ${all.length - 6} more` : "");
+    return [`Secrets: ${all.length} in this room (${names}) — room_info show=secrets gives each one's token and use, room_secret uses one through the gate; never ask for a value.`];
+  }
+
   /** One message as its addressee gets it (§3). */
   envelope(room: Room, message: Message, to: Seat): string {
     const who = (handle: string): string => {
@@ -311,6 +318,9 @@ export class RoomDelivery {
       hm(message.at),
       ...(message.files?.length ? [`Files: ${message.files.join(", ")}`] : []),
       ...(message.expects === "none" ? ["Reply: not expected"] : message.expects === "answer" ? ["Reply: expected"] : []),
+      // The room's secrets said on every message, names only: a member asked to log in or call an API knows they are
+      // there without thinking to look (user #307: 没给房间里的人 secret 的使用方式吗？).
+      ...this.secretsLine(room),
       "",
       message.text,
     ];

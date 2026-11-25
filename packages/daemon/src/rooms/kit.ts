@@ -9,6 +9,7 @@ import type { RoomDelivery } from "./delivery.js";
 import { YOU } from "./names.js";
 import { agentName, STATE_MEETS, type SeatLookup } from "./state.js";
 import { lineOf } from "./secrets.js";
+import { valuesIn, type GateCaller } from "./gateCall.js";
 import { classicFrom, defaultBg, LIBRARY_SAYS, pixelFrom, type ClassicAvatar, type PixelAvatar } from "./avatars.js";
 import { MAX_SESSION_TEXT, MAX_STARTED, RoomError, handleIn, type Claim, type Message, type Room, type RoomStore, type Seat, type SeatWas, type Task } from "./store.js";
 
@@ -120,6 +121,21 @@ const TOOLS: readonly KitTool[] = [
     },
   },
 ];
+
+/** Only where a room has secrets (and for an agent that lists its tools once): the gate's tools for them (user #309). */
+const SECRET_TOOL: KitTool = {
+    name: "room_secret",
+    description: "Use a room secret (room_info secrets) through the credential gate; you never see the value. use http: method, url, headers, body, the token where the value goes. exec: argv (no shell), env {NAME: token}, in your folder. otp/describe: token.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        use: { type: "string", enum: ["http", "exec", "otp", "describe"] },
+        token: { type: "string" }, method: { type: "string" }, url: { type: "string" }, headers: { type: "object" }, body: { type: "string" },
+        argv: { type: "array", items: { type: "string" } }, env: { type: "object" }, room: ROOM_ARG,
+      },
+      required: ["use"],
+    },
+  };
 
 /** For an admin: a session whose `Admin` switch (the `canAdd` of its seat) is on. */
 const ORG_TOOLS: readonly KitTool[] = [
@@ -293,7 +309,8 @@ export async function closeSeat(o: { readonly store: RoomStore; readonly stop: (
 
 export class RoomKit {
   constructor(private readonly o: { readonly store: RoomStore; readonly seat: SeatLookup; readonly delivery: RoomDelivery; readonly changed?: (roomId: string) => void; readonly org?: () => KitOrg | null; readonly now?: () => number; /** Tests: how long a started session is waited for. */ readonly kitWaitMs?: number;
-    /** How many sessions a session may start (MAX_STARTED; the dispatch its own, 2026-11-24). */ readonly startLimit?: (terminal: string) => number }) {}
+    /** How many sessions a session may start (MAX_STARTED; the dispatch its own, 2026-11-24). */ readonly startLimit?: (terminal: string) => number;
+    /** The credential gate's tools, for room_secret (gateCall.ts); null: no gate on this node. */ readonly gate?: () => GateCaller | null }) {}
 
   private readonly seen = new Set<string>();
 
@@ -307,8 +324,10 @@ export class RoomKit {
   tools(terminal: string, always = false): readonly KitTool[] {
     // `always`: for an agent that lists its tools once, when it starts, and never again (Codex): it is seated long
     // after, and would sit in the room with no way to speak. Outside every room a call is answered with why not.
-    if (!this.o.store.roomsOf(terminal).length) return always ? TOOLS : [];
-    return this.o.store.mayAdd(terminal) && this.o.org?.() ? [...TOOLS, ...ORG_TOOLS] : TOOLS;
+    const sits = this.o.store.roomsOf(terminal);
+    if (!sits.length) return always ? [...TOOLS, SECRET_TOOL] : [];
+    const own = always || sits.some((x) => this.o.store.secrets(x.room.id).length) ? [...TOOLS, SECRET_TOOL] : TOOLS;
+    return this.o.store.mayAdd(terminal) && this.o.org?.() ? [...own, ...ORG_TOOLS] : own;
   }
 
   /** What changes when the tools a terminal has change: a session's agent is told to list them again. */
@@ -331,7 +350,7 @@ export class RoomKit {
         if (!this.o.store.mayAdd(terminal) || !org) throw new RoomError(403, NOT_ALLOWED);
         return { text: await this.organize(org, terminal, str(args.action) ?? "", args) };
       }
-      if (!TOOLS.some((t) => t.name === name)) return { text: `There is no tool ${asked} in the Chatroom Kit.`, isError: true };
+      if (!TOOLS.some((t) => t.name === name) && name !== SECRET_TOOL.name) return { text: `There is no tool ${asked} in the Chatroom Kit.`, isError: true };
       const { room, seat } = this.where(terminal, str(args.room));
       this.o.store.count(room.id, seat.handle, { calls: 1 }, int(args.task) ?? (name === "room_tasks" ? int(args.n) : undefined));
       switch (name) {
@@ -349,7 +368,7 @@ export class RoomKit {
             }
             case "secrets": {
               const all = this.o.store.secrets(room.id);
-              return { text: all.length ? [`${all.length} secret${all.length === 1 ? "" : "s"} of "${room.name}" — ciphertexts: use the token where the value goes, the gate puts the value in. Never ask for or write a value.`, ...all.map(lineOf)].join("\n") : "No secrets in this room. If you need a login or a key, ask the user (@you) to add it to the room's Secrets." };
+              return { text: all.length ? [`${all.length} secret${all.length === 1 ? "" : "s"} of "${room.name}" — ciphertexts: use them with room_secret (http, exec, otp), which goes through the gate; the value is put in there. Never ask for or write a value.`, ...all.map(lineOf)].join("\n") : "No secrets in this room. If you need a login or a key, ask the user (@you) to add it to the room's Secrets." };
             }
             case "avatars": {
               const mine = this.o.store.avatarOf(seat);
@@ -358,12 +377,34 @@ export class RoomKit {
             default: return { text: this.members(room, seat) };
           }
         }
+        case "room_secret": return await this.secret(terminal, room, args);
         default: return { text: await this.update(terminal, room, seat, args) };
       }
     } catch (err) {
       if (err instanceof RoomError) return { text: err.message, isError: true };
       throw err;
     }
+  }
+
+  /** A secret of the room used through the gate (user #309): only the room's own ciphertexts, and at least one. */
+  private async secret(terminal: string, room: Room, args: Record<string, unknown>): Promise<KitAnswer> {
+    const gate = this.o.gate?.();
+    if (!gate) return { text: "The credential gate is not set up on this node: ask the user (@you) to install it (设置 › 环境 › Gateway Service).", isError: true };
+    const use = str(args.use);
+    const call = use === "http" ? { tool: "secret_http" as const, args: { method: str(args.method) ?? "GET", url: str(args.url) ?? "", ...(args.headers && typeof args.headers === "object" ? { headers: args.headers } : {}), ...(typeof args.body === "string" ? { body: args.body } : {}) } }
+      : use === "exec" ? { tool: "secret_exec" as const, args: { argv: Array.isArray(args.argv) ? args.argv : [], env: args.env && typeof args.env === "object" ? args.env : {} } }
+      : use === "otp" ? { tool: "secret_otp" as const, args: { token: str(args.token) ?? "" } }
+      : use === "describe" ? { tool: "secret_describe" as const, args: { token: str(args.token) ?? "" } }
+      : null;
+    if (!call) return { text: "Say `use`: http, exec, otp or describe.", isError: true };
+    const ours = new Set(this.o.store.secrets(room.id).map((x) => x.token));
+    const used = valuesIn(call.args);
+    if (!used.length) return { text: `No token of the room in the call: put one where the value goes (room_info secrets lists ${ours.size ? "them" : "none — ask the user (@you) to add one"}).`, isError: true };
+    const strange = used.filter((t) => !ours.has(t));
+    if (strange.length) return { text: `Only the tokens of "${room.name}" work here (room_info secrets); ${strange.length} in the call ${strange.length === 1 ? "is" : "are"} not among them. Copy a token whole.`, isError: true };
+    const cwd = this.o.seat(terminal)?.card.cwd;
+    const r = await gate(call.tool, call.args, cwd || undefined);
+    return r.isError ? { text: r.text, isError: true } : { text: r.text };
   }
 
   private async update(terminal: string, room: Room, seat: Seat, args: Record<string, unknown>): Promise<string> {

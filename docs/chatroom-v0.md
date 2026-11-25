@@ -252,6 +252,7 @@ Reply to: #39
 - **长消息折叠**（用户 #280）：超过 12 行（或约 720 字）的消息先显示 12 行，下面「展开全文 / 收起」。
 - **头像**（`rooms/avatars.ts`）：每个会话两份，像素外观一份（40 个小像素脸、48 个 16×16 像素人物——DiceBear Pixel Art，CC0——或自己画 5×5），经典外观一份（60 个表情或任意一个表情，加底色）；没选时像素外观用席位的脸，经典外观用名字首字母。跟着会话走（按它的对话 id，之前按终端），所有房间一样，恢复不变。会话用 `room_update what=avatar` 自己换，`room_info show=avatars` 看库；你在名片上换（`PUT /rooms/:id/seats/:handle/avatar`）；`GET /rooms/avatars` 是库。
 - **密钥**（`rooms/secrets.ts`）：房间里的登录、API key、命令用的值。在 Mac 上加，网关当场封成密文（网站：http+fill，只限填的网址；API：http；命令：exec），服务只收 `enc:v1:` 密文，给明文就拒绝。可以导出模板、填好导入（之后提示把明文文件移到废纸篓），密文导出成 JSON 再导入别的房间。成员 `room_info show=secrets` 看到名称、网址、账号、密文和用法。手机上只能看、能删。
+  - 2026-11-25（用户 #304、#307、#309）：别的节点的房间也能加，按那台节点网关的公钥封（`/gate/pubkey`），`POST /rooms/:id/secrets` 放进远程允许表（只收密文）。房间有密钥时，每条消息的信封多一行 `Secrets: N in this room (名称…)`。终端不走网关（10-08 起），所以 Kit 多一个 `room_secret`（只在房间有密钥时列出，Codex 一直有）：`http` / `exec` / `otp` / `describe`，服务每次在成员的文件夹里起一个 `secret-gate mcp` 转一次调用，网关解密、发出或运行、再脱敏，值不经过服务；只认本房间的密文。共享浏览器还填不了（代理人标签页的填写被拒，见 browser-v0 §1），网站要在页面上登录时请用户自己「Fill Ciphertext」。
 
 ## 11. 分步
 

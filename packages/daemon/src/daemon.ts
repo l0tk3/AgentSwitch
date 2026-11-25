@@ -130,6 +130,7 @@ import { forgetTerminalFiles, sweepAttachments, sweepTerminalFiles } from "./ter
 import { BRIDGE_SCRIPT, bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
 import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
+import { gateCaller } from "./rooms/gateCall.js";
 import { exitLookup } from "./browser/exit.js";
 import { ExitPool } from "./browser/exits.js";
 import { claudeSignedIn, codexSignedIn } from "./terminals/signIn.js";
@@ -530,7 +531,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   let roomAsk: Ask | null = null;
   // The new dispatch (api/dispatchDesk.ts): a session at the 调度台 room; it may start more sessions than an admin.
   const dispatchDesk = new DispatchDesk({ home: cfg.home, rooms, ask: (method, path, body) => (roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } })), changed: () => roomDelivery.look() });
-  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk, roomPolicy) : null), startLimit: (terminal) => dispatchDesk.limitOf(terminal) ?? MAX_STARTED });
+  const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk, roomPolicy) : null), startLimit: (terminal) => dispatchDesk.limitOf(terminal) ?? MAX_STARTED,
+    gate: () => ((g) => (g ? gateCaller(g) : null))(defaultGate()) });
   let seatRewind: SeatRewind | null = null;
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({

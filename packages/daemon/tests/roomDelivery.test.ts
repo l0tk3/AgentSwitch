@@ -172,6 +172,30 @@ describe("the Chatroom Kit", () => {
     expect(delivery.atTurnEnd("t3")).toContain("20:41\nFiles: /w/api.md\n\n@ios 看这个");
   });
 
+  it("says the room's secrets on each message and uses them through the gate, only the room's own (user #307, #309)", async () => {
+    const calls: { tool: string; args: Record<string, unknown>; cwd: string | undefined }[] = [];
+    const { store, delivery, room } = made();
+    const seatOf = (terminal: string): SeatLive | null => ({ state: "idle", card: { agent: "claude-code", name: terminal, cwd: `/w/${terminal}`, model: null, profile: null, mode: null, node: null } });
+    const kit = new RoomKit({ store, seat: seatOf, delivery, gate: () => async (tool, args, cwd) => { calls.push({ tool, args, cwd }); return { text: "200 ok", isError: false }; } });
+    const token = `enc:v1:${"A".repeat(40)}`;
+    expect(kit.tools("t1").map((t) => t.name)).not.toContain("room_secret");
+    store.addSecrets(room.id, [{ name: "Janus 登录", kind: "site", url: "https://janus.example", account: "ops", token }]);
+    expect(kit.tools("t1").map((t) => t.name)).toContain("room_secret");
+    store.post(room.id, { from: "you", text: "@ios 试试", to: ["ios"] });
+    expect(delivery.atTurnEnd("t3")).toContain("Secrets: 1 in this room (Janus 登录) — room_info show=secrets");
+    expect((await kit.call("t1", "room_info", { show: "secrets" })).text).toContain("room_secret use http");
+    expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login" })).toMatchObject({ isError: true, text: expect.stringContaining("No token of the room") });
+    expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login", body: `p=enc:v1:${"B".repeat(40)}` })).toMatchObject({ isError: true, text: expect.stringContaining("Only the tokens of") });
+    expect(await kit.call("t1", "room_secret", { use: "http", method: "POST", url: "https://janus.example/login", body: `p=${token}` })).toEqual({ text: "200 ok" });
+    expect(await kit.call("t1", "room_secret", { use: "exec", argv: ["sh", "-c", "curl -u ops:$P x"], env: { P: token } })).toEqual({ text: "200 ok" });
+    expect(calls).toEqual([
+      { tool: "secret_http", args: { method: "POST", url: "https://janus.example/login", body: `p=${token}` }, cwd: "/w/t1" },
+      { tool: "secret_exec", args: { argv: ["sh", "-c", "curl -u ops:$P x"], env: { P: token } }, cwd: "/w/t1" },
+    ]);
+    const without = new RoomKit({ store, seat: seatOf, delivery });
+    expect(await without.call("t1", "room_secret", { use: "otp", token })).toMatchObject({ isError: true, text: expect.stringContaining("not set up") });
+  });
+
   it("asks which room when the session sits in several, and takes that room by its name or id", async () => {
     const { kit, store } = made();
     const other = store.create({ name: "Release" });
@@ -202,7 +226,7 @@ describe("a terminal's own programs", () => {
     expect(kit.has("t1")).toBe(true);
     expect((await ask("t9", { op: "tools" })).body).toEqual({ tools: [], version: "" });
     // Codex lists its tools once, at its start: it has them before it sits anywhere, and a call then says why not.
-    expect((await ask("c9", { op: "tools" })).body.tools.map((t: any) => t.name)).toEqual(tools.body.tools.map((t: any) => t.name));
+    expect((await ask("c9", { op: "tools" })).body.tools.map((t: any) => t.name)).toEqual([...tools.body.tools.map((t: any) => t.name), "room_secret"]);
     expect((await ask("c9", { op: "call", name: "room_post", args: { text: "hi" } })).body).toMatchObject({ isError: true, text: expect.stringContaining("sits in no Chat Room") });
     // Unchanged: held its while, then the same; changed: told at once.
     expect((await ask("t1", { op: "watch", version: tools.body.version })).body.version).toBe(tools.body.version);
