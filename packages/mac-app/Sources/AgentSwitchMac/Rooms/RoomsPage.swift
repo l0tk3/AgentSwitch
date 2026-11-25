@@ -304,7 +304,9 @@ private struct RoomListRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, look.isClassic ? 10 : 12)
             .padding(.vertical, look.isClassic ? 7 : 8)
-            .background(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0).fill(current ? Look.raised : hovering ? Look.hover : Color.clear))
+            // The room open is plain to see (user #301: 好像没有选中效果？): in the classic look tinted in the signal colour, as
+            // the terminals' list marks its own; a row under the pointer only a light wash.
+            .background(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0).fill(current ? (look.isClassic ? Color.signal.opacity(0.2) : Look.raised) : hovering ? Look.hover : Color.clear))
             .overlay(alignment: .leading) { if current, !look.isClassic { Rectangle().fill(Color.signal).frame(width: 3) } }
             .padding(.horizontal, look.isClassic ? 8 : 0)
             .contentShape(Rectangle())
