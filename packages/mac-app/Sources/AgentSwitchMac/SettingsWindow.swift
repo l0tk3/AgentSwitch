@@ -9,7 +9,7 @@ import SwiftUI
 
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, nodes, models, redaction, agents, profiles, addons, environment, general
+    case pairing, nodes, redaction, agents, profiles, addons, environment, general
     /// The dispatch (2026-11-24): a session at the 调度台 room (DispatchDeskView).
     case desk
 
@@ -19,7 +19,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "Pairing"
         case .nodes: return "Nodes"
-        case .models: return "Models"
         case .redaction: return "Redaction"
         case .agents: return "Agents"
         case .profiles: return "Profiles"
@@ -34,7 +33,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "qrcode"
         case .nodes: return "point.3.connected.trianglepath.dotted"
-        case .models: return "cpu"
         case .redaction: return "eye.slash"
         case .agents: return "shippingbox"
         case .profiles: return "person.crop.rectangle.stack"
@@ -257,7 +255,6 @@ struct SettingsView: View {
         switch tab {
         case .pairing: PairingView()
         case .nodes: NodesView()
-        case .models: ModelsView()
         case .redaction: RedactionView()
         case .agents: AgentsSettingsView()
         case .profiles: ProfilesSettingsView()
