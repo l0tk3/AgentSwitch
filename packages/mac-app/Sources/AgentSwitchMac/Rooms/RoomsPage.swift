@@ -634,11 +634,22 @@ private struct RoomWriter: View {
                 }
             }
             HStack(alignment: .bottom, spacing: 8) {
-                Button { model.pickFiles() } label: {
-                    LookGlyph(glyph: "+", symbol: "plus", size: 15).foregroundStyle(Look.ink2).frame(width: 30, height: look.isClassic ? 30 : 34).contentShape(Rectangle())
+                // `+`: files; in a room with tasks, the task this message is about too (user #438: `Task: —` under the
+                // box was in the way — it shows there only once a task is chosen).
+                if room.tasks.isEmpty || model.taskFilter != nil {
+                    Button { model.pickFiles() } label: { plus }
+                        .buttonStyle(.plain)
+                        .help(model.uploading > 0 ? "正在上传…" : "Attach Files")
+                } else {
+                    Menu {
+                        Button("Attach Files…") { model.pickFiles() }
+                        Menu("Task") { taskChoices }
+                    } label: { plus }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help(model.uploading > 0 ? "正在上传…" : "Attach Files, Task")
                 }
-                .buttonStyle(.plain)
-                .help(model.uploading > 0 ? "正在上传…" : "Attach Files")
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, insert: model.insert, label: "Message",
                              placeholder: placeholder, replace: model.replace, onKey: { model.key($0) }, onCaret: { model.caretMoved($0, $1) },
                              onSubmit: { model.send() }, onFiles: { model.attach(urls: $0) }, onPasteAttachments: { model.pasteFromClipboard() }, onFocus: { _ in })
@@ -663,9 +674,9 @@ private struct RoomWriter: View {
                 .disabled(!model.canSend)
                 .help(ClassicWords.help("Send ↩", in: look))
             }
-            if model.taskFilter == nil, !room.tasks.isEmpty || room.room.paused {
+            if model.taskFilter == nil, model.draftTask != nil || room.room.paused {
                 HStack(spacing: 12) {
-                    if !room.tasks.isEmpty { taskPicker }
+                    if model.draftTask != nil { taskPicker }
                     if room.room.paused { Text("Paused") }
                 }
                 .font(.system(size: 11.5))
@@ -694,14 +705,20 @@ private struct RoomWriter: View {
 
     /// Which task the next message is about (2026-11-24): taken from the message answered or the task the timeline
     /// shows; the user can change it or say none.
+    private var plus: some View {
+        LookGlyph(glyph: "+", symbol: "plus", size: 15).foregroundStyle(Look.ink2).frame(width: 30, height: look.isClassic ? 30 : 34).contentShape(Rectangle())
+    }
+
+    @ViewBuilder private var taskChoices: some View {
+        Button("No Task") { model.draftTask = nil }
+        Divider()
+        ForEach(room.tasks.filter { $0.state != .done || $0.n == model.draftTask }) { task in
+            Button(RoomTaskLabel.word(task.n, task.title)) { model.draftTask = task.n }
+        }
+    }
+
     private var taskPicker: some View {
-        Menu {
-            Button("No Task") { model.draftTask = nil }
-            Divider()
-            ForEach(room.tasks.filter { $0.state != .done || $0.n == model.draftTask }) { task in
-                Button(RoomTaskLabel.word(task.n, task.title)) { model.draftTask = task.n }
-            }
-        } label: {
+        Menu { taskChoices } label: {
             Text(model.draftTask.map { n in "Task: " + RoomTaskLabel.word(n, room.tasks.first { $0.n == n }?.title) } ?? "Task: —")
                 .mono(11.5).foregroundStyle(model.draftTask == nil ? Look.faint : Look.ink2)
         }
