@@ -90,9 +90,11 @@ public enum RoomPictureLayout {
         switch min(max(count, 0), 4) {
         case 0: return []
         case 1: return [Spot(x: 0.1, y: 0.1, side: 0.8)]
-        case 2: return [Spot(x: 0, y: 0.06, side: 0.58), Spot(x: 0.58, y: 0.5, side: 0.42)]
-        case 3: return [Spot(x: 0, y: 0.02, side: 0.56), Spot(x: 0.57, y: 0.26, side: 0.43), Spot(x: 0.2, y: 0.63, side: 0.35)]
-        default: return [Spot(x: 0, y: 0, side: 0.54), Spot(x: 0.57, y: 0.14, side: 0.42), Spot(x: 0.12, y: 0.57, side: 0.4), Spot(x: 0.6, y: 0.63, side: 0.32)]
+        // The cluster sits in the middle of its box (user #424: 是不是得居中一下): as much room over it as under it,
+        // left of it as right.
+        case 2: return [Spot(x: 0, y: 0.21, side: 0.58), Spot(x: 0.6, y: 0.3, side: 0.4)]
+        case 3: return [Spot(x: 0, y: 0.22, side: 0.56), Spot(x: 0.58, y: 0.07, side: 0.42), Spot(x: 0.61, y: 0.55, side: 0.36)]
+        default: return [Spot(x: 0.02, y: 0.02, side: 0.52), Spot(x: 0.56, y: 0.1, side: 0.42), Spot(x: 0.1, y: 0.56, side: 0.42), Spot(x: 0.58, y: 0.6, side: 0.34)]
         }
     }
 }

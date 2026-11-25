@@ -11,6 +11,10 @@ final class RoomPictureTests: XCTestCase {
             XCTAssertEqual(spots.count, n)
             XCTAssertEqual(spots.map(\.side), spots.map(\.side).sorted(by: >), "the first member's is the biggest")
             for s in spots { XCTAssertTrue(s.x >= 0 && s.y >= 0 && s.x + s.side <= 1.0001 && s.y + s.side <= 1.0001) }
+            // In the middle of the box (user #424).
+            let midX = (spots.map(\.x).min()! + spots.map { $0.x + $0.side }.max()!) / 2, midY = (spots.map(\.y).min()! + spots.map { $0.y + $0.side }.max()!) / 2
+            XCTAssertEqual(midX, 0.5, accuracy: 0.03, "\(n)")
+            XCTAssertEqual(midY, 0.5, accuracy: 0.03, "\(n)")
             for (i, a) in spots.enumerated() {
                 for b in spots[(i + 1)...] {
                     // As squares (the pixel look): apart on one axis at least.
