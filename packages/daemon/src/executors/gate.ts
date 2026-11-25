@@ -4,8 +4,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { connect, type Socket } from "node:net";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { TransferGrant } from "../core/transfer.js";
 import { which } from "../util/which.js";
 import type { ExecutionInput } from "./types.js";
@@ -24,26 +23,11 @@ export type GateOptions = {
   readonly browserExecutable?: string;
 };
 
-const HERE = fileURLToPath(new URL(".", import.meta.url));
 /** The proxy health check: a TCP connect that takes longer counts as down. */
 const HEALTH_TIMEOUT_MS = 1_500;
 
-/** The monorepo's own secret-gate install (packages/secret-gate/.venv). */
-export const VENV_GATE_BIN = resolve(HERE, "..", "..", "..", "secret-gate", ".venv", "bin", "secret-gate");
-
-/** The secret-gate binary: $SECRET_GATE_BIN when set (authoritative: a wrong path finds nothing rather than silently
- *  falling back to another gate), else the repo's venv, else `secret-gate` on $PATH as an absolute path. Null when none. */
-export function gateBin(env: NodeJS.ProcessEnv = process.env, venv: string = VENV_GATE_BIN): string | null {
-  if (env.SECRET_GATE_BIN) return existsSync(env.SECRET_GATE_BIN) ? env.SECRET_GATE_BIN : null;
-  if (existsSync(venv)) return venv;
-  return which("secret-gate", env.PATH);
-}
-
-/** Why `gateBin` found nothing, naming the three places it looks, in its order. */
-export function gateNotFound(env: NodeJS.ProcessEnv = process.env, venv: string = VENV_GATE_BIN): string {
-  if (env.SECRET_GATE_BIN) return `secret-gate not found: $SECRET_GATE_BIN=${env.SECRET_GATE_BIN} does not exist (when set, it is the only place looked at; unset it to use the repo venv ${venv} or \`secret-gate\` on $PATH)`;
-  return `secret-gate not found: $SECRET_GATE_BIN is not set, the repo venv ${venv} does not exist, and there is no \`secret-gate\` on $PATH`;
-}
+export { VENV_GATE_BIN, gateBin, gateNotFound } from "../core/gateBin.js";
+import { VENV_GATE_BIN, gateBin } from "../core/gateBin.js";
 
 export function defaultGate(env: NodeJS.ProcessEnv = process.env, venv: string = VENV_GATE_BIN): GateOptions | null {
   const bin = gateBin(env, venv);
