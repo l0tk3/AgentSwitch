@@ -140,12 +140,15 @@ struct PasswordsPage: View {
     var room: String? = nil
     @Environment(AppModel.self) private var app
     @Environment(\.onScreen) private var onScreen
+    @Environment(\.interfaceLook) private var look
     @State private var model = PasswordsModel()
 
     var body: some View {
         HStack(spacing: 0) {
-            list.frame(width: 300)
-            HairRule(color: Look.line, vertical: true)
+            // The classic look: the list is a card that floats on the window's ground (docs/design-rules.md §2).
+            list.sideCard(leading: Look.panelGap, trailing: Look.panelGap, bottom: Look.panelGap).padding(.top, look.isClassic ? Look.panelGap : 0)
+                .frame(width: 300 + (look.isClassic ? 2 * Look.panelGap : 0))
+            HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
             detail.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Look.ground)
@@ -167,19 +170,19 @@ struct PasswordsPage: View {
                 Button { model.startNew() } label: { BracketLabel(word: "New") }.buttonStyle(BracketButtonStyle(role: .primary, size: 12))
             }
             .padding(12)
-            HairRule(color: Look.line)
+            HairRule(color: look.isClassic ? .clear : Look.line)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(model.shown) { e in
                         Button { model.select(e.id) } label: { row(e) }.buttonStyle(.plain)
-                        HairRule(color: Look.line)
+                        HairRule(color: look.isClassic ? .clear : Look.line)
                     }
                     if model.items.isEmpty && model.loaded {
                         Text("密码本还是空的。点 New 加一条，或从浏览器导出的 CSV 导入。").font(.system(size: 12.5)).foregroundStyle(Look.ink2).padding(16)
                     }
                 }
             }
-            HairRule(color: Look.line)
+            HairRule(color: look.isClassic ? .clear : Look.line)
             HStack {
                 Text("\(model.items.count) 条").font(.system(size: 12)).foregroundStyle(Look.ink2).monospacedDigit()
                 Spacer()
@@ -205,7 +208,9 @@ struct PasswordsPage: View {
             if e.hasTotp { Text("2FA").mono(10).foregroundStyle(Look.ink2) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(model.selected == e.id ? Color.signal.opacity(0.18) : Color.clear)
+        // The row chosen: tinted, with round corners clear of the card's edges in the classic look (design-rules §3.3).
+        .background(RoundedRectangle(cornerRadius: look.isClassic ? Look.controlRadius : 0, style: .continuous).fill(model.selected == e.id ? Color.signal.opacity(0.18) : Color.clear))
+        .padding(.horizontal, look.isClassic ? 6 : 0)
         .contentShape(Rectangle())
     }
 

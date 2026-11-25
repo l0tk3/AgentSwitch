@@ -238,6 +238,10 @@ struct DemoTransport: HTTPTransport {
         // Settings › Add-Ons (AddonsView): a few made-up profiles and what each has.
         case ("GET", "/profiles"): body = DemoData.profilesJSON
         case ("GET", "/profiles/addons"): body = DemoData.addonsJSON(agent: URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "agent" }?.value ?? "claude-code")
+        // The Dispatch page: the dispatch as a fresh install has it, turned off.
+        case ("GET", "/dispatch/desk"):
+            body = ["settings": ["on": false, "agent": "claude-code", "profile": NSNull(), "model": NSNull(), "mode": "bypass", "maxStarted": 8] as [String: Any],
+                    "folder": "~/Library/Application Support/AgentSwitch/dispatch", "instructions": "", "room": NSNull(), "terminal": NSNull(), "problem": NSNull(), "replacing": false] as [String: Any]
         default: body = [:] as [String: Any]
         }
         let data = try JSONSerialization.data(withJSONObject: body)
