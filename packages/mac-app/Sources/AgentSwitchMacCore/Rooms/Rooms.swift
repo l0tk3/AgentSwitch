@@ -191,8 +191,8 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         public init(at: Int64 = 0, why: String, seq: Int, marked: Bool) { self.at = at; self.why = why; self.seq = seq; self.marked = marked }
         public var bySafeguard: Bool { why == "safeguard" }
         public var says: String {
-            bySafeguard ? "回复 #\(seq) 时触发了 Claude 的 safeguard，已自动退回到收到 #\(seq) 之前（换了一个新 session），那条消息不会再送给它。"
-                : "#\(seq) 撤回后已退回到它之前（换了一个新 session）。"
+            bySafeguard ? "回复 #\(seq) 时触发了 Claude 的 safeguard，已自动退回到收到 #\(seq) 之前，那条消息不会再送给它。"
+                : "#\(seq) 撤回后，它的对话已退回到这条消息之前。"
         }
     }
     public let rewound: Rewound?

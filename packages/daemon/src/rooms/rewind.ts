@@ -7,7 +7,7 @@
  *  here starts or stops a terminal (api/roomRewind.ts does). */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 type Json = Record<string, unknown>;
@@ -236,4 +236,169 @@ export function putFilesBack(lines: readonly string[], cut: number, force = fals
     done.push(f.path);
   }
   return done;
+}
+
+// ---- Codex (user #296: 所有agent都加上支持): `rollout-<time>-<id>.jsonl`, lines `{timestamp, type, payload}`. The cut is
+// copied as a new thread, as Claude Code's is: Codex finds a rollout by its id in the file's name.
+
+/** The room's messages named by their envelopes in `texts`. */
+export const seqsOf = (texts: readonly string[], room: string): number[] => {
+  const seqs = new Set<number>();
+  for (const t of texts) for (const m of t.matchAll(envelopes(room))) seqs.add(Number(m[1]));
+  return [...seqs].sort((a, b) => a - b);
+};
+
+/** What a Codex line hands the agent: a message to it (not its own, not a tool's output), as the record or its events
+ *  say it. */
+function codexHanded(e: Json): string | null {
+  const p = obj(e.payload);
+  if (e.type === "response_item") return p.type === "message" && p.role !== "assistant" ? JSON.stringify(p.content ?? "") : null;
+  if (e.type === "event_msg") {
+    if (p.type === "user_message") return str(p.message) || JSON.stringify(p);
+    if (p.type === "item_completed" && obj(p.item).type === "UserMessage") return JSON.stringify(obj(p.item).content ?? "");
+  }
+  return null;
+}
+
+/** JSON keeps the envelope's words as they are but for quotes and line breaks: matched in what a line holds. */
+const said = (s: string): string => JSON.stringify(s).slice(1, -1);
+
+function codexCutAt(lines: readonly string[], line: number, room: string): Cut {
+  const texts: string[] = [];
+  let at: number | null = null;
+  for (let i = line; i < lines.length; i++) {
+    const e = parse(lines[i]!);
+    if (!e) continue;
+    if (at === null && typeof e.timestamp === "string") { const t = Date.parse(e.timestamp); if (Number.isFinite(t)) at = t; }
+    const t = codexHanded(e);
+    if (t) texts.push(t.replace(/\\n/g, "\n"));
+  }
+  const first = seqsOf(texts.filter((t) => envelopes(room).test(t)).slice(0, 1), room);
+  return { line, handed: seqsOf(texts, room), at, first };
+}
+
+/** A turn's opening lines (its settings, the state of the world it starts in) go with what starts it. */
+function codexTurnStart(lines: readonly string[], i: number): number {
+  let first = i;
+  for (let j = i - 1; j >= 0; j--) {
+    const e = parse(lines[j]!);
+    if (!e) continue;
+    const t = str(obj(e.payload).type);
+    if (e.type === "turn_context" || e.type === "world_state" || (e.type === "event_msg" && (t === "task_started" || t === "thread_settings_applied"))) first = j;
+    else break;
+  }
+  return first;
+}
+
+export function codexCutBeforeHanded(lines: readonly string[], room: string, seq: number): Cut | null {
+  const mark = said(envelope(room, seq));
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i]!.includes(mark)) continue;
+    const e = parse(lines[i]!);
+    if (e && codexHanded(e)?.includes(mark)) return codexCutAt(lines, codexTurnStart(lines, i), room);
+  }
+  return null;
+}
+
+/** Before the call in which it sent `seq` (Codex calls the room's tools itself, or from a script it runs: the call
+ *  that was at work when the post was made), and the thinking that led to it. */
+export function codexCutBeforeSent(lines: readonly string[], room: string, seq: number): Cut | null {
+  const mark = said(said(`#${seq} sent in "${room}"`));
+  const plain = said(`#${seq} sent in "${room}"`);
+  let found = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i]!.includes(plain) && !lines[i]!.includes(mark)) continue;
+    const e = parse(lines[i]!);
+    const p = obj(e?.payload);
+    if (e && !(e.type === "response_item" && p.type === "message")) { found = i; break; }
+  }
+  if (found < 0) return null;
+  for (let i = found; i >= 0; i--) {
+    const e = parse(lines[i]!);
+    const t = str(obj(e?.payload).type);
+    if (e?.type !== "response_item" || (t !== "function_call" && t !== "custom_tool_call" && t !== "local_shell_call")) continue;
+    let first = i;
+    for (let j = i - 1; j >= 0; j--) {
+      const p = parse(lines[j]!);
+      if (!p) continue;
+      const pt = str(obj(p.payload).type);
+      if (p.type === "response_item" ? pt === "reasoning" : p.type === "token_usage_record" || (p.type === "event_msg" && (pt === "token_count" || pt === "agent_reasoning" || (pt === "item_completed" && obj(obj(p.payload).item).type === "Reasoning")))) first = j;
+      else break;
+    }
+    return codexCutAt(lines, first, room);
+  }
+  return null;
+}
+
+/** Writes the cut beside the others of the day as a new thread: every mention of the old id is the new one's. */
+export function writeCodexCut(path: string, lines: readonly string[], cut: number, now = new Date()): { readonly id: string; readonly path: string } {
+  const old = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(path)?.[1];
+  const at = path.lastIndexOf("/sessions/");
+  if (!old || at < 0) throw new Error("not a Codex rollout");
+  const id = randomUUID();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = join(path.slice(0, at), "sessions", String(now.getFullYear()), pad(now.getMonth() + 1), pad(now.getDate()));
+  mkdirSync(day, { recursive: true, mode: 0o700 });
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const next = join(day, `rollout-${stamp}-${id}.jsonl`);
+  const kept = lines.slice(0, cut).map((l) => l.split(old).join(id));
+  // A turn started and nothing in it any more: it goes too.
+  while (kept.length) { const e = parse(kept[kept.length - 1]!); if (e?.type === "event_msg" && obj(e.payload).type === "task_started") kept.pop(); else break; }
+  writeFileSync(next, `${kept.join("\n")}\n`, { mode: 0o600 });
+  return { id, path: next };
+}
+
+// ---- pi: `<time>_<id>.jsonl`, a tree of entries (`id`, `parentId`); the last one written is where it is. Taken back
+// as its own /tree does: an entry whose parent is the one before the cut, so the session and its id stay, and what
+// was there stays on a branch of its own.
+
+export type PiCut = Cut & { readonly parent: string | null; readonly leaf: string | null };
+
+function piPath(lines: readonly string[]): Json[] {
+  const entries = lines.map(parse).filter((e): e is Json => !!e && e.type !== "session" && typeof e.id === "string");
+  const byId = new Map(entries.map((e) => [str(e.id), e]));
+  const path: Json[] = [];
+  for (let at: Json | undefined = entries[entries.length - 1]; at; at = typeof at.parentId === "string" ? byId.get(at.parentId) : undefined) path.push(at);
+  return path.reverse();
+}
+
+function piText(e: Json): string {
+  const c = e.type === "custom_message" ? e.content : obj(e.message).content;
+  return typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => (typeof p === "string" ? p : str(obj(p).text))).join("\n") : "";
+}
+
+function piHanded(e: Json): string | null {
+  if (e.type === "custom_message") return piText(e);
+  if (e.type === "message" && obj(e.message).role === "user") return piText(e);
+  return null;
+}
+
+function piCutAt(path: readonly Json[], i: number, room: string): PiCut {
+  const target = path[i]!;
+  const texts = path.slice(i).map(piHanded).filter((t): t is string => t !== null);
+  const t = Date.parse(str(target.timestamp));
+  return { line: i, handed: seqsOf(texts, room), at: Number.isFinite(t) ? t : null, first: seqsOf([piHanded(target) ?? ""], room), parent: typeof target.parentId === "string" ? target.parentId : null, leaf: str(path[path.length - 1]?.id) || null };
+}
+
+export function piCutBeforeHanded(lines: readonly string[], room: string, seq: number): PiCut | null {
+  const path = piPath(lines), mark = envelope(room, seq);
+  const i = path.findIndex((e) => piHanded(e)?.includes(mark));
+  return i < 0 ? null : piCutAt(path, i, room);
+}
+
+export function piCutBeforeSent(lines: readonly string[], room: string, seq: number): PiCut | null {
+  const path = piPath(lines), mark = `#${seq} sent in "${room}"`;
+  const result = path.find((e) => e.type === "message" && obj(e.message).role === "toolResult" && piText(e).includes(mark));
+  const call = str(obj(result?.message).toolCallId);
+  if (!call) return null;
+  const i = path.findIndex((e) => e.type === "message" && obj(e.message).role === "assistant" && Array.isArray(obj(e.message).content) && (obj(e.message).content as unknown[]).some((p) => obj(p).type === "toolCall" && obj(p).id === call));
+  return i < 0 ? null : piCutAt(path, i, room);
+}
+
+/** Appends the entry that takes the session back (an empty branch summary: no words for the model). */
+export function appendPiBranch(path: string, cut: PiCut, now = new Date()): void {
+  const id = randomUUID().replace(/-/g, "").slice(0, 8);
+  const entry = { type: "branch_summary", id, parentId: cut.parent, timestamp: now.toISOString(), fromId: cut.leaf ?? "root", summary: "" };
+  const text = readFileSync(path, "utf8");
+  writeFileSync(path, `${text.endsWith("\n") || !text ? text : `${text}\n`}${JSON.stringify(entry)}\n`);
 }

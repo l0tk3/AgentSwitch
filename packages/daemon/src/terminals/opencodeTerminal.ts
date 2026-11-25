@@ -411,6 +411,39 @@ export class OpenCodeCompanion implements Companion {
     return true;
   }
 
+  /** 撤回 (user #288, #296): the session the TUI is on goes back to before the message `pick` chooses among its
+   *  messages (oldest first) — OpenCode's own revert, conversation only (`files: false`), committed. The session and
+   *  the TUI stay; one at work is interrupted first. What went, and the message it went back to before; null when
+   *  `pick` chose none. */
+  async revertTo(pick: (messages: readonly Json[]) => number): Promise<{ readonly removed: readonly Json[] } | null> {
+    const id = await this.session();
+    if (!id) return null;
+    const path = `/api/session/${encodeURIComponent(id)}`;
+    const all: Json[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 200; page++) {
+      const res = await this.call("GET", `${path}/message?${this.loc}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      const data = Array.isArray(res?.data) ? res.data as Json[] : [];
+      all.push(...data);
+      const next = (res?.cursor as Json | undefined)?.next;
+      if (typeof next !== "string" || !next || next === cursor || !data.length) break;
+      cursor = next;
+    }
+    const seen = new Set<string>();
+    const messages = all.filter((m) => { const k = String(m.id ?? ""); if (!k || seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => (Number((a.time as Json | undefined)?.created) || 0) - (Number((b.time as Json | undefined)?.created) || 0));
+    const at = pick(messages);
+    if (at < 0 || !messages[at]) return null;
+    const busy = async () => Object.keys(((await this.call("GET", "/api/session/active"))?.data ?? {}) as Json).includes(id);
+    if (await busy()) {
+      await this.call("POST", `${path}/interrupt?${this.loc}`).catch(() => null);
+      for (let i = 0; i < 25 && await busy(); i++) await new Promise((r) => setTimeout(r, 200));
+    }
+    await this.call("POST", `${path}/revert/stage?${this.loc}`, { messageID: String(messages[at]!.id), files: false });
+    await this.call("POST", `${path}/revert/commit?${this.loc}`);
+    return { removed: messages.slice(at) };
+  }
+
   private async call(method: string, path: string, body?: Json): Promise<Json | null> {
     const server = this.server;
     if (!server) throw new Error("no server");

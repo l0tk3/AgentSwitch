@@ -242,6 +242,9 @@ export type Companion = {
   /** How a switch of the agent's own stands for the session the program is on, where the terminal has it (Codex's
    *  Daybreak, read from its server). The switch itself is turned in the program, by its own command. */
   daybreak?(session?: string | null): Promise<boolean>;
+  /** The session the program is on taken back to before the message `pick` chooses, where the companion's server
+   *  can (OpenCode's revert; api/roomRewind.ts): what went, or null when none was chosen. */
+  revertTo?(pick: (messages: readonly Record<string, unknown>[]) => number): Promise<{ readonly removed: readonly Record<string, unknown>[] } | null>;
 };
 export type CompanionLink = {
   status(status: Exclude<TerminalStatus, "exited">): void;
@@ -1703,6 +1706,13 @@ export class TerminalHost {
     if (asking()) return { given: false, why: "它在等你回答或批准，先处理那个" };
     this.write(id, replyBytes(text, this.bracketedPaste(id), true));
     return { given: true };
+  }
+
+  /** 撤回 in the agent's own server (OpenCode: Companion.revertTo); undefined when its terminal has none. */
+  async revertTo(id: string, pick: (messages: readonly Record<string, unknown>[]) => number): Promise<{ readonly removed: readonly Record<string, unknown>[] } | null | undefined> {
+    const s = this.sessions.get(id);
+    if (!s?.companion?.revertTo || s.status === "exited") return undefined;
+    return s.companion.revertTo(pick);
   }
 
   /** The file its agent's hooks said its session is written to (Claude Code's and Codex's `transcript_path`), if any. */

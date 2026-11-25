@@ -646,7 +646,7 @@ struct RoomMemberCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(r.says).font(.system(size: 12)).foregroundStyle(r.marked ? Color.orange : Look.faint).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 6) {
-                            if let filesBack { wide("Rewind Files…", help: "把它自己改过的文件也退回到那一刻。先列出会改哪些文件，确认后再改。", action: filesBack) }
+                            if let filesBack, seat.card?.agent == "claude-code" { wide("Rewind Files…", help: "把它自己改过的文件也退回到那一刻。先列出会改哪些文件，确认后再改。", action: filesBack) }
                             if r.marked, let rewindSeen { wide("Got It", help: "去掉头像上的标记。", action: rewindSeen) }
                             Spacer(minLength: 0)
                         }

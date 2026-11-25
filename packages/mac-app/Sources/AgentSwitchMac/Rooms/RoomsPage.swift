@@ -188,7 +188,7 @@ private struct RoomsColumns: View {
             }
         } message: { message in
             Text(message.to.contains(where: { $0 != Room.you }) || message.from != Room.you
-                 ? "文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到。「Delete and Tell Members」会发一句让已收到的成员忽略它。「Recall and Rewind Members」会把发它的成员退回到发之前、收到它的成员退回到收到之前（只退对话，代码不动；只支持 Claude Code，会换一个新 session），其余的成员发一句让它们忽略。"
+                 ? "文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到。「Delete and Tell Members」会发一句让已收到的成员忽略它。「Recall and Rewind Members」会把发它的成员退回到发之前、收到它的成员退回到收到之前（只退对话，代码不动；Claude Code、Codex、pi 会在新终端里接着跑，OpenCode 原地退回），其余的成员发一句让它们忽略。"
                  : "文字和附件链接会删掉，原位置留「这条消息已删除」。")
         }
         .sheet(isPresented: Binding(get: { model.filesBack != nil }, set: { if !$0 { model.filesBack = nil } })) {

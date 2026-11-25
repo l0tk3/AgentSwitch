@@ -96,7 +96,7 @@ export type Seat = {
   readonly rewound?: SeatRewound;
 };
 
-export type SeatRewound = { readonly at: number; readonly why: "recall" | "safeguard"; readonly seq: number; readonly record: string; readonly line: number; readonly marked: boolean };
+export type SeatRewound = { readonly at: number; readonly why: "recall" | "safeguard"; readonly seq: number; readonly record: string; readonly line: number; readonly marked: boolean; readonly agent?: string };
 
 export type Message = {
   readonly seq: number;
@@ -1109,7 +1109,7 @@ function seatFrom(v: unknown): Seat | null {
   const muted = m && str(m.by) && num(m.at) ? { by: m.by, at: m.at } : undefined;
   const r = o.rewound as Record<string, unknown> | undefined;
   const rewound = r && num(r.at) && (r.why === "recall" || r.why === "safeguard") && num(r.seq) && str(r.record) && num(r.line)
-    ? { at: r.at, why: r.why, seq: r.seq, record: r.record, line: r.line, marked: r.marked === true } as SeatRewound : undefined;
+    ? { at: r.at, why: r.why, seq: r.seq, record: r.record, line: r.line, marked: r.marked === true, ...(str(r.agent) ? { agent: r.agent } : {}) } as SeatRewound : undefined;
   return {
     handle: o.handle, kind: o.kind, ...(str(o.terminal) ? { terminal: o.terminal } : {}), face, joinedAt: o.joinedAt,
     addedBy: str(o.addedBy) ? o.addedBy : YOU, canAdd: o.canAdd === true, byAgent: o.byAgent === true,

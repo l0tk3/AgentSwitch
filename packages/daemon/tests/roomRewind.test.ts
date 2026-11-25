@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SeatRewind } from "../src/api/roomRewind.js";
-import { cutBeforeHanded, cutBeforeRefused, cutBeforeSent, cutRecord, filesBack, putFilesBack, readRecord, refusedLast } from "../src/rooms/rewind.js";
+import { appendPiBranch, codexCutBeforeHanded, codexCutBeforeSent, cutBeforeHanded, cutBeforeRefused, cutBeforeSent, cutRecord, filesBack, piCutBeforeHanded, piCutBeforeSent, putFilesBack, readRecord, refusedLast, writeCodexCut } from "../src/rooms/rewind.js";
 import { RoomStore } from "../src/rooms/store.js";
 import type { TerminalHost, TerminalInfo } from "../src/terminals/host.js";
 
@@ -161,5 +161,96 @@ describe("a member taken back", () => {
     store.rewindSeen(room.id, api);
     expect(store.get(room.id).seats.find((s) => s.handle === api)!.rewound!.marked).toBe(false);
     expect(existsSync(seat.rewound!.record)).toBe(true);
+  });
+});
+
+describe("the other agents (user #296)", () => {
+  const ID = "01a2093d-6b8d-7c92-9b53-9e1acf5f1e9d";
+  const env = (n: number) => `[Room login · #${n}]\nFrom: @you (the user)\nhello ${n}`;
+  const codexLines = () => [
+    { type: "session_meta", payload: { id: ID, session_id: ID, cwd: "/w" } },
+    { type: "event_msg", payload: { type: "task_started" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "start" }] } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] } },
+    { type: "world_state", payload: {} },
+    { type: "turn_context", payload: { turn_id: "t2" } },
+    { timestamp: at(2), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: env(2) }] } },
+    { type: "event_msg", payload: { type: "item_completed", thread_id: ID, item: { type: "UserMessage", content: [{ type: "text", text: env(2) }] } } },
+    { type: "response_item", payload: { type: "reasoning", summary: [] } },
+    { type: "response_item", payload: { type: "custom_tool_call", call_id: "c1", name: "exec", input: "post" } },
+    { type: "event_msg", payload: { type: "item_completed", thread_id: ID, item: { type: "McpToolCall", tool: "room_post", result: { content: [{ type: "text", text: "#3 sent in \"login\"." }] } } } },
+    { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "c1", output: "done" } },
+  ].map((l) => JSON.stringify(l));
+
+  it("Codex: before it was handed a message, from the turn's start; before it sent one, from the call", () => {
+    const lines = codexLines();
+    const h = codexCutBeforeHanded(lines, "login", 2)!;
+    expect(h).toMatchObject({ line: 4, handed: [2], first: [2], at: Date.parse(at(2)) });
+    expect(codexCutBeforeSent(lines, "login", 3)!.line).toBe(8);
+    expect(codexCutBeforeSent(lines, "login", 4)).toBeNull();
+  });
+
+  it("Codex: the cut is a new thread, named so in its file and its lines", () => {
+    const dir = mkdtempSync(join(tmpdir(), "as-rewind-codex-"));
+    const path = join(dir, "sessions", "2026", "11", "24", `rollout-2026-11-24T00-29-09-${ID}.jsonl`);
+    const made = writeCodexCut(path, codexLines(), 4, new Date(2026, 10, 25, 10, 1, 2));
+    expect(made.path).toBe(join(dir, "sessions", "2026", "11", "25", `rollout-2026-11-25T10-01-02-${made.id}.jsonl`));
+    const kept = readRecord(made.path);
+    expect(kept).toHaveLength(4);
+    expect(kept.join("\n")).not.toContain(ID);
+    expect(JSON.parse(kept[0]!).payload.id).toBe(made.id);
+  });
+
+  const piLines = () => [
+    { type: "session", id: "pi-1", cwd: "/w" },
+    { type: "message", id: "a", parentId: null, message: { role: "user", content: [{ type: "text", text: "start" }] } },
+    { type: "message", id: "b", parentId: "a", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+    // An abandoned branch: not on the path.
+    { type: "custom_message", id: "x", parentId: "b", customType: "agentswitch-room", content: env(9) },
+    { type: "custom_message", id: "c", parentId: "b", customType: "agentswitch-room", content: env(2), timestamp: at(2) },
+    { type: "message", id: "d", parentId: "c", message: { role: "assistant", content: [{ type: "toolCall", id: "call1", name: "room_post" }] } },
+    { type: "message", id: "e", parentId: "d", message: { role: "toolResult", toolCallId: "call1", content: [{ type: "text", text: "#3 sent in \"login\"." }] } },
+    { type: "custom_message", id: "f", parentId: "e", customType: "agentswitch-room", content: env(4) },
+  ].map((l) => JSON.stringify(l));
+
+  it("pi: along its branch only; taken back with an entry whose parent is the one before", () => {
+    const lines = piLines();
+    expect(piCutBeforeHanded(lines, "login", 9)).toBeNull();
+    const h = piCutBeforeHanded(lines, "login", 2)!;
+    expect(h).toMatchObject({ handed: [2, 4], first: [2], parent: "b", leaf: "f" });
+    expect(piCutBeforeSent(lines, "login", 3)).toMatchObject({ parent: "c", handed: [4] });
+    const dir = mkdtempSync(join(tmpdir(), "as-rewind-pi-"));
+    const path = join(dir, "t_pi-1.jsonl");
+    writeFileSync(path, `${lines.join("\n")}\n`);
+    appendPiBranch(path, h);
+    const last = JSON.parse(readRecord(path).at(-1)!);
+    expect(last).toMatchObject({ type: "branch_summary", parentId: "b", fromId: "f", summary: "" });
+    // From there, its branch ends at "b".
+    expect(piCutBeforeHanded(readRecord(path), "login", 2)).toBeNull();
+  });
+
+  it("OpenCode: its own server reverts the session in place; the seat stays where it is", async () => {
+    const home = mkdtempSync(join(tmpdir(), "as-rewind-oc-"));
+    const store = new RoomStore(home);
+    const room = store.create({ name: "login" });
+    const was = { agent: "opencode", name: "oc", cwd: "/w", model: null, profile: null };
+    const oc = store.seat(room.id, { terminal: "t1", was }).handle;
+    for (const n of [1, 2]) { const seq = store.post(room.id, { from: "you", text: `m${n}`, to: [oc] }).seq; store.setReceipt(room.id, seq, oc, null); }
+    const messages = [
+      { id: "m1", type: "user", text: "start", time: { created: 1 } },
+      { id: "m2", type: "user", text: env(1), time: { created: 2 } },
+      { id: "m3", type: "assistant", time: { created: 3 } },
+      { id: "m4", type: "user", text: env(2), time: { created: 4 } },
+    ];
+    let picked = -1;
+    const host = { get: () => ({ id: "t1", harness: "opencode", status: "idle" }), recordFileOf: () => null,
+      revertTo: async (_t: string, pick: (m: readonly Record<string, unknown>[]) => number) => { picked = pick(messages); return picked < 0 ? null : { removed: messages.slice(picked) }; } } as unknown as TerminalHost;
+    const rewind = new SeatRewind({ rooms: store, host: () => host, locate: () => null, noteProfile: () => {}, sessionOf: () => null, wasOf: () => was });
+    const done = await rewind.recall(room.id, 1);
+    expect(picked).toBe(1);
+    expect(done.rewound).toEqual([{ handle: oc, ok: true, terminal: "t1", again: [2] }]);
+    expect(store.get(room.id).receipts[2]?.[oc]).toBe("sent");
+    expect(store.get(room.id).seats.find((s) => s.handle === oc)!.terminal).toBe("t1");
+    expect(() => rewind.filesOf(room.id, oc)).toThrow(/Claude Code/);
   });
 });
