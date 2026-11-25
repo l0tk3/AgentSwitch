@@ -881,9 +881,13 @@ export class RoomStore {
     // `@all` is the user's alone (§4). Written by a session it is words and calls nobody: refusing the whole message
     // for it cost a session its report twice (2026-11-23), when it only spoke of the rule.
     // At the dispatch desk what the user says is for the dispatch, named or not (2026-11-24).
+    // Elsewhere what the user says naming nobody is for the room's admins (user #363: 默认管理员能收到消息，不用我@);
+    // a room with no admin is as before: it calls nobody.
     const to = (named.includes(ALL) || (room.desk && named.length === 0)) && from.kind === "user"
       ? here.filter((s) => s.kind === "session").map((s) => s.handle)
-      : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
+      : named.length === 0 && from.kind === "user"
+        ? here.filter((s) => s.kind === "session" && s.canAdd).map((s) => s.handle)
+        : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
     const message: Message = { seq: Math.max(room.lastSeq, this.db.last(id)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }) };
     const waiting = to.filter((h) => h !== YOU);

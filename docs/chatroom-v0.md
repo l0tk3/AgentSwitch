@@ -251,6 +251,7 @@ Reply to: #39
 - **safeguard 自动退回**（用户 #288）：cc 这一轮以 `stop_reason: refusal`（或 Usage Policy 的 API 错误）结束（Stop / StopFailure 时看记录末尾），而它在回的是群里的消息：自动退回到那条消息之前，那条不再送；它在群里说一句〔退回〕，头像右上角一个橙色「↺」，名片上「Got It」去掉（`PATCH seats/:handle {rewindSeen: true}`）。用户在终端里直接打的话引起的拒绝不算。
 - **长消息折叠**（用户 #280）：超过 12 行（或约 720 字）的消息先显示 12 行，下面「展开全文 / 收起」。
 - **头像**（`rooms/avatars.ts`）：每个会话两份，像素外观一份（40 个小像素脸、48 个 16×16 像素人物——DiceBear Pixel Art，CC0——或自己画 5×5），经典外观一份（60 个表情或任意一个表情，加底色）；没选时像素外观用席位的脸，经典外观用名字首字母。跟着会话走（按它的对话 id，之前按终端），所有房间一样，恢复不变。会话用 `room_update what=avatar` 自己换，`room_info show=avatars` 看库；你在名片上换（`PUT /rooms/:id/seats/:handle/avatar`）；`GET /rooms/avatars` 是库。
+- **不 @ 也送到管理员**（2026-11-25，用户 #363）：用户发的消息没有 @ 任何人、也不是回复时，送给房间里开了 Admin 的成员；房间没有管理员时和以前一样，谁也不叫。成员发的消息不变。
 - **密钥**（`rooms/secrets.ts`）：房间里的登录、API key、命令用的值。在 Mac 上加，网关当场封成密文（网站：http+fill，只限填的网址；API：http；命令：exec），服务只收 `enc:v1:` 密文，给明文就拒绝。可以导出模板、填好导入（之后提示把明文文件移到废纸篓），密文导出成 JSON 再导入别的房间。成员 `room_info show=secrets` 看到名称、网址、账号、密文和用法。手机上只能看、能删。
   - 2026-11-25（用户 #304、#307、#309）：别的节点的房间也能加，按那台节点网关的公钥封（`/gate/pubkey`），`POST /rooms/:id/secrets` 放进远程允许表（只收密文）。房间有密钥时，每条消息的信封多一行 `Secrets: N in this room (名称…)`。终端不走网关（10-08 起），所以 Kit 多一个 `room_secret`（只在房间有密钥时列出，Codex 一直有）：`http` / `exec` / `otp` / `describe`，服务每次在成员的文件夹里起一个 `secret-gate mcp` 转一次调用，网关解密、发出或运行、再脱敏，值不经过服务；只认本房间的密文。共享浏览器（用户 #312：一定要易用）：agent 用 browser_type / browser_fill_form 把整条密文当文字填，服务交网关按当前页面换成值再输入，之后这个会话收到的所有回答里把值换回 `[REDACTED:名称]`；人在 agent 的标签上接手后也能 Fill Ciphertext（不再拒绝），值同样从该 agent 的回答里去掉。信封里的密钥那一行只在第一次、或密钥有增减后说一次。
 

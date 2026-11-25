@@ -203,6 +203,15 @@ describe("the Chatroom Kit", () => {
     expect(await without.call("t1", "room_secret", { use: "otp", token })).toMatchObject({ isError: true, text: expect.stringContaining("not set up") });
   });
 
+  it("gives what the user says naming nobody to the room's admins; with no admin it calls nobody (user #363)", () => {
+    const { store, room } = made();
+    expect(store.post(room.id, { from: "you", text: "大家看一下" }).to).toEqual([]);
+    store.setCanAdd(room.id, "mac-app", true);
+    expect(store.post(room.id, { from: "you", text: "大家看一下" }).to).toEqual(["mac-app"]);
+    expect(store.post(room.id, { from: "you", text: "@ios 你看" }).to).toEqual(["ios"]);
+    expect(store.post(room.id, { from: "daemon", text: "记一笔" }).to).toEqual([]);
+  });
+
   it("asks which room when the session sits in several, and takes that room by its name or id", async () => {
     const { kit, store } = made();
     const other = store.create({ name: "Release" });
