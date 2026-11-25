@@ -121,6 +121,24 @@ def _cmd_proxy(args: argparse.Namespace) -> int:
     return 0  # pragma: no cover
 
 
+def _cmd_model_proxy(args: argparse.Namespace) -> int:
+    """The model traffic gateway (model_gate.py): needs no key of the gate, its table comes on stdin."""
+    entry = Path(__file__).with_name("model_entry.py")
+    if sys.platform == "win32":
+        run_mitmdump = _mitmdump_in_process()
+        if run_mitmdump is None:
+            print("mitmproxy not found; pip install mitmproxy", file=sys.stderr)
+            return 1
+        run_mitmdump(mitmdump_argv("mitmdump", entry, args.port, confdir=args.confdir)[1:])
+        return 0
+    mitmdump = _find_mitmdump()
+    if not mitmdump:
+        print("mitmdump not found; pip install mitmproxy", file=sys.stderr)
+        return 1
+    os.execv(mitmdump, mitmdump_argv(mitmdump, entry, args.port, confdir=args.confdir))
+    return 0  # pragma: no cover
+
+
 # HTTP/2 stays off: mitmproxy's h2 stack rejects sloppy-but-common upstream headers
 # (e.g. `Server: nginx ` with a trailing space) as a protocol error, which surfaces as a
 # 502 the model cannot do anything about. HTTP/1.1 parsing tolerates them, and nothing
@@ -248,6 +266,10 @@ def build_parser() -> argparse.ArgumentParser:
     pr.set_defaults(fn=_cmd_proxy)
 
     sub.add_parser("mcp", help="run the MCP stdio server").set_defaults(fn=_cmd_mcp)
+    mp = sub.add_parser("model-proxy", help="run the model traffic gateway (its table on stdin)")
+    mp.add_argument("--port", type=int, required=True)
+    mp.add_argument("--confdir", required=True, help="where its CA is kept")
+    mp.set_defaults(fn=_cmd_model_proxy)
     b = sub.add_parser("browser", help="run a gated MCP server in front of a browser MCP (Playwright)")
     b.add_argument("command", nargs=argparse.REMAINDER, help="-- <downstream MCP command...>")
     b.set_defaults(fn=_cmd_browser)
