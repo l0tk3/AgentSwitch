@@ -114,7 +114,7 @@ final class MainWindowState {
     private(set) var nodeHas: Set<String> = []
     /// The pages the rail offers: every one on this Mac; on another node Clash only once that node has said it has it
     /// (Clash Verge is there).
-    var pages: [MainPage] { node == nil ? MainPage.allCases : MainPage.allCases.filter { $0 != .clash || nodeHas.contains("clash") } }
+    var pages: [MainPage] { node == nil ? MainPage.allCases : MainPage.allCases.filter { ($0 != .clash || nodeHas.contains("clash")) && $0 != .passwords } }
 
     /// The node on screen said what it has.
     func nodeSaid(_ info: NodeInfo) {
@@ -175,7 +175,7 @@ final class MainWindowState {
         case .dispatch: dispatchActivity
         case .terminals: terminalsActivity
         case .browser: browserActivity
-        case .clash: .none
+        case .clash, .passwords: .none
         case .rooms: roomsActivity
         }
     }

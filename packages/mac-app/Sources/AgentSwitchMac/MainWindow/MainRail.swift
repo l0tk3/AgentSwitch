@@ -270,6 +270,7 @@ extension MainPage {
         case .terminals: PixelArt.railTerminals
         case .browser: PixelArt.railBrowser
         case .clash: PixelArt.railClash
+        case .passwords: PixelArt.railPasswords
         case .rooms: PixelArt.railRooms
         }
     }

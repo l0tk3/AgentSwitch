@@ -267,6 +267,18 @@ enum MainWindowPreview {
         window.close()
     }
 
+    /// The password book (`-designPreviewOnly passwords`; user #351): the list with an entry, its password shown, and
+    /// an entry being edited, in light and dark.
+    static func renderPasswords(model: AppModel, into directory: URL) async throws {
+        for (suffix, look) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
+            for (name, showing, editing) in [("", false, false), ("-shown", true, false), ("-edit", false, true)] {
+                PasswordsDemo.current = PasswordsDemo.make(showing: showing, editing: editing)
+                try await shot(model: model, page: .passwords, system: NSAppearance(named: look), to: directory.appendingPathComponent("main-passwords\(name)\(suffix).png"))
+            }
+        }
+        PasswordsDemo.current = nil
+    }
+
     /// docs/mesh-v0.md §5.2 (`-designPreviewOnly nodes`, after `model.loadDemoNodes()`): the bar's node choice on this
     /// Mac's own pages (`main-nodes-own`), and the window on another node — `@ Mac mini` in the bar, the strip under it,
     /// the rail without Clash — on Dispatch and on Terminals (`main-nodes-dispatch`, `main-nodes-terminals`), and with
@@ -370,7 +382,8 @@ enum MainWindowPreview {
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
                                               .browser: BrowserPage.host(browser),
                                               .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model)),
-                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: .demo).environment(model))])
+                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: .demo).environment(model)),
+                                              .passwords: NSHostingView(rootView: PasswordsPage(state: state).environment(model))])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head(list: rail != .bare), model: model, content: container,
                                                                 actions: MainBarActions(), browser: browser))
         host.sizingOptions = []

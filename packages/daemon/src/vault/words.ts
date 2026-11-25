@@ -217,9 +217,11 @@ export class RedactionStore {
   refOf(profile: string, w: Pick<Word, "value" | "replace">): string { return w.replace ?? hashRef(this.salt(profile), w.value); }
 
   /** What a terminal of `profile`, sitting in `rooms`, has replaced: the global words, the found ones, its rooms'. */
-  pairs(profile: string, rooms: readonly string[]): Pair[] {
+  pairs(profile: string, rooms: readonly string[], more: readonly string[] = []): Pair[] {
     const out = new Map<string, Pair>();
     const put = (w: Pick<Word, "value" | "replace" | "restore">): void => { out.set(w.value, { value: w.value, ref: this.refOf(profile, w), restore: w.restore }); };
+    // The password book's (passwords.ts): hashed, and put back.
+    for (const value of more) put({ value, restore: true });
     for (const value of foundWords(this.data.settings, this.who)) put({ value, restore: true });
     for (const w of this.data.words) put(w);
     for (const r of rooms) for (const w of this.data.rooms[r] ?? []) put(w);

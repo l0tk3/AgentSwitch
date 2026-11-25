@@ -39,6 +39,8 @@ export type ApiDeps = {
   /** Taking a member back to before a room's message (撤回, a safeguard's refusal; api/roomRewind.ts). */
   readonly seatRewind?: import("./roomRewind.js").SeatRewind;
   /** The words the model never sees, and the gateway that replaces them (vault/; api/redaction.ts). */
+  /** The password book (vault/passwords.ts; api/passwords.ts). */
+  readonly passwords?: import("../vault/passwords.js").PasswordBook;
   readonly redaction?: { readonly store: import("../vault/words.js").RedactionStore; readonly gate: import("../vault/modelGate.js").ModelGate };
   /** Tests: how long a watch of the Kit's tools is held. */
   readonly roomWatchMs?: number;

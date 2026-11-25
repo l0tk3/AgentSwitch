@@ -134,6 +134,7 @@ import { gateCaller } from "./rooms/gateCall.js";
 import { fileKey, vaultKey } from "./vault/key.js";
 import { RedactionStore } from "./vault/words.js";
 import { ModelGate } from "./vault/modelGate.js";
+import { PasswordBook } from "./vault/passwords.js";
 import { exitLookup } from "./browser/exit.js";
 import { ExitPool } from "./browser/exits.js";
 import { claudeSignedIn, codexSignedIn } from "./terminals/signIn.js";
@@ -525,12 +526,14 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
   const rooms = new RoomStore(cfg.home);
   // The model traffic gateway and the words it replaces (vault/; user #320-#332): with real terminals only.
-  const vault = cfg.terminals && !overrides.terminalLauncher ? ((): RedactionStore => {
+  const vaultKeys = cfg.terminals && !overrides.terminalLauncher ? ((): Buffer[] => {
     const k = vaultKey(cfg.home);
     const old = k.where === "keychain" ? fileKey(cfg.home) : null;
-    return new RedactionStore(cfg.home, old ? [k.key, old] : [k.key]);
+    return old ? [k.key, old] : [k.key];
   })() : null;
-  const modelGate = vault ? new ModelGate({ home: cfg.home, bin: gateBin(), store: vault, roomsOf: (t) => rooms.roomsOf(t).map((x) => x.room.id), log: (line) => console.error(line) }) : null;
+  const vault = vaultKeys ? new RedactionStore(cfg.home, vaultKeys) : null;
+  const passwords = vaultKeys ? new PasswordBook(cfg.home, vaultKeys) : null;
+  const modelGate = vault ? new ModelGate({ home: cfg.home, bin: gateBin(), store: vault, roomsOf: (t) => rooms.roomsOf(t).map((x) => x.room.id), more: () => passwords?.words() ?? [], log: (line) => console.error(line) }) : null;
   const roomPolicy = new RoomPolicy(cfg.home);
   const roomFilesDir = filesRoot(cfg.home);
   mkdirSync(roomFilesDir, { recursive: true, mode: 0o700 });
@@ -690,7 +693,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     noteProfile: (session, profile, agent = "claude-code") => { const a = PROFILE_AGENTS.find((x) => x === agent); if (a) profiles.noteSession(a, session, profile); },
     sessionOf: seatSessionOf, wasOf: seatWasOf, changed: () => roomDelivery.look(),
   });
-  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
+  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), ...(passwords ? { passwords } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

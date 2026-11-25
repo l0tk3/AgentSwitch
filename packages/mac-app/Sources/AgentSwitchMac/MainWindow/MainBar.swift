@@ -135,7 +135,7 @@ struct MainWindowRoot: View {
         let list: CGFloat = switch state.page {
         case .terminals: head.sideWidth
         case .browser: browser.map { CGFloat($0.side.shown(pageWidth: Double(windowWidth - rail))) } ?? 0
-        case .dispatch, .clash, .rooms: 0
+        case .dispatch, .clash, .rooms, .passwords: 0
         }
         return rail + list
     }
@@ -246,7 +246,7 @@ struct MainBar: View {
                     case .rooms:
                         ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Room") { state.askNewRoom() }
                         ToolbarPixelButton(rows: PixelArt.toolbarPeople, help: "Members", lit: state.roomsMembers) { state.roomsMembers.toggle() }
-                    case .dispatch, .clash:
+                    case .dispatch, .clash, .passwords:
                         EmptyView()
                     }
                 }
@@ -264,6 +264,8 @@ struct MainBar: View {
                 DispatchTitleView(title: state.browserTitle, back: false, action: {})
             case .clash:
                 DispatchTitleView(title: BarTitle("Clash Integration"), back: false, action: {})
+            case .passwords:
+                DispatchTitleView(title: BarTitle("Passwords"), back: false, action: {})
             case .rooms:
                 DispatchTitleView(title: BarTitle(state.roomsTitle.map { "Chat Room · \($0)" } ?? "Chat Room"), back: false, action: {})
             }

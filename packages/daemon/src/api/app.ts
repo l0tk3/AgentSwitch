@@ -21,6 +21,7 @@ import { mountProfiles } from "./profiles.js";
 import { mountAddons } from "./addons.js";
 import { mountClash } from "./clash.js";
 import { mountAgentsBoard } from "./agentsBoard.js";
+import { mountPasswords } from "./passwords.js";
 import { mountRedaction } from "./redaction.js";
 import { mountRooms } from "./rooms.js";
 import { mountDispatchDesk } from "./dispatchDesk.js";
@@ -49,6 +50,7 @@ export function createApp(deps: ApiDeps): Hono {
   mountAgentsBoard(app);
   mountRooms(app, deps);
   mountRedaction(app, deps);
+  mountPasswords(app, deps);
   mountDispatchDesk(app, deps);
   mountBrowser(app, deps);
   mountProfileBrowsers(app, deps);

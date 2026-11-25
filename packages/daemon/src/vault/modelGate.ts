@@ -58,6 +58,8 @@ export class ModelGate {
     readonly store: RedactionStore;
     /** The rooms a terminal sits in now (their words are its too). */
     readonly roomsOf: (terminal: string) => readonly string[];
+    /** More values the model never sees: the password book's (passwords.ts). */
+    readonly more?: () => readonly string[];
     readonly log?: (line: string) => void;
     /** Tests: how a gateway is started. */
     readonly start?: (port: number, confdir: string) => ChildProcess;
@@ -160,7 +162,7 @@ export class ModelGate {
   /** What a terminal has replaced now (for its card, and the tests). */
   pairsOf(terminal: string): Pair[] {
     const s = this.scopes.get(terminal);
-    return s ? this.o.store.pairs(s.profile, this.o.roomsOf(terminal)) : [];
+    return s ? this.o.store.pairs(s.profile, this.o.roomsOf(terminal), this.o.more?.() ?? []) : [];
   }
 
   private send(): void {
@@ -168,12 +170,13 @@ export class ModelGate {
     if (!child?.stdin || child.stdin.destroyed) return;
     const settings = this.o.store.settings();
     const scopes: Record<string, unknown> = {};
+    const more = this.o.more?.() ?? [];
     for (const [id, s] of this.scopes) {
       const own = hostOf(s.baseUrl);
       scopes[id] = {
         hosts: [...new Set([...MODEL_HOSTS, ...settings.hosts, ...(own && own !== "127.0.0.1" && own !== "localhost" ? [own] : [])])],
         upstream: s.upstream,
-        pairs: this.o.store.pairs(s.profile, this.o.roomsOf(id)),
+        pairs: this.o.store.pairs(s.profile, this.o.roomsOf(id), more),
         log: settings.log,
       };
     }
