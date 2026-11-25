@@ -25,7 +25,7 @@ struct MainRail: View {
 
     var body: some View {
         VStack(spacing: Self.gap) {
-            ForEach(state.pages, id: \.self) { page in
+            ForEach(state.pages.filter { $0 != .passwords }, id: \.self) { page in
                 let open = OldDispatch.reachable(page)
                 // Dispatch while the old dispatch is off: dithered, not clickable, the sentence as its help (OldDispatch).
                 RailButton(rows: page.railIcon, help: open ? page.railHelp : OldDispatch.note, current: state.page == page,
@@ -34,6 +34,9 @@ struct MainRail: View {
                     .accessibilityLabel(page.title)
             }
             RailEmptyPart(state: state)
+            // The password book at the foot, over the settings (user #358: 密码本放在这个位置吧).
+            RailButton(rows: MainPage.passwords.railIcon, help: MainPage.passwords.railHelp, current: state.page == .passwords, mark: .none) { switchPage(.passwords) }
+                .accessibilityLabel(MainPage.passwords.title)
             RailButton(rows: PixelArt.toolbarSettings, help: "Settings ⌘,", current: false, mark: .none, action: settings)
                 .accessibilityLabel("Settings")
         }
@@ -117,7 +120,7 @@ struct RailStrip: View {
 
     var body: some View {
         VStack(spacing: MainRail.gap) {
-            ForEach(state.pages, id: \.self) { page in
+            ForEach(state.pages.filter { $0 != .passwords }, id: \.self) { page in
                 let open = OldDispatch.reachable(page)
                 StripBar(bar: open ? .of(current: state.page == page, activity: state.activity(of: page).mark) : nil,
                          help: open ? page.railHelp : OldDispatch.note) { switchPage(page) }
@@ -125,6 +128,8 @@ struct RailStrip: View {
                     .accessibilityLabel(page.title)
             }
             RailEmptyPart(state: state)
+            StripBar(bar: state.page == .passwords ? .of(current: true, activity: .none) : nil, help: MainPage.passwords.railHelp) { switchPage(.passwords) }
+                .accessibilityLabel(MainPage.passwords.title)
             StripBar(bar: nil, help: "Settings ⌘,", action: settings)
                 .accessibilityLabel("Settings")
         }
