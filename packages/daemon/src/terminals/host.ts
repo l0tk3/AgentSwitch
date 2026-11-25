@@ -324,7 +324,7 @@ export type TerminalHostOptions = {
   /** A turn of Claude Code's ended on an API error (StopFailure): a refusal among them (api/roomRewind.ts). */
   readonly failed?: (id: string) => void;
   /** The model traffic gateway (vault/modelGate.ts): a terminal about to start gets its way through it, or null. */
-  readonly modelGate?: { open(scope: { terminal: string; profile: string; upstream: string | null; baseUrl?: string }): Promise<{ proxy: string; ca: string; bundle: string } | null>; close(terminal: string): void };
+  readonly modelGate?: { open(scope: { terminal: string; /** The agent: a profile is one agent's. */ harness?: string; profile: string; upstream: string | null; baseUrl?: string }): Promise<{ proxy: string; ca: string; bundle: string } | null>; close(terminal: string): void };
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
   /** The agent of a terminal gave the session it writes a title worth showing (sessions/titles.ts). */
   readonly onTitle?: (harness: TerminalHarness, sessionId: string, title: string) => void;
@@ -991,7 +991,7 @@ export class TerminalHost {
     // The model traffic gateway: the way out the terminal would have had (its profile's, or this service's own)
     // is the gateway's way on.
     const envProxy = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.all_proxy || process.env.ALL_PROXY || null;
-    const gate = await this.opts.modelGate?.open({ terminal: id, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
+    const gate = await this.opts.modelGate?.open({ terminal: id, harness: req.harness, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
     let plan: LaunchPlan;
     try {
       plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(gate ? { gate } : {}), ...(req.profile ? { ...(req.profile.isolated ? { isolated: true as const } : {}), ...(req.profile.home ? { configHome: req.profile.home } : {}), ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}), ...(req.profile.browserKey ? { browserKey: req.profile.browserKey } : {}), ...(req.profile.api ? { api: { name: req.profile.name, ...req.profile.api } } : {}), ...(req.profile.telemetryOff ? { telemetryOff: true as const } : {}) } : {}), ...(req.signIn ? { signIn: true as const } : {}), ...(req.ownProvider ? { ownProvider: true as const } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });

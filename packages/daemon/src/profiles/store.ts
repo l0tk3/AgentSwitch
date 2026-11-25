@@ -207,6 +207,11 @@ export class ProfileStore {
     if (home && agent === "codex" && !this.all().codex.profiles.find((p) => p.id === id)?.isolated) this.codexHome(home);
   }
 
+  /** Who is signed in under `id` (the agent's own files say; null: nobody, or an agent that does not say). */
+  accountOf(agent: ProfileAgent, id: string): string | null {
+    return this.of(agent, this.read()).profiles.find((p) => p.id === id)?.account ?? null;
+  }
+
   /** The name the screens show for `id` (null: no such profile). */
   nameOf(agent: ProfileAgent, id: string): string | null {
     return this.of(agent, this.read()).profiles.find((p) => p.id === id)?.name ?? null;

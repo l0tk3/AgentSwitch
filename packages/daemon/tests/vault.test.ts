@@ -10,7 +10,7 @@ import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { fileKey, vaultKey } from "../src/vault/key.js";
 import { ModelGate } from "../src/vault/modelGate.js";
-import { foundWords, hashRef, RedactionError, RedactionStore, restorable, DEFAULT_SETTINGS } from "../src/vault/words.js";
+import { foundWords, hashRef, RedactionError, RedactionStore, restorable, saltKey, DEFAULT_SETTINGS } from "../src/vault/words.js";
 
 const home = () => mkdtempSync(join(tmpdir(), "as-vault-"));
 const WHO = { user: "lkz", full: "Li Kaizhi", home: "/Users/lkz", host: "lkz-mbp.local" };
@@ -184,5 +184,17 @@ describe("over HTTP (this Mac's screens only)", () => {
     expect((await call("DELETE", "/redaction/logs?days=x")).status).toBe(400);
     expect((await call("DELETE", "/redaction/logs?days=3")).json).toEqual({ removed: 0 });
     for (const p of ["/redaction", "/redaction/words", "/redaction/logs"]) expect(remoteAllowed("GET", p)).toBe(false);
+  });
+
+  it("gives a profile another salt when another account signs in under it, and the old one back with the old account (user #421)", () => {
+    const s = new RedactionStore(mkdtempSync(join(tmpdir(), "as-salt-")), [Buffer.alloc(32, 5)], () => 1, { user: "lkz" });
+    const ref = (key: string) => s.pairs(key, []).find((p) => p.value === "lkz")!.ref;
+    const a = saltKey("claude-code", "", "A@example.com"), b = saltKey("claude-code", "", "b@example.com");
+    expect(a).toBe(saltKey("claude-code", "", " a@example.com"));
+    expect(a).not.toContain("example");
+    expect(ref(a)).not.toBe(ref(b));
+    expect(ref(a)).toBe(ref(a));
+    // Another agent's profile of the same name, and nobody signed in, are their own too.
+    expect(new Set([ref(a), ref(b), ref(saltKey("codex", "", "a@example.com")), ref(saltKey("claude-code", "", null))]).size).toBe(4);
   });
 });

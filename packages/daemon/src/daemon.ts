@@ -91,7 +91,7 @@ import { gateFill } from "./browser/fill.js";
 import { fileKey, vaultKey } from "./vault/key.js";
 import { sealValue, vaultOpener, type Opener } from "./vault/seal.js";
 import { moveSealed } from "./sealedMove.js";
-import { RedactionStore } from "./vault/words.js";
+import { RedactionStore, saltKey } from "./vault/words.js";
 import { ModelGate } from "./vault/modelGate.js";
 import { PasswordBook } from "./vault/passwords.js";
 import { exitLookup } from "./browser/exit.js";
@@ -452,7 +452,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   let seatRewind: SeatRewind | null = null;
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
-      ...(modelGate ? { modelGate } : {}),
+      // A profile's placeholders are its account's (vault/words.ts saltKey; user #421).
+      ...(modelGate ? { modelGate: {
+        open: ({ harness, ...scope }) => { const agent = PROFILE_AGENTS.find((x) => x === harness); return modelGate.open({ ...scope, profile: saltKey(harness ?? "", scope.profile, agent ? profiles.accountOf(agent, scope.profile || DEFAULT_PROFILE) : null) }); },
+        close: (terminal: string) => modelGate.close(terminal),
+      } } : {}),
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
       deviceOf: (harness, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); return agent ? profiles.deviceOf(agent, profile ?? DEFAULT_PROFILE) : null; },
       onSession: (harness, sessionId, profile) => { sessionTitles.seen(harness, sessionId); const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },

@@ -10,7 +10,7 @@
  *
  *  Kept in one file, AES-256-GCM, under the key of key.ts; never written in the clear. */
 
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { hostname, userInfo } from "node:os";
@@ -119,6 +119,13 @@ function whoami(): { user?: string; full?: string; home?: string; host?: string 
   } catch { /* no full name */ }
   me = { user: u.username, ...(full && full !== u.username ? { full } : {}), home: u.homedir, host: hostname() };
   return me;
+}
+
+/** What a profile's salt goes by (user #421: 如果我默认profile 换了个账号登录 盐应该也得换): the agent, the profile
+ *  and who is signed in under it — another account under the same profile has another salt, and so other
+ *  placeholders; the same account again has its old ones. The account is kept as a digest, not as written. */
+export function saltKey(harness: string, profile: string, account: string | null): string {
+  return `${harness}:${profile || "default"}:${account ? createHash("sha256").update(account.trim().toLowerCase()).digest("hex").slice(0, 16) : "-"}`;
 }
 
 export class RedactionStore {
