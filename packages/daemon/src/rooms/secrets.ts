@@ -32,7 +32,7 @@ const KIND_WORD: Readonly<Record<SecretKind, string>> = { site: "website login",
 /** How a member uses it, in a line. */
 export function useOf(s: RoomSecret): string {
   switch (s.kind) {
-    case "site": return `log in at ${s.url ?? "its site"}${s.account ? ` as ${s.account}` : ""}: room_secret use http, with the token where the password goes in the login request; the gate puts the password in. The browser tools can not type it: where the site needs its page, ask the user (@you) to fill the field (Fill Ciphertext in the browser).`;
+    case "site": return `log in at ${s.url ?? "its site"}${s.account ? ` as ${s.account}` : ""}: in the browser, type the token into the password field (browser_type or browser_fill_form, the token whole as the text); the gate puts the password in and you get it back as [REDACTED]. Or room_secret use http with the token in the login request.`;
     case "api": return `call ${s.url ?? "its API"}: room_secret use http, with the token where the key goes (e.g. the Authorization header); the gate puts the key in on the way out.`;
     case "exec": return `run a command with it: room_secret use exec, env {"${s.env ?? "NAME"}": "<token>"}; the command sees the value, you never do.`;
   }

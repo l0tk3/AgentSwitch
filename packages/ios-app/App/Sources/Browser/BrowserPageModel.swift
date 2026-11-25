@@ -109,9 +109,8 @@ final class BrowserPageModel {
     var heldElsewhere: BrowserHolder? { tab.heldBy.flatMap { $0 == screenId ? nil : BrowserHolder($0) } }
     /// The page is at this phone's size.
     var phoneSized: Bool { tab.viewport.by == screenId }
-    /// `Fill Ciphertext` is offered: this phone drives one of your own tabs (never an agent's, even taken over: the
-    /// agent sees the page again after the hand-back, and the Mac refuses it).
-    var canFill: Bool { canDrive && !tab.owner.isAgent }
+    /// `Fill Ciphertext` is offered: this phone drives the tab — an agent's too, once taken over (user #312): the service keeps the value out of the agent's answers.
+    var canFill: Bool { canDrive }
 
     var layout: BrowserLayout? {
         guard let frameSize, area.width > 0, area.height > 0 else { return nil }

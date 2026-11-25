@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { FillRefused, type FillResolver } from "../src/browser/fill.js";
 import { BrowserAgents, bridgeCommand, CALL_TIMED_OUT, describeCall, FILES_REFUSED, HELD_LOGS_REFUSED, NOT_UPLOADED, RESIZE_REFUSED, terminalOwner, USER_HOLDS_TAB, type AgentConnection, type EngineConnection, type EngineOptions, type JsonRpcMessage, directTools, withoutFileLinks } from "../src/browser/agents.js";
 import { BrowserAudit } from "../src/browser/audit.js";
 import { BrowserHost } from "../src/browser/host.js";
@@ -20,6 +21,9 @@ const CLAUDE: TabOwner = { kind: "terminal", id: "t2", label: "claude · site" }
 /** One of the gate's own checks as it sends them (a field's state; the templates are in browserProbes.test.ts). */
 const GATE_PROBE = "async (page) => { const locate = (t) => page.locator(/^(?:f\\d+)?e\\d+$/.test(t) ? 'aria-ref=' + t : t); const field = locate(\"e12\"); "
   + "try { if (await field.count() !== 1) return 'unknown'; const value = await field.inputValue({ timeout: 2000 }); return value.length ? 'nonempty' : 'empty'; } catch { return 'unknown'; } }";
+
+/** The page a session's first tab opens on. */
+let firstPage = "about:blank";
 
 /** Playwright MCP as far as the bridge can tell: answers, a current tab it opens through the host on first use, files
  *  written into its output folder, and a call the test can hold open. */
@@ -45,13 +49,14 @@ class FakeConnection implements EngineConnection {
   private async call(m: JsonRpcMessage): Promise<void> {
     const { name } = m.params as { name: string };
     if (!this.current) {
-      const tab = await this.host.open(this.opts.owner, "about:blank");
+      const tab = await this.host.open(this.opts.owner, firstPage);
       this.current = tab.id;
       this.tabs.push(tab.id);
     }
     writeFileSync(join(this.opts.outputDir, `page-${this.received.length}.yml`), "- button \"Merge\" [ref=e12]");
     if (this.gate) await this.gate;
-    this.opts.send({ jsonrpc: "2.0", id: m.id!, result: { content: [{ type: "text", text: `did ${name}` }] } });
+    const typed = name === "browser_type" ? ` ${JSON.stringify((m.params as { arguments: unknown }).arguments)}` : "";
+    this.opts.send({ jsonrpc: "2.0", id: m.id!, result: { content: [{ type: "text", text: `did ${name}${typed}` }] } });
   }
 
   /** Playwright MCP asks the client for its roots. */
@@ -81,14 +86,14 @@ class FakeConnection implements EngineConnection {
 const hosts: BrowserHost[] = [];
 afterEach(async () => { for (const h of hosts.splice(0)) await h.shutdown(); });
 
-function setup(holdWaitMs = 5_000, agentQuietMs = 2_000, callDeadlineMs?: number) {
+function setup(holdWaitMs = 5_000, agentQuietMs = 2_000, callDeadlineMs?: number, fill?: FillResolver) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-agents-")));
   const driver = new FakeDriver();
   const host = new BrowserHost({ driver, profileDir: join(root, "profile"), files: { protected: { roots: [], exempt: [] }, home: root }, ownPorts: () => [4711], log: () => undefined, mac: true, agentQuietMs });
   hosts.push(host);
   const audit = new BrowserAudit(join(root, "browser", "audit.jsonl"));
   const engines: FakeConnection[] = [];
-  const agents = new BrowserAgents({ host, audit, dir: join(root, "browser"), holdWaitMs, ...(callDeadlineMs ? { callDeadlineMs } : {}), log: () => undefined,
+  const agents = new BrowserAgents({ host, audit, dir: join(root, "browser"), holdWaitMs, ...(callDeadlineMs ? { callDeadlineMs } : {}), ...(fill ? { fill } : {}), log: () => undefined,
     engine: async (opts) => { const c = new FakeConnection(opts, host); engines.push(c); return c; } });
   const auditLines = (): Record<string, unknown>[] => {
     try { return readFileSync(join(root, "browser", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>); } catch { return []; }
@@ -218,6 +223,37 @@ describe("the MCP connection", () => {
     await c.conn.close();
     expect(existsSync(dir)).toBe(false);
     expect(engine.closed).toBe(true);
+  });
+
+  it("types a room secret's ciphertext as its value, through the gate, and never answers with the value (user #312)", async () => {
+    const token = `enc:v1:${"A".repeat(40)}`;
+    const asked: { token: string; frames: readonly string[] }[] = [];
+    const fill: FillResolver = async (t, frames) => {
+      asked.push({ token: t, frames });
+      if (!frames[0]!.startsWith("https://janus.example/")) throw new FillRefused("not for this site");
+      return { value: "hunter\"2", label: "Janus 登录" };
+    };
+    firstPage = "https://janus.example/login";
+    try {
+      const { agents, engines } = setup(5_000, 2_000, undefined, fill);
+      const c = await connect(agents, agents.mint(CODEX));
+      await c.call("browser_snapshot");
+      const typed = await c.call("browser_type", { target: "e12", text: token });
+      expect(isError(typed)).toBe(false);
+      expect(asked).toEqual([{ token, frames: ["https://janus.example/login"] }]);
+      const sent = engines[0]!.received.filter((m) => m.method === "tools/call").at(-1)!;
+      expect((sent.params as { arguments: { text: string } }).arguments.text).toBe("hunter\"2");
+      expect(text(typed)).toContain("[REDACTED:Janus 登录]");
+      expect(text(typed)).not.toContain("hunter");
+      expect(text(await c.call("browser_type", { target: "e12", text: "plain words" }))).toContain("plain words");
+      expect(asked).toHaveLength(1);
+    } finally { firstPage = "about:blank"; }
+    const { agents } = setup(5_000, 2_000, undefined, fill);
+    const c = await connect(agents, agents.mint(CODEX));
+    await c.call("browser_snapshot");
+    const refused = await c.call("browser_type", { target: "e12", text: token });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toContain("not filled in");
   });
 
   it("the first page opens as the agent's own tab; the answer says where; the navigation is audited without its query", async () => {

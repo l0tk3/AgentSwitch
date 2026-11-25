@@ -74,7 +74,7 @@ final class BrowserWindowTests: XCTestCase {
         let took = tab(codex, held: BrowserDefaults.windowScreen)
         XCTAssertEqual(BrowserWindowText.state(took), .steppedIn)
         XCTAssertEqual(BrowserWindowText.who(took), "You · Taken Over from Codex")
-        XCTAssertEqual(BrowserWindowText.buttons(took), [.handBack, .show, .copy])
+        XCTAssertEqual(BrowserWindowText.buttons(took), [.handBack, .show, .copy])  // not an http(s) page: no Fill
         XCTAssertEqual(BrowserWindowText.primary(took), .handBack)
         XCTAssertEqual(BrowserWindowText.hint(took), "2 分钟无操作将自动交还。agent 排队等待的操作在交还后继续。")
 

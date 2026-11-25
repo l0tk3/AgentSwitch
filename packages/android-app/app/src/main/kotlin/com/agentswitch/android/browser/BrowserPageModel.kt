@@ -233,10 +233,10 @@ class BrowserPageModel(
     val phoneSized: Boolean get() = tab.viewport.by == screenId
 
     /**
-     * `Fill Ciphertext` is offered: this phone drives one of your own tabs (never an agent's, even taken over: the
-     * agent sees the page again after the hand-back, and the Mac refuses it).
+     * `Fill Ciphertext` is offered: this phone drives the tab — an agent's too, once taken over (user #312): the
+     * service keeps the value out of the agent's answers.
      */
-    val canFill: Boolean get() = canDrive && !tab.owner.isAgent
+    val canFill: Boolean get() = canDrive
 
     val layout: BrowserLayout?
         get() {

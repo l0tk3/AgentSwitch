@@ -107,8 +107,10 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
   // a window where the service is asked for windows: a sign-in under the profile is done in it by hand.
   const chrome = playwrightDriver({ ...(opts.kit ? { playwright: () => opts.kit!.playwright() } : {}), ...(opts.own ? { proxy: () => opts.own!.forwarder.start(), window: opts.headless === false } : {}) });
   const chosen = opts.driver ? null : engineDriver({ ...(opts.kit ? { kit: opts.kit } : {}), identity, chrome, forwarder, headless: opts.headless ?? true });
+  let agentsLate: BrowserAgents | null = null;
   const host: BrowserHost = new BrowserHost({
     driver: opts.driver ?? chosen!,
+    filledForAgent: (owner, value, label) => agentsLate?.filledBy(owner, value, label),
     profileDir: join(opts.home, BROWSER_PROFILES_DIR, opts.own?.name ?? MAIN_PROFILE),
     files: { protected: opts.protected, home: userHome, ownFolders: [opts.home, ...(opts.gateHome ? [opts.gateHome] : [])] },
     ownPorts: opts.ownPorts,
@@ -124,10 +126,12 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
     ...(opts.holdIdleMs !== undefined ? { holdIdleMs: opts.holdIdleMs } : {}),
     ...(opts.idleCloseMs !== undefined ? { idleCloseMs: opts.idleCloseMs } : {}),
   });
-  const agents = new BrowserAgents({
+  const agents: BrowserAgents = new BrowserAgents({
     host, audit, dir: state, engine: opts.engine ?? playwrightEngine(host),
+    ...(opts.fill ? { fill: opts.fill } : {}),
     ...(opts.holdWaitMs !== undefined ? { holdWaitMs: opts.holdWaitMs } : {}),
   });
+  agentsLate = agents;
   return {
     host, audit, agents, home: userHome, ...(opts.fill ? { fill: opts.fill } : {}),
     engine: () => chosen?.engine() ?? "chrome",

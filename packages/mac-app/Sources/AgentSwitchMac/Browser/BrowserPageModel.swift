@@ -910,7 +910,6 @@ final class BrowserPageModel {
     private func send(_ token: String, into tabId: String) async -> String? {
         if let problem = BrowserFillText.problem(token) { return problem }
         guard let tab = list.tab(tabId) else { return "此标签已关闭。" }
-        guard tab.owner.kind == .you else { return "只能在你自己的标签中填入密文。" }
         guard BrowserFillText.offered(on: tab.url) else { return "只能在 http(s) 页面中填入密文。" }
         do {
             let result = try await service().fill(tabId: tabId, token: token.trimmingCharacters(in: .whitespacesAndNewlines),

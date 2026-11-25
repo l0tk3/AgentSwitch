@@ -34,7 +34,6 @@ import { BrowserError, DEFAULT_VIEWPORT, WINDOW_HOLDER, YOU, type AgentAction, t
 
 /** A person's fill on an agent's tab (browser-v0 §6): the value would stay in the page, which the agent reads after the
  *  hand-back. */
-export const AGENT_TAB_FILL = "Agent 的标签不可填入密文：填入的值会留在页面中，交还后 agent 可能读到。请在你自己打开的标签中填入。";
 /** A person's fill into a field the screens would show as typed (browser-v0 §6). */
 export const SECRET_FIELDS_ONLY = "只能填入密码或验证码输入框。";
 
@@ -75,6 +74,8 @@ const KIND_ORDER: readonly TabOwnerKind[] = ["terminal", "task", "you"];
 
 export type BrowserHostOptions = {
   readonly driver: BrowserDriver;
+  /** A person filled a value into an agent's tab: the agent is answered without it from then on (agents.ts). */
+  readonly filledForAgent?: (owner: TabOwner, value: string, label: string) => void;
   readonly profileDir: string;
   readonly files: FileRules;
   /** AgentSwitch's own ports (local API, remote, gate proxy, OpenCode): never opened in the browser. */
@@ -527,7 +528,8 @@ export class BrowserHost {
    *  screens show any other as typed), and only while focus stays on the field that was checked. The value goes into
    *  the page and nowhere else: not returned, not logged, not quoted in an error. */
   async fill(id: string, holder: string, token: string, resolve: FillResolver): Promise<FillDone> {
-    if (this.must(id).owner.kind !== "you") throw new BrowserError("conflict", AGENT_TAB_FILL);
+    // An agent's tab too (user #312: 一定要易用): what the page shows of the value is taken out of the agent's answers.
+    const owner = this.must(id).owner;
     this.mayDrive(id, holder);
     const field = await this.focusOf(id);
     try {
@@ -543,6 +545,7 @@ export class BrowserHost {
         throw new BrowserError("unavailable", "页面未接受输入。");
       }
       if (!typed) throw new BrowserError("conflict", "输入焦点已改变，未填入。请重新点选输入框后再试。");
+      if (owner.kind !== "you") this.opts.filledForAgent?.(owner, resolved.value, resolved.label);
       this.touch(id, holder);
       return { label: resolved.label, host: hostOf(field.frames.at(-1)!) };
     } finally {

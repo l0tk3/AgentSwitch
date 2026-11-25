@@ -182,8 +182,13 @@ describe("the Chatroom Kit", () => {
     store.addSecrets(room.id, [{ name: "Janus 登录", kind: "site", url: "https://janus.example", account: "ops", token }]);
     expect(kit.tools("t1").map((t) => t.name)).toContain("room_secret");
     store.post(room.id, { from: "you", text: "@ios 试试", to: ["ios"] });
-    expect(delivery.atTurnEnd("t3")).toContain("Secrets: 1 in this room (Janus 登录) — room_info show=secrets");
-    expect((await kit.call("t1", "room_info", { show: "secrets" })).text).toContain("room_secret use http");
+    expect(delivery.atTurnEnd("t3")).toContain("The room has 1 secret (Janus 登录): room_info show=secrets");
+    store.post(room.id, { from: "you", text: "@ios 再试", to: ["ios"] });
+    expect(delivery.atTurnEnd("t3")).not.toContain("secret");
+    store.addSecrets(room.id, [{ name: "Janus API", kind: "api", url: "https://janus.example/api", token: `enc:v1:${"C".repeat(40)}` }]);
+    store.post(room.id, { from: "you", text: "@ios 又加了一个", to: ["ios"] });
+    expect(delivery.atTurnEnd("t3")).toContain("The room has 2 secrets (Janus 登录, Janus API)");
+    expect((await kit.call("t1", "room_info", { show: "secrets" })).text).toContain("type the token into the password field");
     expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login" })).toMatchObject({ isError: true, text: expect.stringContaining("No token of the room") });
     expect(await kit.call("t1", "room_secret", { use: "http", url: "https://janus.example/login", body: `p=enc:v1:${"B".repeat(40)}` })).toMatchObject({ isError: true, text: expect.stringContaining("Only the tokens of") });
     expect(await kit.call("t1", "room_secret", { use: "http", method: "POST", url: "https://janus.example/login", body: `p=${token}` })).toEqual({ text: "200 ok" });

@@ -33,6 +33,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { BrowserAudit } from "./audit.js";
 import type { BrowserHost } from "./host.js";
 import { codeRefusal, EVALUATE_TOOL, RUN_CODE_TOOL } from "./probes.js";
+import { CIPHERTEXT, FillRefused, type FillResolver } from "./fill.js";
 import { auditUrl, UPLOAD_MAX_BYTES } from "./rules.js";
 import type { MeasuredBox } from "./actionBox.js";
 import { BrowserError, type TabOwner } from "./types.js";
@@ -54,6 +55,7 @@ const BOX_MS = 1_000;
 const DESCRIPTION_CHARS = 60;
 
 export const USER_HOLDS_TAB = "The user is using this tab in AgentSwitch (they took it over) and did not hand it back within 2 minutes, so this call was not run. Try again later, or ask the user to hand the tab back.";
+export const NOT_FILLED = "The ciphertext was not filled in:";
 export const FILES_REFUSED = "AgentSwitch's shared browser writes no files for agents (filename) and reads none (paths) but the ones a terminal's agent uploads (browser_file_upload, browser_drop).";
 export const NOT_UPLOADED = "Not uploaded in AgentSwitch's shared browser:";
 const UPLOAD_RULE = "A page is given no credentials (keys, .env files, logins, tokens), none of AgentSwitch's own data, and no folders.";
@@ -136,6 +138,9 @@ export type BrowserAgentsOptions = {
   /** Tests: how long a file handed to a page is kept (`UPLOAD_KEEP_MS`). */
   readonly uploadKeepMs?: number;
   readonly log?: (line: string) => void;
+  /** The gate's fill (fill.ts): an agent with no gate in front types a ciphertext and the page gets its value (user
+   *  #312: 一定要易用). Absent: a ciphertext is typed as the text it is. */
+  readonly fill?: FillResolver;
 };
 
 /** A session as its launcher gets it: the id and token for the bridge, and the 0600 file holding the token (the bridge
@@ -177,6 +182,8 @@ type Session = {
   readonly tokenFile: string;
   readonly connections: Map<string, Connection>;
   queue: Promise<void>;
+  /** Values the gate filled for it, each with what is said in its place: taken out of every answer it gets after. */
+  readonly filled: Map<string, string>;
 };
 
 type Connection = {
@@ -313,7 +320,7 @@ export class BrowserAgents {
     const tokenFile = join(this.sessionsDir, `${id}.token`);
     mkdirSync(this.sessionsDir, { recursive: true, mode: 0o700 });
     writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
-    this.sessions.set(id, { id, owner, gate: o.gate === true, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve() });
+    this.sessions.set(id, { id, owner, gate: o.gate === true, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve(), filled: new Map() });
     return { id, token, tokenFile };
   }
 
@@ -324,7 +331,7 @@ export class BrowserAgents {
     const tokenFile = join(this.sessionsDir, `${id}.token`);
     mkdirSync(this.sessionsDir, { recursive: true, mode: 0o700 });
     writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
-    this.sessions.set(id, { id, owner, gate: false, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve() });
+    this.sessions.set(id, { id, owner, gate: false, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve(), filled: new Map() });
   }
 
   /** True when `token` is session `id`'s own and the session is live. */
@@ -492,6 +499,14 @@ export class BrowserAgents {
       handed = { ...request, params: { ...params, arguments: { ...args, paths: staged.map((f) => f.copy) } } };
       uploaded = staged.map((f) => f.shown);
     }
+    // A room secret typed as its ciphertext (user #312): the gate gives the value for the page the field is on, and the
+    // page gets that; the agent is answered without it, now and after.
+    if (!conn.session.gate && this.opts.fill && (tool === "browser_type" || tool === "browser_fill_form")) {
+      const page = target ? this.opts.host.get(target)?.url ?? "" : "";
+      const swapped = await this.unsealed(conn.session, tool, (handed.params as { arguments?: Args }).arguments ?? args, page);
+      if (typeof swapped === "string") { this.send(conn, failure(id, swapped)); return; }
+      if (swapped) handed = { ...handed, params: { ...(handed.params as object), arguments: swapped } };
+    }
     const before = engine.currentTab();
     if (target) {
       this.quietly(() => this.opts.host.setStatus(target, "busy"));
@@ -528,7 +543,43 @@ export class BrowserAgents {
     }
     // With no gate in front (which drops them), the answer's links to this connection's folder, emptied above.
     if (!conn.session.gate) answer = withoutFileLinks(answer, conn.outputDir);
+    answer = scrubbed(answer, conn.session.filled);
     this.send(conn, !before && after && !failed(answer) ? withNote(answer, `Opened in tab "${owner.label}" of AgentSwitch's shared browser: the user sees it in AgentSwitch and can take it over.`) : answer);
+  }
+
+  /** A person filled a value into one of `owner`'s tabs: its sessions are answered without it. */
+  filledBy(owner: TabOwner, value: string, label: string): void {
+    for (const session of this.sessions.values()) if (session.owner.kind === owner.kind && session.owner.id === owner.id) session.filled.set(value, `[REDACTED:${label}]`);
+  }
+
+  /** A call's ciphertexts (a whole `enc:v1:` text) given their values by the gate for `page`; null: none in it; a
+   *  string: the gate's refusal, in words for the model. */
+  private async unsealed(session: Session, tool: string, args: Args, page: string): Promise<Args | string | null> {
+    const fill = this.opts.fill!;
+    const open = async (text: unknown): Promise<string | null> => {
+      if (typeof text !== "string" || !CIPHERTEXT.test(text.trim())) return null;
+      if (!/^https?:/.test(page)) throw new FillRefused("a ciphertext is filled only on an http(s) page.");
+      const { value, label } = await fill(text.trim(), [page]);
+      session.filled.set(value, `[REDACTED:${label}]`);
+      return value;
+    };
+    try {
+      if (tool === "browser_type") {
+        const value = await open(args.text);
+        return value === null ? null : { ...args, text: value };
+      }
+      if (!Array.isArray(args.fields)) return null;
+      let any = false;
+      const fields = [];
+      for (const f of args.fields as Args[]) {
+        const value = f && typeof f === "object" ? await open(f.value) : null;
+        if (value !== null) any = true;
+        fields.push(value === null ? f : { ...f, value });
+      }
+      return any ? { ...args, fields } : null;
+    } catch (err) {
+      return `${NOT_FILLED} ${err instanceof FillRefused ? err.message : "the credential gate could not handle it."}`;
+    }
   }
 
   /** The bridge's own refusals (the gate refuses most of them too; these hold whoever calls). */
@@ -757,6 +808,24 @@ export function withoutFileLinks(answer: JsonRpcMessage, dir: string): JsonRpcMe
 
 function failed(answer: JsonRpcMessage): boolean {
   return answer.error !== undefined || (answer.result as { isError?: unknown } | undefined)?.isError === true;
+}
+
+/** An answer with every value the gate filled for the session put back as its stand-in: as it is, and as code or
+ *  JSON quote it (Playwright MCP shows the code it ran). */
+export function scrubbed(answer: JsonRpcMessage, filled: ReadonlyMap<string, string>): JsonRpcMessage {
+  if (!filled.size) return answer;
+  const forms: [string, string][] = [];
+  for (const [value, said] of filled) {
+    for (const form of new Set([value, JSON.stringify(value).slice(1, -1), value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")])) if (form) forms.push([form, said]);
+  }
+  forms.sort((x, y) => y[0].length - x[0].length);
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") { let t = v; for (const [form, said] of forms) t = t.split(form).join(said); return t; }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  return walk(answer) as JsonRpcMessage;
 }
 
 function withNote(answer: JsonRpcMessage, note: string): JsonRpcMessage {

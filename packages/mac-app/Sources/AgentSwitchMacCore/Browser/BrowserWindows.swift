@@ -51,7 +51,7 @@ public enum BrowserWindowText {
         switch state(tab) {
         case .yours: BrowserFillText.offered(on: tab) ? [.show, .fill, .copy, .close] : [.show, .copy, .close]
         case .agent: [.show, .copy, .close]
-        case .steppedIn: [.handBack, .show, .copy]
+        case .steppedIn: BrowserFillText.offered(on: tab) ? [.handBack, .fill, .show, .copy] : [.handBack, .show, .copy]
         case .elsewhere: [.show, .copy]
         }
     }
@@ -74,7 +74,7 @@ public enum BrowserWindowText {
     public static func hint(_ tab: BrowserTab) -> String {
         switch state(tab) {
         case .yours: BrowserFillText.offered(on: tab) ? "Fill Ciphertext 填入该窗口中当前的焦点输入框，仅限密码与验证码输入框。" : ""
-        case .agent: "在它的窗口里操作即视为接手。接手期间输入的内容，交还后 agent 能在页面上看到；密码请在自己的标签中输入。"
+        case .agent: "在它的窗口里操作即视为接手。接手后可用 Fill Ciphertext 填密码，agent 看不到填入的值。"
         case .steppedIn: "2 分钟无操作将自动交还。agent 排队等待的操作在交还后继续。"
         case .elsewhere: (tab.heldBy ?? "").hasPrefix("phone") ? "正在 iPhone 上使用。手机交还后窗口恢复原来的大小。" : "正在其他设备上使用。交还后窗口恢复原来的大小。"
         }

@@ -226,6 +226,15 @@ export class RoomDelivery {
     let text = this.textOf(waiting);
     if (!this.told.has(terminal)) text += ` New here, or taking work over? The room's record is in ${this.o.store.recordDir(waiting[waiting.length - 1]!.room.id)} (README.md first).`;
     if (!this.told.has(terminal)) text += " What this session knew before the room is not the room's: bring in only what its task needs — no credentials, accounts, or private matters of the user's, in messages or in shared files.";
+    // The room's secrets, names only, once — and again when they change (user #307, #312: not on every message).
+    const room = waiting[waiting.length - 1]!.room;
+    const secrets = this.o.store.secrets(room.id);
+    const sig = secrets.map((x) => x.id).join(",");
+    const key = `${terminal}\u0000${room.id}`;
+    if (sig && this.toldSecrets.get(key) !== sig) {
+      text += ` ${this.secretsLine(secrets)}`;
+      if (taken) this.toldSecrets.set(key, sig);
+    }
     if (taken) this.counted(terminal, waiting, text);
     return text;
   }
@@ -289,11 +298,11 @@ export class RoomDelivery {
     return `${this.envelope(last.room, last.message, last.seat)}${before}\n\n---\n\n${how}`;
   }
 
-  private secretsLine(room: Room): string[] {
-    const all = this.o.store.secrets(room.id);
-    if (!all.length) return [];
+  private readonly toldSecrets = new Map<string, string>();
+
+  private secretsLine(all: readonly { readonly name: string }[]): string {
     const names = all.slice(0, 6).map((x) => x.name).join(", ") + (all.length > 6 ? `, … ${all.length - 6} more` : "");
-    return [`Secrets: ${all.length} in this room (${names}) — room_info show=secrets gives each one's token and use, room_secret uses one through the gate; never ask for a value.`];
+    return `The room has ${all.length} secret${all.length === 1 ? "" : "s"} (${names}): room_info show=secrets says how to use each.`;
   }
 
   /** One message as its addressee gets it (§3). */
@@ -318,9 +327,6 @@ export class RoomDelivery {
       hm(message.at),
       ...(message.files?.length ? [`Files: ${message.files.join(", ")}`] : []),
       ...(message.expects === "none" ? ["Reply: not expected"] : message.expects === "answer" ? ["Reply: expected"] : []),
-      // The room's secrets said on every message, names only: a member asked to log in or call an API knows they are
-      // there without thinking to look (user #307: 没给房间里的人 secret 的使用方式吗？).
-      ...this.secretsLine(room),
       "",
       message.text,
     ];

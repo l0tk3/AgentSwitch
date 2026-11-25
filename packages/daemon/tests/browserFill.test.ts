@@ -11,7 +11,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountBrowser } from "../src/api/browser.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { FillRefused, gateFill, type FillResolver } from "../src/browser/fill.js";
-import { AGENT_TAB_FILL } from "../src/browser/host.js";
 import { SECRET_FIELD } from "../src/browser/playwrightDriver.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { markRemote } from "../src/core/caller.js";
@@ -79,20 +78,17 @@ describe("POST /browser/tabs/:id/fill", () => {
     expect((await call("POST", "/browser/tabs/nope/fill", { token: TOKEN })).status).toBe(404);
   });
 
-  // 2026-10-02 review: a value typed into an agent's tab stays in the page (and in the request the page sends), which
-  // the agent reads after the hand-back.
-  it("never on an agent's tab, even taken over: 409 with the reason, nothing asked or typed", async () => {
-    const { api, driver, call, asked, typed } = setup();
+  // 2026-10-02 review held a value typed into an agent's tab back; user #312 (一定要易用) lets it in, and the agent's
+  // answers lose it (browserAgents.test.ts).
+  it("on an agent's tab too", async () => {
+    const { api, driver, call, typed } = setup();
     const tab = await api.host.open(CODEX, LOGIN);
     driver.page(0).focused = { frames: [LOGIN] };
-    for (const take of [false, true]) {
-      if (take) api.host.take(tab.id, "phone-1");
-      const res = await call("POST", `/browser/tabs/${tab.id}/fill`, { token: TOKEN, screen: "phone-1" });
-      expect(res.status).toBe(409);
-      expect(JSON.parse(res.text).error).toBe(AGENT_TAB_FILL);
-    }
-    expect(asked).toEqual([]);
-    expect(typed()).toEqual([]);
+    api.host.take(tab.id, "phone-1");
+    const res = await call("POST", `/browser/tabs/${tab.id}/fill`, { token: TOKEN, screen: "phone-1" });
+    expect(res.text).toContain("filled");
+    expect(res.status).toBe(200);
+    expect(typed().length).toBe(1);
   });
 
   it("only into a password or one-time-code field: 400 otherwise, nothing asked or typed, the field let go", async () => {
