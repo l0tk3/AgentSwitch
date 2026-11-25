@@ -31,6 +31,8 @@ export type SeatView = {
   readonly canAdd: boolean; readonly byAgent: boolean; readonly left: number | null;
   /** Muted by an admin or the user (§6.2): it reads and works but may not post or write the notes. */
   readonly muted: boolean; readonly mutedBy: string | null;
+  /** Its conversation was taken back last (撤回, a safeguard's refusal): `marked` until the user has seen it. */
+  readonly rewound: { readonly at: number; readonly why: "recall" | "safeguard"; readonly seq: number; readonly marked: boolean } | null;
   readonly state: SeatState | null; readonly card: SeatCard | null;
   /** How many of the room's messages it has not read yet (said since it sat down, by others); null for the user. */
   readonly unread: number | null;
@@ -67,7 +69,7 @@ export function seatState(info: TerminalInfo | null): SeatState {
   return info.status === "working" ? "busy" : info.status;
 }
 
-function wasOf(info: TerminalInfo): SeatWas {
+export function wasOf(info: TerminalInfo): SeatWas {
   return { agent: info.harness, name: info.name, cwd: info.workdir, model: info.modelNow ?? info.model, profile: info.profile?.name ?? null, ...(info.profile?.color ? { color: info.profile.color } : {}) };
 }
 
@@ -102,7 +104,8 @@ export function seatLive(info: TerminalInfo | null): SeatLive | null {
 
 export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (terminal: string) => boolean, stats?: SeatStats, unread = 0): SeatView {
   const info = seat.terminal ? host?.get(seat.terminal) ?? null : null;
-  const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null, muted: seat.muted !== undefined, mutedBy: seat.muted?.by ?? null };
+  const base = { handle: seat.handle, kind: seat.kind, terminal: seat.terminal ?? null, face: seat.face, joinedAt: seat.joinedAt, addedBy: seat.addedBy, canAdd: seat.canAdd, byAgent: seat.byAgent, left: seat.left ?? null, muted: seat.muted !== undefined, mutedBy: seat.muted?.by ?? null,
+    rewound: seat.rewound ? { at: seat.rewound.at, why: seat.rewound.why, seq: seat.rewound.seq, marked: seat.rewound.marked } : null };
   if (seat.kind === "user") return { ...base, state: null, card: null, kit: null, stats: null, asks: null, unread: null };
   const was = info ? wasOf(info) : seat.was ?? null;
   return { ...base, state: seatState(info), card: was ? { ...was, mode: info ? info.modeNow ?? info.mode : null, node: null } : null, kit: seat.terminal && info && kit ? kit(seat.terminal) : false, stats: stats ?? { wakes: 0, chars: 0, posts: 0, calls: 0 }, unread,
@@ -112,8 +115,8 @@ export function seatView(seat: Seat, host: TerminalHost | undefined, kit?: (term
 const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().max(MAX_TOPIC * 4).optional(), terminals: z.array(z.string().min(1).max(100)).max(16).optional() }).strict();
 const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: z.string().max(MAX_TOPIC * 4).optional(), paused: z.boolean().optional(), roundsLimit: z.number().int().min(2).max(100).optional() }).strict();
 const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boolean().optional() }).strict();
-const SetSeat = z.object({ canAdd: z.boolean().optional(), muted: z.boolean().optional(), name: z.string().min(1).max(100).optional() }).strict()
-  .refine((o) => o.canAdd !== undefined || o.muted !== undefined || o.name !== undefined, "nothing to change");
+const SetSeat = z.object({ canAdd: z.boolean().optional(), muted: z.boolean().optional(), name: z.string().min(1).max(100).optional(), rewindSeen: z.literal(true).optional() }).strict()
+  .refine((o) => o.canAdd !== undefined || o.muted !== undefined || o.name !== undefined || o.rewindSeen !== undefined, "nothing to change");
 const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(4096)).max(10).optional(), expects: z.enum(["none", "answer"]).optional(), task: z.number().int().positive().optional() }).strict();
 const WriteNotes = z.object({ text: z.string().max(100_000) }).strict();
 const Read = z.object({ seq: z.number().int().nonnegative() }).strict();
@@ -349,6 +352,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase();
       if (body.data.canAdd !== undefined) rooms.setCanAdd(id, handle, body.data.canAdd);
       if (body.data.muted !== undefined) rooms.setMuted(id, YOU, handle, body.data.muted);
+      if (body.data.rewindSeen) rooms.rewindSeen(id, handle);
       const named = body.data.name === undefined ? handle : rooms.rename(id, YOU, handle, body.data.name).handle;
       const seat = rooms.get(id).seats.find((s) => s.handle === named);
       if (!seat) throw new RoomError(404, `房间里没有 @${handle}`);
@@ -433,6 +437,23 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     } catch (err) { return refused(c, err); }
   });
 
+  // Its files as they were before its last rewind (user #290: 要退代码时我再单独点一下): what that would do, then do it.
+  // Only what its own edits did; one changed since by anyone else is left unless `force`.
+  app.get("/rooms/:id/seats/:handle/rewind/files", (c) => {
+    try {
+      if (!deps.seatRewind) throw new RoomError(503, "这个服务不能退回会话。");
+      return c.json({ files: deps.seatRewind.filesOf(c.req.param("id"), c.req.param("handle").replace(/^@/, "").toLowerCase()) });
+    } catch (err) { return refused(c, err); }
+  });
+  app.post("/rooms/:id/seats/:handle/rewind/files", async (c) => {
+    const body = await parseBody(c, z.object({ force: z.boolean().optional() }).strict());
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try {
+      if (!deps.seatRewind) throw new RoomError(503, "这个服务不能退回会话。");
+      return c.json({ restored: deps.seatRewind.putBack(c.req.param("id"), c.req.param("handle").replace(/^@/, "").toLowerCase(), body.data.force === true) });
+    } catch (err) { return refused(c, err); }
+  });
+
   // A seat leaves. `?close=end`: its terminal is closed too (its conversation kept); `?close=delete`: and its
   // conversation's record deleted (§6.2 结束、删除). The user may do this to any seat.
   app.delete("/rooms/:id/seats/:handle", async (c) => {
@@ -509,11 +530,18 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   // 删除消息 (user #278): the user's, any message. `tell`: those who had it already are told in a line to leave it aside
   // (what a session has read can not be taken back from it).
-  app.delete("/rooms/:id/messages/:seq", (c) => {
+  app.delete("/rooms/:id/messages/:seq", async (c) => {
     try {
       const id = c.req.param("id");
       const seq = Number(c.req.param("seq"));
       if (!Number.isInteger(seq) || seq < 1) return c.json({ error: "消息编号不对" }, 400);
+      // 撤回 (user #288): its sender and those it reached are taken back to before it, where they can be.
+      if (c.req.query("rewind") === "1") {
+        if (!deps.seatRewind) throw new RoomError(503, "这个服务不能退回会话。");
+        const done = await deps.seatRewind.recall(id, seq);
+        deps.roomsChanged?.(id);
+        return c.json({ ok: true, ...done });
+      }
       const done = rooms.deleteMessage(id, seq);
       let told: number | undefined;
       if (c.req.query("tell") === "1" && done.reached.length) {

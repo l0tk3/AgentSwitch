@@ -36,6 +36,8 @@ export type ApiDeps = {
   readonly roomKit?: import("../rooms/kit.js").RoomKit;
   /** How a room's messages reach the sessions they are for (§5). */
   readonly roomDelivery?: import("../rooms/delivery.js").RoomDelivery;
+  /** Taking a member back to before a room's message (撤回, a safeguard's refusal; api/roomRewind.ts). */
+  readonly seatRewind?: import("./roomRewind.js").SeatRewind;
   /** Tests: how long a watch of the Kit's tools is held. */
   readonly roomWatchMs?: number;
   /** Something a room's seats may be waiting for changed (a message, a seat, a pause): what is to be given is looked

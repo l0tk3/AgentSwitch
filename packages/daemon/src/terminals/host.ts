@@ -316,6 +316,8 @@ export type TerminalHostOptions = {
   readonly onExit?: (id: string) => void;
   /** A terminal's agent writes this conversation now — one it was started on, or one it says it is in: under which
    *  profile (null: the Mac's own). Kept so the conversation goes on under the same one (docs/profiles-v0.md §3.3). */
+  /** A turn of Claude Code's ended on an API error (StopFailure): a refusal among them (api/roomRewind.ts). */
+  readonly failed?: (id: string) => void;
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
   /** The agent of a terminal gave the session it writes a title worth showing (sessions/titles.ts). */
   readonly onTitle?: (harness: TerminalHarness, sessionId: string, title: string) => void;
@@ -951,7 +953,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1550,6 +1552,7 @@ export class TerminalHost {
         this.noSubagents(s);
         this.turnEnded(s, false, error || "这一轮出错结束", true);
         this.setStatus(s, "idle");
+        if (!agentId) this.opts.failed?.(s.id);
         return null;
       }
       case "PreToolUse": {

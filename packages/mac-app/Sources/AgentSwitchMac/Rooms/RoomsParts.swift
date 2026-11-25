@@ -47,7 +47,17 @@ struct RoomFaceView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: classic ? side / 2 : 0, style: .continuous))
-        .accessibilityLabel(seat.map { $0.isUser ? "You" : "@\($0.handle)" } ?? "")
+        // Taken back on Claude's safeguard (user #288): marked until the user has seen it on its card.
+        .overlay(alignment: .topTrailing) {
+            if let r = seat?.rewound, r.marked {
+                Text("↺").font(.system(size: max(side * 0.32, 8), weight: .bold)).foregroundStyle(.white)
+                    .frame(width: max(side * 0.44, 11), height: max(side * 0.44, 11))
+                    .background(Circle().fill(Color.orange))
+                    .offset(x: side * 0.16, y: -side * 0.16)
+                    .help(r.says)
+            }
+        }
+        .accessibilityLabel(seat.map { $0.isUser ? "You" : "@\($0.handle)" + ($0.rewound?.marked == true ? "，已退回" : "") } ?? "")
     }
 }
 
@@ -225,6 +235,10 @@ struct RoomMessageRow: View {
                         .textSelection(.enabled)
                         .lineLimit(long && !expanded ? Self.foldLines : nil)
                         .fixedSize(horizontal: false, vertical: true)
+                        .opacity(message.rewound ? 0.55 : 1)
+                    if message.rewound {
+                        Text("已退回 · 它退回到这之前了，不记得说过这条").font(.system(size: 11.5)).foregroundStyle(Look.faint)
+                    }
                     if long {
                         Button { expanded.toggle() } label: {
                             Text(expanded ? "收起" : "展开全文").font(.system(size: 12)).foregroundStyle(Color.signal)
@@ -564,6 +578,9 @@ struct RoomMemberCard: View {
     var openTerminal: (() -> Void)? = nil
     /// Its avatar chosen (one for each look).
     var avatar: (() -> Void)? = nil
+    /// The mark of its last rewind seen; its files put back to before it (退代码, user #290).
+    var rewindSeen: (() -> Void)? = nil
+    var filesBack: (() -> Void)? = nil
     @State private var renaming = false
     @State private var newName = ""
     @Environment(\.interfaceLook) private var look
@@ -622,6 +639,17 @@ struct RoomMemberCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         BlinkingSquare()
                         Text(RoomSeat.needsResumeSays).font(.system(size: 12)).foregroundStyle(Look.ink).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 8)
+                }
+                if let r = seat.rewound {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(r.says).font(.system(size: 12)).foregroundStyle(r.marked ? Color.orange : Look.faint).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 6) {
+                            if let filesBack { wide("Rewind Files…", help: "把它自己改过的文件也退回到那一刻。先列出会改哪些文件，确认后再改。", action: filesBack) }
+                            if r.marked, let rewindSeen { wide("Got It", help: "去掉头像上的标记。", action: rewindSeen) }
+                            Spacer(minLength: 0)
+                        }
                     }
                     .padding(.top, 8)
                 }

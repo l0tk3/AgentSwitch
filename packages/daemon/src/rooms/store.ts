@@ -90,7 +90,13 @@ export type Seat = {
   /** Muted by an admin or the user (docs/chatroom-v0.md §6.2): it still reads, is woken and works, but may not post
    *  or write the pinned notes. */
   readonly muted?: { readonly by: string; readonly at: number };
+  /** Its conversation was taken back last (rooms/rewind.ts, user #288): when, why, to before which message, and where
+   *  the record it went on from is (its files can be put back from it later, when the user asks). `marked`: its face
+   *  carries a mark until the user has seen it (a safeguard's). */
+  readonly rewound?: SeatRewound;
 };
+
+export type SeatRewound = { readonly at: number; readonly why: "recall" | "safeguard"; readonly seq: number; readonly record: string; readonly line: number; readonly marked: boolean };
 
 export type Message = {
   readonly seq: number;
@@ -110,6 +116,9 @@ export type Message = {
   readonly task?: number;
   /** Deleted by the user (user #278): its words and files are gone, its number and place stay (「已删除」). */
   readonly deleted?: { readonly at: number; readonly by: string };
+  /** Said in a stretch of its sender's conversation that was taken back since (rooms/rewind.ts): its sender no longer
+   *  remembers saying it (「已退回」). */
+  readonly rewound?: { readonly at: number };
 };
 
 /** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
@@ -908,6 +917,42 @@ export class RoomStore {
     return { reached, withdrawn };
   }
 
+  /** A seat's conversation was taken back (rooms/rewind.ts): what it said since `since` is marked 「已退回」, what it
+   *  was handed in the stretch taken back (`again`) is on its way to it once more, and the seat remembers how. */
+  rewind(id: string, handle: string, since: number | null, again: readonly number[], rewound: SeatRewound, drop: readonly number[] = []): void {
+    const room = this.get(id);
+    const seat = this.seatOf(room, handle);
+    if (since !== null) {
+      for (const m of this.messages(id, { limit: 2000 })) {
+        if (m.from !== seat.handle || m.deleted || m.rewound || m.at < since) continue;
+        const next: Message = { ...m, rewound: { at: rewound.at } };
+        this.db.add(id, next, JSON.stringify(next));
+      }
+    }
+    const receipts: Record<string, Record<string, Receipt>> = { ...room.receipts };
+    for (const seq of again) {
+      const m = this.messages(id, { after: seq - 1, limit: 1 })[0];
+      if (!m || m.seq !== seq || m.deleted || !m.to.includes(seat.handle)) continue;
+      receipts[seq] = { ...(receipts[seq] ?? {}), [seat.handle]: "sent" };
+    }
+    // What it is not to be given again (what a refused reply answered), however far it had come.
+    for (const seq of drop) {
+      const of = receipts[seq];
+      if (!of || !(seat.handle in of)) continue;
+      const { [seat.handle]: _was, ...others } = of;
+      if (Object.keys(others).length) receipts[seq] = others; else delete receipts[seq];
+    }
+    this.rewriteLog(this.save({ ...room, seats: room.seats.map((s) => (s === seat ? { ...s, rewound } : s)), receipts }));
+  }
+
+  /** The user has seen the mark on a seat's face (a safeguard's rewind). */
+  rewindSeen(id: string, handle: string): void {
+    const room = this.get(id);
+    const seat = this.seatOf(room, handle);
+    if (!seat.rewound?.marked) return;
+    this.save({ ...room, seats: room.seats.map((s) => (s === seat ? { ...s, rewound: { ...seat.rewound!, marked: false } } : s)) });
+  }
+
   /** The user has seen up to `seq`. */
   read(id: string, seq: number): Room {
     const room = this.get(id);
@@ -1062,11 +1107,14 @@ function seatFrom(v: unknown): Seat | null {
   const session = e && str(e.id) && str(e.cwd) ? { id: e.id, cwd: e.cwd, ...(str(e.mode) ? { mode: e.mode } : {}), ...(str(e.model) ? { model: e.model } : {}), ...(str(e.effort) ? { effort: e.effort } : {}), ...(str(e.profile) ? { profile: e.profile } : {}) } : undefined;
   const m = o.muted as Record<string, unknown> | undefined;
   const muted = m && str(m.by) && num(m.at) ? { by: m.by, at: m.at } : undefined;
+  const r = o.rewound as Record<string, unknown> | undefined;
+  const rewound = r && num(r.at) && (r.why === "recall" || r.why === "safeguard") && num(r.seq) && str(r.record) && num(r.line)
+    ? { at: r.at, why: r.why, seq: r.seq, record: r.record, line: r.line, marked: r.marked === true } as SeatRewound : undefined;
   return {
     handle: o.handle, kind: o.kind, ...(str(o.terminal) ? { terminal: o.terminal } : {}), face, joinedAt: o.joinedAt,
     addedBy: str(o.addedBy) ? o.addedBy : YOU, canAdd: o.canAdd === true, byAgent: o.byAgent === true,
     ...(num(o.left) ? { left: o.left } : {}), ...(was ? { was } : {}), ...(str(o.starter) ? { starter: o.starter } : {}),
-    ...(muted ? { muted } : {}), ...(session ? { session } : {}),
+    ...(muted ? { muted } : {}), ...(session ? { session } : {}), ...(rewound ? { rewound } : {}),
   };
 }
 
@@ -1113,5 +1161,5 @@ function messageFrom(v: unknown): Message | null {
   const o = v as Record<string, unknown>;
   // A message of files alone has no words: it is kept all the same.
   if (!num(o.seq) || !str(o.from) || typeof o.text !== "string" || !num(o.at)) return null;
-  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}), ...(o.deleted && typeof o.deleted === "object" && num((o.deleted as Record<string, unknown>).at) ? { deleted: { at: (o.deleted as { at: number }).at, by: str((o.deleted as Record<string, unknown>).by) ? (o.deleted as { by: string }).by : YOU } } : {}) };
+  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}), ...(o.deleted && typeof o.deleted === "object" && num((o.deleted as Record<string, unknown>).at) ? { deleted: { at: (o.deleted as { at: number }).at, by: str((o.deleted as Record<string, unknown>).by) ? (o.deleted as { by: string }).by : YOU } } : {}), ...(o.rewound && typeof o.rewound === "object" && num((o.rewound as Record<string, unknown>).at) ? { rewound: { at: (o.rewound as { at: number }).at } } : {}) };
 }

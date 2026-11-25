@@ -33,7 +33,8 @@ import { filesRoot, MAX_STARTED, RoomStore } from "./rooms/store.js";
 import { RoomDelivery } from "./rooms/delivery.js";
 import { RoomKit } from "./rooms/kit.js";
 import type { SeatLookup } from "./rooms/state.js";
-import { runningOf, seatLive } from "./api/rooms.js";
+import { runningOf, seatLive, sessionOf as seatSessionOf, wasOf as seatWasOf } from "./api/rooms.js";
+import { SeatRewind } from "./api/roomRewind.js";
 import { follow } from "./rooms/follow.js";
 import { RoomPolicy } from "./rooms/policy.js";
 import { roomOrg, type Ask } from "./api/roomOrg.js";
@@ -530,6 +531,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The new dispatch (api/dispatchDesk.ts): a session at the 调度台 room; it may start more sessions than an admin.
   const dispatchDesk = new DispatchDesk({ home: cfg.home, rooms, ask: (method, path, body) => (roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } })), changed: () => roomDelivery.look() });
   const roomKit: RoomKit = new RoomKit({ store: rooms, seat: (terminal) => roomSeat(terminal), delivery: roomDelivery, org: () => (roomAsk ? roomOrg(roomAsk, roomPolicy) : null), startLimit: (terminal) => dispatchDesk.limitOf(terminal) ?? MAX_STARTED });
+  let seatRewind: SeatRewind | null = null;
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -560,7 +562,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         codexDaybreak: () => overrides.modelOffers?.current().codex?.daybreak !== undefined,
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
-      mail: (id, takes) => (roomKit.has(id) ? roomDelivery.atTurnEnd(id, takes) : null),
+      // A reply refused by Claude's safeguard takes the member back to before the room's message it answered
+      // (api/roomRewind.ts, user #288): nothing is handed it meanwhile.
+      mail: (id, takes) => (!roomKit.has(id) ? null : seatRewind?.refused(id) ? null : roomDelivery.atTurnEnd(id, takes)),
+      failed: (id) => { if (roomKit.has(id)) setTimeout(() => seatRewind?.refused(id), 800).unref(); },
       mailNow: (id) => (roomKit.has(id) ? roomDelivery.duringTurn(id) : null),
       prompted: (id, prompt) => roomDelivery.userTyped(id, prompt),
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
@@ -664,7 +669,13 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
+  seatRewind = new SeatRewind({
+    rooms, host: () => terminalHost ?? undefined, callLocal: (method, path, body) => (roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } })),
+    locate: (session) => sessions?.locate("claude-code", session) ?? null,
+    noteProfile: (session, profile) => profiles.noteSession("claude-code", session, profile),
+    sessionOf: seatSessionOf, wasOf: seatWasOf, changed: () => roomDelivery.look(),
+  });
+  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

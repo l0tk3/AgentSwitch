@@ -183,10 +183,16 @@ private struct RoomsColumns: View {
             if message.to.contains(where: { $0 != Room.you }) {
                 Button("Delete and Tell Members") { model.delete(message: message.seq, tell: true) }
             }
+            if message.from != Room.you || message.to.contains(where: { $0 != Room.you }) {
+                Button("Recall and Rewind Members") { model.recall(message: message.seq) }
+            }
         } message: { message in
-            Text(message.to.contains(where: { $0 != Room.you })
-                 ? "文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到；已经收到的成员看过了，删不掉它记得的内容——选「Delete and Tell Members」会发一句让它们忽略这条。"
+            Text(message.to.contains(where: { $0 != Room.you }) || message.from != Room.you
+                 ? "文字和附件链接会删掉，原位置留「这条消息已删除」。还没送到的成员不会再收到。「Delete and Tell Members」会发一句让已收到的成员忽略它。「Recall and Rewind Members」会把发它的成员退回到发之前、收到它的成员退回到收到之前（只退对话，代码不动；只支持 Claude Code，会换一个新 session），其余的成员发一句让它们忽略。"
                  : "文字和附件链接会删掉，原位置留「这条消息已删除」。")
+        }
+        .sheet(isPresented: Binding(get: { model.filesBack != nil }, set: { if !$0 { model.filesBack = nil } })) {
+            if let back = model.filesBack { FilesBackSheet(handle: back.handle, files: back.files, put: { model.putFilesBack(back.handle, force: $0) }, cancel: { model.filesBack = nil }) }
         }
         .confirmationDialog("解散“\(model.room?.room.name ?? "")”？", isPresented: $model.deleting) {
             Button("Dissolve", role: .destructive) { model.delete() }
@@ -354,7 +360,8 @@ private struct RoomView: View {
                     RoomMemberCard(seat: seat, home: home, claim: room.claim(of: handle), setCanAdd: { model.setCanAdd($0, seat: handle) },
                                    setMuted: { model.setMuted($0, seat: handle) }, resume: { model.resume(seat: handle) },
                                    mention: { model.mention(handle) }, kick: { model.kick(seat: handle) }, end: { model.end(seat: handle, delete: $0) }, rename: { model.rename(seat: handle, to: $0) },
-                                   openTerminal: seat.terminal.map { id in { model.card = nil; showTerminal(id) } }, avatar: { model.chooseAvatar(handle) })
+                                   openTerminal: seat.terminal.map { id in { model.card = nil; showTerminal(id) } }, avatar: { model.chooseAvatar(handle) },
+                                   rewindSeen: { model.rewindSeen(handle) }, filesBack: { model.card = nil; model.lookAtFilesBack(handle) })
                         .padding(.top, 48).padding(.trailing, 18)
                 }
             }
@@ -1004,4 +1011,49 @@ private struct RoomSheet: View {
         .buttonStyle(.plain)
         .help(held.map { "已经在房间「\($0.name)」里；也能再进这一个。" } ?? "")
     }
+}
+
+
+/// 退代码 (user #290): what putting a member's files back to before its last rewind would do, asked before it is done.
+private struct FilesBackSheet: View {
+    let handle: String
+    let files: [RewindFile]
+    let put: (Bool) -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("把 @\(handle) 的文件退回到它退回的那一刻？").font(.headline)
+            Text("只退它自己用 Write/Edit 改过的文件，命令行改的不算。之后又被别人改过的文件，默认不动。").font(.callout).foregroundStyle(.secondary)
+            if files.isEmpty {
+                Text("它在那之后没有改过文件。").foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(files) { f in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(Self.word(f)).font(.caption.weight(.semibold)).foregroundStyle(Self.tint(f)).frame(width: 52, alignment: .leading)
+                                Text(f.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled).lineLimit(2).truncationMode(.middle)
+                                if f.changed { Text("之后被改过").font(.caption).foregroundStyle(.orange) }
+                            }
+                        }
+                    }
+                }
+                .frame(minHeight: 80, maxHeight: 280)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                if files.contains(where: { $0.changed && $0.unknown != true }) {
+                    Button("Restore All, Including Changed") { put(true) }
+                }
+                Button("Restore") { put(false) }.keyboardShortcut(.defaultAction).disabled(files.allSatisfy { $0.changed || $0.unknown == true })
+            }
+        }
+        .padding(20)
+        .frame(width: 560)
+    }
+
+    private static func word(_ f: RewindFile) -> String { f.unknown == true ? "无法恢复" : f.action == "remove" ? "删除" : "恢复" }
+    private static func tint(_ f: RewindFile) -> Color { f.unknown == true ? .secondary : f.action == "remove" ? .red : .accentColor }
 }

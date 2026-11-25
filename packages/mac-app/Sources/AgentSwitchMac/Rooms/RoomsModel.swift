@@ -656,6 +656,42 @@ final class RoomsModel {
         act { client in try await client.deleteMessage(seq, in: id, tell: tell) }
     }
 
+    /// 撤回 (user #288): deleted, and its sender and those who had it taken back to before it (Claude Code's). Who
+    /// could not be is said (they were told to leave it aside instead).
+    func recall(message seq: Int) {
+        guard let id = selected else { return }
+        deletingMessage = nil
+        act { client in
+            let missed = try await client.recallMessage(seq, in: id)
+            if !missed.isEmpty { throw RoomsModel.NotRewound(text: missed.map { "@\($0.handle)：\($0.why)" }.joined(separator: "；")) }
+        }
+    }
+
+    /// The mark on a seat's face is seen.
+    func rewindSeen(_ handle: String) {
+        guard let id = selected else { return }
+        act { try await $0.rewindSeen(seat: handle, in: id) }
+    }
+
+    /// A seat whose files are being looked at before they are put back (退代码, user #290), and what that would do.
+    var filesBack: (handle: String, files: [RewindFile])?
+
+    func lookAtFilesBack(_ handle: String) {
+        guard let id = selected, !demo else { return }
+        Task {
+            do { filesBack = (handle, try await client().rewindFiles(seat: handle, in: id)); problem = nil }
+            catch { problem = Self.say(error) }
+        }
+    }
+
+    func putFilesBack(_ handle: String, force: Bool) {
+        guard let id = selected else { return }
+        filesBack = nil
+        act { _ = try await $0.putRewindFiles(seat: handle, in: id, force: force) }
+    }
+
+    private struct NotRewound: LocalizedError { let text: String; var errorDescription: String? { "这些成员没能退回，已发消息让它们忽略：\(text)" } }
+
     private struct Missed: LocalizedError { let text: String; var errorDescription: String? { "没戳到 \(text)" } }
 
     private func act(_ what: @escaping (DaemonClient) async throws -> Void) {

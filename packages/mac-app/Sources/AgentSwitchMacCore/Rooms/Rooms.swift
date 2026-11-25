@@ -181,6 +181,21 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     /// Muted by an admin or the user (docs/chatroom-v0.md §6.2): it reads and works but may not post or write the notes.
     public let muted: Bool
     public let mutedBy: String?
+    /// Its conversation was taken back last (撤回, or Claude's safeguard refused a reply; user #288): `marked` until
+    /// the user has seen it — its face carries a mark meanwhile.
+    public struct Rewound: Decodable, Equatable, Sendable {
+        public let at: Int64
+        public let why: String
+        public let seq: Int
+        public let marked: Bool
+        public init(at: Int64 = 0, why: String, seq: Int, marked: Bool) { self.at = at; self.why = why; self.seq = seq; self.marked = marked }
+        public var bySafeguard: Bool { why == "safeguard" }
+        public var says: String {
+            bySafeguard ? "回复 #\(seq) 时触发了 Claude 的 safeguard，已自动退回到收到 #\(seq) 之前（换了一个新 session），那条消息不会再送给它。"
+                : "#\(seq) 撤回后已退回到它之前（换了一个新 session）。"
+        }
+    }
+    public let rewound: Rewound?
     /// What the seat has cost so far, as the room counts it: woken how often, with how many characters, how many
     /// messages it posted and tool calls it made here. The tokens are the agent's own to say.
     public struct Stats: Decodable, Equatable, Sendable {
@@ -223,12 +238,13 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
     public var here: Bool { left == nil }
     public var state: SeatState? { stateWord.map { SeatState(rawValue: $0) ?? .error } }
 
-    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, stats, asks, unread, avatar, stateWord = "state" }
+    private enum CodingKeys: String, CodingKey { case handle, kind, terminal, face, joinedAt, addedBy, canAdd, byAgent, left, card, kit, muted, mutedBy, rewound, stats, asks, unread, avatar, stateWord = "state" }
 
     public init(handle: String, kind: String = "session", terminal: String? = nil, face: RoomFace? = nil, joinedAt: Int64 = 0, addedBy: String = Room.you,
                 canAdd: Bool = false, byAgent: Bool = false, left: Int64? = nil, muted: Bool = false, mutedBy: String? = nil,
-                state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil) {
+                state: SeatState? = nil, card: SeatCard? = nil, kit: Bool? = nil, rewound: Rewound? = nil) {
         self.kit = kit
+        self.rewound = rewound
         self.handle = handle
         self.kind = kind
         self.terminal = terminal
@@ -261,6 +277,7 @@ public struct RoomSeat: Decodable, Equatable, Sendable, Identifiable {
         left = RoomJSON.int(c, .left)
         muted = (try? c.decodeIfPresent(Bool.self, forKey: .muted)) ?? false
         mutedBy = try? c.decodeIfPresent(String.self, forKey: .mutedBy)
+        rewound = try? c.decodeIfPresent(Rewound.self, forKey: .rewound)
         stats = try? c.decodeIfPresent(Stats.self, forKey: .stats)
         asks = try? c.decodeIfPresent(Asks.self, forKey: .asks)
         unread = (try? c.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
@@ -284,14 +301,17 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
     public let task: Int?
     /// Deleted by the user (user #278): drawn as 「这条消息已删除」 in its place.
     public let deleted: Bool
+    /// Said in a stretch of its sender's conversation that was taken back since (user #288): 「已退回」.
+    public let rewound: Bool
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, deleted }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, deleted, rewound }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, deleted: Bool = false) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, deleted: Bool = false, rewound: Bool = false) {
         self.deleted = deleted
+        self.rewound = rewound
         self.files = files
         self.task = task
         self.seq = seq
@@ -313,7 +333,20 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
         files = (try? c.decodeIfPresent([String].self, forKey: .files)) ?? []
         task = try? c.decodeIfPresent(Int.self, forKey: .task)
         deleted = (try? c.contains(.deleted) && !c.decodeNil(forKey: .deleted)) ?? false
+        rewound = (try? c.contains(.rewound) && !c.decodeNil(forKey: .rewound)) ?? false
     }
+}
+
+/// A file a member's own edits changed after the moment it was taken back to.
+public struct RewindFile: Decodable, Equatable, Sendable, Identifiable {
+    public let path: String
+    /// `restore` or `remove` (it was made after that moment).
+    public let action: String
+    /// Changed since by someone else: left as it is unless forced.
+    public let changed: Bool
+    /// Its content from before is not known: it can not be put back.
+    public let unknown: Bool?
+    public var id: String { path }
 }
 
 /// The room's pinned notes (§9): one text every member reads and writes whole.
@@ -1067,6 +1100,35 @@ public extension DaemonClient {
     /// A message deleted (user #278); `tell`: the members who had it already are told to leave it aside.
     func deleteMessage(_ seq: Int, in room: String, tell: Bool) async throws {
         _ = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/messages/\(seq)\(tell ? "?tell=1" : "")", timeout: 15)
+    }
+
+    /// 撤回 (user #288): the message is deleted, its sender taken back to before it sent it and each member that had it
+    /// to before it was given it (Claude Code's only); the others are told to leave it aside. Who could not be.
+    func recallMessage(_ seq: Int, in room: String) async throws -> [(handle: String, why: String)] {
+        let data = try await call("DELETE", "/rooms/\(DaemonClient.segment(room))/messages/\(seq)?rewind=1", timeout: 120)
+        let rows = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["rewound"] as? [[String: Any]] ?? []
+        return rows.compactMap { r in
+            guard (r["ok"] as? Bool) != true, let h = r["handle"] as? String else { return nil }
+            return (h, r["error"] as? String ?? "没退回")
+        }
+    }
+
+    /// The mark on a seat's face (a safeguard's rewind) is seen.
+    func rewindSeen(seat handle: String, in room: String) async throws {
+        _ = try await call("PATCH", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))", body: try JSONSerialization.data(withJSONObject: ["rewindSeen": true]), timeout: 10)
+    }
+
+    /// What putting a seat's files back to before its last rewind would do (only its own edits).
+    func rewindFiles(seat handle: String, in room: String) async throws -> [RewindFile] {
+        let data = try await call("GET", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))/rewind/files", timeout: 20)
+        struct Answer: Decodable { let files: [RewindFile] }
+        return try JSONDecoder().decode(Answer.self, from: data).files
+    }
+
+    /// Puts them back; `force`: also those changed since. The ones put back.
+    func putRewindFiles(seat handle: String, in room: String, force: Bool) async throws -> [String] {
+        let data = try await call("POST", "/rooms/\(DaemonClient.segment(room))/seats/\(DaemonClient.segment(handle))/rewind/files", body: try JSONSerialization.data(withJSONObject: ["force": force]), timeout: 30)
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["restored"] as? [String] ?? []
     }
 
     /// A file's bytes put into the room's shared folder (a room on another node, whose disk this Mac's paths do not
