@@ -250,12 +250,9 @@ object BrowserNotice {
 
     /**
      * Said once when a person takes over an agent's tab: what is typed stays on the page for the agent to see after
-     * the hand-back, and Fill Ciphertext is only on one's own tabs (docs/browser-v0.md §2 安全, §6).
+     * the hand-back (docs/browser-v0.md §2 安全, §6).
      */
     const val takeOver = "接手期间你输入的内容，交还后 agent 能在页面上看到；密码请在自己的标签里填写。"
-
-    /** Fill Ciphertext asked for on an agent's tab (the key is not offered there). */
-    const val fillOwnTabsOnly = "只能在你自己的标签中填入密文。"
 }
 
 /**

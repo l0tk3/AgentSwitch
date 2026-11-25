@@ -15,14 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.agentswitch.android.AppSettings
-import com.agentswitch.kit.api.AgentTask
-import com.agentswitch.kit.feed.Markdown
 import com.agentswitch.kit.feed.Speech
 import java.util.Locale
 
 /**
- * 朗读 (app-v0 §5): a task's spoken script read by the phone's text-to-speech engine, in Mandarin. One at a time; the
- * same button stops it. While it speaks, audio focus is held (other apps' audio ducks) and given back after.
+ * 朗读 (app-v0 §5): a line read by the phone's text-to-speech engine, in Mandarin. One at a time; a later one takes
+ * its place. While it speaks, audio focus is held (other apps' audio ducks) and given back after.
  * The voice: the user's pick (kept in [AppSettings]) while it is still installed, else the best installed Mandarin one
  * (the iPhone's `SpeechVoices`, here in the same class: [installedVoices], [chosenVoice], [chooseVoice], [sample]).
  *
@@ -35,7 +33,7 @@ class Speaker(context: Context? = null, private val settings: AppSettings? = nul
     private val main = Handler(Looper.getMainLooper())
     private val audio: AudioManager? = this.context?.getSystemService(AudioManager::class.java)
 
-    /** What is being read: a task's id, or the key a voice-mode line was said under; null when silent. */
+    /** What is being read: the key a voice-mode line was said under; null when silent. */
     var speakingKey: String? by mutableStateOf(null)
         private set
     val isSpeaking: Boolean get() = speakingKey != null
@@ -105,18 +103,6 @@ class Speaker(context: Context? = null, private val settings: AppSettings? = nul
     val onlyCompact: Boolean get() = installedVoices.none { it.quality > Voice.QUALITY_NORMAL }
 
     /**
-     * What to read for a task: its spoken script, else the one-line summary, else its state and the start of the
-     * result. Always cleaned (Speech.speakable) so no ciphertext, link or Markdown is read.
-     */
-    fun toggle(task: AgentTask) {
-        if (speakingKey == task.id) {
-            stop()
-            return
-        }
-        speak(script(task), task.id, sample = false)
-    }
-
-    /**
      * Voice mode (assistant-v0 §3): a short line — a question that needs you, "收到" — under `key`; it replaces what
      * is being read. Cleaned like everything read aloud.
      */
@@ -126,7 +112,7 @@ class Speaker(context: Context? = null, private val settings: AppSettings? = nul
         speak(line, key, sample = false)
     }
 
-    /** 试听 in Settings: a short sample in `voice`, no task. */
+    /** 试听 in Settings: a short sample in `voice`. */
     fun sample(voice: Voice) = speak(SAMPLE_TEXT, null, sample = true, voice = voice)
 
     fun stop() {
@@ -197,7 +183,7 @@ class Speaker(context: Context? = null, private val settings: AppSettings? = nul
 
     companion object {
         val LANGUAGE: Locale = Locale.SIMPLIFIED_CHINESE
-        const val SAMPLE_TEXT = "这是 AgentSwitch 的朗读声音。任务结束时，将使用此声音朗读结果。"
+        const val SAMPLE_TEXT = "这是 AgentSwitch 的朗读声音。终端等你处理时，将使用此声音朗读。"
         private const val CHOSEN_KEY = "speechVoiceName"
 
         /** Installed Mandarin voices, best first (quality, then name); voices still to be downloaded left out. */
@@ -212,18 +198,6 @@ class Speaker(context: Context? = null, private val settings: AppSettings? = nul
             voice.quality >= Voice.QUALITY_VERY_HIGH -> "高音质"
             voice.quality >= Voice.QUALITY_HIGH -> "增强"
             else -> "基础"
-        }
-
-        /**
-         * What to read for a task: its spoken script, else the one-line summary, else its state and the start of the
-         * result. Always cleaned (Speech.speakable).
-         */
-        fun script(task: AgentTask): String {
-            val written = listOfNotNull(task.speech, task.spoken).map(Speech::speakable).firstOrNull { it.isNotEmpty() }
-            if (written != null) return written
-            val result = Markdown.flattened(task.result ?: task.error ?: "").text
-            val body = Speech.speakable(result.take(200))
-            return if (body.isEmpty()) task.spokenStatus else "${task.spokenStatus}。$body"
         }
     }
 }

@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
 //
 // Android freezes an app within seconds of its leaving the screen. Frozen, it asks the Mac nothing, so it learns of
 // nothing and notifies of nothing: a terminal that comes to need you, a turn that ends. While something is in
-// progress — a task, a terminal at work — a foreground service keeps the app running and asking, and the service's
+// progress — a terminal at work — a foreground service keeps the app running and asking, and the service's
 // ongoing notification says what is in progress (the summary the iPhone's Live Activity shows, `LiveSummary`). With
 // nothing in progress there is no service and no notification, and the phone is left alone.
 //
@@ -96,7 +96,7 @@ class Follower(context: Context, private val settings: AppSettings, private val 
     init {
         manager?.createNotificationChannel(
             NotificationChannel(CHANNEL, "In Progress", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "有任务或终端在工作时显示；这期间应用在后台保持连接。"
+                description = "有终端在工作时显示；这期间应用在后台保持连接。"
                 setShowBadge(false)
             },
         )
@@ -176,8 +176,8 @@ class Follower(context: Context, private val settings: AppSettings, private val 
 
 /**
  * The service behind [Follower]: for as long as it runs the app is not frozen, and while the app is not in front it
- * asks the Mac every [Follower.pollMs] what the terminals and the tasks in progress are doing — which is what posts
- * the notifications (`AppModel.refreshTerminals`, `DispatchStore.refreshApprovals`). It ends itself when [Follower]
+ * asks the Mac every [Follower.pollMs] what the terminals are doing and what waits in the rooms — which is what posts
+ * the notifications (`AppModel.refreshTerminals`, `AppModel.refreshRoomAttention`). It ends itself when [Follower]
  * shows nothing.
  *
  * Its kind is `connectedDevice` (a paired Mac, reached over the network): no limit of hours a day, as `dataSync` has.
@@ -220,7 +220,6 @@ class FollowService : Service() {
                     wake?.acquire(Follower.pollMs * 6)
                     try {
                         model.refreshTerminals()
-                        model.dispatch.refreshFollowed()
                         model.refreshRoomAttention()
                     } catch (e: CancellationException) {
                         throw e

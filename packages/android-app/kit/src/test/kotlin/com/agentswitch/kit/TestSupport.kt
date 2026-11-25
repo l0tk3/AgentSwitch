@@ -1,12 +1,7 @@
 package com.agentswitch.kit
 
-import com.agentswitch.kit.pairing.GateKey
 import com.agentswitch.kit.pairing.PairingPayload
-import com.agentswitch.kit.secrets.BoxSealer
-import com.agentswitch.kit.support.Base64URL
 import com.agentswitch.kit.support.KitJson
-import com.goterl.lazysodium.LazySodiumJava
-import com.goterl.lazysodium.SodiumJava
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -37,42 +32,11 @@ private fun toJsonElement(value: Any?): JsonElement = when (value) {
     else -> error("not JSON: $value")
 }
 
-val PairingPayload.Companion.sampleKey: String get() = Base64URL.encode(ByteArray(32) { 7 })
-
-fun PairingPayload.Companion.sample(
-    gate: GateKey? = GateKey(publicKey = PairingPayload.sampleKey, keypair = "default"),
-): PairingPayload = PairingPayload(
+fun PairingPayload.Companion.sample(): PairingPayload = PairingPayload(
     name = "Mac mini", port = 4713, fp = "ab".repeat(32), code = "7K3M-9QZX",
     lan = listOf("192.168.1.5"), tailnet = listOf("100.101.102.103", "mac.tail1234.ts.net"),
-    bonjour = "AgentSwitch on Mac mini", gate = gate,
+    bonjour = "AgentSwitch on Mac mini",
 )
-
-/** libsodium (lazysodium-java over JNA) for the tests: the sealer the app would give the kit, and the opening side. */
-object TestSodium {
-    val sodium: LazySodiumJava by lazy { LazySodiumJava(SodiumJava()) }
-
-    const val SEALBYTES = 48
-
-    val sealer = BoxSealer { message, recipientPublicKey ->
-        val cipher = ByteArray(message.size + SEALBYTES)
-        check(sodium.cryptoBoxSeal(cipher, message, message.size.toLong(), recipientPublicKey)) { "crypto_box_seal failed" }
-        cipher
-    }
-
-    class KeyPair(val publicKey: ByteArray, val secretKey: ByteArray)
-
-    fun keyPair(): KeyPair {
-        val pk = ByteArray(32)
-        val sk = ByteArray(32)
-        check(sodium.cryptoBoxKeypair(pk, sk))
-        return KeyPair(pk, sk)
-    }
-
-    fun open(cipher: ByteArray, publicKey: ByteArray, secretKey: ByteArray): ByteArray? {
-        val message = ByteArray(cipher.size - SEALBYTES)
-        return if (sodium.cryptoBoxSealOpen(message, cipher, cipher.size.toLong(), publicKey, secretKey)) message else null
-    }
-}
 
 // MARK: - fakes for the API, the prober and discovery (Swift's TestSupport.swift)
 

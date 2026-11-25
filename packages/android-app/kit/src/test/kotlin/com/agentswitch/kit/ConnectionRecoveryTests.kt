@@ -3,14 +3,10 @@ package com.agentswitch.kit
 import com.agentswitch.kit.api.*
 import com.agentswitch.kit.connection.*
 import com.agentswitch.kit.pairing.*
-import java.util.Collections
 import kotlin.test.*
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.flow.toList
@@ -75,7 +71,7 @@ class ConnectionRecoveryTests {
         assertEquals(listOf(true, true, null), connected.map { it.ok }, "Tailscale was not needed")
         assertEquals(listOf("已通过 LAN 连接", "OK", "Unused · 已通过其他线路连接"), connected.map { it.detail })
 
-        val noTailnet = ServerProfile(name = "Mac", port = 4713, fingerprint = payload.fp, lan = listOf("192.168.1.5"), tailnet = emptyList(), bonjour = "b", gate = null,
+        val noTailnet = ServerProfile(name = "Mac", port = 4713, fingerprint = payload.fp, lan = listOf("192.168.1.5"), tailnet = emptyList(), bonjour = "b",
             deviceId = "d", pairedAt = System.currentTimeMillis())
         val missing = Troubleshooting.checks(state = ConnectionState.Unreachable, reports = listOf(reports[0]), book = noTailnet)
         assertEquals(false, missing[2].ok)
@@ -152,51 +148,12 @@ class ConnectionRecoveryTests {
         assertEquals(count, prober.probed.size)
     }
 
-    // MARK: - half-open event streams
-
-    @Test
-    fun aSilentStreamIsDroppedAndResumed() = runTest {
-        val transport = SilentStreamTransport()
-        val api = AgentSwitchAPI(endpoints = FixedEndpoint(lan), transport = transport, token = "tok")
-        val policy = ReconnectPolicy(initial = 5.milliseconds, maximum = 10.milliseconds, idleTimeout = 150.milliseconds)
-        val started = System.nanoTime()
-        val got = api.events(taskId = "t1", policy = policy).toList().map { it.seq }
-        assertEquals(listOf(1L, 2L), got)
-        assertEquals(listOf("after=0", "after=1"), transport.queries, "resumed after the last event before the silence")
-        assertTrue((System.nanoTime() - started) / 1e9 < 5)
-    }
+    // MARK: - half-open streams
 
     @Test
     fun idleGuardPassesBytesThrough() = runTest {
         val body = flowOf("a".toByteArray(), "b".toByteArray())
         val out = AgentSwitchAPI.idleGuarded(body, limit = 5.seconds).toList().fold(ByteArray(0)) { a, b -> a + b }
         assertEquals("ab", out.decodeToString())
-    }
-}
-
-/** First connection: one event, then nothing at all (a half-open socket). Second: the end. */
-private class SilentStreamTransport : HTTPTransport {
-    private val log = Collections.synchronizedList(mutableListOf<String>())
-
-    val queries: List<String> get() = synchronized(log) { log.toList() }
-
-    override suspend fun send(request: HTTPRequest): Pair<ByteArray, HTTPResponse> =
-        json(mapOf("id" to "t1", "createdAt" to 0, "updatedAt" to 0, "status" to "running", "task" to "x")) to httpResponse(request.url)
-
-    override suspend fun stream(request: HTTPRequest): Pair<HTTPResponse, Flow<ByteArray>> {
-        val n = synchronized(log) { log.add(request.query ?: ""); log.size - 1 }
-        val body = if (n == 0) {
-            flow { emit(frame(1, "text")); awaitCancellation() }
-        } else {
-            flowOf(frame(2, "done"))
-        }
-        return httpResponse(request.url, contentType = "text/event-stream") to body
-    }
-
-    companion object {
-        fun frame(seq: Int, type: String): ByteArray {
-            val obj = mapOf("taskId" to "t1", "seq" to seq, "ts" to seq, "type" to type, "payload" to mapOf("text" to "x"))
-            return "data: ${json(obj).decodeToString()}\n\n".toByteArray()
-        }
     }
 }

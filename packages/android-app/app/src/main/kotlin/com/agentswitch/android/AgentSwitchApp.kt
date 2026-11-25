@@ -6,10 +6,8 @@ import com.agentswitch.android.platform.Follower
 import android.app.Application
 import android.os.Build
 import android.provider.Settings
-import com.agentswitch.android.dispatch.DispatchServices
 import com.agentswitch.android.platform.AndroidPathMonitor
 import com.agentswitch.android.platform.Feedback
-import com.agentswitch.android.platform.SodiumSealer
 import com.agentswitch.android.platform.Speaker
 import com.agentswitch.android.platform.KeystoreTokenVault
 import com.agentswitch.android.platform.Notifier
@@ -33,7 +31,7 @@ class AgentSwitchApp : Application() {
 
     val model: AppModel by lazy {
         val store = try { LocalStore(File(filesDir, "agentswitch").apply { mkdirs() }) } catch (_: Exception) { null }
-        AppModel(store, KeystoreTokenVault(this), Services(), dispatchServices = DispatchServices(SodiumSealer, Feedback(this, settings), Speaker(this, settings)), settings = settings, tempDir = cacheDir).also {
+        AppModel(store, KeystoreTokenVault(this), Services(), feedback = Feedback(this, settings), speaker = Speaker(this, settings), settings = settings, tempDir = cacheDir).also {
             if (store == null) it.banner = "无法打开本地存储，配对信息将无法保存。"
             it.notifier = notifier
             it.follower = follower

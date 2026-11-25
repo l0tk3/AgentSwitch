@@ -1,6 +1,7 @@
 package com.agentswitch.kit
 
 import com.agentswitch.kit.feed.EffortScale
+import com.agentswitch.kit.feed.MessageDisplay
 import com.agentswitch.kit.feed.ShellHighlight
 import com.agentswitch.kit.feed.ShellHighlight.Kind
 import com.agentswitch.kit.feed.Speech
@@ -72,5 +73,15 @@ class TextLogicTests {
         r = TerminalDraft.insert(listOf("[Image #3]"), "a b", 1)
         assertEquals("a [Image #3] b", r.text, "the space already there is not doubled")
         assertEquals("看这张 哪里不对", TerminalDraft.remove("[Image #1]", "看这张 [Image #1] 哪里不对"))
+    }
+
+    @Test
+    fun testSealedMessageReadsWithoutTheLegendOrLongTokens() {
+        val token = "enc:v1:" + "A".repeat(80) + "xyz789"
+        val stored = "登录 https://fin.example.test 用 $token 查报表\n\n[AgentSwitch sealed the credentials in this message. The following field names …]\nCandidate record layout: password\n- $token: password → fin.example.test"
+        assertEquals("登录 https://fin.example.test 用 🔒密文 查报表", MessageDisplay.readable(stored))
+        assertEquals("no secrets here", MessageDisplay.readable("no secrets here"))
+        assertEquals("🔒密文 🔒密文", MessageDisplay.readable("$token $token"))
+        assertEquals("enc:v1:short", MessageDisplay.readable("enc:v1:short"), "only real-looking tokens are shortened")
     }
 }

@@ -88,11 +88,6 @@ private fun PairForm(payload: PairingPayload, pairing: Boolean, setPairing: (Boo
             for (address in payload.tailnet) { LabeledRow("Tailscale", "$address:${payload.port}", first = first, monoValue = true); first = false }
             if (payload.bonjour.isNotEmpty()) LabeledRow("Bonjour", payload.bonjour, first = first)
         }
-        FormSection("Gate Key") {
-            val gate = payload.gate
-            if (gate != null) LabeledRow("Keypair", gate.keypair, first = true, monoValue = true)
-            else FormRow(first = true) { Text("二维码中无公钥，将在配对后向 Mac 获取", color = Theme.secondaryInk, style = plain(13)) }
-        }
         val known = model.macs.server(payload.fp)
         FormSection(
             "This Device",

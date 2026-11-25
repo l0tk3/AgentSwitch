@@ -11,7 +11,7 @@ import com.agentswitch.kit.connection.EndpointSelector
 import com.agentswitch.kit.connection.HTTPEndpointProber
 import com.agentswitch.kit.connection.SelectionResult
 import com.agentswitch.kit.connection.ServiceDiscovery
-import com.agentswitch.kit.secrets.trimmingWhitespacesAndNewlines
+import com.agentswitch.kit.support.trimmingWhitespacesAndNewlines
 import java.text.BreakIterator
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
@@ -42,9 +42,7 @@ data class PairingOutcome(
 )
 
 /**
- * Pairing (app-v0 §2, §5): find a reachable address from the payload, `POST /pair` over the pinned connection, and
- * fill in the gate key from `GET /gate/pubkey` if the QR code had none (`gate: null` when the Mac could not read it;
- * the endpoint then answers 503 and the app asks again later).
+ * Pairing (app-v0 §2, §5): find a reachable address from the payload and `POST /pair` over the pinned connection.
  */
 class PairingService(
     val transport: HTTPTransport,
@@ -113,13 +111,7 @@ class PairingService(
         }
         if (result.token.isEmpty() || result.deviceId.isEmpty()) throw PairingError.Failed("empty token")
 
-        var gate = payload.gate
-        if (gate == null) {
-            val authed = AgentSwitchAPI(endpoints = FixedEndpoint(endpoint), transport = transport, token = result.token)
-            gate = try { authed.gatePubkey() } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
-            if (gate != null && !gate.isValid) gate = null
-        }
-        val profile = ServerProfile(payload = payload, deviceId = result.deviceId, gate = gate)
+        val profile = ServerProfile(payload = payload, deviceId = result.deviceId)
         return PairingOutcome(profile = profile, token = result.token, endpoint = endpoint)
     }
 }

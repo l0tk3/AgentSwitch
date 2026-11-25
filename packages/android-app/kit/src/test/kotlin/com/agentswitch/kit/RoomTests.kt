@@ -638,30 +638,11 @@ class RoomTests {
         assertEquals("""{"pixel":{"rows":["#####","#...#","#...#","#...#","#####"],"color":3},"classic":{"emoji":"🦊"}}""", String(transport.requests.last().body!!))
     }
 
+    /** A Mac from before 2026-11-25 still counts a room's secrets; the count is read past. */
     @Test
-    fun testSecretsDecodeSayTheirKindAndRoutesReadAndDelete() = runTest {
-        val tok = "enc:v1:" + "A".repeat(40)
-        val transport = FakeTransport({ req, _ ->
-            when (req.method) {
-                "GET" -> """{"secrets":[{"id":"s1","name":"GitHub","kind":"site","url":"https://github.com","account":"me","token":"$tok","addedAt":5},
-                    {"id":"s2","name":"OpenAI","kind":"api","token":"enc:v1:short","addedAt":6},{"id":"s3","name":"DB","kind":"exec","env":"PGPASSWORD","token":"$tok"}]}""".toByteArray() to httpResponse(req.url)
-                else -> """{"ok":true}""".toByteArray() to httpResponse(req.url)
-            }
-        })
-        val api = api(transport)
-        val got = api.roomSecrets("a")
-        assertEquals("/rooms/a/secrets", transport.paths.last())
-        assertEquals(listOf("网站登录", "API Key", "命令用"), got.map { it.kindWord })
-        assertEquals("https://github.com · me", got[0].details)
-        assertEquals("", got[1].details)
-        assertEquals("PGPASSWORD", got[2].details)
-        assertEquals(28, got[0].shortToken().length)
-        assertTrue(got[0].shortToken().endsWith("…"))
-        assertEquals("enc:v1:short", got[1].shortToken())
-        api.deleteRoomSecret("a", "s1")
-        assertEquals("DELETE", transport.requests.last().method)
-        assertEquals("/rooms/a/secrets/s1", transport.paths.last())
-        assertEquals(3, KitJson.decodeFromString(RoomDetail.serializer(), """{"room":{"id":"a"},"secrets":3}""").secrets)
-        assertEquals(0, detail().secrets)
+    fun testARoomDecodesWithOrWithoutSecrets() {
+        val with = KitJson.decodeFromString(RoomDetail.serializer(), """{"room":{"id":"a"},"secrets":3}""")
+        assertEquals(KitJson.decodeFromString(RoomDetail.serializer(), """{"room":{"id":"a"}}"""), with)
+        assertEquals("a", with.room.id)
     }
 }

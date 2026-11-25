@@ -130,7 +130,7 @@ class ConnectionManagerTests {
     @Test
     fun addressesLearnedLaterAreUsedOffTheLan() = runTest {
         val saved = ServerProfile(name = "Mac", port = 4713, fingerprint = "ab".repeat(32), lan = listOf("192.168.1.5"), tailnet = emptyList(),
-            bonjour = "AgentSwitch on Mac", gate = null, deviceId = "d", pairedAt = System.currentTimeMillis())
+            bonjour = "AgentSwitch on Mac", deviceId = "d", pairedAt = System.currentTimeMillis())
         val prober = FakeProber(mapOf("192.168.1.5" to ProbeOutcome.Ok, "100.101.102.103" to ProbeOutcome.Ok))
         val manager = manager(saved, prober)
         val home = manager.endpoint()
@@ -147,7 +147,7 @@ class ConnectionManagerTests {
     @Test
     fun anEmptyKindKeepsTheSavedAddressesAndNothingNewChangesNothing() {
         val saved = ServerProfile(name = "Mac", port = 4713, fingerprint = "ab".repeat(32), lan = listOf("192.168.1.5"), tailnet = listOf("100.101.102.103"),
-            bonjour = "b", gate = null, deviceId = "d", pairedAt = System.currentTimeMillis())
+            bonjour = "b", deviceId = "d", pairedAt = System.currentTimeMillis())
         assertNull(saved.updated(with = MacAddresses(lan = listOf("192.168.1.5"), tailnet = emptyList())), "Tailscale off for a moment keeps the saved address")
         assertNull(saved.updated(with = MacAddresses(lan = emptyList(), tailnet = listOf("100.101.102.103"))))
         assertEquals(listOf("192.168.1.20", "192.168.1.5"), saved.updated(with = MacAddresses(lan = listOf("192.168.1.20", "bad host!"), tailnet = emptyList()))?.lan,
@@ -163,7 +163,7 @@ class ConnectionManagerTests {
     fun aMacThatMovesBetweenNetworksIsFoundOnEitherOne() = runTest {
         val fp = "ab".repeat(32)
         val home = ServerProfile(name = "Mac", port = 4713, fingerprint = fp, lan = listOf("192.168.31.137"), tailnet = listOf("100.77.168.100"),
-            bonjour = "b", gate = null, deviceId = "d", pairedAt = System.currentTimeMillis())
+            bonjour = "b", deviceId = "d", pairedAt = System.currentTimeMillis())
         // At the office, reached over Tailscale: the phone is told the address there.
         val office = assertNotNull(home.updated(with = MacAddresses(lan = listOf("10.38.120.101"), tailnet = listOf("100.77.168.100"))))
         assertEquals(listOf("10.38.120.101", "192.168.31.137"), office.lan)

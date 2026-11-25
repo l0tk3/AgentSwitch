@@ -1,6 +1,5 @@
 package com.agentswitch.kit.api
 
-import com.agentswitch.kit.support.JSONValue
 import java.text.BreakIterator
 
 /** Swift counts and cuts a `String` by grapheme clusters (`count`, `prefix`); these do the same on the JVM. */
@@ -31,22 +30,11 @@ internal fun String.graphemePrefix(n: Int): String {
 }
 
 /**
- * A tool call said as people say it (2026-09-25): the tool as a verb and the one thing it works on in the process
- * list ("运行 git log -n 3", "浏览器 · 打开 https://…"), and its input field by field when the call is opened. The
+ * A tool said as people say it (2026-09-25): as a verb ("运行", "浏览器 · 打开") and in one short word. The
  * three executors name tools differently: Claude `Bash`, `mcp__playwright__browser_click`; Codex `commandExecution`,
  * `playwright.browser_click`; OpenCode `bash`, `playwright_browser_click`.
  */
 object ToolDisplay {
-    /** One field of an opened call's input (Swift's `(name:, value:)` tuple). */
-    data class Field(val name: String, val value: String)
-
-    /** The list line of a `tool_call` event's payload. */
-    fun line(payload: JSONValue): String {
-        val label = label(payload["tool"]?.string ?: "?")
-        val target = target(payload) ?: return label
-        return "$label $target"
-    }
-
     fun label(tool: String): String {
         verbs[tool]?.let { return it }
         verbs[tool.lowercase()]?.let { return it }
@@ -85,34 +73,6 @@ object ToolDisplay {
         "compact" to "Compact",
     )
 
-    /** The one thing a call works on: its command (without Codex's shell wrapper), page, file, pattern or query. */
-    fun target(payload: JSONValue): String? {
-        val command = payload["command"]?.string ?: payload["input"]?.get("command")?.string
-        if (command != null) return clip(EventDescriber.unwrapShell(command))
-        val input = payload["input"]
-        for (key in targetKeys) {
-            val value = input?.get(key)?.string
-            if (value != null && value.isNotEmpty()) return clip(value)
-        }
-        val files = input?.get("files")?.array?.mapNotNull { it.string }
-        if (files != null && files.isNotEmpty()) return clip(files.joinToString(", "))
-        return null
-    }
-
-    /** The input of an opened call, field by field; a plain string input is one field. */
-    fun fields(input: JSONValue?): List<Field> = when (input) {
-        is JSONValue.Object -> {
-            val keys = input.value.keys.sortedWith(compareBy<String> { rank(it) }.thenBy { it })
-            keys.mapNotNull { key ->
-                val value = input.value[key]
-                if (value == null || value == JSONValue.Null) null else Field(key, value.string ?: value.compactText)
-            }
-        }
-        is JSONValue.Str -> listOf(Field("输入", input.value))
-        null, JSONValue.Null -> emptyList()
-        else -> listOf(Field("输入", input.compactText))
-    }
-
     private val verbs: Map<String, String> = mapOf(
         "Bash" to "运行", "bash" to "运行", "shell" to "运行", "commandExecution" to "运行",
         "Read" to "读取", "read" to "读取", "Write" to "写入", "write" to "写入",
@@ -134,17 +94,6 @@ object ToolDisplay {
         "secret_fill" to "填入密文", "secret_type" to "填入密文", "secret_repair" to "修复密文", "credential_repair" to "修复密文",
     )
 
-    private val targetKeys = listOf(
-        "url", "file_path", "filePath", "notebook_path", "path", "pattern", "query", "element",
-        "description", "skill", "prompt",
-    )
-
-    /** Where the fields of an opened call come first: what it runs or opens, then the rest by name. */
-    private fun rank(key: String): Int {
-        val i = targetKeys.indexOf(key)
-        return if (i >= 0) i + 1 else if (key == "command") 0 else targetKeys.size + 1
-    }
-
     /** `mcp__server__name`, `server.name`, `server_name` (a known server only: `apply_patch` is not one). */
     private fun split(tool: String): Pair<String?, String> {
         if (tool.startsWith("mcp__")) {
@@ -158,10 +107,5 @@ object ToolDisplay {
         }
         if (tool.startsWith("browser_")) return "playwright" to tool
         return null to tool
-    }
-
-    private fun clip(text: String): String {
-        val line = text.splitNewlines().firstOrNull() ?: text
-        return if (line.graphemeCount() > 160) line.graphemePrefix(159) + "…" else line
     }
 }

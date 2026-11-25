@@ -34,7 +34,6 @@ import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.code
 import com.agentswitch.android.design.mono
 import com.agentswitch.android.design.plain
-import com.agentswitch.android.platform.SodiumSealer
 import com.agentswitch.android.terminals.ProfileDot
 import com.agentswitch.kit.api.AgentSwitchAPI
 import com.agentswitch.kit.api.APIError
@@ -43,7 +42,6 @@ import com.agentswitch.kit.api.ClashView
 import com.agentswitch.kit.api.ProfileChoice
 import com.agentswitch.kit.api.ProfileChoices
 import com.agentswitch.kit.api.ProxyDraft
-import com.agentswitch.kit.api.ProxyOwner
 import com.agentswitch.kit.api.ProxyRequest
 import com.agentswitch.kit.api.ProxySetting
 import com.agentswitch.kit.api.ProxyText
@@ -54,12 +52,11 @@ import com.agentswitch.kit.api.profiles
 import com.agentswitch.kit.api.restartBrowser
 import com.agentswitch.kit.api.setBrowserProxy
 import com.agentswitch.kit.api.setProfileProxy
-import com.agentswitch.kit.secrets.TokenError
-import com.agentswitch.kit.secrets.TokenMinter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import com.agentswitch.kit.api.vaultSeal
 
 /** Whose proxy a form sets, as a place to go to from Settings. */
 sealed class ProxyTarget {
@@ -68,12 +65,6 @@ sealed class ProxyTarget {
 
     /** One of an agent's profiles (never the Mac's own, which has no proxy of its own). */
     data class Profile(val agent: String, val profile: ProfileChoice) : ProxyTarget()
-
-    val owner: ProxyOwner
-        get() = when (this) {
-            Browser -> ProxyOwner.Browser
-            is Profile -> ProxyOwner.Profile(agent = agent, id = profile.id)
-        }
 
     val title: String
         get() = when (this) {
@@ -196,12 +187,12 @@ private fun demoProxyState(target: ProxyTarget): BrowserProxyState = when (targe
 
 /**
  * A proxy's form (the Mac's `Proxy…` sheet and the Browser page's identity box, in one): where it is, who asks, the
- * password — sealed on this phone before it is sent — and where it lets traffic out. A page: push it with
+ * password — sealed by the Mac before the proxy is set — and where it lets traffic out. A page: push it with
  * [openProxy].
  *
- * The typed password is sealed with the Mac's gate key as it is now and leaves the field as soon as it is sealed; it
- * is never logged and never kept (only the ciphertext goes out). A request that fails after that has to have it typed
- * again: the field does not hold on to it for a retry.
+ * The typed password goes to the Mac to be sealed under its own vault key (`POST /vault/seal`, over the pinned
+ * connection) and leaves the field as soon as it is sealed; it is never logged and never kept. A request that fails
+ * after that has to have it typed again: the field does not hold on to it for a retry.
  */
 @Composable
 fun ProxyFormView(target: ProxyTarget) {
@@ -299,17 +290,14 @@ fun ProxyFormView(target: ProxyTarget) {
     suspend fun apply(api: AgentSwitchAPI) {
         val typed = draft.split()
         draft = typed
-        var ciphertext: String? = null
-        val payload = typed.sealing(target.owner.sealLabel)
-        if (payload != null) {
-            // The Mac's key as it is now (it may have changed since pairing); the one kept from pairing otherwise.
-            model.refreshGateKey()
-            val key = model.profile?.gate?.publicKey ?: throw TokenError.BadPublicKey
-            ciphertext = TokenMinter(key, SodiumSealer).mint(payload)
+        var sealed: String? = null
+        if (typed.password.isNotEmpty() && typed.site != null) {
+            // Sealed by the Mac that keeps it, under its own vault key (the Mac's own screens do the same).
+            sealed = api.vaultSeal(typed.password)
             // Sealed: the typed password is gone from the field, whatever the Mac answers.
             draft = draft.copy(password = "")
         }
-        send(api, typed.request(ciphertext, current))
+        send(api, typed.request(sealed, current))
     }
 
     suspend fun check(api: AgentSwitchAPI) {

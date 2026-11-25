@@ -9,8 +9,6 @@ import com.agentswitch.kit.api.APIError
 import com.agentswitch.kit.api.AgentSwitchAPI
 import com.agentswitch.kit.api.Me
 import com.agentswitch.kit.api.asMacFileSource
-import com.agentswitch.android.dispatch.DispatchServices
-import com.agentswitch.android.dispatch.DispatchStore
 import com.agentswitch.kit.feed.Cue
 import com.agentswitch.android.platform.Notifier
 import com.agentswitch.android.terminals.TerminalsStore
@@ -38,18 +36,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
+import com.agentswitch.android.platform.Feedback
+import com.agentswitch.android.platform.Speaker
+import com.agentswitch.kit.feed.LiveSummary
 
 /** The entries side by side (docs/terminal-v0.md §1, browser-v0 §1): terminals first, the app opens on them. */
 /** The tabs (docs/chatroom-v0.md §10, 2026-11-22): Files left the bar for a sheet from the Terminals page's top bar; its place is Rooms'. */
-enum class MainTab { Terminals, Tasks, Rooms, Browser, Settings }
-
-sealed class GateKeyStatus {
-    data object Unknown : GateKeyStatus()
-    data object Available : GateKeyStatus()
-
-    /** The Mac could not read its gate key (`GET /gate/pubkey` → 503); minting waits until it can. */
-    data class Unavailable(val reason: String) : GateKeyStatus()
-}
+enum class MainTab { Terminals, Dispatch, Rooms, Browser, Settings }
 
 /** What the phone itself gives the app: finding the Mac nearby, hearing of network changes, its own name. */
 interface PlatformServices {
@@ -72,7 +65,10 @@ class AppModel(
     private val vault: TokenVault,
     private val services: PlatformServices?,
     val scope: CoroutineScope = MainScope(),
-    dispatchServices: DispatchServices = DispatchServices(),
+    /** The cues' sounds and taps; silent by default (sample screens, tests). */
+    val feedback: Feedback = Feedback(),
+    /** The reading voice; silent by default. */
+    val speaker: Speaker = Speaker(),
     /** What the phone keeps (the iPhone's `UserDefaults`): the Files tab's last places, the Browser's addresses and zoom. Null in a preview. */
     val settings: AppSettings? = null,
     /** Where files wait on their way to the Mac or to be shared (the cache directory); null: the JVM's temporary one. */
@@ -95,8 +91,6 @@ class AppModel(
 
     /** How each address fared in the last route choice (settings › Mac), for "why can't it connect". */
     var routeReport: ConnectionManager.LastReport? by mutableStateOf(null)
-        private set
-    var gateKeyStatus: GateKeyStatus by mutableStateOf(GateKeyStatus.Unknown)
         private set
 
     /** The app opens on the terminals (2026-10-07, user: 手机默认进入 terminal 页吧): what the phone is used for most. */
@@ -202,11 +196,7 @@ class AppModel(
 
     init { onReset { files.reset(); browser.reset(); rooms.reset(); linkedPage = null; openBrowserRequest = null; openRoomRequest = null } }
 
-    /** The Dispatch half: tasks, conversation, input box, ciphertexts (after `refreshers` and `resetters`, which it joins). */
-    val dispatch = DispatchStore(this, store, dispatchServices)
-
     val isPaired: Boolean get() = !macs.isEmpty
-    val canMint: Boolean get() = profile?.gate?.isValid == true
     val deviceName: String get() = services?.deviceName ?: "Android"
 
     /** What the connection line says now (连接中 · 重连中 · 无法连接（第 N 次）· 未找到 Mac · 配对已失效). */
@@ -238,7 +228,6 @@ class AppModel(
         stopConnection()
         resetSession()
         save(macs.adding(outcome.profile))
-        gateKeyStatus = if (outcome.profile.gate == null) GateKeyStatus.Unknown else GateKeyStatus.Available
         connect(outcome.token, transport)
     }
 
@@ -297,11 +286,11 @@ class AppModel(
         routeReport = null
         api = null
         me = null
-        gateKeyStatus = GateKeyStatus.Unknown
         terminalCues = TerminalCueTracker()
         terminalDone = TerminalDoneTracker()
         terminals.reset()
         for (reset in resetters) reset()
+        syncLive()
     }
 
     // MARK: connection
@@ -309,7 +298,6 @@ class AppModel(
     /** Connects to the current Mac with its saved token; without one it is shown as no longer paired. */
     private fun connectCurrent() {
         val current = profile ?: return
-        gateKeyStatus = if (current.gate == null) GateKeyStatus.Unknown else GateKeyStatus.Available
         val token = try { vault.load(current.tokenAccount) } catch (_: Exception) { null }
         if (token == null) {
             connection = ConnectionState.Unauthorized
@@ -347,7 +335,6 @@ class AppModel(
         if (state.endpoint != null && !wasConnected) {
             scope.launch {
                 refreshAll()
-                refreshGateKey()
                 refreshAddresses()
                 fetch(quiet = true) { it.me() }?.let { me = it }
             }
@@ -412,19 +399,27 @@ class AppModel(
         }
         if (asked != session) return
         val fresh = terminalCues.newlyWaiting(terminals.terminals)
-        // The "needs you" cue for a terminal that newly waits, read aloud in voice mode (the assistant does not report
-        // terminals).
+        // The "needs you" cue for a terminal that newly waits, read aloud in voice mode.
         if (fresh.isNotEmpty()) {
-            dispatch.feedback.play(Cue.NeedsYou, speaking = dispatch.speaker.isSpeaking)
-            if (dispatch.feedback.voiceMode) {
-                dispatch.speaker.say(fresh.joinToString("。") { it.spokenWait }, key = "terminals:" + fresh.joinToString(",") { it.id })
+            feedback.play(Cue.NeedsYou, speaking = speaker.isSpeaking)
+            if (feedback.voiceMode) {
+                speaker.say(fresh.joinToString("。") { it.spokenWait }, key = "terminals:" + fresh.joinToString(",") { it.id })
             }
         }
         val seen = if (inFront) viewedTerminal else null
         for (terminal in fresh) if (terminal.id != seen) notifier?.post(terminal.id, "${terminal.noticeName} · Needs You", terminal.noticeWait)
         for (terminal in terminalDone.newlyDone(terminals.terminals)) if (terminal.id != seen) notifier?.post(terminal.id, "${terminal.noticeName} · Done", "这一轮结束了。")
-        // What is in progress has the terminals in it (and each asking lets a wait that is over run out: FollowRule).
-        dispatch.syncLive()
+        // Each asking lets a wait that is over run out (FollowRule).
+        syncLive()
+    }
+
+    /**
+     * What is in progress — the terminals at work or waiting (assistant-v0 §4) — goes to the ongoing notification, and
+     * while there is any the Mac is followed from behind (FollowService). The iPhone feeds its Live Activity from the
+     * same summary.
+     */
+    fun syncLive() {
+        follower?.sync(LiveSummary.state(terminals.terminals), profile?.name ?: "Mac")
     }
 
     /**
@@ -454,29 +449,6 @@ class AppModel(
         if (updated.fingerprint != this.profile?.fingerprint) return
         save(macs.updating(updated))
         manager?.update(updated)
-    }
-
-    /**
-     * The Mac's current gate key. Kept as is when the Mac cannot read it (503), so minting keeps working with the key
-     * from pairing. The gate has one key (gate-simple-v0 §1); after the Mac rotates it, the new one arrives here.
-     */
-    suspend fun refreshGateKey() {
-        val api = api ?: return
-        val profile = profile ?: return
-        try {
-            val key = api.gatePubkey()
-            if (!key.isValid || profile.fingerprint != this.profile?.fingerprint) return
-            if (key != profile.gate) save(macs.updating(profile.with(gate = key)))
-            gateKeyStatus = GateKeyStatus.Available
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: APIError.Http) {
-            if (e.status == 503) {
-                if (profile.gate == null) gateKeyStatus = GateKeyStatus.Unavailable(e.detail.ifEmpty { "公钥暂时不可用" })
-            } else handle(e)
-        } catch (e: Exception) {
-            handle(e)
-        }
     }
 
     /**

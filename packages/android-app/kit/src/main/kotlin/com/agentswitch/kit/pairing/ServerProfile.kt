@@ -33,7 +33,10 @@ private data class PayloadAddressBook(val payload: PairingPayload) : ServerAddre
     override val bonjour: String get() = payload.bonjour
 }
 
-/** The paired Mac, saved on the phone. Holds no secret: the device token lives in the token vault, keyed by `fingerprint`. */
+/**
+ * The paired Mac, saved on the phone. Holds no secret: the device token lives in the token vault, keyed by
+ * `fingerprint`. (A `gate` key saved before 2026-11-25 is read past.)
+ */
 @Serializable
 data class ServerProfile(
     val name: String,
@@ -43,18 +46,14 @@ data class ServerProfile(
     override val lan: List<String>,
     override val tailnet: List<String>,
     override val bonjour: String,
-    val gate: GateKey?,
     val deviceId: String,
     /** Milliseconds since 1970. */
     val pairedAt: Long,
 ) : ServerAddressBook {
-    constructor(payload: PairingPayload, deviceId: String, gate: GateKey?, pairedAt: Long = System.currentTimeMillis()) : this(
+    constructor(payload: PairingPayload, deviceId: String, pairedAt: Long = System.currentTimeMillis()) : this(
         name = payload.name, port = payload.port, fingerprint = payload.fp, lan = payload.lan, tailnet = payload.tailnet,
-        bonjour = payload.bonjour, gate = gate ?: payload.gate, deviceId = deviceId, pairedAt = pairedAt,
+        bonjour = payload.bonjour, deviceId = deviceId, pairedAt = pairedAt,
     )
-
-    /** A copy with a new gate key (the user rotated the gate key on the Mac). */
-    fun with(gate: GateKey?): ServerProfile = copy(gate = gate)
 
     /**
      * A copy with the Mac's current addresses, or null when nothing changes. A kind the Mac reports empty (Tailscale

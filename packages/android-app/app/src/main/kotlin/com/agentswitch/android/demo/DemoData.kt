@@ -5,22 +5,15 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import com.agentswitch.kit.api.APIEndpoint
-import com.agentswitch.kit.api.Approval
-import com.agentswitch.kit.api.ApprovalPolicy
-import com.agentswitch.kit.api.ApprovalPolicyInfo
-import com.agentswitch.kit.api.AgentTask
-import com.agentswitch.kit.api.AgentThread
 import com.agentswitch.kit.api.EndpointKind
 import com.agentswitch.kit.api.FileDiff
 import com.agentswitch.kit.api.GitSummary
-import com.agentswitch.kit.api.PermissionMode
 import com.agentswitch.kit.api.PlanEntry
 import com.agentswitch.kit.api.ProfileChoice
 import com.agentswitch.kit.api.ProfileChoices
 import com.agentswitch.kit.api.ProfileColor
 import com.agentswitch.kit.api.ProxyExit
 import com.agentswitch.kit.api.ProxySetting
-import com.agentswitch.kit.api.QuotaReading
 import com.agentswitch.kit.api.RecordFile
 import com.agentswitch.kit.api.RecordItem
 import com.agentswitch.kit.api.RecordStep
@@ -29,7 +22,6 @@ import com.agentswitch.kit.api.RecordUsage
 import com.agentswitch.kit.api.SentReply
 import com.agentswitch.kit.api.SessionRecord
 import com.agentswitch.kit.api.SessionSummary
-import com.agentswitch.kit.api.TaskEvent
 import com.agentswitch.kit.api.TerminalActivity
 import com.agentswitch.kit.api.TerminalInfo
 import com.agentswitch.kit.api.TerminalList
@@ -41,7 +33,6 @@ import com.agentswitch.kit.api.TerminalStatus
 import com.agentswitch.kit.api.TerminalSubagent
 import com.agentswitch.kit.api.TurnProgress
 import com.agentswitch.kit.api.WorkdirSetting
-import com.agentswitch.kit.assistant.AssistantMessage
 import com.agentswitch.kit.connection.ProbeOutcome
 import com.agentswitch.kit.connection.ProbeReport
 import com.agentswitch.kit.feed.SlashCommand
@@ -60,16 +51,13 @@ sealed class DemoSettingsRoute {
     data object ProxyBrowser : DemoSettingsRoute()
     data class ProxyProfile(val agent: String, val profile: ProfileChoice) : DemoSettingsRoute()
     data object Mac : DemoSettingsRoute()
-    data object Tasks : DemoSettingsRoute()
     data object Sessions : DemoSettingsRoute()
     data class Session(val summary: SessionSummary) : DemoSettingsRoute()
 }
 
 /**
- * Sample state for looking at the screens without a Mac (`uiDemo`, debug builds only): a conversation with a task
- * running, one waiting for an answer, one finished and not opened yet, one gone quiet for a quarter of an hour and one
- * stopped by a restart; their threads and the pending question; the Mac's coding sessions, its permission mode and
- * default folder (control-v0).
+ * Sample state for looking at the screens without a Mac (`uiDemo`, debug builds only): the terminals and what they
+ * show, the Mac's coding sessions and its default folder (control-v0), the proxies.
  *
  * Where the iPhone's builders read the `uiDemoScreen` flag, the screen's name is a parameter here.
  */
@@ -92,146 +80,9 @@ object DemoData {
 
     private inline fun <reified T> decode(obj: Any?): T = KitJson.decodeFromJsonElement(json(obj))
 
-    val threads: List<AgentThread>
-        get() = decode(
-            listOf(
-                mapOf("id" to "th1", "title" to "AgentSwitch 最近的改动", "cwd" to "/Users/me/Projects/AgentSwitch", "status" to "open", "createdAt" to ago(900), "updatedAt" to ago(60), "expiresAt" to null, "lastActivity" to ago(10), "taskCount" to 1),
-                mapOf("id" to "th2", "title" to "财务平台登录", "cwd" to "/tmp/w2", "status" to "open", "createdAt" to ago(1800), "updatedAt" to ago(120), "expiresAt" to null, "lastActivity" to ago(120), "taskCount" to 1),
-                mapOf("id" to "th3", "title" to "整理下载目录", "cwd" to "/tmp/w3", "status" to "open", "createdAt" to ago(4000), "updatedAt" to ago(3000), "expiresAt" to null, "lastActivity" to ago(3000), "taskCount" to 1),
-                mapOf("id" to "th4", "title" to "博客构建报错", "cwd" to "/Users/me/Blog", "status" to "open", "createdAt" to ago(2500), "updatedAt" to ago(1080), "expiresAt" to null, "lastActivity" to ago(1080), "taskCount" to 1),
-                mapOf("id" to "th5", "title" to "周报数据", "cwd" to "/Users/me/AgentSwitch/2026-09-27-t6", "status" to "open", "createdAt" to ago(9000), "updatedAt" to ago(7000), "expiresAt" to null, "lastActivity" to ago(7000), "taskCount" to 1),
-                mapOf("id" to "th6", "title" to "明天的天气", "cwd" to null, "status" to "open", "createdAt" to ago(20000), "updatedAt" to ago(19000), "expiresAt" to null, "lastActivity" to ago(19000), "taskCount" to 1),
-            ),
-        )
-
-    val tasks: List<AgentTask>
-        get() = decode(
-            listOf(
-                mapOf(
-                    "id" to "t3", "createdAt" to ago(3600), "updatedAt" to ago(3000), "status" to "done", "task" to "整理一下下载目录，重复的文件放一起", "threadId" to "th3",
-                    "harness" to "opencode", "model" to "deepseek/deepseek-flash", "result" to "## 整理结果\n- 共 42 个文件，已按类型分入 6 个文件夹\n- 7 个重复文件已移入“重复”\n- 未删除任何文件",
-                    "speech" to "下载目录已整理完成，共四十二个文件，其中七个重复文件已移入“重复”文件夹。", "spoken" to "下载目录已整理完成。",
-                ),
-                mapOf(
-                    "id" to "t2", "createdAt" to ago(1500), "updatedAt" to ago(120), "status" to "waiting_approval", "task" to "登录财务平台，汇总首页的待办", "threadId" to "th2",
-                    "harness" to "claude-code", "model" to "claude-sonnet-4-6",
-                ),
-                mapOf(
-                    "id" to "t1", "createdAt" to ago(95), "updatedAt" to ago(10), "status" to "running", "task" to "总结一下 AgentSwitch 最近的改动", "threadId" to "th1",
-                    "harness" to "claude-code", "model" to "claude-opus-5-5", "spoken" to "正在读取提交记录",
-                ),
-                mapOf(
-                    "id" to "t4", "createdAt" to ago(2500), "updatedAt" to ago(1080), "status" to "running", "task" to "博客换主题后构建报错了，看看怎么回事", "threadId" to "th4",
-                    "harness" to "codex", "model" to "gpt-6-luna",
-                ),
-                mapOf(
-                    "id" to "t6", "createdAt" to ago(9000), "updatedAt" to ago(7000), "status" to "blocked", "blockCause" to "interrupted", "task" to "把这周的周报数据汇总成表格",
-                    "threadId" to "th5", "harness" to "claude-code", "model" to "claude-sonnet-4-6", "acknowledgedAt" to ago(6900),
-                    "error" to "服务重启时任务仍在进行，执行进度无法确认。",
-                ),
-                mapOf(
-                    "id" to "t5", "createdAt" to ago(20000), "updatedAt" to ago(19000), "status" to "done", "task" to "明天杭州的天气怎么样", "threadId" to "th6",
-                    "harness" to "claude-code", "model" to "claude-sonnet-4-6", "result" to "明天多云转小雨，气温 18 至 24 度。", "acknowledgedAt" to ago(18000),
-                ),
-            ),
-        )
-
-    val approvals: List<Approval>
-        get() {
-            val evidence = """{"source":"executor","questions":[{"id":"code","header":"验证码","text":"短信验证码是多少？","secret":true}]}"""
-            return decode(
-                listOf(
-                    mapOf(
-                        "id" to "ap1", "taskId" to "t2", "createdAt" to ago(120), "kind" to "question", "action" to "短信验证码是多少？",
-                        "evidence" to evidence, "status" to "pending", "resolvedAt" to null, "answer" to null,
-                    ),
-                ),
-            )
-        }
-
-    /** Each task's process, as the detail page shows it. */
-    val events: Map<String, List<TaskEvent>>
-        get() {
-            var seq = 0
-            fun e(task: String, type: String, payload: Map<String, Any?>, ts: Long): Map<String, Any?> {
-                seq += 1
-                return mapOf("taskId" to task, "seq" to seq, "ts" to ts, "type" to type, "payload" to payload)
-            }
-            fun call(task: String, tool: String, input: Map<String, Any?>, ts: Long, id: String? = null): Map<String, Any?> {
-                val useId = id ?: "tu${seq + 1}"
-                return e(task, "tool_call", mapOf("tool" to tool, "id" to useId, "input" to input), ts)
-            }
-            val all: List<TaskEvent> = decode(
-                listOf(
-                    e("t1", "step", mapOf("action" to "intake", "sealingMs" to 820), ago(95)),
-                    e("t1", "routed", mapOf("verdict" to mapOf("ok" to true, "harness" to "claude-code", "model" to "claude-opus-5-5"), "source" to "model"), ago(94)),
-                    e("t1", "dispatched", mapOf("harness" to "claude-code", "model" to "claude-opus-5-5"), ago(93)),
-                    call("t1", "Bash", mapOf("command" to "git log --oneline -n 30", "description" to "最近 30 个提交"), ago(80), id = "tu1"),
-                    e("t1", "tool_result", mapOf("id" to "tu1", "ok" to true, "output" to "749fdca docs: Live Activity, local API token\naa761fa feat: local API token; tasks may use the Mac's folders\n0413725 feat(ios-app): Live Activity and Dynamic Island"), ago(79)),
-                    call("t1", "Read", mapOf("file_path" to "/Users/me/Projects/AgentSwitch/docs/assistant-v0.md"), ago(70)),
-                    e("t1", "text", mapOf("text" to "最近 30 个提交集中在三个方面：本机 API 的令牌鉴权、任务使用 Mac 上的目录、只读步骤运行只读命令。"), ago(40)),
-                    call("t1", "Read", mapOf("file_path" to "/Users/me/Projects/AgentSwitch/packages/daemon/src/api/localAuth.ts"), ago(36)),
-                    call("t1", "Read", mapOf("file_path" to "/Users/me/Projects/AgentSwitch/packages/daemon/src/api/cwdPolicy.ts"), ago(32)),
-                    call("t1", "Grep", mapOf("pattern" to "readOnly", "path" to "packages/daemon/src"), ago(27)),
-                    call("t1", "Read", mapOf("file_path" to "/Users/me/Projects/AgentSwitch/packages/daemon/src/executors/readOnly.ts"), ago(22)),
-                    call("t1", "Bash", mapOf("command" to "git show --stat HEAD~1"), ago(16)),
-                    call("t1", "Bash", mapOf("command" to "git show --stat HEAD~2"), ago(10)),
-                    e("t2", "dispatched", mapOf("harness" to "claude-code", "model" to "claude-sonnet-4-6"), ago(1500)),
-                    call("t2", "mcp__playwright__browser_navigate", mapOf("url" to "https://finance.example.com/login"), ago(1400), id = "tu2"),
-                    e("t2", "tool_result", mapOf("id" to "tu2", "ok" to true, "output" to "Page URL: https://finance.example.com/login\nPage Title: 登录"), ago(1399)),
-                    e("t2", "text", mapOf("text" to "登录页要求输入短信验证码。"), ago(125)),
-                    e("t2", "approval_request", mapOf("kind" to "question", "source" to "executor", "questions" to listOf(mapOf("text" to "短信验证码是多少？"))), ago(120)),
-                    e("t3", "dispatched", mapOf("harness" to "opencode", "model" to "deepseek/deepseek-flash"), ago(3600)),
-                    call("t3", "bash", mapOf("command" to "ls -la ~/Downloads | wc -l"), ago(3590)),
-                    call("t3", "bash", mapOf("command" to "shasum ~/Downloads/* | sort"), ago(3570)),
-                    call("t3", "read", mapOf("filePath" to "/Users/me/Downloads/清单.txt"), ago(3560)),
-                    e("t3", "text", mapOf("text" to "42 个文件中有 7 个重复，将按类型分入 6 个文件夹。"), ago(3540)),
-                    call("t3", "bash", mapOf("command" to "mkdir -p ~/Downloads/{文档,图片,安装包,压缩包,表格,重复}"), ago(3520)),
-                    call("t3", "bash", mapOf("command" to "mv ~/Downloads/*.pdf ~/Downloads/文档/"), ago(3500)),
-                    e("t3", "done", mapOf("result" to "共 42 个文件，7 个重复文件已移入“重复”。"), ago(3467)),
-                    e("t4", "dispatched", mapOf("harness" to "codex", "model" to "gpt-6-luna"), ago(2480)),
-                    call("t4", "commandExecution", mapOf("command" to "/bin/zsh -lc 'npm run build'"), ago(2400)),
-                    e("t4", "text", mapOf("text" to "构建在 hexo-renderer 步骤停止响应，无输出。"), ago(1100)),
-                    call("t4", "commandExecution", mapOf("command" to "/bin/zsh -lc 'npm ls hexo-renderer-marked'"), ago(1080)),
-                    e("t6", "dispatched", mapOf("harness" to "claude-code", "model" to "claude-sonnet-4-6"), ago(8900)),
-                    call("t6", "Read", mapOf("file_path" to "/Users/me/Documents/周报/第39周.xlsx"), ago(8800)),
-                    e("t6", "blocked", mapOf("cause" to "interrupted", "error" to "服务重启时任务仍在进行，执行进度无法确认。"), ago(7000)),
-                ),
-            )
-            return all.groupBy { it.taskId }
-        }
-
-    val messages: List<AssistantMessage>
-        get() {
-            fun m(seq: Int, role: String, text: String, kind: String, tasks: List<String> = emptyList(), ts: Long): Map<String, Any?> =
-                mapOf("seq" to seq, "ts" to ts, "role" to role, "text" to text, "kind" to kind, "taskIds" to tasks, "clientId" to null, "replyTo" to null)
-            return decode(
-                listOf(
-                    m(1, "user", "整理一下下载目录，重复的文件放一起", kind = "message", ts = ago(3610)),
-                    m(2, "assistant", "已交给 DeepSeek Flash 整理下载目录。", kind = "task", tasks = listOf("t3"), ts = ago(3605)),
-                    m(3, "assistant", "「整理下载目录」已完成：共四十二个文件，其中七个重复文件已移入“重复”文件夹。", kind = "notice", tasks = listOf("t3"), ts = ago(2990)),
-                    m(9, "user", "注视感知功能的英文叫什么", kind = "message", ts = ago(50)),
-                    m(10, "assistant", "Attention Aware Features，位于 设置 › 面容 ID 与密码。", kind = "reply", ts = ago(48)),
-                    m(4, "user", "登录财务平台，汇总首页的待办", kind = "message", ts = ago(1510)),
-                    m(5, "assistant", "已交给 Sonnet 4.6，通过浏览器登录财务平台。", kind = "task", tasks = listOf("t2"), ts = ago(1505)),
-                    m(6, "assistant", "「财务平台登录」等你回答：短信验证码是多少？", kind = "waiting", tasks = listOf("t2"), ts = ago(115)),
-                    m(11, "user", "明天杭州的天气怎么样", kind = "message", ts = ago(20010)),
-                    m(12, "assistant", "已交给 Sonnet 4.6 查询天气。", kind = "task", tasks = listOf("t5"), ts = ago(20005)),
-                    m(13, "user", "把这周的周报数据汇总成表格", kind = "message", ts = ago(9010)),
-                    m(14, "assistant", "已交给 Sonnet 4.6 汇总周报数据。", kind = "task", tasks = listOf("t6"), ts = ago(9005)),
-                    m(15, "user", "博客换主题后构建报错了，看看怎么回事", kind = "message", ts = ago(2510)),
-                    m(16, "assistant", "已交给 GPT-6 Luna，在 ~/Blog 中检查构建。", kind = "task", tasks = listOf("t4"), ts = ago(2505)),
-                    m(7, "user", "总结一下 AgentSwitch 最近的改动", kind = "message", ts = ago(100)),
-                    m(8, "assistant", "已交给 Opus 5.5，在 AgentSwitch 仓库中查看提交记录。", kind = "task", tasks = listOf("t1"), ts = ago(96)),
-                ),
-            )
-        }
-
     // MARK: - control-v0
 
-    val policy = ApprovalPolicyInfo(policy = ApprovalPolicy(mode = PermissionMode.Skip))
     val workdir = WorkdirSetting(path = "/Users/me/AgentSwitch", defaultPath = "/Users/me/AgentSwitch")
-    const val searchQuery = "目录"
 
     val sessions: List<SessionSummary>
         get() {
@@ -570,34 +421,6 @@ object DemoData {
         ),
     )
 
-    /**
-     * 设置 › 用量, mirroring a real reading (2026-09-27): Claude Code 20 % of 5 h and 82 % of 7 d, Codex Pro 8 % of 7 d
-     * (no 5 h window), the DeepSeek balance for OpenCode; read a minute and a half ago, resets still ahead.
-     */
-    val quota: List<QuotaReading>
-        get() {
-            val s = now / 1000
-            return decode(
-                listOf(
-                    mapOf(
-                        "harness" to "codex", "fetchedAt" to ago(90), "remaining" to 0.92, "source" to "codex app-server account/rateLimits/read", "error" to null,
-                        "detail" to mapOf("planType" to "pro", "windows" to listOf(mapOf("label" to "7d", "usedPercent" to 8, "resetsAt" to s + 571_921))),
-                    ),
-                    mapOf(
-                        "harness" to "opencode", "fetchedAt" to ago(92), "remaining" to 1, "source" to "deepseek /user/balance", "error" to null,
-                        "detail" to mapOf("is_available" to true, "balances" to listOf(mapOf("currency" to "CNY", "total" to "96.23", "granted" to "0.00", "topped_up" to "96.23"))),
-                    ),
-                    mapOf(
-                        "harness" to "claude-code", "fetchedAt" to ago(92), "remaining" to 0.18, "source" to "claude rate_limit_event (subscription windows)", "error" to null,
-                        "detail" to mapOf(
-                            "windows" to listOf(mapOf("label" to "5h", "usedPercent" to 20, "resetsAt" to s + 14_551), mapOf("label" to "7d", "usedPercent" to 82, "resetsAt" to s + 3_151)),
-                            "windowsAgeMs" to 155_743,
-                        ),
-                    ),
-                ),
-            )
-        }
-
     /** The last route choice as the Mac details page shows it: the LAN answered, Tailscale timed out. */
     val routeReport: List<ProbeReport>
         get() = listOf(
@@ -699,7 +522,6 @@ object DemoData {
         "proxybrowser" -> listOf(DemoSettingsRoute.ProxyBrowser)
         "proxyprofile" -> ownedProxyProfiles.firstOrNull()?.let { listOf(DemoSettingsRoute.ProxyProfile(it.first, it.second)) } ?: emptyList()
         "mac", "offlinemac" -> listOf(DemoSettingsRoute.Mac)
-        "tasks", "search" -> listOf(DemoSettingsRoute.Tasks)
         "sessions" -> listOf(DemoSettingsRoute.Sessions)
         "transcript", "transcriptfiles" -> sessions.firstOrNull()?.let { listOf(DemoSettingsRoute.Sessions, DemoSettingsRoute.Session(it)) } ?: listOf(DemoSettingsRoute.Sessions)
         else -> emptyList()

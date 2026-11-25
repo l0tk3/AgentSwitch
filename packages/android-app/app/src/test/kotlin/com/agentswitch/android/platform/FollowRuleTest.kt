@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 /** When the Mac is followed from behind (FollowService.kt). */
 class FollowRuleTest {
-    private fun row(needsYou: Boolean) = LiveState.Row(id = "t1", title = "终端", step = "进行中", startedAt = 0, needsYou = needsYou, kind = LiveState.Row.Kind.Terminal)
+    private fun row(needsYou: Boolean) = LiveState.Row(id = "t1", title = "终端", step = "进行中", startedAt = 0, needsYou = needsYou)
     private val working = LiveState(rows = listOf(row(false)), running = 1, waiting = 0)
     private val waiting = LiveState(rows = listOf(row(true)), running = 0, waiting = 1)
     private val both = LiveState(rows = listOf(row(true), row(false)), running = 1, waiting = 1)

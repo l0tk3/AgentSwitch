@@ -11,7 +11,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -244,43 +243,6 @@ class BrowserTests {
         assertEquals(50, queue.next().size)
         assertEquals(13, queue.next().size)
         assertTrue(queue.isEmpty)
-    }
-
-    @Test
-    fun testFillingACiphertextAndAMacWithoutIt() = runTest {
-        val tab = jsonText(mapOf("tab" to codexTab))
-        val transport = FakeTransport({ req, n ->
-            if (n == 0) return@FakeTransport """{"ok":true}""".toByteArray() to httpResponse(req.url)
-            // An older Mac: no fill route, the tab itself there.
-            if (req.path == "/browser/tabs/a1") return@FakeTransport tab.toByteArray() to httpResponse(req.url)
-            """{"error":"not found"}""".toByteArray() to httpResponse(req.url, status = 404)
-        })
-        val api = api(transport)
-        val filled = api.fillBrowserTab("a1", token = "enc:v1:abc", screen = "phone-1")
-        assertTrue(filled)
-        assertEquals(expected(mapOf("token" to "enc:v1:abc", "screen" to "phone-1")), body(transport.requests[0]))
-        val older = api.fillBrowserTab("a1", token = "enc:v1:abc", screen = "phone-1")
-        assertFalse(older, "404 while the tab is there: this Mac cannot fill yet")
-        assertEquals(listOf("/browser/tabs/a1/fill", "/browser/tabs/a1/fill", "/browser/tabs/a1"), transport.paths)
-    }
-
-    /** 2026-10-02 review: a 404 from a tab closed meanwhile is not taken for an older Mac (which would hide the key). */
-    @Test
-    fun testFillingATabThatIsGoneSaysSo() = runTest {
-        val transport = FakeTransport({ req, _ -> """{"error":"not found"}""".toByteArray() to httpResponse(req.url, status = 404) })
-        val error = assertFailsWith<APIError>("a closed tab is an error, not an older Mac") {
-            api(transport).fillBrowserTab("gone", token = "enc:v1:abc", screen = "phone-1")
-        }
-        assertEquals(APIError.Http(status = 404, message = "此标签已关闭。"), error)
-        assertEquals(listOf("/browser/tabs/gone/fill", "/browser/tabs/gone"), transport.paths)
-    }
-
-    /** The Mac's refusals are shown in its words: 400 for a field that takes no ciphertext, 409 on an agent's tab. */
-    @Test
-    fun testAFillRefusalCarriesTheMacsWords() = runTest {
-        val transport = FakeTransport({ req, _ -> """{"error":"只能填入密码或验证码输入框。"}""".toByteArray() to httpResponse(req.url, status = 400) })
-        val error = assertFailsWith<APIError>("refused") { api(transport).fillBrowserTab("a1", token = "enc:v1:abc", screen = "phone-1") }
-        assertEquals("只能填入密码或验证码输入框。", error.message)
     }
 
     @Test

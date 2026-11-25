@@ -32,7 +32,7 @@ import androidx.compose.foundation.layout.RowScope
 @Composable
 fun SpeechVoiceView() {
     val model = LocalAppModel.current
-    val speaker = model.dispatch.speaker
+    val speaker = model.speaker
     val context = LocalContext.current
     // A voice downloaded meanwhile shows up.
     LaunchedEffect(Unit) { speaker.refreshVoices() }

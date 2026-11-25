@@ -1,6 +1,5 @@
 package com.agentswitch.kit.feed
 
-import com.agentswitch.kit.api.TargetRef
 import java.util.Locale
 
 /**
@@ -51,6 +50,3 @@ object ModelName {
         return word.substring(0, first).uppercase(Locale.ROOT) + word.substring(first)
     }
 }
-
-/** "Opus 5.5 · Claude Code": a choice of model in a menu. */
-val TargetRef.displayName: String get() = "${ModelName.display(model)} · ${ModelName.harness(harness)}"

@@ -26,7 +26,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -196,9 +195,3 @@ fun BrailleSpinner(modifier: Modifier = Modifier, color: Color = Theme.busy, siz
 
 /** ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏ as the dot bits of their code points (U+2800 + bits). */
 private val BrailleFrames = intArrayOf(0x0B, 0x19, 0x39, 0x38, 0x3C, 0x34, 0x26, 0x27, 0x07, 0x0F)
-
-/** A word alone on a line, centred: an empty state's sentence. */
-@Composable
-fun Centered(text: String, modifier: Modifier = Modifier, color: Color = Theme.secondaryInk) {
-    Text(text, modifier.fillMaxWidth().padding(horizontal = 24.dp), color = color, style = plain(15), textAlign = TextAlign.Center)
-}

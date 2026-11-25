@@ -6,11 +6,8 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.Serializable
 
 /**
- * control-v0's routes: the permission mode and default folder (read-only on the phone), the Mac's coding sessions,
- * marking a task read, and search.
+ * control-v0's routes: the default folder (read-only on the phone) and the Mac's coding sessions.
  */
-suspend fun AgentSwitchAPI.approvalPolicy(): ApprovalPolicyInfo = get(listOf("approvals", "policy"), ApprovalPolicyInfo.serializer())
-
 suspend fun AgentSwitchAPI.workdir(): WorkdirSetting = get(listOf("settings", "workdir"), WorkdirSetting.serializer())
 
 /** Claude Code, Codex and OpenCode sessions on the Mac, newest first. */
@@ -97,11 +94,3 @@ suspend fun AgentSwitchAPI.deleteSessions(sessions: List<SessionSummary>): Sessi
         }
         SessionsRemoval(results)
     }
-
-/** Records the task as read now; returns the time the Mac recorded, when it says. */
-suspend fun AgentSwitchAPI.acknowledge(taskId: String): Long? =
-    post(listOf("tasks", taskId, "ack"), EmptyBody(), EmptyBody.serializer(), AckReply.serializer()).acknowledgedAt
-
-suspend fun AgentSwitchAPI.search(query: String, limit: Int = 30): List<SearchResult> =
-    get(listOf("search"), SearchResults.serializer(),
-        query = listOf(URLQueryItem("q", query), URLQueryItem("limit", limit.toString()))).results

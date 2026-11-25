@@ -1,7 +1,7 @@
 # android-app
 
 Android client for AgentSwitch (`docs/app-v0.md` §5b): the iPhone app (`../ios-app`), on Android. Pair with the Mac
-by QR code, then the same five places — `Terminals`, `Dispatch`, `Files`, `Browser`, `Settings` — drawn by the same
+by QR code, then the same five places — `Terminals`, `Dispatch`, `Rooms`, `Browser`, `Settings` — drawn by the same
 rules (`docs/ui-v0.md` §7 and §8). Kotlin, Jetpack Compose, Android 10 (API 29) and later.
 
 The two phones are one design. A screen here is the iPhone's screen drawn with Android's means: the same layout, the
@@ -31,9 +31,6 @@ file.
   its kind) takes every app's traffic and would send a connection for the Mac to a proxy that cannot reach it; where
   the app names the network under the VPN (`platform/AndroidDirectRoute.kt`), the transport tries it first — a
   connection and the pinned handshake — and uses it when the Mac answers there (`docs/app-v0.md` §5b, "手机上的 VPN").
-- `secrets/`: `crypto_box_seal` is libsodium's and nothing cryptographic is written here. The kit has the interface
-  `BoxSealer`; the tests give it libsodium through lazysodium-java (and `CrossLanguageTests`, opt-in, has the Python
-  gate open what Kotlin sealed).
 - `connection/`: `ServiceDiscovery` and `PathMonitoring` are interfaces; the app implements them
   (`platform/NsdDiscovery.kt` over Android's own service discovery, `platform/AndroidPathMonitor.kt`).
 - `storage/`: `TokenVault` is an interface; the app's is `platform/KeystoreTokenVault.kt` (each token sealed with an
@@ -48,7 +45,8 @@ file.
 `app`, by folder: `design/` (the look: `Theme`, the pixel and classic palettes, sprites, the app's mark, buttons,
 forms, the floating boxes, glitch and the other effects), `components/` (Markdown, code blocks), `onboarding/`
 (pairing: the scanner, the confirmation), `terminals/` (the tab, a terminal's page and its models), `terminal/` (a
-terminal's screen: a display only, as on the iPhone), `dispatch/` (the Dispatch tab, a task's page, approvals),
+terminal's screen: a display only, as on the iPhone), `rooms/` (Chat Room's rooms, and the Dispatch tab: the room
+the Mac flags as its dispatch desk),
 `files/` (the Mac's files: the browser, previews, changes), `browser/` (the Mac's shared browser and the pages of
 tapped links), `settings/` (with the proxies and Clash), `platform/` (what the phone gives; `FollowService.kt` keeps the app
 following the Mac from behind while something is in progress), `demo/` (the sample
@@ -77,9 +75,6 @@ cd packages/android-app
 ./gradlew :app:assembleDebug           # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:assembleRelease         # app/build/outputs/apk/release/app-release.apk — the one for a phone
 ```
-
-`CrossLanguageTests` needs the Python gate and is skipped unless asked for:
-`AGENTSWITCH_GATE_CROSSCHECK=1 AGENTSWITCH_PACKAGES=<repo>/packages ./gradlew :kit:test`.
 
 ## Run
 

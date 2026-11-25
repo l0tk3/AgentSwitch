@@ -1,8 +1,6 @@
 package com.agentswitch.kit
 
-import com.agentswitch.kit.api.AgentSwitchAPI
 import com.agentswitch.kit.api.SSEMessage
-import com.agentswitch.kit.api.taskEvent
 import com.agentswitch.kit.api.SSEParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,10 +14,7 @@ class SSEParserTests {
         val messages = parser.feed(Fixture.data("events.sse"))
         assertEquals(listOf("queued", "dispatched", "text", "approval_request", "done"), messages.map { it.event })
         assertEquals(listOf("1", "2", "3", "4", "5"), messages.map { it.id })
-        val events = messages.mapNotNull { AgentSwitchAPI.taskEvent(it, taskId = "t_1") }
-        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), events.map { it.seq })
-        assertEquals("第一行\n第二行 ✓", events[2].payload["text"]?.string)
-        assertTrue(events[4].endsStream)
+        assertTrue(messages[2].data.contains("第一行\\n第二行 ✓"), "the data is the frame's JSON as sent")
     }
 
     @Test
@@ -66,12 +61,5 @@ class SSEParserTests {
         val parser = SSEParser()
         assertEquals(emptyList(), parser.feed("event: only\n\ndata: half".toByteArray()))
         assertNull(parser.lastId)
-    }
-
-    @Test
-    fun foreignOrBrokenFramesAreSkipped() {
-        assertNull(AgentSwitchAPI.taskEvent(SSEMessage(id = "1", event = "text", data = "{bad"), taskId = "t"))
-        val other = """{"taskId":"other","seq":1,"ts":1,"type":"text","payload":{}}"""
-        assertNull(AgentSwitchAPI.taskEvent(SSEMessage(id = "1", event = "text", data = other), taskId = "t"))
     }
 }

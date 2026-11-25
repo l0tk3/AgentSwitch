@@ -1,28 +1,21 @@
 package com.agentswitch.kit.api
 
-import com.agentswitch.kit.assistant.AssistantMessage
-import com.agentswitch.kit.assistant.AssistantMessages
-import com.agentswitch.kit.assistant.AssistantReply
-import com.agentswitch.kit.assistant.NewMessage
 import com.agentswitch.kit.files.Multipart
 import com.agentswitch.kit.files.StagedUpload
 import com.agentswitch.kit.files.StagedUploads
-import com.agentswitch.kit.files.TaskFile
-import com.agentswitch.kit.files.TaskFileList
 import com.agentswitch.kit.files.UploadFile
 import com.agentswitch.kit.support.KitJson
 import java.util.UUID
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
 /**
  * Client for the daemon's remote API (app-v0 §2). Every call goes through the pinned transport to whatever endpoint the
  * provider selects; a network failure is reported back so the next call re-selects. GETs are retried once on a fresh
- * endpoint; POST, PUT and DELETE never (a task must not be created twice, a delete must not be reported twice).
+ * endpoint; POST, PUT and DELETE never (nothing is sent twice, a delete is not reported twice).
  *
  * Swift's is a struct; here a class whose two settable properties are copied with [copy]. Routes of other files are
  * extension functions written with the plumbing below ([get], [post], [send], [perform], [bytes]), each given the
@@ -51,19 +44,13 @@ class AgentSwitchAPI(
 
     companion object {
         /**
-         * `POST /tasks` answers only after the sealer (up to 30 s on the Mac) has run; give it room so a slow answer is
-         * not taken for a failure and the task sent twice.
+         * What the Mac seals before it answers (up to 30 s there) gets room, so a slow answer is not taken for a
+         * failure and the same thing sent twice.
          */
         val createTaskTimeout: Duration = 60.seconds
 
         /** Up to 100 MB of attachments over a phone connection. */
         val uploadTimeout: Duration = 180.seconds
-
-        /** A message is sealed, answered by the assistant and may create a task before the reply comes back. */
-        val assistantTimeout: Duration = 90.seconds
-
-        /** How many of the newest tasks the list asks for. */
-        const val taskListLimit = 50
 
         fun <T> decode(data: ByteArray, response: HTTPResponse, reply: KSerializer<T>): T {
             check(data, response)
@@ -96,94 +83,13 @@ class AgentSwitchAPI(
     suspend fun health(): Health = get(listOf("healthz"), Health.serializer())
     suspend fun me(): Me = get(listOf("me"), Me.serializer())
     suspend fun addresses(): MacAddresses = get(listOf("addresses"), MacAddresses.serializer())
-    suspend fun gatePubkey(): GatePubkey = get(listOf("gate", "pubkey"), GatePubkey.serializer())
-
-    suspend fun tasks(limit: Int = taskListLimit): List<AgentTask> =
-        get(listOf("tasks"), ListSerializer(AgentTask.serializer()), query = listOf(URLQueryItem("limit", limit.toString())))
-
-    suspend fun task(id: String): TaskDetail = get(listOf("tasks", id), TaskDetail.serializer())
-
-    suspend fun createTask(body: NewTaskRequest): AgentTask =
-        send("POST", listOf("tasks"), body, NewTaskRequest.serializer(), AgentTask.serializer(), timeout = createTaskTimeout)
-
-    suspend fun approve(taskId: String, approvalId: String, decision: ApprovalDecision) {
-        post(listOf("tasks", taskId, "approve"), ApproveRequest(approvalId, decision), ApproveRequest.serializer(), OKReply.serializer())
-    }
-
-    suspend fun answer(taskId: String, approvalId: String, answers: Map<String, List<String>>) {
-        post(listOf("tasks", taskId, "answer"), AnswerRequest(approvalId, answers), AnswerRequest.serializer(), OKReply.serializer())
-    }
-
-    suspend fun cancel(taskId: String): AgentTask =
-        post(listOf("tasks", taskId, "cancel"), EmptyBody(), EmptyBody.serializer(), AgentTask.serializer())
-
-    /** Hands the task to another executor; returns the follow-up task that continues it. */
-    suspend fun handoff(taskId: String, to: TargetRef? = null): AgentTask =
-        post(listOf("tasks", taskId, "handoff"), HandoffRequest(to), HandoffRequest.serializer(), AgentTask.serializer())
-
-    suspend fun approvals(): List<Approval> = get(listOf("approvals"), ListSerializer(Approval.serializer()))
-
-    suspend fun threads(limit: Int = 50): List<AgentThread> =
-        get(listOf("threads"), ListSerializer(AgentThread.serializer()), query = listOf(URLQueryItem("limit", limit.toString())))
-
-    suspend fun thread(id: String): ThreadDetail = get(listOf("threads", id), ThreadDetail.serializer())
-    suspend fun quota(): List<QuotaReading> = get(listOf("quota"), ListSerializer(QuotaReading.serializer()))
-
-    suspend fun refreshQuota(): List<QuotaReading> =
-        post(listOf("quota", "refresh"), EmptyBody(), EmptyBody.serializer(), ListSerializer(QuotaReading.serializer()))
-
-    suspend fun targets(): Targets = get(listOf("targets"), Targets.serializer())
-
-    /**
-     * CONTEXT.md on the Mac (app-v0 §2): read, the daemon's example, and save. A save is sealed like a task (so it
-     * may wait for the sealer too) and returns the lint's warnings and what was sealed.
-     */
-    suspend fun context(): ContextDocument = get(listOf("context"), ContextDocument.serializer())
-    suspend fun contextExample(): String = get(listOf("context", "example"), ContextExample.serializer()).text
-
-    suspend fun saveContext(text: String): ContextSaveResult =
-        send("PUT", listOf("context"), SaveContextRequest(text), SaveContextRequest.serializer(), ContextSaveResult.serializer(),
-            timeout = createTaskTimeout)
-
-    /** The input box (assistant-v0 §1.1): sent once; a resend after a lost reply uses the same client id. */
-    suspend fun sendMessage(message: NewMessage): AssistantReply =
-        send("POST", listOf("assistant"), message, NewMessage.serializer(), AssistantReply.serializer(), timeout = assistantTimeout)
-
-    /** Swift's `assistantMessages(after:)`. */
-    suspend fun assistantMessages(after: Int): List<AssistantMessage> =
-        get(listOf("assistant"), AssistantMessages.serializer(), query = listOf(URLQueryItem("after", after.toString()))).messages
-
-    /** The newest `last` messages, oldest first: the first load of the conversation (Swift's `assistantMessages(last:)`). */
-    suspend fun assistantMessagesLast(last: Int): List<AssistantMessage> =
-        get(listOf("assistant"), AssistantMessages.serializer(), query = listOf(URLQueryItem("last", last.toString()))).messages
-
-    /**
-     * Deletes one entry of the home screen from any of its lines (threads-v0 手动删除): a message with its answers and
-     * the tasks they created, or a line on its own. 409 while such a task still runs.
-     */
-    suspend fun deleteEntry(seq: Int) {
-        perform("DELETE", listOf("assistant", seq.toString()), emptyList(), null, OKReply.serializer())
-    }
-
-    /** Deletes all history: every topic, task and conversation line. 409 while a task runs; then nothing is deleted. */
-    suspend fun clearHistory() {
-        perform("DELETE", listOf("history"), emptyList(), null, OKReply.serializer())
-    }
-
-    /** Stages files for a task (multipart, sent once); pass the ids as `NewTaskRequest.attachments`. */
+    /** Stages files on the Mac (multipart, sent once); the ids go with what is sent next. */
     suspend fun upload(files: List<UploadFile>): List<StagedUpload> {
         val boundary = "agentswitch-${UUID.randomUUID().toString().uppercase()}"
         val reply = perform("POST", listOf("uploads"), emptyList(), Multipart.body(files, boundary), StagedUploads.serializer(),
             timeout = uploadTimeout, contentType = "multipart/form-data; boundary=$boundary")
         return reply.files
     }
-
-    /** A task's attachments and deliverables (`GET /tasks/:id/files`). */
-    suspend fun taskFiles(taskId: String): List<TaskFile> = get(listOf("tasks", taskId, "files"), TaskFileList.serializer()).taskFiles
-
-    /** One file's bytes; `path` as `taskFiles` lists it (each segment is encoded on its own). */
-    suspend fun download(taskId: String, path: String): ByteArray =
-        bytes(listOf("tasks", taskId, "files") + path.split("/").filter { it.isNotEmpty() })
 
     /**
      * A picture the user sent with a message of a session (docs/simple-view-v0.md §4, §5.1): the `n`-th of the record's
@@ -213,15 +119,6 @@ class AgentSwitchAPI(
             if (error.isNetworkFailure) endpoints.reportFailure(endpoint)
             throw error
         }
-    }
-
-    /** Cascading deletes with the Mac's semantics: a running task (or a thread with one) is refused with 409. */
-    suspend fun deleteTask(id: String) {
-        perform("DELETE", listOf("tasks", id), emptyList(), null, OKReply.serializer())
-    }
-
-    suspend fun deleteThread(id: String) {
-        perform("DELETE", listOf("threads", id), emptyList(), null, OKReply.serializer())
     }
 
     /** A newer AgentSwitch.app staged on the Mac, if any, and the last switch's outcome. */

@@ -50,8 +50,6 @@ class BrowserStore(private val scope: CoroutineScope, private val settings: AppS
     /** The last read failed (the kept list is shown); cleared by the next good one. */
     var error: String? by mutableStateOf(null)
 
-    /** This Mac cannot fill ciphertexts into a page yet (its fill route answered 404): the key is not offered. */
-    var fillUnavailable: Boolean by mutableStateOf(false)
 
     /** Addresses typed on this phone, newest first. */
     var recent: List<String> by mutableStateOf(keptRecent())
@@ -190,7 +188,6 @@ class BrowserStore(private val scope: CoroutineScope, private val settings: AppS
         servers = emptyList()
         unsupported = false
         error = null
-        fillUnavailable = false
         browsers = listOf(BrowserChoice.shared)
         key = null
     }

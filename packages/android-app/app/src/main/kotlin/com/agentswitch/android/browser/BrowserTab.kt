@@ -439,9 +439,8 @@ private fun ServerRow(server: BrowserLocalServer, opening: Boolean, enabled: Boo
 /** The agent's name as people call it (`Codex`, `Claude Code`), else the owner's label. */
 fun AppModel.agentName(owner: BrowserTabOwner): String = owner.agentName(harness(owner))
 
-/** The agent behind a tab: its terminal's or its task's, else as its label names it. */
+/** The agent behind a tab: its terminal's, else as its label names it. */
 fun AppModel.harness(owner: BrowserTabOwner): String? = when (owner.kind) {
     BrowserTabOwner.Kind.Terminal -> terminals.terminals.firstOrNull { it.id == owner.id }?.harness ?: owner.namedHarness
-    BrowserTabOwner.Kind.Task -> dispatch.tasks.firstOrNull { it.id == owner.id }?.harness ?: owner.namedHarness
     else -> owner.namedHarness
 }

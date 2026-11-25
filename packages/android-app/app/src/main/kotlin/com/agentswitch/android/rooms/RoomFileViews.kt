@@ -80,7 +80,6 @@ import com.agentswitch.android.design.grounded
 import com.agentswitch.android.design.lookShape
 import com.agentswitch.android.design.mono
 import com.agentswitch.android.design.plain
-import com.agentswitch.android.dispatch.FileCache
 import com.agentswitch.android.files.BarIcon
 import com.agentswitch.android.files.FileGlyph
 import com.agentswitch.android.files.FileKind
@@ -106,6 +105,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import com.agentswitch.android.files.FileCache
 
 // A room message's files as a chat draws them (2026-11-23, user: 会话发的图片、我发的图片要能在聊天页直接预览；文件要有
 // 文件图标，点了能预览): a picture is shown in the timeline, any other file is a card with its kind's icon, its name

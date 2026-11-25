@@ -21,7 +21,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.code
-import com.agentswitch.kit.api.EventDescriber
 import com.agentswitch.kit.feed.LinkText
 import com.agentswitch.kit.feed.Markdown
 import com.agentswitch.kit.feed.RecordDisplay
@@ -29,8 +28,6 @@ import com.agentswitch.kit.feed.ShellHighlight
 import com.agentswitch.kit.feed.Speech
 import com.agentswitch.kit.feed.SecretHint
 import com.agentswitch.kit.feed.TerminalTree
-import com.agentswitch.kit.feed.Usage
-import com.agentswitch.kit.pairing.GateKey
 import com.agentswitch.kit.pairing.PairingLink
 import com.agentswitch.kit.pairing.PairingPayload
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +64,7 @@ object KitSelfCheck {
         }
         walk("pairing link") {
             val payload = PairingPayload(name = "Mac mini", port = 4713, fp = "ab".repeat(32), code = "7K3M-9QZX", lan = listOf("192.168.1.5"),
-                tailnet = listOf("mac.tail1234.ts.net", "fd7a:115c:a1e0::1"), bonjour = "AgentSwitch on Mac mini", gate = GateKey("A".repeat(43), "default"))
+                tailnet = listOf("mac.tail1234.ts.net", "fd7a:115c:a1e0::1"), bonjour = "AgentSwitch on Mac mini")
             check(PairingLink.parse("看这个 " + PairingLink.make(payload) + " 好了").name == "Mac mini")
         }
         walk("markdown") {
@@ -85,13 +82,10 @@ object KitSelfCheck {
             LinkText.webAddresses("见 https://example.com/a（说明）。还有 http://localhost:3000/x.")
         }
         walk("sample data") {
-            check(DemoData.tasks.isNotEmpty() && DemoData.threads.isNotEmpty() && DemoData.approvals.isNotEmpty())
-            check(DemoData.messages.isNotEmpty() && DemoData.sessions.isNotEmpty() && DemoData.quota.isNotEmpty())
-            for (events in DemoData.events.values) for (event in events) { EventDescriber.line(event); EventDescriber.tone(event) }
+            check(DemoData.sessions.isNotEmpty())
             val list = DemoData.terminalList(null)
             check(TerminalTree.build(list.terminals, DemoData.sessions, DemoData.git).isNotEmpty())
             check(TerminalTree.build(TerminalsListProbe.list(0).terminals, TerminalsListProbe.sessions(0)).isNotEmpty())
-            Usage.rows(DemoData.quota)
             for (screen in listOf(null, "simplebusy", "simplecompact", "simplestep", "simpledaybreak")) {
                 val record = DemoData.sessionRecord("claude-code", "demo", screen)
                 for (item in record.items) RecordDisplay.summary(item)
@@ -102,7 +96,6 @@ object KitSelfCheck {
             DemoData.routeReport
             DemoData.clash
         }
-        walk("libsodium on this device") { check(com.agentswitch.android.platform.SodiumSealer.selfCheck()) { "a sealed message did not open to itself" } }
         Log.i("KitSelfCheck", "loaded $loaded classes, ${failures.size} failures")
         for (failure in failures) Log.e("KitSelfCheck", failure)
         return listOf("loaded $loaded classes") + failures

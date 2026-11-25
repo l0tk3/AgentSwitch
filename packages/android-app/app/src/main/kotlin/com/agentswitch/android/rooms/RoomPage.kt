@@ -197,7 +197,6 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
             "roomcard" -> members(model.detail?.sessions?.firstOrNull()?.handle)
             "roomdrawer" -> drawer.open()
             "roomsearch" -> search()
-            "roomsecrets" -> nav.present("roomsecrets:$id") { RoomSecretsSheet(model) }
         }
     }
 
@@ -215,7 +214,6 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
                 PixelBox.Action("Notes…") { nav.present("roomnotes:$id") { RoomNotesSheet(model) } },
                 PixelBox.Action("Tasks…") { tasks() },
                 PixelBox.Action("Files…") { nav.present("roomfiles:$id") { RoomFilesSheet(model) } },
-                PixelBox.Action(if (d.secrets > 0) "Secrets (${d.secrets})…" else "Secrets…") { nav.present("roomsecrets:$id") { RoomSecretsSheet(model) } },
                 // 解散 (user #230); not the 调度台, which goes with the dispatch turned off on the Mac.
                 if (d.room.desk) null else PixelBox.Action("Dissolve Room…", PixelBox.Action.Role.Destructive, icon = "trash") { confirmDelete = true },
             ),

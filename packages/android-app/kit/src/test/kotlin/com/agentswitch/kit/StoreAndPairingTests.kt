@@ -8,42 +8,27 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.*
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 class LocalStoreTests {
     private fun tempDir(): File = Files.createTempDirectory("as-store-").toFile().also { it.deleteRecursively() }
 
     @Test
-    fun macsAndCiphertextsRoundTrip() {
+    fun macsRoundTrip() {
         val dir = tempDir()
         try {
             val store = LocalStore(directory = dir)
             assertTrue(store.loadMacs().isEmpty)
-            assertEquals(emptyList(), store.loadCiphertexts())
 
-            val profile = ServerProfile(payload = PairingPayload.sample(), deviceId = "dev1", gate = null, pairedAt = 1_790_000_000_000)
+            val profile = ServerProfile(payload = PairingPayload.sample(), deviceId = "dev1", pairedAt = 1_790_000_000_000)
             val other = profile(fp = "cd", name = "MacBook")
             val macs = PairedMacs().adding(profile).adding(other)
             store.saveMacs(macs)
             assertEquals(macs, store.loadMacs())
             assertEquals(other, store.loadMacs().current)
 
-            val saved = listOf(
-                SavedCiphertext(token = "enc:v1:" + "A".repeat(40), note = "公司 VPN", createdAt = 1_790_000_000_000),
-                SavedCiphertext(token = "enc:v1:" + "B".repeat(40), note = "家里 NAS", createdAt = 1_790_000_000_000, mac = other.fingerprint),
-            )
-            store.saveCiphertexts(saved)
-            assertEquals(saved, store.loadCiphertexts())
-            val onDisk = File(dir, "ciphertexts.json").readText()
-            val rows = (KitJson.parseToJsonElement(onDisk) as JsonArray).map { it.jsonObject }
-            assertEquals(setOf("id", "token", "note", "createdAt"), rows[0].keys, "ciphertext and note only")
-            assertEquals(setOf("id", "token", "note", "createdAt", "mac"), rows[1].keys, "plus the Mac it was made for")
-
             store.saveMacs(PairedMacs())
             assertTrue(store.loadMacs().isEmpty)
-            assertEquals("enc:v1:AAAAAAAA…AAAAAA", saved[0].shortToken)
         } finally {
             dir.deleteRecursively()
         }
@@ -55,7 +40,7 @@ class LocalStoreTests {
         val dir = tempDir()
         try {
             dir.mkdirs()
-            val profile = ServerProfile(payload = PairingPayload.sample(), deviceId = "dev1", gate = null, pairedAt = 1_790_000_000_000)
+            val profile = ServerProfile(payload = PairingPayload.sample(), deviceId = "dev1", pairedAt = 1_790_000_000_000)
             val legacy = File(dir, "server.json")
             legacy.writeText(KitJson.encodeToString(ServerProfile.serializer(), profile))
 
@@ -102,20 +87,9 @@ class LocalStoreTests {
         assertEquals(a, PairedMacs(servers = listOf(a), active = "gone").current, "a stale current Mac falls back to the first")
     }
 
-    @Test
-    fun ciphertextsFollowTheirMac() {
-        val untagged = SavedCiphertext(token = "enc:v1:A", note = "")
-        val mine = SavedCiphertext(token = "enc:v1:B", note = "", mac = "aa")
-        val other = SavedCiphertext(token = "enc:v1:C", note = "", mac = "bb")
-        val orphan = SavedCiphertext(token = "enc:v1:D", note = "", mac = "gone")
-        val paired = listOf("aa", "bb")
-        assertEquals(listOf(untagged, mine, orphan), listOf(untagged, mine, other, orphan).filter { it.usable(current = "aa", paired = paired) })
-        assertEquals(listOf(untagged, other, orphan), listOf(untagged, mine, other, orphan).filter { it.usable(current = "bb", paired = paired) })
-    }
-
     private fun profile(fp: String, name: String, deviceId: String = "dev1"): ServerProfile =
         ServerProfile(name = name, port = 4713, fingerprint = fp.repeat(32), lan = listOf("192.168.1.5"), tailnet = emptyList(),
-            bonjour = "AgentSwitch on $name", gate = null, deviceId = deviceId, pairedAt = 1_790_000_000_000)
+            bonjour = "AgentSwitch on $name", deviceId = deviceId, pairedAt = 1_790_000_000_000)
 
     /** The in-memory half of Swift's testVaults; the Keychain half is iOS's (the app's Keystore vault is not in the kit). */
     @Test
@@ -129,12 +103,11 @@ class LocalStoreTests {
 }
 
 class PairingServiceTests {
-    private fun transport(pairStatus: Int = 200, gateKey: String? = null): FakeTransport = FakeTransport({ req, _ ->
+    private fun transport(pairStatus: Int = 200): FakeTransport = FakeTransport({ req, _ ->
         when (req.path) {
             "/healthz" -> json(mapOf("ok" to true)) to httpResponse(req.url)
             "/pair" -> if (pairStatus != 200) json(mapOf("error" to "invalid code")) to httpResponse(req.url, status = pairStatus)
                 else json(mapOf("deviceId" to "dev-9", "token" to "tok-9")) to httpResponse(req.url)
-            "/gate/pubkey" -> json(mapOf("publicKey" to (gateKey ?: ""), "keypair" to "work")) to httpResponse(req.url)
             else -> json(mapOf("error" to "not found")) to httpResponse(req.url, status = 404)
         }
     })
@@ -145,22 +118,18 @@ class PairingServiceTests {
         val outcome = PairingService(transport = t, discovery = null).pair(PairingPayload.sample(), deviceName = "我的 iPhone")
         assertEquals("tok-9", outcome.token)
         assertEquals("dev-9", outcome.profile.deviceId)
-        assertEquals("default", outcome.profile.gate?.keypair)
         assertEquals(EndpointKind.Lan, outcome.endpoint.kind)
         val pair = assertNotNull(t.requests.firstOrNull { it.path == "/pair" })
         assertNull(pair.header("Authorization"))
         val body = assertNotNull(pair.jsonBody).mapValues { it.value.jsonPrimitive.content }
         assertEquals(mapOf("code" to "7K3M-9QZX", "name" to "我的 iPhone", "platform" to "android"), body)
-        assertFalse(t.paths.contains("/gate/pubkey"), "the QR code already had the key")
+        assertEquals(listOf("/pair"), t.paths.filter { it != "/healthz" }, "nothing else is asked of the Mac")
     }
 
     @Test
-    fun fetchesTheGateKeyWhenTheQRCodeHadNone() = runTest {
-        val t = transport(gateKey = PairingPayload.sampleKey)
-        val outcome = PairingService(transport = t, discovery = null).pair(PairingPayload.sample(gate = null), deviceName = "")
-        assertEquals(GateKey(publicKey = PairingPayload.sampleKey, keypair = "work"), outcome.profile.gate)
-        val pubkey = assertNotNull(t.requests.firstOrNull { it.path == "/gate/pubkey" })
-        assertEquals("Bearer tok-9", pubkey.header("Authorization"))
+    fun anEmptyNameFallsBack() = runTest {
+        val t = transport()
+        PairingService(transport = t, discovery = null).pair(PairingPayload.sample(), deviceName = "")
         assertEquals("Android", t.requests.first { it.path == "/pair" }.jsonBody?.get("name")?.jsonPrimitive?.content, "an empty name falls back")
     }
 

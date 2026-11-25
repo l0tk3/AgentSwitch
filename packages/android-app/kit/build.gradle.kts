@@ -18,9 +18,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.tls)
     testImplementation(libs.okhttp.mockwebserver)
-    // libsodium for the tests' BoxSealer (the app hands the kit its own); JNA loads the bundled native library.
-    testImplementation(libs.lazysodium.java)
-    testImplementation(libs.jna)
 }
 
 tasks.test {

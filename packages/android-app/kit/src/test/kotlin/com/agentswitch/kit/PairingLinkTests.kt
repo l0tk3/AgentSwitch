@@ -19,7 +19,7 @@ class PairingLinkTests {
         get() = mapOf(
             "v" to 1, "name" to "Mac mini", "port" to 4713, "fp" to "AB".repeat(32), "code" to "7k3m-9qzx",
             "lan" to listOf("192.168.1.5"), "tailnet" to listOf("100.101.102.103", "mac.tail1234.ts.net"),
-            "bonjour" to "AgentSwitch on Mac mini", "gate" to mapOf("publicKey" to PairingPayload.sampleKey, "keypair" to "default"),
+            "bonjour" to "AgentSwitch on Mac mini", "gate" to mapOf("publicKey" to Base64URL.encode(ByteArray(32) { 7 }), "keypair" to "default"),
         )
 
     @Test
@@ -30,7 +30,6 @@ class PairingLinkTests {
         assertEquals("ab".repeat(32), p.fp)
         assertEquals("7K3M-9QZX", p.code)
         assertEquals(listOf("100.101.102.103", "mac.tail1234.ts.net"), p.tailnet)
-        assertEquals("default", p.gate?.keypair)
     }
 
     @Test
@@ -53,11 +52,12 @@ class PairingLinkTests {
     }
 
     @Test
-    fun gateIsOptionalButMustBeValidWhenPresent() {
-        val noGate = docExample - "gate"
-        assertNull(PairingLink.parse(link(noGate)).gate)
-        val badGate = docExample + ("gate" to mapOf("publicKey" to "AAAA", "keypair" to "default"))
-        assertEquals(PairingLinkError.InvalidField("gate.publicKey"), assertFailsWith<PairingLinkError> { PairingLink.parse(link(badGate)) })
+    fun theGateKeyIsReadPastWhateverItHolds() {
+        val with = PairingLink.parse(link(docExample))
+        assertEquals(with, PairingLink.parse(link(docExample - "gate")), "a Mac that no longer sends one")
+        assertEquals(with, PairingLink.parse(link(docExample + ("gate" to mapOf("publicKey" to "AAAA", "keypair" to "default")))))
+        assertEquals(with, PairingLink.parse(link(docExample + ("gate" to null))))
+        assertEquals(with, PairingLink.parse(link(docExample + ("gate" to "gone"))))
     }
 
     @Test
@@ -117,12 +117,9 @@ class PairingLinkTests {
 
     @Test
     fun profileFromPayload() {
-        val profile = com.agentswitch.kit.pairing.ServerProfile(payload = PairingPayload.sample(), deviceId = "dev1", gate = null)
-        assertEquals("default", profile.gate?.keypair, "falls back to the payload's key")
+        val profile = com.agentswitch.kit.pairing.ServerProfile(payload = PairingPayload.sample(), deviceId = "dev1")
+        assertEquals("dev1", profile.deviceId)
         assertEquals(profile.fingerprint, profile.tokenAccount)
         assertEquals("abcd ef01 2345", com.agentswitch.kit.pairing.ServerProfile.grouped("abcdef012345"))
-        val rotated = profile.with(gate = com.agentswitch.kit.pairing.GateKey(publicKey = PairingPayload.sampleKey, keypair = "work"))
-        assertEquals("work", rotated.gate?.keypair)
-        assertEquals("dev1", rotated.deviceId)
     }
 }

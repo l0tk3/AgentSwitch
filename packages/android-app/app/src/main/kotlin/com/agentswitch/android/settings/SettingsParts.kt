@@ -52,15 +52,11 @@ import com.agentswitch.android.terminals.LookSymbolIcon
 import com.agentswitch.kit.api.SessionSummary
 import kotlinx.coroutines.launch
 
-/** Where Settings can lead: the Mac's details, the history, the Mac's coding sessions and one of them, and the pages of its groups. */
+/** Where Settings can lead: the Mac's details, the Mac's coding sessions and one of them, and the pages of its groups. */
 sealed class SettingsRoute(val key: String) {
     data object Mac : SettingsRoute("settings/mac")
-    data object Tasks : SettingsRoute("settings/tasks")
     data object Sessions : SettingsRoute("settings/sessions")
     data class Session(val summary: SessionSummary) : SettingsRoute("settings/session/${summary.id}")
-    data object Context : SettingsRoute("settings/context")
-    data object Ciphertexts : SettingsRoute("settings/ciphertexts")
-    data object Models : SettingsRoute("settings/models")
     data object Voice : SettingsRoute("settings/voice")
 }
 
@@ -174,19 +170,10 @@ internal fun rememberOpen(): (SettingsRoute) -> Unit {
 @Composable
 internal fun RouteContent(route: SettingsRoute) {
     val model = com.agentswitch.android.LocalAppModel.current
-    // The old dispatch's pages, while it is off (OldDispatch): the note, whatever opened them.
-    if (com.agentswitch.android.OldDispatch.OFF && (route == SettingsRoute.Tasks || route == SettingsRoute.Context || route == SettingsRoute.Models)) {
-        com.agentswitch.android.DispatchOffPage(onBack = com.agentswitch.android.rememberBack())
-        return
-    }
     when (route) {
         SettingsRoute.Mac -> model.profile?.let { MacDetailsView(it) }
-        SettingsRoute.Tasks -> com.agentswitch.android.dispatch.TasksManageView()
         SettingsRoute.Sessions -> SessionsView()
         is SettingsRoute.Session -> com.agentswitch.android.terminals.SessionTranscriptView(route.summary)
-        SettingsRoute.Context -> ContextEditorView()
-        SettingsRoute.Ciphertexts -> CiphertextsView()
-        SettingsRoute.Models -> ModelsView()
         SettingsRoute.Voice -> SpeechVoiceView()
     }
 }

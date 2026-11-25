@@ -1,27 +1,19 @@
 package com.agentswitch.kit
 
 import com.agentswitch.kit.api.*
-import com.agentswitch.kit.secrets.GatePolicyError
-import com.agentswitch.kit.secrets.SecretUse
-import com.agentswitch.kit.secrets.TokenMinter
 import com.agentswitch.kit.support.KitJson
 import java.time.ZoneId
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -168,35 +160,25 @@ class ProxyTests {
     @Test
     fun testThePasswordStaysWhenNoneIsTyped() {
         val current = ProxySetting(server = "http://proxy.example:8080", username = "me", sealed = true)
-        val kept = ProxyDraft(current).request(ciphertext = null, current = current)
+        val kept = ProxyDraft(current).request(sealed = null, current = current)
         assertEquals(ProxyRequest(server = "http://proxy.example:8080", username = "me", password = null, keepPassword = true), kept)
         val sent = KitJson.encodeToJsonElement(ProxyRequest.serializer(), kept).jsonObject
         assertEquals(setOf("server", "username", "keepPassword"), sent.keys)
-        // A new one typed: it goes as a ciphertext and nothing is kept.
+        // A new one typed: it goes as the Mac sealed it and nothing is kept.
         val typed = ProxyDraft(current).copy(password = "hunter2")
-        assertEquals(ProxyRequest(server = "http://proxy.example:8080", username = "me", password = "enc:v1:abc"), typed.request(ciphertext = "enc:v1:abc", current = current))
+        assertEquals(ProxyRequest(server = "http://proxy.example:8080", username = "me", password = "asv:1:abc"), typed.request(sealed = "asv:1:abc", current = current))
         // No user: nobody's password to keep.
-        assertNull(ProxyDraft(server = "http://proxy.example:8080").request(ciphertext = null, current = current).keepPassword)
+        assertNull(ProxyDraft(server = "http://proxy.example:8080").request(sealed = null, current = current).keepPassword)
     }
 
     @Test
-    fun testThePasswordIsSealedForTheProxyItselfAndNowhereElse() {
-        val draft = ProxyDraft(server = "http://Proxy.Example:8080", username = "me", password = "hunter2-x")
-        val payload = assertNotNull(draft.sealing(label = ProxyOwner.Profile(agent = "claude-code", id = "abc").sealLabel))
-        assertEquals(listOf("proxy.example:8080"), payload.hosts)
-        assertEquals(listOf(SecretUse.Fill, SecretUse.Http), payload.uses)
-        assertEquals("profile/proxy", payload.label)
-        assertEquals("hunter2-x", payload.value)
-        assertEquals(GatePolicyError.ValueTooShort, assertFailsWith<GatePolicyError> {
-            ProxyDraft(server = "http://proxy.example:8080", username = "me", password = "hunter2").sealing(label = "browser/proxy")
-        })
-        assertEquals("browser/proxy", ProxyOwner.Browser.sealLabel)
-        assertNull(ProxyDraft(server = "http://proxy.example:8080", username = "me").sealing(label = "browser/proxy"))
-        // What it becomes is a ciphertext the gate's own format, and the value is not in it.
-        val keys = TestSodium.keyPair()
-        val token = TokenMinter(keys.publicKey, TestSodium.sealer).mint(payload)
-        assertTrue(TokenMinter.looksLikeToken(token))
-        assertFalse(token.contains("hunter2"))
+    fun testTheMacSealsATypedPassword() = runTest {
+        val transport = FakeTransport({ req, _ -> """{"token":"asv:1:QUJDREVGR0hJSktMTU5PUA"}""".toByteArray() to httpResponse(req.url) })
+        val api = AgentSwitchAPI(endpoints = FixedEndpoint(APIEndpoint(host = "192.168.1.5", port = 4713, kind = EndpointKind.Lan)), transport = transport, token = "tok")
+        assertEquals("asv:1:QUJDREVGR0hJSktMTU5PUA", api.vaultSeal("hunter2"))
+        val sent = transport.requests.single()
+        assertEquals("POST /vault/seal", "${sent.method} ${sent.path}")
+        assertEquals("""{"value":"hunter2"}""", String(sent.body!!))
     }
 
     // MARK: whose proxy

@@ -16,12 +16,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.ByteArrayOutputStream
 
@@ -56,9 +53,6 @@ private val browserViewportBody = ObjectWriter<BrowserViewportBody> {
     mapOf("width" to JsonPrimitive(it.width), "height" to JsonPrimitive(it.height), "scale" to jsonNumber(it.scale),
         "mobile" to JsonPrimitive(it.mobile)) + browserScreenField(it.screen)
 }
-
-private class BrowserFillBody(val token: String, val screen: String?)
-private val browserFillBody = ObjectWriter<BrowserFillBody> { mapOf("token" to JsonPrimitive(it.token)) + browserScreenField(it.screen) }
 
 /** Where to navigate a tab, and from which screen: the target's one field beside `screen`. */
 private class BrowserNavigateBody(val target: BrowserTarget, val screen: String?)
@@ -165,8 +159,6 @@ suspend fun AgentSwitchAPI.browsers(): List<BrowserChoice> =
  */
 suspend fun AgentSwitchAPI.browserTabs(): BrowserTabList = get(browserPath + "tabs", BrowserTabList.serializer())
 
-suspend fun AgentSwitchAPI.browserTab(id: String): BrowserTabInfo = get(browserPath + listOf("tabs", id), BrowserTabEnvelopeSerializer)
-
 /**
  * A new tab of yours; a refusal (403), a missing file (404) or an address the Mac cannot read (400) carries its
  * reason in words.
@@ -243,28 +235,6 @@ suspend fun AgentSwitchAPI.browserSpeed(bytes: Int = BrowserSpeed.bytes, limit: 
     }
     if (!complete) meter.cut(began.elapsedNow().inWholeNanoseconds / 1e9)
     return meter.mbps
-}
-
-/**
- * A saved ciphertext into the field that has the focus; the gate checks it against the page's site and only the
- * Mac sees the value. Only on a person's own tab, and only into a password or one-time-code field (the Mac's 409
- * and 400 carry the reason in words). False: this Mac cannot fill yet — its fill route is missing (404) while the
- * tab itself is there; a 404 for a tab that is gone is thrown as such (`BrowserClosedReason.Closed`'s words).
- */
-suspend fun AgentSwitchAPI.fillBrowserTab(id: String, token: String, screen: String?): Boolean {
-    try {
-        post(browserPath + listOf("tabs", id, "fill"), BrowserFillBody(token, screen), browserFillBody, OKReply.serializer())
-        return true
-    } catch (e: APIError.Http) {
-        if (e.status != 404) throw e
-        try {
-            browserTab(id)
-        } catch (gone: APIError.Http) {
-            if (gone.status == 404) throw APIError.Http(status = 404, message = BrowserClosedReason.Closed.said)
-            throw gone
-        }
-        return false
-    }
 }
 
 /**

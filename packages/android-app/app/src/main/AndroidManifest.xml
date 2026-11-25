@@ -68,8 +68,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
-        <!-- A downloaded task file is opened by the phone's own viewer: it is handed a content:// address of the app's
-             cache folder for tasks' files (xml/file_paths.xml) and nothing else. -->
+        <!-- A downloaded file is opened by the phone's own viewer: it is handed a content:// address of the app's
+             cache folder for downloads (xml/file_paths.xml) and nothing else. -->
         <service
             android:name=".platform.FollowService"
             android:exported="false"

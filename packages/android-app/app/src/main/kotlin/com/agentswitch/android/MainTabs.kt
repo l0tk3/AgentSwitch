@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import com.agentswitch.android.browser.BrowserStore
 import com.agentswitch.android.design.HairRule
 import com.agentswitch.android.browser.BrowserTab
-import com.agentswitch.android.dispatch.HomeView
 import com.agentswitch.android.files.FilesSheet
 import com.agentswitch.android.rooms.RoomsStore
 import com.agentswitch.android.rooms.RoomsTab
@@ -62,7 +61,7 @@ import kotlinx.coroutines.delay
 
 /**
  * The entries side by side (docs/terminal-v0.md §1, browser-v0 §1, chatroom-v0 §10): `Terminals`, `Dispatch` (the
- * conversation), `Rooms`, `Browser` and `Settings` — Files is a sheet from the Terminals page's top bar; their icons are the shaded pictures (docs/ui-v0.md §9: tones of the ink, no hue),
+ * dispatch desk, a Chat Room: rooms/DispatchDesk.kt), `Rooms`, `Browser` and `Settings` — Files is a sheet from the Terminals page's top bar; their icons are the shaded pictures (docs/ui-v0.md §9: tones of the ink, no hue),
  * whole for the tab in use, fainter for the others.
  *
  * No push: while the app is open the Mac is followed from every tab.
@@ -97,7 +96,8 @@ fun MainTabs() {
             )
         }
     }
-    // The Mac's rooms, from every tab: the badge counts what is not seen yet; more often on the Rooms tab, rarely when
+    // The Mac's rooms, from every tab: the badge counts what is not seen yet; more often on the Rooms tab and on
+    // Dispatch (its desk is one of them), rarely when
     // the Mac has no Chat Room. Sent with the version the list has, so an unchanged one costs nothing.
     WhileStarted(Pair(model.connection.endpoint, model.tab)) {
         while (true) {
@@ -106,7 +106,7 @@ fun MainTabs() {
             model.refreshRoomAttention()
             delay(
                 if (model.rooms.unsupported) RoomsStore.unsupportedIntervalMs
-                else if (model.tab == MainTab.Rooms || (OldDispatch.OFF && model.tab == MainTab.Tasks)) RoomsStore.pollIntervalMs else RoomsStore.backgroundIntervalMs,
+                else if (model.tab == MainTab.Rooms || model.tab == MainTab.Dispatch) RoomsStore.pollIntervalMs else RoomsStore.backgroundIntervalMs,
             )
         }
     }
@@ -130,7 +130,7 @@ fun MainTabs() {
                     KeptTab(shown = tab == model.tab) {
                         when (tab) {
                             MainTab.Terminals -> TerminalsTab()
-                            MainTab.Tasks -> if (OldDispatch.OFF) DispatchDeskTab() else HomeView()
+                            MainTab.Dispatch -> DispatchDeskTab()
                             MainTab.Rooms -> RoomsTab()
                             MainTab.Browser -> BrowserTab()
                             MainTab.Settings -> SettingsTab()
@@ -153,7 +153,7 @@ private class TabItem(val tab: MainTab, val word: String, val picture: ShadedSpr
 
 private val tabItems = listOf(
     TabItem(MainTab.Terminals, "Terminals", ShadedSprite.terminals, ClassicIconKind.Symbol("terminal")),
-    TabItem(MainTab.Tasks, "Dispatch", ShadedSprite.dispatch, ClassicIconKind.Lanes),
+    TabItem(MainTab.Dispatch, "Dispatch", ShadedSprite.dispatch, ClassicIconKind.Lanes),
     TabItem(MainTab.Rooms, "Rooms", ShadedSprite.rooms, ClassicIconKind.Symbol("bubble.left")),
     TabItem(MainTab.Browser, "Browser", ShadedSprite.browser, ClassicIconKind.Symbol("globe")),
     TabItem(MainTab.Settings, "Settings", ShadedSprite.settings, ClassicIconKind.Symbol("gearshape")),

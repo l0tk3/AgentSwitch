@@ -31,7 +31,7 @@ android {
         targetSdk = 36
         versionCode = 6
         versionName = "0.4.2"
-        // The libraries that carry machine code (libsodium, JNA, the terminal emulator) for the phones there are —
+        // The libraries that carry machine code (the terminal emulator) for the phones there are —
         // 64-bit ARM — and for an emulator on an Intel machine; the 32-bit ones would only make the package larger.
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -106,14 +106,6 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
-    // libsodium itself (`crypto_box_seal` for ciphertexts made on the phone): nothing cryptographic is written here.
-    // Both as Android archives: the plain jars carry no library for a phone.
-    implementation(libs.lazysodium.android) {
-        artifact { type = "aar" }
-        // It asks for JNA's plain jar, which has no library for a phone and the same classes as the archive below.
-        exclude(group = "net.java.dev.jna", module = "jna")
-    }
-    implementation(libs.jna.android) { artifact { type = "aar" } }
 
     testImplementation(kotlin("test-junit5"))
     testImplementation(libs.junit.jupiter)

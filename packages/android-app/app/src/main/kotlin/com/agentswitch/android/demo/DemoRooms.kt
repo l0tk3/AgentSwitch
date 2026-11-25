@@ -102,7 +102,7 @@ object DemoRooms {
 
     val detail = RoomDetail(
         room = RoomInfo(id = room, name = "登录", topic = "这周把登录做完：先定接口，再分头实现。", createdAt = ago(300), lastSeq = 5, readSeq = 4),
-        seats = seats, messages = messages, secrets = 3,
+        seats = seats, messages = messages,
         notes = RoomNotes(text = "接口：POST /login → { token, expiresAt }\n约定：改公共文件前先在房间里说一声。", at = ago(190), by = "daemon"),
         folder = folder, tasks = tasks, claims = claims,
         // Who has read the user's first message (2026-11-24: `1/2 已读`), and what the work has cost so far.
@@ -159,13 +159,6 @@ object DemoRooms {
     val attention = listOf(
         RoomAttentionItem(room = room, roomName = "登录", kind = "blocked", task = 4, handle = "web", text = "联调：登录页接上真实接口：等 T2 的刷新接口定下字段名", at = ago(20)),
         RoomAttentionItem(room = room, roomName = "登录", kind = "question", handle = "docs", seq = 5, text = "旧 cookie 逻辑已标成废弃（T7），清单在共享文件夹的 `deprecations.md`。", at = ago(8)),
-    )
-
-    /** The sample room's secrets: ciphertexts only, as the Mac's gate sealed them. */
-    val secrets = listOf(
-        com.agentswitch.kit.api.RoomSecret("s1", "GitHub", "site", url = "https://github.com/login", account = "me@example.com", token = "enc:v1:Q2lwaGVydGV4dC1vbmx5LW5vdC1hLXJlYWwtc2VjcmV0", addedAt = ago(900)),
-        com.agentswitch.kit.api.RoomSecret("s2", "OpenAI", "api", url = "https://api.openai.com", token = "enc:v1:U2FtcGxlLWNpcGhlcnRleHQtZm9yLWRlbW8tb25seQ", addedAt = ago(600)),
-        com.agentswitch.kit.api.RoomSecret("s3", "Staging DB", "exec", env = "PGPASSWORD", token = "enc:v1:RGVtby1vbmx5LW5vdGhpbmctdG8tc2VlLWhlcmU", addedAt = ago(300)),
     )
 
     const val desk = "de5k000001"

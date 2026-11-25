@@ -1,11 +1,10 @@
 package com.agentswitch.kit.pairing
 
 import com.agentswitch.kit.api.CertificatePin
-import com.agentswitch.kit.secrets.TokenMinter
-import com.agentswitch.kit.secrets.isUnicodeWhiteSpace
-import com.agentswitch.kit.secrets.trimmingWhitespacesAndNewlines
+import com.agentswitch.kit.api.isUnicodeWhitespace
 import com.agentswitch.kit.support.Base64URL
 import com.agentswitch.kit.support.KitJson
+import com.agentswitch.kit.support.trimmingWhitespacesAndNewlines
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -15,19 +14,10 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
-/** The gate's current keypair as the Mac hands it over (`GET /gate/pubkey` has the same shape). */
-@Serializable
-data class GateKey(
-    /** base64url, 32 bytes */
-    val publicKey: String,
-    val keypair: String,
-) {
-    val isValid: Boolean get() = TokenMinter.isValidPublicKey(publicKey)
-}
-
 /**
  * The JSON inside `agentswitch://pair?p=…` (app-v0 §2), version 1. `v`, `name`, `port`, `fp` and `code` must be
- * present; `lan`, `tailnet` and `bonjour` default to empty.
+ * present; `lan`, `tailnet` and `bonjour` default to empty. A `gate` key (the secret gate's, which a Mac from before
+ * 2026-11-25 still sends) is read past, whatever it holds.
  */
 @Serializable
 data class PairingPayload(
@@ -39,12 +29,10 @@ data class PairingPayload(
     val lan: List<String> = emptyList(),
     val tailnet: List<String> = emptyList(),
     val bonjour: String = "",
-    /** Optional here so a Mac without a gate keypair can still pair; the phone then asks `GET /gate/pubkey`. */
-    val gate: GateKey? = null,
 ) {
     /** Version 1, as Swift's `init(v: Int = 1, …)`. */
-    constructor(name: String, port: Int, fp: String, code: String, lan: List<String>, tailnet: List<String>, bonjour: String, gate: GateKey?) :
-        this(1, name, port, fp, code, lan, tailnet, bonjour, gate)
+    constructor(name: String, port: Int, fp: String, code: String, lan: List<String>, tailnet: List<String>, bonjour: String) :
+        this(1, name, port, fp, code, lan, tailnet, bonjour)
 
     companion object
 }
@@ -102,8 +90,7 @@ object PairingLink {
         if (!p.lan.all(HostAddress::isValid)) throw PairingLinkError.InvalidField("lan")
         if (!p.tailnet.all(HostAddress::isValid)) throw PairingLinkError.InvalidField("tailnet")
         if (p.lan.isEmpty() && p.tailnet.isEmpty() && p.bonjour.isEmpty()) throw PairingLinkError.InvalidField("lan/tailnet/bonjour")
-        if (p.gate != null && !p.gate.isValid) throw PairingLinkError.InvalidField("gate.publicKey")
-        return PairingPayload(p.v, name, p.port, fp, code, p.lan, p.tailnet, p.bonjour, p.gate)
+        return PairingPayload(p.v, name, p.port, fp, code, p.lan, p.tailnet, p.bonjour)
     }
 
     /**
@@ -112,7 +99,7 @@ object PairingLink {
      */
     fun normalizeCode(code: String): String? {
         val mapped = mapOf('O' to '0', 'I' to '1', 'L' to '1')
-        val raw = code.uppercase().filter { it != '-' && !isUnicodeWhiteSpace(it) }.map { mapped[it] ?: it }.joinToString("")
+        val raw = code.uppercase().filter { it != '-' && !it.isUnicodeWhitespace() }.map { mapped[it] ?: it }.joinToString("")
         val alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".toSet()
         if (raw.length != 8 || !raw.all { it in alphabet }) return null
         return "${raw.take(4)}-${raw.takeLast(4)}"
@@ -123,7 +110,7 @@ object PairingLink {
         val start = trimmed.indexOf("$scheme://", ignoreCase = true)
         if (start < 0) return null
         val tail = trimmed.substring(start)
-        val end = tail.indexOfFirst { isUnicodeWhiteSpace(it) || it == '"' || it == '\'' || it == '<' || it == '>' }
+        val end = tail.indexOfFirst { it.isUnicodeWhitespace() || it == '"' || it == '\'' || it == '<' || it == '>' }
         return if (end >= 0) tail.substring(0, end) else tail
     }
 

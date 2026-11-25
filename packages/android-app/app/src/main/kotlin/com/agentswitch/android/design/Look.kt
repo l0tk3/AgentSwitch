@@ -78,11 +78,6 @@ fun Modifier.grounded(color: Color, radius: Dp = 10.dp): Modifier = composed { b
 @ReadOnlyComposable
 fun lookWord(text: String): String = ClassicWords.word(text, LocalLook.current)
 
-/** A line of short words joined by ` · `, each as the look writes it. */
-@Composable
-@ReadOnlyComposable
-fun lookPhrase(text: String): String = ClassicWords.phrase(text, LocalLook.current)
-
 /** A button's word: `[ Allow ]`, or the word alone in the classic look. */
 @Composable
 @ReadOnlyComposable

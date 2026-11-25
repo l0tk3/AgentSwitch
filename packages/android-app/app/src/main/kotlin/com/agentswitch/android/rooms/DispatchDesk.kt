@@ -21,7 +21,7 @@ import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.plain
 
 /**
- * The Dispatch tab while the old dispatch is off (OldDispatch): the new dispatch, the Chat Room the Mac flags as the
+ * The Dispatch tab: the Chat Room the Mac flags as the
  * dispatch desk (调度台, `desk` in GET /rooms) shown as its room page, titled `Dispatch`. The rooms list is the one the
  * tabs' root polls (MainTabs). No desk room: the dispatch is not turned on — that is done on the Mac only.
  */

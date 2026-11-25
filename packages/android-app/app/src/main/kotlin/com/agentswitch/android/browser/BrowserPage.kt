@@ -1,10 +1,7 @@
 package com.agentswitch.android.browser
 
-import com.agentswitch.android.settings.CiphertextsView
-import com.agentswitch.android.settings.CiphertextPicker
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -28,7 +25,6 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
@@ -102,7 +98,6 @@ import com.agentswitch.android.design.screenRefresh
 import com.agentswitch.android.design.waitingBlink
 import com.agentswitch.android.platform.PhoneScreen
 import com.agentswitch.android.terminals.KeyCap
-import com.agentswitch.android.terminals.KeyCapBox
 import com.agentswitch.kit.api.BrowserClosedReason
 import com.agentswitch.kit.api.BrowserKey
 import com.agentswitch.kit.api.BrowserHistoryAction
@@ -125,8 +120,8 @@ import kotlinx.coroutines.launch
  * `BrowserPage`): the address on top (the lock and the place; tap to edit) with `⋯` (Copy URL, Reload, Close Tab); under
  * it who holds the tab — the agent and what it is doing, or `You`; the live picture, the agent's last action outlined
  * on it; the bar at the bottom — `‹ › ↻`, the keyboard, the zoom (`100%`), and on an agent's tab `[ Take Over ]` / `[
- * Hand Back ]`. Typing brings the system keyboard and the key bar (`esc tab ⏎ ⌫ ← →`, as the terminal page's caps, and
- * on your own tabs `⚿ Fill Ciphertext`); the zoom key opens the zoom row in its place (`− 100% +`, BrowserZoomBar).
+ * Hand Back ]`. Typing brings the system keyboard and the key bar (`esc tab ⏎ ⌫ ← →`, as the terminal page's
+ * caps); the zoom key opens the zoom row in its place (`− 100% +`, BrowserZoomBar).
  *
  * `linked`: the page of a link tapped outside the Browser tab (`LinkedPage`): `Done` leads the bar in place of the way
  * back.
@@ -254,13 +249,6 @@ fun BrowserPage(tab: BrowserTabInfo, linked: Boolean = false) {
             },
         )
     }
-    fun fillCiphertext() {
-        if (model.dispatch.ciphertexts.isEmpty()) nav.present("makeCiphertext") { CiphertextsView(sheet = true) }
-        else nav.present("fillCiphertext") {
-            CiphertextPicker(title = "Fill Ciphertext") { token -> scope.launch { if (!page.fill(token)) store.fillUnavailable = true } }
-        }
-    }
-
     Column(Modifier.fillMaxSize().background(Theme.base).imePadding()) {
         PageBar(page, linked, editing, address, onAddress = { address = it },
             onEdit = { editing = it }, onBack = { leave() }, onMore = { menuAnchor = it }, store = store)
@@ -268,10 +256,9 @@ fun BrowserPage(tab: BrowserTabInfo, linked: Boolean = false) {
         HairRule()
         ScreenArea(page, editing, onTap = { editing = false }, onBack = { leave() }, modifier = Modifier.weight(1f))
         Controls(
-            page, store, composing, zooming,
+            page, composing, zooming,
             onComposing = { composing = it },
             onZooming = { zooming = it }, onEditing = { editing = it },
-            onFill = { page.typing = false; fillCiphertext() },
         )
     }
 }
@@ -496,8 +483,8 @@ private val keys: List<Pair<BrowserKey, String>> = listOf(
 
 @Composable
 private fun Controls(
-    page: BrowserPageModel, store: BrowserStore, composing: String, zooming: Boolean,
-    onComposing: (String) -> Unit, onZooming: (Boolean) -> Unit, onEditing: (Boolean) -> Unit, onFill: () -> Unit,
+    page: BrowserPageModel, composing: String, zooming: Boolean,
+    onComposing: (String) -> Unit, onZooming: (Boolean) -> Unit, onEditing: (Boolean) -> Unit,
 ) {
     Box(Modifier.fillMaxWidth().background(Theme.base)) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
@@ -511,7 +498,7 @@ private fun Controls(
                 }
             }
             if (page.typing) {
-                KeyBar(page, store, composing, onFill)
+                KeyBar(page, composing)
             } else if (zooming) {
                 BrowserZoomBar(
                     page.zoomPercent, page.canZoomOut, page.canZoomIn, pictureOnly = !page.zoomsPage,
@@ -529,22 +516,13 @@ private fun Controls(
 }
 
 @Composable
-private fun KeyBar(page: BrowserPageModel, store: BrowserStore, composing: String, onFill: () -> Unit) {
+private fun KeyBar(page: BrowserPageModel, composing: String) {
     // The keyboard goes away from the bar's own key under this one.
     Row(
         Modifier.fillMaxWidth().background(Theme.raised.copy(alpha = 0.5f)).horizontalScroll(rememberScrollState()).padding(horizontal = Theme.Space.m, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         for ((key, label) in keys) KeyCap(label, { page.press(key) }, solid = key == BrowserKey.Enter, compact = true)
-        // Your own tabs only: an agent sees its page again after the hand-back (the Mac refuses it there).
-        if (!store.fillUnavailable && page.canFill) {
-            KeyCapBox(onFill, Modifier.border(1.dp, Theme.signal, RectangleShape).semantics { contentDescription = "从密文填入" }, compact = true) {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PixelSprite(PixelArt.lock, pixel = 2.dp, color = Theme.signal, strength = 0.9f, shadow = false, picture = ShadedSprite.lockSmall)
-                    Text("Fill Ciphertext", color = Theme.signal, style = mono(12), maxLines = 1)
-                }
-            }
-        }
         if (composing.isNotEmpty()) Text(composing, Modifier.padding(start = 4.dp), color = Theme.secondaryInk, style = mono(13), maxLines = 1)
     }
 }

@@ -112,7 +112,6 @@ fun MacDetailsView(profile: ServerProfile) {
             LabeledRow("Port", profile.port.toString(), monoValue = true)
             if (profile.lan.isNotEmpty()) LabeledRow("LAN", profile.lan.joinToString(", "), monoValue = true)
             if (profile.tailnet.isNotEmpty()) LabeledRow("Tailscale", profile.tailnet.joinToString(", "))
-            LabeledRow("Keypair", profile.gate?.keypair ?: "—", monoValue = true)
             LabeledRow("This Device", model.me?.name ?: profile.deviceId)
             LabeledRow("Paired", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault()).format(Date(profile.pairedAt)))
         }

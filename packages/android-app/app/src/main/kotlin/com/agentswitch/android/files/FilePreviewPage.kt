@@ -60,7 +60,6 @@ import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.code
 import com.agentswitch.android.design.mono
 import com.agentswitch.android.design.plain
-import com.agentswitch.android.dispatch.FileCache
 import com.agentswitch.kit.api.FileRefusal
 import com.agentswitch.kit.api.FileSize
 import com.agentswitch.kit.api.MacFileDetails

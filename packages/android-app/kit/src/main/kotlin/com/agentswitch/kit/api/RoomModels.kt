@@ -374,8 +374,6 @@ data class RoomDetail(
     val reads: Map<String, List<String>> = emptyMap(),
     /** What each task of the list has cost, by its number. */
     @SerialName("taskStats") private val rawTaskStats: Map<String, RoomStats> = emptyMap(),
-    /** How many secrets the room holds (RoomSecrets.kt). */
-    val secrets: Int = 0,
 ) {
     /** What one task has cost the room; null before anything was counted for it. */
     fun taskStats(n: Int): RoomStats? = rawTaskStats[n.toString()]

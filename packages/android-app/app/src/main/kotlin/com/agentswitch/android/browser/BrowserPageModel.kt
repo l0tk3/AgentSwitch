@@ -24,7 +24,6 @@ import com.agentswitch.kit.api.BrowserTabInfo
 import com.agentswitch.kit.api.browserEvents
 import com.agentswitch.kit.api.browserHistory
 import com.agentswitch.kit.api.closeBrowserTab
-import com.agentswitch.kit.api.fillBrowserTab
 import com.agentswitch.kit.api.navigateBrowserTab
 import com.agentswitch.kit.api.releaseBrowserTab
 import com.agentswitch.kit.api.sendBrowserInput
@@ -231,12 +230,6 @@ class BrowserPageModel(
 
     /** The page is at this phone's size. */
     val phoneSized: Boolean get() = tab.viewport.by == screenId
-
-    /**
-     * `Fill Ciphertext` is offered: this phone drives the tab — an agent's too, once taken over (user #312): the
-     * service keeps the value out of the agent's answers.
-     */
-    val canFill: Boolean get() = canDrive
 
     val layout: BrowserLayout?
         get() {
@@ -791,28 +784,6 @@ class BrowserPageModel(
         val api = api ?: return
         if (!canDrive) { refuse(); return }
         try { applyTab(api.browserHistory(id, action, screenId)) } catch (e: CancellationException) { throw e } catch (e: Exception) { error = describe(e) }
-    }
-
-    /**
-     * A saved ciphertext into the focused field, checked by the gate against the page's site; your own tabs only, and
-     * only a password or one-time-code field (the Mac's refusal is shown as it is). False: the Mac cannot do it yet.
-     */
-    suspend fun fill(token: String): Boolean {
-        val api = api ?: return true
-        if (!canDrive) { refuse(); return true }
-        if (!canFill) { error = BrowserNotice.fillOwnTabsOnly; return true }
-        try {
-            if (!api.fillBrowserTab(id, token, screenId)) {
-                error = "此 Mac 上的 AgentSwitch 版本尚不支持填入密文，请先更新。"
-                return false
-            }
-            say("已填入密文。")
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = describe(e)
-        }
-        return true
     }
 
     suspend fun close(): Boolean {

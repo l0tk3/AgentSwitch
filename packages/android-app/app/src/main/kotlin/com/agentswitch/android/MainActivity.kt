@@ -117,9 +117,6 @@ class MainActivity : ComponentActivity() {
         // A notification's link: agentswitch://terminal/<id>.
         intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "terminal" }
             ?.pathSegments?.firstOrNull()?.takeIf { it.isNotEmpty() }?.let { app.model.openTerminal(it) }
-        // A task notification's link: agentswitch://task/<id>.
-        intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "task" }
-            ?.pathSegments?.firstOrNull()?.takeIf { it.isNotEmpty() }?.let { app.model.dispatch.openTask(it) }
         // A 等你处理 notification's link: agentswitch://room/<id>?task=&seq=&card=.
         intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "room" }?.let { uri ->
             val id = uri.pathSegments.firstOrNull()?.takeIf { it.isNotEmpty() } ?: return@let

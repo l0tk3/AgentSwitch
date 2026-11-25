@@ -1,6 +1,5 @@
 package com.agentswitch.kit
 
-import com.agentswitch.kit.api.AgentTask
 import com.agentswitch.kit.api.TerminalActivity
 import com.agentswitch.kit.api.TerminalInfo
 import com.agentswitch.kit.api.TerminalPermission
@@ -15,7 +14,6 @@ import com.agentswitch.kit.feed.spokenWait
 import com.agentswitch.kit.feed.waitsForYou
 import com.agentswitch.kit.live.LiveLink
 import com.agentswitch.kit.live.LiveState
-import com.agentswitch.kit.support.KitJson
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -75,21 +73,19 @@ class TerminalAttentionTests {
 
     @Test
     fun testAWaitingTerminalIsARowAndStartsTheSummaryOnItsOwn() {
-        assertNull(LiveSummary.state(emptyList(), emptyList(), emptyMap(), terminals = listOf(terminal("b", TerminalStatus.Idle), terminal("c", TerminalStatus.Exited))),
+        assertNull(LiveSummary.state(listOf(terminal("b", TerminalStatus.Idle), terminal("c", TerminalStatus.Exited))),
             "an idle or ended terminal is not in it")
-        val state = assertNotNull(LiveSummary.state(emptyList(), emptyList(), emptyMap(), terminals = listOf(terminal("a", asks = listOf("p1")))))
+        val state = assertNotNull(LiveSummary.state(listOf(terminal("a", asks = listOf("p1")))))
         assertEquals(LiveState.Phase.NeedsYou, state.phase)
         assertEquals(1, state.waiting)
         assertEquals(0, state.running)
-        assertFalse(state.hasTasks, "no conclusion to show once it is answered")
         val row = assertNotNull(state.lead)
-        assertEquals(LiveState.Row.Kind.Terminal, row.kind)
         assertEquals("修复登录", row.title)
         assertEquals("Bash: npm test", row.step)
         assertEquals("Claude Code", row.model)
         assertEquals(1_700_000_000_000L, row.startedAt, "the clock counts from the request")
         assertEquals(LiveLink.terminal("a"), row.link)
-        val screen = assertNotNull(LiveSummary.state(emptyList(), emptyList(), emptyMap(), terminals = listOf(terminal("a", TerminalStatus.Waiting)))?.lead)
+        val screen = assertNotNull(LiveSummary.state(listOf(terminal("a", TerminalStatus.Waiting)))?.lead)
         assertEquals("等你处理", screen.step)
         assertEquals(1_600_000_000_000L, screen.startedAt, "no request: since its last output")
     }
@@ -99,52 +95,38 @@ class TerminalAttentionTests {
     fun testATerminalAtWorkIsARowInProgressSayingWhatItUses() {
         val busy = TerminalInfo(id = "k1", harness = "codex", cwd = "/p", name = "api-refactor", status = TerminalStatus.Working, createdAt = 1, lastOutputAt = 9,
             activity = TerminalActivity(tool = "Bash", target = "/bin/zsh -lc 'npm test'"), statusSince = 1_700_000_000_000)
-        val state = assertNotNull(LiveSummary.state(emptyList(), emptyList(), emptyMap(), terminals = listOf(busy, terminal("b", TerminalStatus.Idle))))
+        val state = assertNotNull(LiveSummary.state(listOf(busy, terminal("b", TerminalStatus.Idle))))
         assertEquals(LiveState.Phase.Running, state.phase)
         assertEquals(1, state.running)
         assertEquals(0, state.waiting)
         val row = assertNotNull(state.lead)
-        assertEquals(LiveState.Row.Kind.Terminal, row.kind)
         assertFalse(row.needsYou)
         assertEquals("api-refactor", row.title)
         assertEquals("运行 npm test", row.step)
         assertEquals("Codex", row.model)
         assertEquals(1_700_000_000_000L, row.startedAt, "since this turn began")
-        val quiet = assertNotNull(LiveSummary.state(emptyList(), emptyList(), emptyMap(), terminals = listOf(terminal("a")))?.lead)
+        val quiet = assertNotNull(LiveSummary.state(listOf(terminal("a")))?.lead)
         assertEquals("进行中", quiet.step, "no tool reported yet")
     }
 
     @Test
-    fun testTerminalsAndTasksWaitingComeFirstNewestFirst() {
-        val running = KitJson.decodeFromString(AgentTask.serializer(), mapToJsonText(mapOf(
-            "id" to "t1", "createdAt" to 1_800_000_000_000, "updatedAt" to 1_800_000_000_000, "status" to "running", "task" to "整理下载目录")))
-        val state = assertNotNull(LiveSummary.state(listOf(running), emptyList(), emptyMap(),
-            terminals = listOf(terminal("old", asks = listOf("p"), at = 1_000), terminal("new", asks = listOf("p"), at = 2_000))))
-        assertEquals(listOf("new", "old", "t1"), state.rows.map { it.id })
+    fun testTerminalsWaitingComeFirstNewestFirst() {
+        val busy = TerminalInfo(id = "k1", harness = "codex", cwd = "/p", name = "api", status = TerminalStatus.Working, createdAt = 1, lastOutputAt = 9, statusSince = 9_000)
+        val state = assertNotNull(LiveSummary.state(listOf(busy, terminal("old", asks = listOf("p"), at = 1_000), terminal("new", asks = listOf("p"), at = 2_000))))
+        assertEquals(listOf("new", "old", "k1"), state.rows.map { it.id })
         assertEquals(2, state.waiting)
         assertEquals(1, state.running)
-        assertTrue(state.hasTasks)
-        assertEquals(LiveLink.task("t1"), state.rows.lastOrNull()?.link)
+        assertEquals(LiveLink.terminal("k1"), state.rows.lastOrNull()?.link)
     }
 
     @Test
-    fun testTerminalLinksGoBothWaysAndAreNotTaskLinks() {
+    fun testTerminalLinksGoBothWaysAndOtherLinksAreNotTerminals() {
         val url = LiveLink.terminal("a1b2c3d4")
         assertEquals("agentswitch://terminal/a1b2c3d4", url)
         assertEquals("a1b2c3d4", LiveLink.terminalId(url))
-        assertNull(LiveLink.taskId(url))
-        assertNull(LiveLink.terminalId(LiveLink.task("a1b2c3d4")))
+        assertNull(LiveLink.terminalId("agentswitch://pair?p=abc"))
+        assertNull(LiveLink.terminalId("https://terminal/abc"))
         assertNull(LiveLink.terminalId("agentswitch://terminal/"))
-    }
-
-    @Test
-    fun testAStateSavedBeforeRowsHadAKindReadsAsTasks() {
-        val old = """{"rows":[{"id":"t1","title":"x","step":"y","startedAt":0,"needsYou":false}],"running":1,"waiting":0}"""
-        val state = KitJson.decodeFromString(LiveState.serializer(), old)
-        assertEquals(LiveState.Row.Kind.Task, state.rows.firstOrNull()?.kind)
-        val again = KitJson.decodeFromString(LiveState.serializer(), KitJson.encodeToString(LiveState.serializer(),
-            LiveState(rows = listOf(LiveState.Row(id = "a", title = "x", step = "y", model = null, startedAt = 1, needsYou = true, kind = LiveState.Row.Kind.Terminal)), running = 0, waiting = 1)))
-        assertEquals(LiveState.Row.Kind.Terminal, again.rows.firstOrNull()?.kind)
     }
 
     @Test

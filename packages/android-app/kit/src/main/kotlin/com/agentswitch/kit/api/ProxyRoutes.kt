@@ -3,7 +3,6 @@ package com.agentswitch.kit.api
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -18,6 +17,15 @@ import kotlinx.serialization.json.JsonPrimitive
 // is nothing to show, said as null.
 
 private val stringMap = MapSerializer(String.serializer(), String.serializer())
+
+@Serializable private class VaultSealed(val token: String)
+
+/**
+ * A secret this phone is about to hand over (a proxy's password), sealed by the Mac under its own vault key
+ * (`POST /vault/seal`, the service's vault/seal.ts): what the Mac then keeps of it, `asv:1:…`.
+ */
+suspend fun AgentSwitchAPI.vaultSeal(value: String): String =
+    send("POST", listOf("vault", "seal"), mapOf("value" to value), stringMap, VaultSealed.serializer(), timeout = 10.seconds).token
 
 // MARK: Clash
 

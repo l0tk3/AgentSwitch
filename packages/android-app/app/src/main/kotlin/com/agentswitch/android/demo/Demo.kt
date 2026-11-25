@@ -16,7 +16,6 @@ import com.agentswitch.kit.connection.ConnectionProgress
 import com.agentswitch.kit.connection.ConnectionState
 import com.agentswitch.kit.connection.ProbeOutcome
 import com.agentswitch.kit.connection.ProbeReport
-import com.agentswitch.kit.pairing.GateKey
 import com.agentswitch.kit.pairing.PairedMacs
 import com.agentswitch.kit.pairing.PairingPayload
 import com.agentswitch.kit.pairing.ServerProfile
@@ -53,13 +52,13 @@ object Demo {
         val model = AppModel(store = null, vault = MemoryTokenVault(), services = null)
         val payload = PairingPayload(
             name = "Mac mini", port = 4713, fp = "ab".repeat(32), code = "7K3M-9QZX", lan = listOf("192.168.1.5"), tailnet = listOf("100.101.102.103"),
-            bonjour = "AgentSwitch on Mac mini", gate = GateKey(publicKey = "A".repeat(43), keypair = "default"),
+            bonjour = "AgentSwitch on Mac mini",
         )
         val macs = PairedMacs(servers = listOf(
-            ServerProfile(payload = payload, deviceId = "dev-preview", gate = null),
+            ServerProfile(payload = payload, deviceId = "dev-preview"),
             ServerProfile(
                 name = "MacBook Pro", port = 4713, fingerprint = "cd".repeat(32), lan = listOf("192.168.1.8"), tailnet = emptyList(),
-                bonjour = "AgentSwitch on MacBook Pro", gate = null, deviceId = "dev-preview-2", pairedAt = System.currentTimeMillis(),
+                bonjour = "AgentSwitch on MacBook Pro", deviceId = "dev-preview-2", pairedAt = System.currentTimeMillis(),
             ),
         ))
         var connection: ConnectionState = ConnectionState.Connected(APIEndpoint(host = "192.168.1.5", port = 4713, kind = EndpointKind.Bonjour))
@@ -84,7 +83,6 @@ object Demo {
         } else {
             model.terminals.setDemo(DemoData.terminalList(screen), sessions = DemoData.sessions, git = DemoData.git, profiles = profiles)
         }
-        model.dispatch.setDemo(DemoData.tasks, DemoData.threads, DemoData.approvals, DemoData.messages, DemoData.quota)
         if (offline) {
             val start = System.currentTimeMillis() - 150_000
             connection = ConnectionState.Unreachable
@@ -101,7 +99,6 @@ object Demo {
             browsers = if (screen == "browserprofiles") DemoBrowser.profileBrowsers else null)
         // The Rooms tab's sample rooms: one with its tasks, its shared folder and who is changing which files.
         model.rooms.setDemo(DemoRooms.list, mapOf(DemoRooms.room to DemoRooms.detail, DemoRooms.desk to DemoRooms.deskDetail), mapOf(DemoRooms.room to DemoRooms.files), DemoRooms.bytes, DemoRooms.attention, DemoRooms.avatars)
-        model.rooms.demoSecrets = mapOf(DemoRooms.room to DemoRooms.secrets)
         model.setDemo(macs, connection, progress, report)
         open(model, screen, phoneScreen)
         return model
@@ -116,13 +113,8 @@ object Demo {
             screen == "rooms" -> model.tab = MainTab.Rooms
             screen == "roomdesk" -> { model.tab = MainTab.Rooms; model.openRoomRequest = DemoRooms.desk }
             screen.startsWith("room") -> { model.tab = MainTab.Rooms; model.openRoomRequest = DemoRooms.room }
-            screen == "task" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t2" }
-            screen == "done" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t3" }
-            screen == "running" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t1" }
-            screen == "stale" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t4" }
-            screen == "interrupted" -> { model.tab = MainTab.Tasks; model.dispatch.openTaskRequest = "t6" }
             // The Dispatch page itself (the app opens on the terminals).
-            screen == "home" || screen == "offline" || screen == "keptfiles" -> model.tab = MainTab.Tasks
+            screen == "home" || screen == "offline" -> model.tab = MainTab.Dispatch
             // The Files tab (docs/files-v0.md §5) on the made-up disk (DemoFiles): its pages in the Files screens.
             screen in filesProjectScreens -> { model.tab = MainTab.Terminals; model.filesShown = true; model.openFilesRequest = DemoFiles.project }
             screen == "fileshome" || screen == "filesscoped" -> { model.tab = MainTab.Terminals; model.filesShown = true; model.openFilesRequest = DemoFiles.home }
@@ -155,7 +147,7 @@ object Demo {
         "filesnew", "filesnameerror", "filestrash", "filestrashbusy", "filesselectbar", "filesshare", "filesupload", "filesclash",
     )
     private val settingsScreens = setOf(
-        "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript", "transcriptfiles", "proxies", "clash", "clashservice",
+        "settings", "mac", "offlinemac", "sessions", "transcript", "transcriptfiles", "proxies", "clash", "clashservice",
         "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource", "proxybrowser", "proxyprofile",
     )
     private val terminalPageScreens = setOf(

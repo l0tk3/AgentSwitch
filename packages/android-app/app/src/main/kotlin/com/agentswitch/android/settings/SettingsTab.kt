@@ -25,7 +25,6 @@ import com.agentswitch.android.LocalAppModel
 import com.agentswitch.android.LocalSettings
 import com.agentswitch.android.demo.DemoData
 import com.agentswitch.android.demo.DemoSettingsRoute
-import com.agentswitch.android.OldDispatch
 import com.agentswitch.android.design.dithered
 import com.agentswitch.android.demo.LocalDemo
 import com.agentswitch.android.demo.LocalDemoScreen
@@ -38,61 +37,39 @@ import com.agentswitch.android.design.PixelSprite
 import com.agentswitch.android.design.Theme
 import com.agentswitch.android.design.mono
 import com.agentswitch.android.design.plain
-import com.agentswitch.android.dispatch.DeleteConfirmation
-import com.agentswitch.android.dispatch.DeleteRequest
 import com.agentswitch.android.platform.AppLock
 import com.agentswitch.android.platform.rememberActivity
 import com.agentswitch.android.terminals.LookSymbol
 import com.agentswitch.android.terminals.LookSymbolIcon
 import com.agentswitch.android.terminals.RecordTextSize
-import com.agentswitch.kit.api.ApprovalPolicyInfo
-import com.agentswitch.kit.api.approvalPolicy
 import com.agentswitch.kit.connection.ConnectionPhase
 import com.agentswitch.kit.connection.ConnectionState
 import com.agentswitch.kit.design.InterfaceLook
 import com.agentswitch.kit.design.PixelArt
-import kotlinx.coroutines.CancellationException
 
 /**
- * Everything behind the gear (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top, then the executors' usage
- * (§4.2); the look (Appearance, docs/ui-v0.md §8); what every task reads (CONTEXT.md, ciphertexts); sounds and reading;
- * the proxies (Clash, the browser's, each profile's; docs/clash-v0.md §9); the Mac app's new version; the history (every
- * task; clear history deletes it all) and the models; the permission mode (changed on the Mac); the app lock; re-pairing.
- * Rows carry no icons (the usage rows' tiles are content, not row icons); footers are one sentence. Pull to refresh
- * re-reads the usage.
+ * Everything behind the gear (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top; the look (Appearance,
+ * docs/ui-v0.md §8); the proxies (Clash, the browser's, each profile's; docs/clash-v0.md §9); sounds and reading; the
+ * Mac app's new version; the app lock; re-pairing. Rows carry no icons; footers are one sentence.
  */
 @Composable
 fun SettingsTab() {
     val model = LocalAppModel.current
     val settings = LocalSettings.current
-    val dispatch = model.dispatch
     val open = rememberOpen()
     val lock = remember { AppLock.of(settings) }
     val activity = rememberActivity()
     val connected = model.connection is ConnectionState.Connected
-    var policy by remember { mutableStateOf<ApprovalPolicyInfo?>(null) }
     var confirmForget by remember { mutableStateOf(false) }
-    var clearing by remember { mutableStateOf<DeleteRequest?>(null) }
-    var clearError by remember { mutableStateOf<String?>(null) }
-    var cleared by remember { mutableStateOf(false) }
     val demo = LocalDemo.current
     val screen = LocalDemoScreen.current
 
-    /** The permission mode, read-only here (control-v0 §1); a Mac without the route shows no row. */
-    suspend fun loadPolicy() {
-        val api = model.api
-        if (api == null) { if (demo) policy = DemoData.policy; return }
-        if (!connected) return
-        policy = try { api.approvalPolicy() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
-    }
-    LaunchedEffect(connected, model.api) { dispatch.refreshQuota(); loadPolicy() }
     val proxyNav = com.agentswitch.android.LocalNav.current
     // The demo screens open straight onto the pages they are about.
     LaunchedEffect(Unit) {
         if (!demo) return@LaunchedEffect
         for (r in DemoData.settingsPath(screen)) when (r) {
             DemoSettingsRoute.Mac -> open(SettingsRoute.Mac)
-            DemoSettingsRoute.Tasks -> open(SettingsRoute.Tasks)
             DemoSettingsRoute.Sessions -> open(SettingsRoute.Sessions)
             is DemoSettingsRoute.Session -> open(SettingsRoute.Session(r.summary))
             // The proxies' pages are opened the way their rows open them (ProxiesSection.kt).
@@ -110,13 +87,12 @@ fun SettingsTab() {
             actions = listOf(PixelBox.Action("Remove", PixelBox.Action.Role.Destructive) { model.forget() }),
         )
     }
-    DeleteConfirmation(clearing, { clearing = null }, { clearError = it }, { cleared = true })
 
     // The `proxies` sample screen is about a section far down the page: it opens scrolled to it (SettingsView.swift).
     val scroll = rememberScrollState()
     var proxiesTop by remember { mutableStateOf(0) }
     LaunchedEffect(proxiesTop) { if (demo && screen == "proxies" && proxiesTop > 0) scroll.scrollTo((proxiesTop - 600).coerceAtLeast(0)) }
-    SettingsPage("Settings", tab = true, onRefresh = { dispatch.refreshQuota(force = true); loadPolicy() }, scroll = scroll) {
+    SettingsPage("Settings", tab = true, scroll = scroll) {
         val current = model.profile
         if (current != null) {
             val others = model.macs.servers.filter { it.fingerprint != current.fingerprint }
@@ -131,62 +107,22 @@ fun SettingsTab() {
                 }
                 ActionRow("Add Mac") { model.addingMac = true }
             }
-            dispatch.quota?.let { UsageSection(it) }
         }
         AppearanceSection()
-        // The old dispatch is off (OldDispatch): Context, which only its tasks read, is dithered and opens nothing;
-        // Ciphertexts stay (the proxies' passwords and the browser's pages use them too).
-        FormSection("Dispatch", footer = if (OldDispatch.OFF) OldDispatch.NOTE else "环境说明记录站点、账号和偏好，供每个任务参考。") {
-            if (OldDispatch.OFF) OffRow("Context", first = true)
-            else NavRow("Context", first = true, enabled = connected) { open(SettingsRoute.Context) }
-            NavRow("Ciphertexts", enabled = connected) { open(SettingsRoute.Ciphertexts) }
-        }
         if (connected) Column(Modifier.onGloballyPositioned { proxiesTop = it.positionInParent().y.toInt() }) { ProxiesSection() }
         FeedbackSection(open)
         if (connected) MacAppSection()
-        FormSection(
-            "Manage",
-            footer = (if (OldDispatch.OFF) "History、Models 属于旧调度：${OldDispatch.NOTE}" else "") +
-                "Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。",
-        ) {
-            // The old dispatch's tasks and its model (OldDispatch): dithered and inert while it is off.
-            if (OldDispatch.OFF) {
-                OffRow("History", first = true)
-                OffRow("Models")
-                OffRow("Clear History", color = Theme.failed)
-            } else {
-                NavRow("History", first = true, enabled = connected) { open(SettingsRoute.Tasks) }
-                NavRow("Models", enabled = connected) { open(SettingsRoute.Models) }
-                ActionRow("Clear History", enabled = connected, color = Theme.failed) { cleared = false; clearing = DeleteRequest.History }
-            }
-            clearError?.let { NoteRow(it, color = Theme.failed) }
-            if (cleared) NoteRow("记录已清空。")
-        }
-        policy?.let { p ->
-            FormSection(footer = p.policy.mode.explanation + "。在 Mac 上修改。") {
-                FormRow(first = true) {
-                    Text("Permissions", Modifier.weight(1f), color = Theme.ink, style = plain(16))
-                    Text(p.policy.mode.label, color = Theme.secondaryInk, style = mono(13))
-                }
-            }
-        }
         FormSection("Security", footer = "设备丢失时，可在 Mac 上移除此设备。") {
             ToggleRow("Unlock with ${lock.biometryName}", lock.enabled, first = true) { lock.setEnabled(it, activity) }
             lock.lastError?.let { NoteRow(it, color = Theme.failed) }
         }
         if (current != null) {
-            FormSection(footer = "删除此手机与这台 Mac 的配对，已保存的密文不受影响。") {
+            FormSection(footer = "删除此手机与这台 Mac 的配对。") {
                 ActionRow("Remove This Mac", first = true, color = Theme.failed) { confirmForget = true }
             }
         }
         model.banner?.let { FormSection { FormRow(first = true, onClick = { model.banner = null }) { Text(it, color = Theme.failed, style = plain(14)) } } }
     }
-}
-
-/** A row of the old dispatch while it is off (OldDispatch): half dithered away, nothing on a tap. */
-@Composable
-private fun OffRow(label: String, first: Boolean = false, color: androidx.compose.ui.graphics.Color = Theme.ink) {
-    FormRow(first = first) { Text(label, Modifier.weight(1f).dithered(), color = color, style = plain(16), maxLines = 1) }
 }
 
 /**
@@ -248,14 +184,14 @@ private fun MacHeader(modifier: Modifier) {
 @Composable
 private fun FeedbackSection(open: (SettingsRoute) -> Unit) {
     val model = LocalAppModel.current
-    val feedback = model.dispatch.feedback
+    val feedback = model.feedback
     val follower = model.follower
-    FormSection("Alerts & Voice", footer = "Read Aloud 开启时自动朗读回复和任务通知；Follow in Background 在有任务或终端工作时让应用在后台保持连接，离开应用后仍能收到通知，这期间通知栏有一条常驻通知。") {
+    FormSection("Alerts & Voice", footer = "Read Aloud 开启时自动朗读终端的提问；Follow in Background 在有终端工作时让应用在后台保持连接，离开应用后仍能收到通知，这期间通知栏有一条常驻通知。") {
         ToggleRow("Sound", feedback.sound, first = true) { feedback.chooseSound(it) }
         ToggleRow("Haptics", feedback.haptics) { feedback.chooseHaptics(it) }
         ToggleRow("Sound in Silent Mode", feedback.audibleInSilent, enabled = feedback.sound) { feedback.chooseAudibleInSilent(it) }
         ToggleRow("Read Aloud", feedback.voiceMode) { feedback.chooseVoiceMode(it) }
-        if (follower != null) ToggleRow("Follow in Background", follower.enabled) { follower.choose(it); model.dispatch.syncLive() }
+        if (follower != null) ToggleRow("Follow in Background", follower.enabled) { follower.choose(it); model.syncLive() }
         NavRow("Voice", monoValue = false) { open(SettingsRoute.Voice) }
     }
 }

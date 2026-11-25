@@ -19,7 +19,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * Sound and haptic feedback (assistant-v0 §3): the input box must feel received, handed on, finished — without
+ * Sound and haptic feedback (assistant-v0 §3): a terminal that comes to need you is heard and felt — without
  * looking. Short synthesized tones, no audio files (the Swift's sine tones, written into an `AudioTrack`); they follow
  * the phone's silent mode unless the user chose otherwise (or voice mode is on, which is for listening). Haptics are
  * the system's predefined effects.
@@ -41,7 +41,7 @@ class Feedback(context: Context? = null, private val settings: AppSettings? = nu
     var audibleInSilent: Boolean by mutableStateOf(settings?.bool(KEY_AUDIBLE_IN_SILENT, false) ?: false)
         private set
 
-    /** Reads aloud: the task's result when it ends, a question when one needs you, a short line when a task is taken. */
+    /** Reads aloud: what a terminal asks when it comes to need you. */
     var voiceMode: Boolean by mutableStateOf(settings?.bool(KEY_VOICE_MODE, false) ?: false)
         private set
 
@@ -101,14 +101,11 @@ class Feedback(context: Context? = null, private val settings: AppSettings? = nu
         else @Suppress("DEPRECATION") c.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
     }
 
-    /** sent: light tap · accepted, done: click · needsYou: double click · failed: heavy click. */
+    /** needsYou: double click. */
     private fun haptic(cue: Cue) {
         val vibrator = vibrator ?: return
         val effect = when (cue) {
-            Cue.Sent -> VibrationEffect.EFFECT_TICK
-            Cue.Accepted, Cue.Done -> VibrationEffect.EFFECT_CLICK
             Cue.NeedsYou -> VibrationEffect.EFFECT_DOUBLE_CLICK
-            Cue.Failed -> VibrationEffect.EFFECT_HEAVY_CLICK
         }
         try { vibrator.vibrate(VibrationEffect.createPredefined(effect)) } catch (_: Exception) {}
     }
@@ -122,11 +119,7 @@ class Feedback(context: Context? = null, private val settings: AppSettings? = nu
 
         /** (frequency in Hz — 0 is a pause, milliseconds) per cue. */
         val tones: Map<Cue, List<Pair<Double, Double>>> = mapOf(
-            Cue.Sent to listOf(880.0 to 55.0),
-            Cue.Accepted to listOf(660.0 to 70.0, 990.0 to 95.0),
             Cue.NeedsYou to listOf(880.0 to 110.0, 0.0 to 60.0, 880.0 to 110.0, 0.0 to 60.0, 1175.0 to 170.0),
-            Cue.Done to listOf(523.0 to 90.0, 659.0 to 90.0, 784.0 to 170.0),
-            Cue.Failed to listOf(440.0 to 150.0, 330.0 to 230.0),
         )
 
         /** Sine tones with a 6 ms fade at each edge (no clicks), quiet enough to sit under other audio. */

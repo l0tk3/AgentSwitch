@@ -1,7 +1,5 @@
 package com.agentswitch.kit.api
 
-import com.agentswitch.kit.secrets.SecretPayload
-import com.agentswitch.kit.secrets.SecretUse
 import com.agentswitch.kit.support.unicodePattern
 import java.io.ByteArrayOutputStream
 import kotlinx.serialization.KSerializer
@@ -54,8 +52,8 @@ data class ProxyExit(
 }
 
 /**
- * A proxy to set: `password` is a ciphertext for the proxy's own `host:port`, made on this phone (the service takes
- * no other); `keepPassword`: none is sent because the one stored stays.
+ * A proxy to set: `password` is the typed one as the Mac itself sealed it (`POST /vault/seal`; the service takes no
+ * other); `keepPassword`: none is sent because the one stored stays.
  */
 @Serializable
 data class ProxyRequest(
@@ -72,7 +70,7 @@ data class ProxyRequest(
 data class ProxyDraft(
     val server: String = "",
     val username: String = "",
-    /** As typed; sealed on this phone before anything is sent. */
+    /** As typed; sealed by the Mac (`vaultSeal`) before the proxy is set. */
     val password: String = "",
 ) {
     /** The fields as the proxy in force has them (the password is never sent back: its field starts empty). */
@@ -80,7 +78,7 @@ data class ProxyDraft(
 
     internal val user: String get() = username.trim { it.isUnicodeWhitespace() }
 
-    /** The proxy's own `host:port`: what its password is sealed for. */
+    /** The proxy's own `host:port`. */
     val site: String? get() = ProxyText.site(server)
 
     /** What stands in the way of `Apply`, once something has been typed. */
@@ -134,25 +132,14 @@ data class ProxyDraft(
         return ProxyDraft(server = "$scheme://$rest", username = plain(name) ?: username, password = plain(word) ?: password)
     }
 
-    /** The request, with `ciphertext` for a typed password (null: none was typed). */
-    fun request(ciphertext: String?, current: ProxySetting?): ProxyRequest =
+    /** The request, with `sealed` for a typed password as the Mac sealed it (null: none was typed). */
+    fun request(sealed: String?, current: ProxySetting?): ProxyRequest =
         ProxyRequest(
             server = server.trim { it.isUnicodeWhitespace() },
             username = if (user.isEmpty()) null else user,
-            password = ciphertext,
-            keepPassword = if (ciphertext == null && keepsPassword(current)) true else null,
+            password = sealed,
+            keepPassword = if (sealed == null && keepsPassword(current)) true else null,
         )
-
-    /**
-     * A typed password as the gate is to have it: for the proxy's own `host:port` and nowhere else, to be put into
-     * requests and typed (the uses the Mac seals it with). Null: no password was typed. Throws what the gate's rules
-     * say no to (a host it does not take). Sealing it (a `TokenMinter` with the app's `BoxSealer`) is the caller's.
-     */
-    fun sealing(label: String): SecretPayload? {
-        val site = site
-        if (password.isEmpty() || site == null) return null
-        return SecretPayload.make(value = password, hosts = listOf(site), uses = setOf(SecretUse.Http, SecretUse.Fill), label = label)
-    }
 
     private companion object {
         val place = unicodePattern("""(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+):(\d{1,5})""")
@@ -188,22 +175,6 @@ internal fun percentDecoded(s: String): String? {
     }
 }
 
-/** Whose proxy a form sets. */
-sealed class ProxyOwner {
-    /** The browser everything shares. */
-    data object Browser : ProxyOwner()
-
-    /** One of an agent's profiles. */
-    data class Profile(val agent: String, val id: String) : ProxyOwner()
-
-    /** The name its password is sealed under (the Mac's). */
-    val sealLabel: String
-        get() = when (this) {
-            Browser -> "browser/proxy"
-            is Profile -> "profile/proxy"
-        }
-}
-
 object ProxyText {
     private val sitePattern = Regex("""(http|https|socks4|socks5)://(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+):([0-9]{1,5})""")
 
@@ -225,7 +196,7 @@ object ProxyText {
     }
 
     // "这台 iPhone" → "这台手机" (this device).
-    const val passwordHint = "密码在这台手机上封成密文再发给 Mac，只能用于这个代理自己的地址；使用时由 Mac 的凭据网关解密。"
+    const val passwordHint = "密码由这台 Mac 加密后才保存。"
     const val browserHint = "更换代理立即生效，无需重新启动浏览器。"
     const val profileHint = "这个配置名下的终端和它自己的浏览器都从这个代理出去；已经开着的终端要重新开才换。"
 

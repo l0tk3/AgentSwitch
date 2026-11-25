@@ -33,7 +33,7 @@ class PairedMacs(servers: List<ServerProfile> = emptyList(), active: String? = n
         return PairedMacs(servers = next, active = profile.fingerprint)
     }
 
-    /** A saved Mac with new details (addresses, gate key); unknown fingerprints change nothing. */
+    /** A saved Mac with new details (addresses); unknown fingerprints change nothing. */
     fun updating(profile: ServerProfile): PairedMacs {
         val i = servers.indexOfFirst { it.fingerprint == profile.fingerprint }
         if (i < 0) return this
