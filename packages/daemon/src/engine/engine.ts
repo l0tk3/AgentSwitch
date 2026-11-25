@@ -3,9 +3,9 @@
  *  Scheduler (gates), ApprovalDesk (questions to humans), ThreadBook (threads, handoffs, records, summary),
  *  Composer (prompts and route deps), supervise (the router as supervisor). */
 
-import type { BrowserSlots } from "../executors/browserSlots.js";
+import type { BrowserSlots } from "../core/browserSlots.js";
 import type { Executor } from "../executors/types.js";
-import type { ProtectedPaths } from "../executors/protected.js";
+import type { ProtectedPaths } from "../core/protected.js";
 import type { RouteDeps } from "../router/route.js";
 import type { Router } from "../core/modelCall.js";
 import type { ThreadState } from "../threads/types.js";

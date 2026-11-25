@@ -3,10 +3,10 @@
  *  Code keeps every floor: target validation, approval policy, protected paths, budgets, the retry/switch rules
  *  after transport and quota failures. The loop model only ever answers "what next" with one JSON object. */
 
-import { namedHosts } from "../executors/browserSlots.js";
+import { namedHosts } from "../core/browserSlots.js";
 import { isReadOnlyCommand, shellCommandOf } from "../executors/readOnly.js";
 import type { Executor } from "../executors/types.js";
-import { NO_PROTECTED, restoreProtected, snapshotProtected } from "../executors/protected.js";
+import { NO_PROTECTED, restoreProtected, snapshotProtected } from "../core/protected.js";
 import { knownTokens as tokensIn } from "../executors/tokens.js";
 import { classifyFailure, excerpt } from "../router/failure.js";
 import { detectRefusal, hasSideEffects, NO_AGENTS, NO_SIDE_EFFECTS, type ExecutionOutcome, type SideEffects } from "../core/outcome.js";

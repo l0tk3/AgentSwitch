@@ -20,7 +20,7 @@ import { bundledPlaywright } from "../src/browser/engine/loader.js";
 import { Forwarder } from "../src/browser/forwarder.js";
 import { sharedBrowser, type SharedBrowser } from "../src/browser/setup.js";
 import { type BrowserEvent, type TabOwner } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 
 const executable = process.argv[2];
 const mode = process.argv[3] ?? "window";

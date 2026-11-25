@@ -19,7 +19,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LOCAL_TOKEN_NAME } from "../executors/protected.js";
+import { LOCAL_TOKEN_NAME } from "../core/protected.js";
 
 export const LOCAL_TOKEN_FILE = LOCAL_TOKEN_NAME;
 export const CONSOLE_COOKIE = "agentswitch_console";

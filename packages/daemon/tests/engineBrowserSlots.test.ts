@@ -9,7 +9,7 @@ import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
-import { BrowserSlots } from "../src/executors/browserSlots.js";
+import { BrowserSlots } from "../src/core/browserSlots.js";
 import type { ExecutionInput, Executor } from "../src/executors/types.js";
 import { NO_SIDE_EFFECTS } from "../src/core/outcome.js";
 import { echoRouter } from "../src/router/routers/echo.js";

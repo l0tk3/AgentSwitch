@@ -28,7 +28,7 @@ import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
 import { approvalFor, createdAt, declinedPrompt, foldTurn, formAnswer, formQuestions, isFinal, modelRef, runtimeMcp, shellEnv, toRuleset, type PermissionRequest, type PermissionRule, type TurnItem } from "./opencodeServeMap.js";
 import { locationQuery, OpenCodeApiError, type CallOptions, type Json, type OpenCodeExecServer } from "./opencodeServer.js";
 import { opencodeExecConfig, outcomeFromRun, SUBAGENT_TOOL } from "./opencodeShared.js";
-import { canonicalPath, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
+import { canonicalPath, NO_PROTECTED, type ProtectedPaths } from "../core/protected.js";
 import type { ExecutionInput } from "./types.js";
 import { clipInput, clipOutput } from "./toolEvents.js";
 

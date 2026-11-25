@@ -12,7 +12,7 @@ import { FileAudit, mountBrowse, type FileAccess } from "../src/api/browse.js";
 import { MAX_UPLOAD, mountFileChanges } from "../src/api/fileChanges.js";
 import { localRefusal } from "../src/api/localGuard.js";
 import { markRemote } from "../src/core/caller.js";
-import type { ProtectedPaths } from "../src/executors/protected.js";
+import type { ProtectedPaths } from "../src/core/protected.js";
 import { details, listLevel, type FileScope, type Viewer } from "../src/files/browse.js";
 import { fixedPlace, freedesktopTrash, goodName, inTrash, keepBothName, newFile, newFolder, renameItem, restore, TrashError, toTrash, type Running, type Trasher } from "../src/files/change.js";
 import { remoteAllowed } from "../src/remote/routes.js";

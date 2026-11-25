@@ -7,9 +7,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalPath, dataVolumeSpellings, isWithin, lineage } from "../core/paths.js";
+import { canonicalPath, dataVolumeSpellings, isWithin, lineage } from "./paths.js";
 
-export { canonicalPath } from "../core/paths.js";
+export { canonicalPath } from "./paths.js";
 
 export type ProtectedPaths = {
   readonly roots: readonly string[];    // canonical absolute paths

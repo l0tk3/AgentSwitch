@@ -6,7 +6,7 @@
  *  is fine, like Claude Code on it (user decision the same day). Anything else still goes to the floor, which refuses
  *  it in a read-only step. */
 
-import { commandTouchesProtected, NO_PROTECTED, type ProtectedPaths, shellWords } from "./protected.js";
+import { commandTouchesProtected, NO_PROTECTED, type ProtectedPaths, shellWords } from "../core/protected.js";
 
 /** Commands that read and print, with no option that writes or runs something else. */
 const READERS = new Set([

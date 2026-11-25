@@ -19,7 +19,7 @@ import { codexMcpToml } from "./extensions.js";
 import { codexGateToml, gateRun, mcpServerEnv, reportTransfer, type GateOptions, type GateRun } from "./gate.js";
 import { stripProxy } from "../util/env.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
-import { commandTouchesProtected, NO_PROTECTED, PROTECTED_DENIAL, shellWords, type ProtectedPaths } from "./protected.js";
+import { commandTouchesProtected, NO_PROTECTED, PROTECTED_DENIAL, shellWords, type ProtectedPaths } from "../core/protected.js";
 import { clipInput, clipOutput } from "./toolEvents.js";
 import { watchRunStop, type RunStop } from "./lifecycle.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";

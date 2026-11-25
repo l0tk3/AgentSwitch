@@ -10,7 +10,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexExecutor } from "../src/executors/codex.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { isReadOnlyCommand, shellCommandOf } from "../src/executors/readOnly.js";
 import type { ExecutionInput } from "../src/executors/types.js";
 

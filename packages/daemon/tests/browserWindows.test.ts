@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserHost, HOLD_IDLE_MS, type BrowserHostOptions } from "../src/browser/host.js";
 import { BrowserError, WINDOW_HOLDER, YOU, type BrowserEvent, type TabOwner } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { FakeDriver } from "./fakeBrowser.js";
 
 const CODEX: TabOwner = { kind: "terminal", id: "t1", label: "codex · AgentSwitch" };

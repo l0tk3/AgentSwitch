@@ -16,7 +16,7 @@ import { BrowserHost } from "../src/browser/host.js";
 import type { FileRules } from "../src/browser/rules.js";
 import { Screencast, viewAt } from "../src/browser/screencast.js";
 import { YOU, type FrameEvent } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { FakeDriver, FakePage } from "./fakeBrowser.js";
 
 const settle = () => vi.advanceTimersByTimeAsync(0);

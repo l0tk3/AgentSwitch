@@ -9,7 +9,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { NODES_DIR } from "../executors/protected.js";
+import { NODES_DIR } from "../core/protected.js";
 import type { GateKey } from "../remote/pairing.js";
 
 /** Under `$AGENTSWITCH_HOME`; executors/protected.ts keeps the name, with the other places no agent reads. */

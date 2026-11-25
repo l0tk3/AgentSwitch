@@ -13,7 +13,7 @@ import { renderScale } from "../src/browser/screencast.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { markRemote } from "../src/core/caller.js";
 import { buildDaemon, defaultConfig, type DaemonConfig } from "../src/daemon.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { FakeDriver } from "./fakeBrowser.js";
 import { TARGETS_PATH } from "./helpers.js";

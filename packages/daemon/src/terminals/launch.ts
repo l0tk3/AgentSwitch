@@ -17,7 +17,7 @@ import { which } from "../util/which.js";
 import { fileURLToPath } from "node:url";
 import { CODEX_FILE_STORE } from "./signIn.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
-import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
+import { rootSpellings, type ProtectedPaths } from "../core/protected.js";
 import type { Companion, LaunchPlan, LaunchRequest, Launcher, TerminalHarness } from "./host.js";
 import type { Holding } from "./held.js";
 

@@ -4,7 +4,7 @@
 
 import { detectRefusal, NO_SIDE_EFFECTS, type ExecutionOutcome } from "../core/outcome.js";
 import { opencodeGateConfig, type GateOptions, type GateRun } from "./gate.js";
-import { NO_PROTECTED, rootSpellings, type ProtectedPaths } from "./protected.js";
+import { NO_PROTECTED, rootSpellings, type ProtectedPaths } from "../core/protected.js";
 
 export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly skillsDir?: string | null; readonly protected?: ProtectedPaths };
 

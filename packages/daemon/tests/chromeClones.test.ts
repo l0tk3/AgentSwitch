@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync, existsSync, readdirS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { clonesInOutput, CloneSweeper, MIN_CLONE_AGE_MS, sweepClones } from "../src/executors/chromeClones.js";
+import { clonesInOutput, CloneSweeper, MIN_CLONE_AGE_MS, sweepClones } from "../src/core/chromeClones.js";
 
 const NOW = Date.parse("2026-09-25T12:00:00Z");
 

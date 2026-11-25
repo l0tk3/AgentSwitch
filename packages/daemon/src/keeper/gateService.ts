@@ -9,7 +9,7 @@
 import { execFile } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { GATE_PUBLIC_DIR } from "../executors/protected.js";
+import { GATE_PUBLIC_DIR } from "../core/protected.js";
 import type { Messages } from "../i18n/index.js";
 import type { Layout, Ports } from "./plan.js";
 

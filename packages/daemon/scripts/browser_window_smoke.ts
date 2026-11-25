@@ -20,7 +20,7 @@ import { bundledPlaywright } from "../src/browser/engine/loader.js";
 import { Forwarder } from "../src/browser/forwarder.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { WINDOW_HOLDER, YOU, type BrowserEvent, type FrameEvent, type TabOwner } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 
 const executable = process.argv[2];
 if (!executable) { console.error("usage: browser_window_smoke.ts <Camoufox's program>"); process.exit(2); }

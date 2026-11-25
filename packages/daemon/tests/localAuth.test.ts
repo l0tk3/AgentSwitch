@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ensureLocalToken, LOCAL_TOKEN_FILE, LocalAuth, readLocalToken } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { decideTool } from "../src/executors/claude.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { TARGETS_PATH } from "./helpers.js";
 
 const closers: (() => void)[] = [];

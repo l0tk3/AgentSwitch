@@ -11,7 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HOLD_IDLE_MS, BrowserHost, launchFailure, ownPortPatterns, type BrowserHostOptions } from "../src/browser/host.js";
 import { AGENT_FILE_REFUSAL, OWN_PORT_REFUSAL, type FileRules } from "../src/browser/rules.js";
 import { BrowserError, DEFAULT_VIEWPORT, YOU, type BrowserEvent, type FrameEvent, type TabOwner } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { FakeDriver, FakePage, slowAnswer } from "./fakeBrowser.js";
 
 const CODEX: TabOwner = { kind: "terminal", id: "t1", label: "codex · AgentSwitch" };

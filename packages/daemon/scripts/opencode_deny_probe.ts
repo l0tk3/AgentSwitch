@@ -14,7 +14,7 @@ import { join } from "node:path";
 import type { ExecutionInput } from "../src/executors/types.js";
 import { opencodeExecutor } from "../src/executors/opencode.js";
 import { OpenCodeExecServer, opencodeServeConfig } from "../src/executors/opencodeServer.js";
-import type { ProtectedPaths } from "../src/executors/protected.js";
+import type { ProtectedPaths } from "../src/core/protected.js";
 
 const MODEL = "deepseek/deepseek-flash";
 const LIMIT_MS = Number(process.env.PROBE_LIMIT_MS ?? 180_000);

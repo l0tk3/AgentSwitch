@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, exis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commandTouchesProtected, defaultProtected, GATE_PUBLIC_DIR, terminalProtected, isProtected, isReadDenied, protectedInside, restoreProtected, rootSpellings, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
+import { commandTouchesProtected, defaultProtected, GATE_PUBLIC_DIR, terminalProtected, isProtected, isReadDenied, protectedInside, restoreProtected, rootSpellings, snapshotProtected, type ProtectedPaths } from "../src/core/protected.js";
 import { decideTool } from "../src/executors/claude.js";
 
 function setup() {

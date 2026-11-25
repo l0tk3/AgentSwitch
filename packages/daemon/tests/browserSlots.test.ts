@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { BROWSER_SLOTS, BrowserSlots, closeBrowsersOf, namedHosts } from "../src/executors/browserSlots.js";
+import { BROWSER_SLOTS, BrowserSlots, closeBrowsersOf, namedHosts } from "../src/core/browserSlots.js";
 
 function pool(now = { t: 1000 }) {
   const root = join(mkdtempSync(join(tmpdir(), "agentswitch-slots-")), "browser-profiles");

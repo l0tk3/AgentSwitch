@@ -20,7 +20,7 @@ import { bundledPlaywright } from "../src/browser/engine/loader.js";
 import { FillRefused } from "../src/browser/fill.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { YOU } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 
 const executable = process.argv[2];
 if (!executable) { console.error("usage: browser_identity_smoke.ts <Camoufox's program>"); process.exit(2); }

@@ -53,7 +53,7 @@ import { bridgeCommand, terminalOwner } from "../src/browser/agents.js";
 import { gateFill } from "../src/browser/fill.js";
 import { listenLocal } from "../src/daemon.js";
 import { VENV_GATE_BIN } from "../src/executors/gate.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { camoufoxDriver } from "../src/browser/camoufoxDriver.js";
 import { Forwarder, type ForwarderAddress } from "../src/browser/forwarder.js";

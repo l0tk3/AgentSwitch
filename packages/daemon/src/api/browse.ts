@@ -10,7 +10,7 @@ import { appendFileSync, createReadStream, mkdirSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { Readable } from "node:stream";
 import { remoteCaller } from "../core/caller.js";
-import type { ProtectedPaths } from "../executors/protected.js";
+import type { ProtectedPaths } from "../core/protected.js";
 import { askedPath, details, listLevel, readable, startOf, textPreview, type FileScope, type Refusal, type Viewer } from "../files/browse.js";
 import { contentType } from "../files/names.js";
 import type { Running, Trasher } from "../files/change.js";

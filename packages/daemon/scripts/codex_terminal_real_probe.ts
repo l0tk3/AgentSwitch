@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import headless from "@xterm/headless";
 import { ensureLocalToken, LocalAuth } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
-import { terminalProtected } from "../src/executors/protected.js";
+import { terminalProtected } from "../src/core/protected.js";
 import { AppServerClient } from "../src/harness/appserver.js";
 import { connectWsLines } from "../src/harness/wsLines.js";
 import { readRecord } from "../src/sessions/record.js";

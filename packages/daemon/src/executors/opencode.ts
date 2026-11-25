@@ -22,7 +22,7 @@ import type { OpenCodeExecServer } from "./opencodeServer.js";
 import { runOnServer } from "./opencodeServeRun.js";
 import { opencodeExecConfig, outcomeFromRun, SUBAGENT_TOOL, type OpenCodeExtras, type RunSummary } from "./opencodeShared.js";
 import { spawnOwned, terminateProcess } from "../harness/processes.js";
-import type { ProtectedPaths } from "./protected.js";
+import type { ProtectedPaths } from "../core/protected.js";
 import { clipInput, clipOutput } from "./toolEvents.js";
 import type { ExecutionInput, Executor } from "./types.js";
 

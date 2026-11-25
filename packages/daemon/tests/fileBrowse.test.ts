@@ -9,7 +9,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { FileAudit, MAX_REMOTE_CONTENT, mountBrowse, rangeOf, viewerFor, type FileAccess } from "../src/api/browse.js";
 import { markRemote } from "../src/core/caller.js";
-import type { ProtectedPaths } from "../src/executors/protected.js";
+import type { ProtectedPaths } from "../src/core/protected.js";
 import { askedPath, attachable, byFinderOrder, details, listLevel, sensitiveReason, textPreview, typeOf, type FileScope, type Viewer } from "../src/files/browse.js";
 import { Thumbnails } from "../src/files/thumbnails.js";
 import { remoteAllowed } from "../src/remote/routes.js";

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { DAEMON_CONFIG_DIR, defaultProtected } from "../src/executors/protected.js";
+import { DAEMON_CONFIG_DIR, defaultProtected } from "../src/core/protected.js";
 import { AGENT_FILE_REFUSAL, AGENTSWITCH_DIRS, auditUrl, checkLocalFile, checkUploadFile, checkUrl, CREDENTIAL_DIRS, CREDENTIAL_NAMES, isLoopbackAddress, isLoopbackHost, OWN_PORT_REFUSAL, placeOf, targetUrl, tilde, type FileRules } from "../src/browser/rules.js";
 import { BrowserError, YOU, type TabOwner } from "../src/browser/types.js";
 

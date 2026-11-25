@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isReadOnlyCommand, shellCommandOf } from "../src/executors/readOnly.js";
-import type { ProtectedPaths } from "../src/executors/protected.js";
+import type { ProtectedPaths } from "../src/core/protected.js";
 
 const cwd = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-ro-")));
 const env = { HOME: "/Users/u" };

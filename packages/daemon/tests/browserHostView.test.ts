@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserHost, type BrowserHostOptions } from "../src/browser/host.js";
 import type { FileRules } from "../src/browser/rules.js";
 import { DEFAULT_VIEWPORT, YOU, type FrameEvent, type TabOwner } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { FakeDriver, slowAnswer, type FakePage } from "./fakeBrowser.js";
 
 const CODEX: TabOwner = { kind: "terminal", id: "t1", label: "codex · AgentSwitch" };

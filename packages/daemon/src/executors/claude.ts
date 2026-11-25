@@ -16,7 +16,7 @@ import { claudeMcpServers, gateEnv, gateRun, mcpServerEnv, reportTransfer, type 
 import type { TransferGrant } from "../core/transfer.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
-import { canonicalPath, commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, PROTECTED_DENIAL, type ProtectedPaths } from "./protected.js";
+import { canonicalPath, commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, PROTECTED_DENIAL, type ProtectedPaths } from "../core/protected.js";
 import { clipInput, clipOutput } from "./toolEvents.js";
 import { repairInValue, shortToken } from "./tokens.js";
 import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../core/questions.js";

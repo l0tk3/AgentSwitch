@@ -14,7 +14,7 @@ import { opencodeExecConfig, opencodeExecutor } from "../src/executors/opencode.
 import { OpenCodeExecServer, opencodeServeConfig } from "../src/executors/opencodeServer.js";
 import { toRuleset } from "../src/executors/opencodeServeMap.js";
 import { runOnServer, type ServeRunOptions } from "../src/executors/opencodeServeRun.js";
-import type { ProtectedPaths } from "../src/executors/protected.js";
+import type { ProtectedPaths } from "../src/core/protected.js";
 import type { ExecutionInput } from "../src/executors/types.js";
 import type { TransferGrant } from "../src/core/transfer.js";
 import { FakeOpenCode, until } from "./fakeOpencodeServe.js";

@@ -11,7 +11,7 @@ import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isWithin, lineage, withoutDataVolume } from "../core/paths.js";
-import type { ProtectedPaths } from "../executors/protected.js";
+import type { ProtectedPaths } from "../core/protected.js";
 import { BrowserError, type PlaceKind, type TabOwner } from "./types.js";
 
 /** Folders that hold logins and keys. A single dot-folder (`.ssh`) is refused wherever it is (a backup's too); a longer

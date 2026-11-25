@@ -15,7 +15,7 @@ import { cleanupEphemeral, defaultCleanupPaths } from "../src/engine/cleanup.js"
 import type { GateOptions } from "../src/executors/gate.js";
 import { opencodeExecutor } from "../src/executors/opencode.js";
 import { locationQuery, OpenCodeExecServer, opencodeServeConfig } from "../src/executors/opencodeServer.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import type { ExecutionInput } from "../src/executors/types.js";
 import type { ExecutionOutcome } from "../src/core/outcome.js";
 

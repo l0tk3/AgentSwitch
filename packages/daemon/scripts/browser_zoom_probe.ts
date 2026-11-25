@@ -59,7 +59,7 @@ import { mountBrowser } from "../src/api/browser.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import type { FrameEvent, TabInfo } from "../src/browser/types.js";
-import { defaultProtected } from "../src/executors/protected.js";
+import { defaultProtected } from "../src/core/protected.js";
 import { lastPages, lastPicture, type Probe, type Stream } from "./browser_last_picture.js";
 
 const keep = process.argv.includes("--keep");

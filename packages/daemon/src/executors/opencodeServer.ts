@@ -17,7 +17,7 @@ import { stripProxy } from "../util/env.js";
 import { opencodeExecConfig } from "./opencodeShared.js";
 import { basicAuth, startStdioServe, stopStdioServe } from "../harness/opencodeStdio.js";
 import { followEventStream } from "../harness/opencodeEvents.js";
-import { canonicalPath, type ProtectedPaths } from "./protected.js";
+import { canonicalPath, type ProtectedPaths } from "../core/protected.js";
 
 export type Json = Record<string, unknown>;
 
