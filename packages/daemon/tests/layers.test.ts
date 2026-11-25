@@ -30,6 +30,7 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   clash: ["util", "core"],
   /** chatroom-v0: the rooms, their seats and what was said, as kept; a leaf. */
   rooms: ["util", "core"],
+  vault: [],
   /** profiles-v0: each agent's sign-ins and their folders; a leaf like sessions. */
   profiles: ["util", "core"],
   router: ["util", "core", "harness"],
@@ -41,7 +42,7 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   terminals: [...UPPER, "executors"],
   /** browser-v0: the shared browser the daemon holds; the executors' protected table and browser profiles, below the API. */
   browser: [...UPPER, "executors"],
-  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "rooms", "nodes"],
+  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "rooms", "nodes", "vault"],
   /** app-v0 §2: the remote listener, device tokens and pairing; a peer of api, which it reaches only over fetch. */
   remote: [...UPPER, "threads", "router", "executors", "engine"],
   /** mesh-v0: the other nodes this one uses — their book, the pinned connections to them, pairing with them. Above the
@@ -57,7 +58,7 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   /** tui-v0: `agentswitch config`, one more face of the HTTP API (given its client by the CLI), node.json through the
    *  keeper's own reading and writing of it. Only the CLI imports it. */
   tui: [...UPPER, "profiles", "keeper", "i18n"],
-  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "rooms", "api", "remote", "nodes", "keeper", "i18n", "tui"],
+  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "rooms", "api", "remote", "nodes", "keeper", "i18n", "tui", "vault"],
 };
 
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)(["'])(\.{1,2}\/[^"']+)\1/gm;

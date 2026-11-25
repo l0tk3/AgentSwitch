@@ -12,9 +12,12 @@ public struct LaunchSpec: Sendable, Equatable {
     /// The daemon shuts down gracefully on SIGINT, the gate (mitmdump) on SIGTERM.
     public let stopSignal: Int32
     public let stopTimeout: TimeInterval
+    /// A line written to the child's stdin as it starts (the daemon's vault key: never in its environment or argv).
+    public let stdinLine: String?
 
     public init(executable: URL, arguments: [String], environment: [String: String], workingDirectory: URL?,
-                logFile: URL, pidFile: URL?, stopSignal: Int32, stopTimeout: TimeInterval) {
+                logFile: URL, pidFile: URL?, stopSignal: Int32, stopTimeout: TimeInterval, stdinLine: String? = nil) {
+        self.stdinLine = stdinLine
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
@@ -128,7 +131,8 @@ public actor ProcessSupervisor {
         proc.arguments = spec.arguments
         proc.environment = spec.environment
         if let dir = spec.workingDirectory { proc.currentDirectoryURL = dir }
-        proc.standardInput = FileHandle.nullDevice
+        var stdinPipe: Pipe?
+        if spec.stdinLine != nil { stdinPipe = Pipe(); proc.standardInput = stdinPipe } else { proc.standardInput = FileHandle.nullDevice }
         do {
             let log = try LogFiles.open(spec.logFile, header: "\(name) start: \(spec.executable.path) \(spec.arguments.joined(separator: " "))")
             proc.standardOutput = log
@@ -141,6 +145,11 @@ public actor ProcessSupervisor {
             }
             try proc.run()
             try? log.close()   // the child holds its own descriptor
+            if let line = spec.stdinLine, let pipe = stdinPipe {
+                try? pipe.fileHandleForWriting.write(contentsOf: Data((line + "\n").utf8))
+                try? pipe.fileHandleForWriting.close()
+                try? pipe.fileHandleForReading.close()
+            }
         } catch {
             apply(.launchFailed(error.localizedDescription, at: Date()))
             return

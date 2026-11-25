@@ -9,7 +9,7 @@ import SwiftUI
 
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, nodes, models, keys, agents, profiles, addons, environment, general
+    case pairing, nodes, models, keys, redaction, agents, profiles, addons, environment, general
     /// The new dispatch (2026-11-24): a session at the 调度台 room (DispatchDeskView).
     case desk
     /// Dispatch's own settings (docs/dispatch-v0.md §3): one row in the sidebar, its parts chosen at the top of the
@@ -21,7 +21,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// The sidebar's first block, without a header.
-    static let app: [SettingsTab] = [.pairing, .nodes, .models, .keys, .agents, .profiles, .addons, .environment, .general, .desk]
+    static let app: [SettingsTab] = [.pairing, .nodes, .models, .keys, .redaction, .agents, .profiles, .addons, .environment, .general, .desk]
     /// The parts of the sidebar's `Dispatch` page, in the order its switch shows them.
     static let dispatch: [SettingsTab] = [.dispatchModels, .permissions, .context, .extensions, .log, .history]
     var isDispatch: Bool { Self.dispatch.contains(self) }
@@ -35,6 +35,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .models, .dispatchModels: return "Models"
         case .permissions: return "Permissions"
         case .keys: return "Keys"
+        case .redaction: return "Redaction"
         case .agents: return "Agents"
         case .profiles: return "Profiles"
         case .addons: return "Add-Ons"
@@ -55,6 +56,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .models, .dispatchModels: return "cpu"
         case .permissions: return "checkmark.shield"
         case .keys: return "key"
+        case .redaction: return "eye.slash"
         case .agents: return "shippingbox"
         case .profiles: return "person.crop.rectangle.stack"
         case .addons: return "square.stack.3d.up"
@@ -333,6 +335,7 @@ struct SettingsView: View {
         case .dispatchModels: ModelsView(dispatch: true)
         case .permissions: PermissionsView()
         case .keys: KeysView()
+        case .redaction: RedactionView()
         case .agents: AgentsSettingsView()
         case .profiles: ProfilesSettingsView()
         case .addons: AddonsView()

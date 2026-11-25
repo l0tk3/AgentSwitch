@@ -143,6 +143,8 @@ final class AppModel {
     #endif
 
     init() {
+        // The daemon's vault key from the Keychain, on its stdin (VaultKey.swift); read when the daemon starts.
+        RuntimePlan.vaultKey = { VaultKey.hex() }
         let defaults = UserDefaults.standard
         let env = ProcessInfo.processInfo.environment
         let home = URL(fileURLWithPath: NSHomeDirectory())

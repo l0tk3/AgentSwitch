@@ -355,6 +355,13 @@ describe("a profile's own proxy", () => {
     const plain = launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(plain.env.HTTPS_PROXY).toBe("http://old:1");
     expect(JSON.parse(readFileSync(join(stateDir, "c2", "settings.json"), "utf8")).env).toBeUndefined();
+    // Through the model traffic gateway (user #320-#332): it is the way out, the profile's proxy its way on; its CA
+    // trusted besides the usual roots.
+    const gate = { proxy: "http://s:c3@127.0.0.1:50999", ca: "/as/vault/model-gate/ca.pem", bundle: "/as/vault/model-gate/trust.pem" };
+    const gated = launch({ id: "c3", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", proxy: via, gate });
+    expect(gated.env).toMatchObject({ ...proxyEnv(gate.proxy), NODE_EXTRA_CA_CERTS: gate.ca, SSL_CERT_FILE: gate.bundle });
+    expect(JSON.parse(readFileSync(join(stateDir, "c3", "settings.json"), "utf8")).env).toMatchObject(proxyEnv(gate.proxy));
+    for (const harness of ["codex"] as const) expect(launch({ id: `x-${harness}`, harness, cwd: "/tmp", mode: "manual", hookToken: "tok", gate }).env).toMatchObject({ HTTPS_PROXY: gate.proxy, SSL_CERT_FILE: gate.bundle });
   });
 });
 

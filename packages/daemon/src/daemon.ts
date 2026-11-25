@@ -54,7 +54,7 @@ import { Store } from "./engine/store.js";
 import { canonical, claudeExecutor, decideTool, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
-import { defaultGate, gateHealth, gateNotFound, proxyEndpoint, warmBrowserMcp, type GateOptions } from "./executors/gate.js";
+import { defaultGate, gateBin, gateHealth, gateNotFound, proxyEndpoint, warmBrowserMcp, type GateOptions } from "./executors/gate.js";
 import { gateRefsExecutor } from "./executors/gateRefs.js";
 import { gateRefs } from "./secrets/refs.js";
 import { platformExperience } from "./engine/platformContext.js";
@@ -131,6 +131,9 @@ import { BRIDGE_SCRIPT, bridgeCommand, terminalOwner, type AgentEngine } from ".
 import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
 import { gateCaller } from "./rooms/gateCall.js";
+import { fileKey, vaultKey } from "./vault/key.js";
+import { RedactionStore } from "./vault/words.js";
+import { ModelGate } from "./vault/modelGate.js";
 import { exitLookup } from "./browser/exit.js";
 import { ExitPool } from "./browser/exits.js";
 import { claudeSignedIn, codexSignedIn } from "./terminals/signIn.js";
@@ -282,6 +285,8 @@ export type Daemon = {
   readonly targets: Targets;
   /** AgentSwitch's own terminals (docs/terminal-v0.md), or null when off. */
   readonly terminals: TerminalHost | null;
+  /** The model traffic gateway (vault/modelGate.ts), or null with no real terminals. */
+  readonly modelGate: ModelGate | null;
   /** What the terminals leave running after they ended (docs/terminal-v0.md §11), or null when not cleaned. */
   readonly leftovers: Leftovers | null;
   /** The Mac's own sessions as they are watched (docs/control-v0.md §3), or null when off. */
@@ -519,6 +524,13 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // Chat Room (docs/chatroom-v0.md): the rooms as kept, how their messages reach the sessions they are for, and what
   // a session in a room can do there. Who a seat is now is asked of the terminals, once there are any.
   const rooms = new RoomStore(cfg.home);
+  // The model traffic gateway and the words it replaces (vault/; user #320-#332): with real terminals only.
+  const vault = cfg.terminals && !overrides.terminalLauncher ? ((): RedactionStore => {
+    const k = vaultKey(cfg.home);
+    const old = k.where === "keychain" ? fileKey(cfg.home) : null;
+    return new RedactionStore(cfg.home, old ? [k.key, old] : [k.key]);
+  })() : null;
+  const modelGate = vault ? new ModelGate({ home: cfg.home, bin: gateBin(), store: vault, roomsOf: (t) => rooms.roomsOf(t).map((x) => x.room.id), log: (line) => console.error(line) }) : null;
   const roomPolicy = new RoomPolicy(cfg.home);
   const roomFilesDir = filesRoot(cfg.home);
   mkdirSync(roomFilesDir, { recursive: true, mode: 0o700 });
@@ -536,6 +548,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   let seatRewind: SeatRewind | null = null;
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
+      ...(modelGate ? { modelGate } : {}),
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
       deviceOf: (harness, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); return agent ? profiles.deviceOf(agent, profile ?? DEFAULT_PROFILE) : null; },
       onSession: (harness, sessionId, profile) => { sessionTitles.seen(harness, sessionId); const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
@@ -677,7 +690,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     noteProfile: (session, profile, agent = "claude-code") => { const a = PROFILE_AGENTS.find((x) => x === agent); if (a) profiles.noteSession(a, session, profile); },
     sessionOf: seatSessionOf, wasOf: seatWasOf, changed: () => roomDelivery.look(),
   });
-  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => roomDelivery.look(), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
+  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's (admitTask).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -708,9 +721,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   nodesMade = nodes;
   const fileScopes = { get: (id: string) => scopeOf(cfg.home, id), set: (id: string, scope: Parameters<typeof setScope>[2]) => setScope(cfg.home, id, scope) };
   const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
-  return { app, api, remote, nodes, engine, store, quota, targets, clash, clashPhone, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
+  return { app, api, remote, nodes, engine, store, quota, targets, clash, clashPhone, terminals: terminalHost, modelGate, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { clearInterval(roomLooks); dispatchDesk.close(); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    close: () => { clearInterval(roomLooks); modelGate?.stop(); dispatchDesk.close(); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
@@ -897,6 +910,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
     // What the last daemon's terminals left running is looked for once this daemon's own terminals are all known
     // (docs/terminal-v0.md §11): a held terminal taken up again has left nothing.
     void taken.finally(() => {
+      if (daemon.terminals) daemon.modelGate?.keepOnly(new Set(daemon.terminals.list().map((t) => t.id)));
       daemon.leftovers?.start();
       // Folders of terminals no daemon has any more (stateFiles.ts), once this daemon's own are all known.
       if (daemon.terminals) {

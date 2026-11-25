@@ -328,8 +328,12 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     };
     // A profile with a proxy of its own (docs/profiles-v0.md §4): what the agent and the commands it runs send
     // leaves through it. What stays on this Mac — the hook, the browser bridge, a local server — does not.
-    const proxied = req.proxy ? proxyEnv(req.proxy) : null;
+    const proxied = req.gate ? proxyEnv(req.gate.proxy) : req.proxy ? proxyEnv(req.proxy) : null;
     if (proxied) Object.assign(env, proxied);
+    // Through the model traffic gateway (vault/modelGate.ts; user #320-#332): the proxy above is it, the profile's
+    // own being its way on; its CA is trusted besides the usual roots (Node's extra CA; the roots with it for
+    // OpenSSL and Rust: Codex, curl, git), only the models' connections being its.
+    if (req.gate) Object.assign(env, { NODE_EXTRA_CA_CERTS: req.gate.ca, SSL_CERT_FILE: req.gate.bundle });
     const bridge = opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd, ...(req.browserKey ? { browserKey: req.browserKey } : {}) }) : null;
     minted = bridge?.minted ?? null;
     // A profile with a browser of its own: a web address the agent asks the system to open — its sign-in page — is

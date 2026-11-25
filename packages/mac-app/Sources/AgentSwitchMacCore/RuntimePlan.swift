@@ -67,17 +67,24 @@ public enum RuntimePlan {
                    logFile: c.paths.gateLog, pidFile: c.paths.gatePidFile, stopSignal: SIGTERM, stopTimeout: gateStopTimeout)
     }
 
+    /// The daemon's vault key (VaultKey.swift: the Keychain's), handed over on its stdin; nil: the daemon keeps a key
+    /// file of its own. Set by the app at its start; tests leave it nil.
+    nonisolated(unsafe) public static var vaultKey: @Sendable () -> String? = { nil }
+
     public static func daemonSpec(_ c: RuntimeConfig) -> LaunchSpec {
-        let env = ChildEnvironment.daemon(base: c.baseEnvironment, paths: c.paths, ports: c.ports, options: c.options, path: c.path,
+        var env = ChildEnvironment.daemon(base: c.baseEnvironment, paths: c.paths, ports: c.ports, options: c.options, path: c.path,
                                           remote: c.remoteEnabled, remoteName: c.remoteName, opencodeBinary: c.opencodeBinary,
                                           claudeBinary: c.claudeBinary, codexBinary: c.codexBinary, piBinary: c.piBinary, gateMode: c.gateMode)
+        let key = vaultKey()
+        if key != nil { env["AGENTSWITCH_VAULT_STDIN"] = "1" }
         // `npm start` of packages/daemon, with absolute paths.
         let args = ["--no-warnings=ExperimentalWarning", c.paths.runtime.daemonCLI.path, "serve"]
         return LaunchSpec(executable: c.paths.runtime.node, arguments: args,
                           // The data folder, not the bundle: an app kept on the Desktop would otherwise put every
                           // child's cwd inside a privacy-protected folder (Claude Code scans parents for CLAUDE.md).
                           environment: env, workingDirectory: c.paths.agentswitchHome,
-                          logFile: c.paths.daemonLog, pidFile: c.paths.daemonPidFile, stopSignal: SIGINT, stopTimeout: daemonStopTimeout)
+                          logFile: c.paths.daemonLog, pidFile: c.paths.daemonPidFile, stopSignal: SIGINT, stopTimeout: daemonStopTimeout,
+                          stdinLine: key)
     }
 
     /// Gate port busy: reuse a listener that passes the bootstrap probe, refuse anything else (app-v0 §4).

@@ -49,7 +49,8 @@ export function terminalProtected(env: NodeJS.ProcessEnv = process.env): Protect
   // The other nodes' tokens are credentials at rest too: one of them runs commands on another machine. And the
   // terminals' own folder: a held terminal's `meta.json` keeps its hook token, which answers for its profile's API key
   // (2026-10-31, review of terminal-v0 §10) — an agent's own token is in its environment, the other terminals' are not.
-  const closed = [gate, socket, join(home, NODES_DIR), join(home, TERMINALS_DIR)].map(canonicalPath);
+  // And the vault (vault/): the words the model is not to see, the key they are kept under, the gateway's logs.
+  const closed = [gate, socket, join(home, NODES_DIR), join(home, TERMINALS_DIR), join(home, VAULT_DIR)].map(canonicalPath);
   return { roots: closed, exempt: [], readDenied: closed };
 }
 
@@ -60,9 +61,12 @@ export function defaultProtected(env: NodeJS.ProcessEnv = process.env): Protecte
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),
     // The local API's token too: an executor that read it could call the API to loosen its own approval policy. And the
     // profiles' folders: a Codex account profile keeps its ChatGPT sign-in there in a file (docs/profiles-v0.md §6.2).
-    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, BROWSER_STATE_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME), join(home, NODES_DIR), join(home, PROFILES_DIR), join(home, TERMINALS_DIR)].map(canonicalPath),
+    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, BROWSER_STATE_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME), join(home, NODES_DIR), join(home, PROFILES_DIR), join(home, TERMINALS_DIR), join(home, VAULT_DIR)].map(canonicalPath),
   };
 }
+
+/** Under `$AGENTSWITCH_HOME`: the vault (vault/key.ts `VAULT_DIR`). */
+const VAULT_DIR = "vault";
 
 /** Under `$AGENTSWITCH_HOME`: the terminals' state (terminals/launch.ts keeps the same name). A held terminal's
  *  `meta.json` there (docs/terminal-v0.md §10) keeps its hook token — a bearer for `POST /terminals/key`, which answers

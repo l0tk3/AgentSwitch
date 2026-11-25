@@ -38,6 +38,8 @@ export type ApiDeps = {
   readonly roomDelivery?: import("../rooms/delivery.js").RoomDelivery;
   /** Taking a member back to before a room's message (撤回, a safeguard's refusal; api/roomRewind.ts). */
   readonly seatRewind?: import("./roomRewind.js").SeatRewind;
+  /** The words the model never sees, and the gateway that replaces them (vault/; api/redaction.ts). */
+  readonly redaction?: { readonly store: import("../vault/words.js").RedactionStore; readonly gate: import("../vault/modelGate.js").ModelGate };
   /** Tests: how long a watch of the Kit's tools is held. */
   readonly roomWatchMs?: number;
   /** Something a room's seats may be waiting for changed (a message, a seat, a pause): what is to be given is looked

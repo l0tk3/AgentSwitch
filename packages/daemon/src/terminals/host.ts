@@ -193,6 +193,8 @@ export type LaunchRequest = {
   /** The proxy what the agent sends is to leave through: a forwarder of this service on this Mac (docs/profiles-v0.md
    *  §4), as an address with its name and password; absent: this Mac's own way out. */
   readonly proxy?: string;
+  /** Through the model traffic gateway (vault/modelGate.ts): its proxy (the scope in it), its CA, the roots with it. */
+  readonly gate?: { readonly proxy: string; readonly ca: string; readonly bundle: string };
   /** The profile's own browser, by its key, for the agent's browser tool and for the pages it asks the system to
    *  open (docs/profiles-v0.md §5.1); absent: the shared browser, and the system's own for those pages. */
   readonly browserKey?: string;
@@ -321,6 +323,8 @@ export type TerminalHostOptions = {
    *  profile (null: the Mac's own). Kept so the conversation goes on under the same one (docs/profiles-v0.md §3.3). */
   /** A turn of Claude Code's ended on an API error (StopFailure): a refusal among them (api/roomRewind.ts). */
   readonly failed?: (id: string) => void;
+  /** The model traffic gateway (vault/modelGate.ts): a terminal about to start gets its way through it, or null. */
+  readonly modelGate?: { open(scope: { terminal: string; profile: string; upstream: string | null; baseUrl?: string }): Promise<{ proxy: string; ca: string; bundle: string } | null>; close(terminal: string): void };
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
   /** The agent of a terminal gave the session it writes a title worth showing (sessions/titles.ts). */
   readonly onTitle?: (harness: TerminalHarness, sessionId: string, title: string) => void;
@@ -956,7 +960,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed" | "modelGate">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -984,9 +988,13 @@ export class TerminalHost {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
+    // The model traffic gateway: the way out the terminal would have had (its profile's, or this service's own)
+    // is the gateway's way on.
+    const envProxy = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.all_proxy || process.env.ALL_PROXY || null;
+    const gate = await this.opts.modelGate?.open({ terminal: id, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
     let plan: LaunchPlan;
     try {
-      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.profile ? { ...(req.profile.isolated ? { isolated: true as const } : {}), ...(req.profile.home ? { configHome: req.profile.home } : {}), ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}), ...(req.profile.browserKey ? { browserKey: req.profile.browserKey } : {}), ...(req.profile.api ? { api: { name: req.profile.name, ...req.profile.api } } : {}), ...(req.profile.telemetryOff ? { telemetryOff: true as const } : {}) } : {}), ...(req.signIn ? { signIn: true as const } : {}), ...(req.ownProvider ? { ownProvider: true as const } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
+      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(gate ? { gate } : {}), ...(req.profile ? { ...(req.profile.isolated ? { isolated: true as const } : {}), ...(req.profile.home ? { configHome: req.profile.home } : {}), ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}), ...(req.profile.browserKey ? { browserKey: req.profile.browserKey } : {}), ...(req.profile.api ? { api: { name: req.profile.name, ...req.profile.api } } : {}), ...(req.profile.telemetryOff ? { telemetryOff: true as const } : {}) } : {}), ...(req.signIn ? { signIn: true as const } : {}), ...(req.ownProvider ? { ownProvider: true as const } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
     } catch (err) {
       this.ended(id, true);
       throw new TerminalError("unavailable", (err as Error).message);
@@ -1790,6 +1798,7 @@ export class TerminalHost {
   /** Tells the owner of what was made for terminal `id` that its program ended, or (`removed`) that it is gone too. */
   private ended(id: string, removed: boolean, left = true): void {
     try {
+      if (removed) this.opts.modelGate?.close(id);
       this.opts.onExit?.(id);
       if (removed) this.opts.onRemove?.(id);
       if (left) this.opts.onLeft?.(id);
