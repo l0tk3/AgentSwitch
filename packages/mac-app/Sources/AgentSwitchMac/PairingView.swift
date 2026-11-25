@@ -46,7 +46,8 @@ struct PairingView: View {
                         LabeledContent("LAN", value: payload.lan.isEmpty ? "None" : payload.lan.joined(separator: ", "))
                         LabeledContent("Tailscale", value: payload.tailnet.isEmpty ? "None · Same LAN Only" : payload.tailnet.joined(separator: ", "))
                         LabeledContent("Cert Fingerprint", value: String(payload.fp.prefix(16)) + "…")
-                        LabeledContent("Gateway Key", value: payload.gate.map { "\($0.keypair) · \($0.publicKey.prefix(12))…" } ?? "None")
+                        // Only from a service that still puts the old gate's public key in the code.
+                        if let gate = payload.gate { LabeledContent("Gateway Key", value: "\(gate.keypair) · \(gate.publicKey.prefix(12))…") }
                     } header: {
                         SectionLabel("QR Contents")
                     } footer: {

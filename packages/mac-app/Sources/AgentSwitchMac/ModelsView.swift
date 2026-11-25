@@ -1,126 +1,26 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// 模型: usage (docs/ui-v0.md §4.2). With `dispatch` it is the Dispatch page's own part instead (2026-11-22): the
-/// dispatch (router) model via `GET|PUT /settings/models`; the daemon applies it on restart. It is the only model
-/// setting: the Default executor/model section was removed on 2026-11-23 (the dispatch model is the fallback too).
-/// Pickers show model names (Opus 5.5) and save the ids.
+/// 模型: usage (docs/ui-v0.md §4.2), read from the service (`GET /quota`).
 struct ModelsView: View {
     @Environment(AppModel.self) private var model
-    var dispatch = false
-    @State private var settings: ModelSettings?
-    @State private var routerModel = ""
-    @State private var problem: String?
-    @State private var saved: String?
-    @State private var busy = false
 
     var body: some View {
         Group {
             if !model.daemonReady {
                 EmptyPage(title: "Service Not Ready", symbol: "hourglass", message: model.daemonLine.text)
-            } else if !dispatch {
-                Form { UsageSection() }.formStyle(.grouped)
-            } else if let settings {
-                form(settings)
-            } else if let problem {
-                EmptyPage(title: "Models: Unavailable", symbol: "exclamationmark.triangle", message: problem) {
-                    Button("Retry") { Task { await load() } }
-                }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                Form { UsageSection() }.formStyle(.grouped)
             }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { if dispatch { await load() } else { await model.refreshUsage(force: true) } } } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                Button { Task { await model.refreshUsage(force: true) } } label: { Label("Reload", systemImage: "arrow.clockwise") }
                     .help("Reload")
                     .disabled(!model.daemonReady)
             }
         }
-        .task(id: model.daemonReady) {
-            if dispatch { await load() } else { await model.refreshUsage() }
-        }
-    }
-
-    private func form(_ s: ModelSettings) -> some View {
-        let changes = ModelSettingsUpdate.diff(current: s, routerModel: routerModel)
-        return Form {
-            Section {
-                Picker("Dispatch Model", selection: $routerModel) {
-                    ForEach(options(s.router.options, current: s.router.model), id: \.self) { Text(ModelName.display($0)).tag($0) }
-                }
-            } header: {
-                SectionLabel("Dispatch")
-            } footer: {
-                Footer("根据消息内容选择执行器和模型；无法判断、所选模型均不可用或调度出错时，由它自己执行。")
-            }
-            Section {
-            } footer: {
-                HStack(alignment: .center, spacing: 8) {
-                    status(s, unsaved: !changes.isEmpty)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if busy { ProgressView().controlSize(.small) }
-                    Button("Save & Restart") { Task { await save(s) } }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(busy || changes.isEmpty)
-                        .help("保存到 \(model.shortPath(model.paths.modelsOverride))，覆盖 targets.yaml 中的对应设置")
-                }
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    /// What the last save did, or whether saved settings still wait for a restart.
-    @ViewBuilder
-    private func status(_ s: ModelSettings, unsaved: Bool) -> some View {
-        if let problem {
-            Label(problem, systemImage: "xmark.circle.fill").foregroundStyle(.red).textSelection(.enabled)
-        } else if let saved, !unsaved {
-            Label(saved, systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
-        } else if s.restartPending && !unsaved {
-            HStack(spacing: 6) {
-                StatusDot(level: .warning)
-                Text("Saved · Applies After Restart").foregroundStyle(.secondary)
-            }
-        } else {
-            Footer("保存后服务将重启，正在运行的任务将中断。")
-        }
-    }
-
-    /// The list plus the current value when the catalog no longer has it, so the picker never shows blank.
-    private func options(_ list: [String], current: String?) -> [String] {
-        guard let current, !current.isEmpty, !list.contains(current) else { return list }
-        return [current] + list
-    }
-
-    private func load() async {
-        guard model.daemonReady else { return }
-        do {
-            let s = try await model.client.modelSettings()
-            settings = s
-            routerModel = s.router.model ?? s.router.options.first ?? ""
-            problem = nil
-        } catch {
-            problem = error.localizedDescription
-        }
-    }
-
-    private func save(_ s: ModelSettings) async {
-        busy = true
-        defer { busy = false }
-        let update = ModelSettingsUpdate.diff(current: s, routerModel: routerModel)
-        do {
-            let result = try await model.client.saveModelSettings(update)
-            problem = nil
-            if result.restartRequired {
-                saved = "Saved · Restarting"
-                model.restartDaemon()
-            } else {
-                saved = "Saved"
-            }
-        } catch {
-            problem = error.localizedDescription
-        }
+        .task(id: model.daemonReady) { await model.refreshUsage() }
     }
 }
 

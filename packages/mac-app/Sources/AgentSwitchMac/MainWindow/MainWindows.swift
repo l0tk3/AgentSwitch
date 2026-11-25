@@ -66,14 +66,8 @@ final class MainWindows {
     /// One terminal on screen (the Live Activity): the window on its node, else the main window goes there.
     func show(terminal id: String, node: String?) { (on(node) ?? main).show(terminal: id, node: node) }
 
-    /// One task's page (the Live Activity, Settings): the window on its node, else the main window goes there.
-    func show(task id: String, node: String? = nil) { (on(node) ?? main).show(task: id, node: node) }
-
     /// The terminals on screen in any of the windows: the Live Activity says nothing of their turns.
     var watchingTerminals: Set<String> { all.reduce(into: Set<String>()) { $0.formUnion($1.watchingTerminals) } }
-
-    /// The task whose page is open in the window in use.
-    var watchingTask: String? { all.lazy.compactMap(\.watchingTask).first }
 
     func liveChanged(_ snapshot: LiveSnapshot?) {
         ownLive = snapshot

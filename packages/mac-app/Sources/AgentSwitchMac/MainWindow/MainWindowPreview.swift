@@ -9,17 +9,9 @@ import SwiftUI
 ///
 ///     swift build && .build/debug/AgentSwitchMac -designPreview /tmp/agentswitch-preview
 ///
-/// and it writes, light and dark (`-dark`), beside the menu and settings pictures — the Dispatch page drawn from the
-/// demo's made-up Mac (DispatchDemo.swift, the work of `docs/design/implemented/mac-window.html`):
-/// - `main-dispatch`: Dispatch's record at its end, the counts `⠙1 ▪1`, Terminals waiting for you;
-/// - `main-dispatch-full`: the same record in a window tall enough for all of it;
-/// - `main-dispatch-task`: a task's page — `‹` + mark + title, the approval, the process — with the gateway down
-///   (`■ Gateway Down`);
-/// - `main-dispatch-topic`: a topic's page;
-/// - `main-dispatch-code`: a task's page with code (2026-10-03) — what you typed with a fenced block, the result's block
-///   and inline code;
-/// - `main-terminals`: the Terminals bar (list, title, `+`, all the terminals' mark), Dispatch waiting for you; the
-///   page itself is always dark;
+/// and it writes, light and dark (`-dark`), beside the menu and settings pictures:
+/// - `main-dispatch`: the Dispatch page (the 调度台 room), Terminals waiting for you;
+/// - `main-terminals`: the Terminals bar (list, title, `+`, all the terminals' mark); the page itself is always dark;
 /// - `main-terminals-fullscreen`: the same full screen — the system's traffic lights gone, the bar's own in their place;
 /// - `main-refresh-2`, `-6`, `-10` (dark): steps of a change from Dispatch to Terminals held still (as the demo's
 ///   `?freeze=`): the bar already on Terminals, the page drawn in down to the scan line, black below it;
@@ -27,12 +19,8 @@ import SwiftUI
 ///   (the refresh's pictures in the pixel look alone: the classic look changes pages at once);
 /// - `main-browser`: the Browser page (always dark) from a made-up browser (BrowserDemo.swift, the tabs of
 ///   `docs/design/implemented/browser.html`): Codex's pull request on screen, its last click boxed, `[ Take Over ]`;
-/// - `main-browser-held`: the same tab taken over by this Mac (`You · Taken Over from Codex`, `[ Hand Back ]`; no Fill
-///   Ciphertext on an agent's tab), the take-over notice in the footer;
-/// - `main-browser-filled`: your local dev server's page, a ciphertext just filled (`[ Fill Ciphertext ]`, `Filled
-///   dev/pass · localhost:5173`);
-/// - `main-browser-fill`, `main-browser-fill-new`: Fill Ciphertext's sheet over that page — a ciphertext to paste; the
-///   New… form with the page's site filled in;
+/// - `main-browser-held`: the same tab taken over by this Mac (`You · Taken Over from Codex`, `[ Hand Back ]`), the
+///   take-over notice in the footer;
 /// - `main-browser-waiting`: the task's login waiting for a code (`[ Take Over ]` filled);
 /// - `main-browser-file`: one of your tabs, a file of the Mac's (no hold, no lock);
 /// - `main-browser-zoom`: your dev server's page zoomed to 125 % (2026-10-03): the status bar's `−` `125%` `+`, the
@@ -52,8 +40,6 @@ import SwiftUI
 @MainActor
 enum MainWindowPreview {
     static let size = NSSize(width: 1280, height: 820)
-    /// Tall enough for the demo's whole record.
-    static let fullSize = NSSize(width: 1280, height: 1640)
 
     static func render(model: AppModel, into directory: URL) async throws {
         try await renderBrowser(model: model, into: directory)
@@ -61,13 +47,6 @@ enum MainWindowPreview {
             let look = NSAppearance(named: name)
             func file(_ base: String) -> URL { directory.appendingPathComponent("\(base)\(suffix).png") }
             try await shot(model: model, page: .dispatch, system: look, to: file("main-dispatch"))
-            try await shot(model: model, page: .dispatch, system: look, size: fullSize, to: file("main-dispatch-full"))
-            model.loadDemo(gate: .notResponding)
-            try await shot(model: model, page: .dispatch, system: look, open: .task("t1"), to: file("main-dispatch-task"))
-            model.loadDemo()
-            try await shot(model: model, page: .dispatch, system: look, open: .topic("th1"), to: file("main-dispatch-topic"))
-            try await shot(model: model, page: .dispatch, system: look, open: .files, to: file("main-dispatch-files"))
-            try await shot(model: model, page: .dispatch, system: look, open: .task("t5"), to: file("main-dispatch-code"))
             try await shot(model: model, page: .terminals, system: look, to: file("main-terminals"))
         }
         try await shot(model: model, page: .terminals, system: NSAppearance(named: .darkAqua), fullScreen: true,
@@ -162,11 +141,6 @@ enum MainWindowPreview {
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), to: file("main-browser"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(holding: "pr"),
                        note: BrowserTabText.takeOverNotice, to: file("main-browser-held"))
-        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), select: "vite",
-                       note: BrowserFillText.done(BrowserFillResult(label: "dev/pass", host: "localhost:5173")),
-                       to: file("main-browser-filled"))
-        try await fillSheet(model: model, startsNew: false, to: file("main-browser-fill"))
-        try await fillSheet(model: model, startsNew: true, to: file("main-browser-fill-new"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), select: "portal", to: file("main-browser-waiting"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), select: "mesh", to: file("main-browser-file"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(holding: "vite"), select: "vite", zoom: 125,
@@ -191,23 +165,22 @@ enum MainWindowPreview {
         try await refresh(model: model, to: .browser, from: .dispatch, system: dark, steps: [6], name: "main-refresh-browser", into: directory)
     }
 
-    /// Two tasks (one busy, one waiting), two terminals (the same), and the browser's tabs (an agent busy, one waiting).
-    /// With the rail put away, each page a different bar: a task at work, a terminal waiting, nothing in the browser.
+    /// Two terminals (one busy, one waiting) and the browser's tabs (an agent busy, one waiting). With the rail put
+    /// away: a terminal waiting, nothing in the browser.
     private static func state(on page: MainPage, rail: Rail = .shown) -> MainWindowState {
         let state = MainWindowState(page: page, railHidden: rail != .shown)
         let now = Date()
-        func row(_ id: String, _ kind: LiveSnapshot.Kind, waiting: Bool) -> LiveSnapshot.Row {
-            LiveSnapshot.Row(id: id, kind: kind, title: id, step: "", startedAt: now, needsYou: waiting)
+        func row(_ id: String, waiting: Bool) -> LiveSnapshot.Row {
+            LiveSnapshot.Row(id: id, title: id, step: "", startedAt: now, needsYou: waiting)
         }
         guard rail == .shown else {
             if rail != .quiet, rail != .bare {
-                state.liveChanged(LiveSnapshot(rows: [row("t1", .task, waiting: false), row("k1", .terminal, waiting: true)], now: now))
+                state.liveChanged(LiveSnapshot(rows: [row("k1", waiting: true)], now: now))
             }
             state.showRail(out: rail == .out)
             return state
         }
-        state.liveChanged(LiveSnapshot(rows: [row("t1", .task, waiting: false), row("t2", .task, waiting: true),
-                                              row("k1", .terminal, waiting: true), row("k2", .terminal, waiting: false)], now: now))
+        state.liveChanged(LiveSnapshot(rows: [row("k1", waiting: true), row("k2", waiting: false)], now: now))
         state.browserChanged(activity: PageActivity(busy: 1, waiting: 1), title: nil)
         return state
     }
@@ -230,17 +203,16 @@ enum MainWindowPreview {
         return head
     }
 
-    /// `open`: the Dispatch page opens on this task's or topic's page (as after a click on its card or chip). `browser`:
-    /// the made-up browser the Browser page shows (`select`: this tab on screen; `compose`: the new tab box open; `note`:
+    /// `browser`: the made-up browser the Browser page shows (`select`: this tab on screen; `compose`: the new tab box open; `note`:
     /// the footer's line; `zoom`: the page zoomed in to this step).
-    private static func shot(model: AppModel, page: MainPage, system: NSAppearance?, size: NSSize = size, open: DispatchRoute? = nil,
+    private static func shot(model: AppModel, page: MainPage, system: NSAppearance?, size: NSSize = size,
                              browser service: BrowserDemoService? = nil, select: String? = nil, compose: Bool = false,
                              note: String? = nil, zoom: Int? = nil, identity: BrowserIdentityDemo? = nil, fullScreen: Bool = false, rail: Rail = .shown,
                              browsers: [BrowserChoice]? = nil, to file: URL) async throws {
         let state = state(on: page, rail: rail)
         let browser = BrowserPageModel(service: { service ?? BrowserDemoService(empty: true) }, state: state, defaults: nil,
                                        recents: BrowserDemoService.recents)
-        let (window, _) = makeWindow(model: model, state: state, page: page, system: system, size: size, open: open, browser: browser, rail: rail)
+        let (window, _) = makeWindow(model: model, state: state, page: page, system: system, size: size, browser: browser, rail: rail)
         if fullScreen {
             for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(button)?.isHidden = true }
             state.fullScreen = true
@@ -315,18 +287,6 @@ enum MainWindowPreview {
         browser.screen.show(frame)
     }
 
-    /// Fill Ciphertext's sheet over your local dev server's page (always dark, as the page); `startsNew`: the New… form,
-    /// the page's site filled in.
-    private static func fillSheet(model: AppModel, startsNew: Bool, to file: URL) async throws {
-        let demo = BrowserDemoService()
-        let browser = BrowserPageModel(service: { demo }, state: nil, defaults: nil,
-                                       sealer: { _ in throw CommandError("演示数据，未生成密文。") })
-        let target = BrowserFillTarget(tabId: "vite", site: GateSealRequest.host(of: "http://localhost:5173/"))
-        try await DesignPreview.renderSheet(BrowserFillSheet(model: browser, target: target, startsNew: startsNew)
-                                                .environment(\.colorScheme, .dark),
-                                            model: model, appearance: NSAppearance(named: .darkAqua), to: file)
-    }
-
     /// A few steps of the refresh that draws `page` in, from the other page: the page and the bar changed at once, as
     /// the window does, each step held still. No pictures in the classic look, where a page is not drawn in
     /// (`ScanRefresh.plays`).
@@ -366,7 +326,7 @@ enum MainWindowPreview {
     }
 
     private static func makeWindow(model: AppModel, state: MainWindowState, page: MainPage, system: NSAppearance?,
-                                   size: NSSize = size, open: DispatchRoute? = nil, browser: BrowserPageModel,
+                                   size: NSSize = size, browser: BrowserPageModel,
                                    rail: Rail = .shown) -> (NSWindow, PageContainer) {
         let window = PreviewWindow(contentRect: NSRect(origin: .zero, size: size),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -375,9 +335,7 @@ enum MainWindowPreview {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
-        let dispatch = NSHostingView(rootView: DispatchRoot(model: model, state: state)
-            .environment(\.dispatchService, DispatchDemoService())
-            .environment(\.dispatchPreviewRoute, open))
+        let dispatch = NSHostingView(rootView: RoomsPage(state: state, desk: true).environment(model))
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
                                               .browser: BrowserPage.host(browser),
                                               .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model)),

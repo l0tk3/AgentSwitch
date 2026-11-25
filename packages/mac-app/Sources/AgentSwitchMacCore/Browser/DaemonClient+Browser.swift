@@ -52,13 +52,6 @@ extension DaemonClient: BrowserService {
         try decode(BrowserServerList.self, try await dispatchCall("GET", "/browser/servers", timeout: BrowserTimeouts.servers)).servers
     }
 
-    public func fill(tabId: String, token: String, screen: String) async throws -> BrowserFillResult {
-        struct Body: Encodable { let token: String; let screen: String }
-        let route = "/browser/tabs/\(Self.segment(tabId))/fill"
-        return try decode(BrowserFillResult.self, try await dispatchCall("POST", route, json: Body(token: token, screen: screen),
-                                                                          timeout: BrowserTimeouts.fill))
-    }
-
     public func showTab(id: String) async throws {
         _ = try await dispatchCall("POST", "/browser/tabs/\(Self.segment(id))/show", json: [String: String](), timeout: BrowserTimeouts.request)
     }

@@ -243,8 +243,6 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(RecordDisplay.toolWord("Compact"), "Compact")
         XCTAssertEqual(RecordDisplay.toolSymbol("Compact"), RecordDisplay.compactSymbol)
         XCTAssertFalse(kinds.map(RecordDisplay.symbol).contains(RecordDisplay.compactSymbol))
-        XCTAssertEqual(DispatchToolDisplay.word("Compact"), "Compact")
-        XCTAssertEqual(DispatchToolDisplay.label("Compact"), "压缩上下文")
 
         typealias R = ShellHighlight.Run
         // The word each command begins with, what is quoted, a here-document's body, a comment.

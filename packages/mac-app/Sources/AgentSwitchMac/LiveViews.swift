@@ -168,7 +168,7 @@ struct LiveTally: View {
     }
 }
 
-/// The compact presentation in the menu bar: the mark and, right of it, what the one task or terminal is doing in a word
+/// The compact presentation in the menu bar: the mark and, right of it, what the one terminal is doing in a word
 /// (as the phone's compact island: `Run`, `Edit`, `Allow?` in amber), the tally or the result's square, in a black
 /// capsule 22 pt high. Drawn into the status item's image; `minimal` is the mark alone.
 struct LiveCapsule: View {
@@ -212,7 +212,6 @@ struct LiveCardActions {
     var open: (LiveSnapshot.Row) -> Void = { _ in }
     var openEnd: (LiveSnapshot.End) -> Void = { _ in }
     var decide: (LiveSnapshot.Row, Bool) -> Void = { _, _ in }
-    var pick: (LiveSnapshot.Row, String) -> Void = { _, _ in }
 }
 
 /// The card under the capsule: the lock screen card of the phone — the mark, `AgentSwitch` and the tally over a
@@ -333,8 +332,6 @@ struct LiveCard: View {
                 .padding(.top, 8)
                 .padding(.bottom, 3)
                 .disabled(pending.contains(row.ask?.id ?? row.id))
-                // A task's of the old dispatch, which is off: its answers are refused (OldDispatch).
-                .oldDispatchOff(row.kind == .task && OldDispatch.off)
             }
         }
     }
@@ -345,8 +342,6 @@ struct LiveCard: View {
             // The tool as a short word; what it runs on is a command or a path (code in both looks' reading font).
             return (Text(tool + "  ").font(.system(size: 12.5, weight: .semibold, design: LiveLook.classic ? .default : .monospaced)) + Text(target).font(.system(size: 13)))
                 .foregroundColor(LiveLook.waiting)
-        case .question(_, _, let text, _, _)?:
-            return Text(text).font(.system(size: 13)).foregroundColor(LiveLook.waiting)
         case nil:
             return Text(row.step).font(.system(size: 13)).foregroundColor(row.needsYou ? LiveLook.waiting : LiveLook.ink2)
         }
@@ -357,9 +352,7 @@ struct LiveCard: View {
         case .decide?:
             LiveButton(title: "Deny") { actions.decide(row, false) }
             LiveButton(title: "Allow", primary: true) { actions.decide(row, true) }
-        case .question(_, _, _, let options, true)?:
-            ForEach(options, id: \.self) { option in LiveButton(title: option) { actions.pick(row, option) } }
-        default:
+        case nil:
             LiveButton(title: "Open", primary: true) { actions.open(row) }
         }
     }

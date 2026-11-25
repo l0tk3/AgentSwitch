@@ -213,7 +213,7 @@ final class RoomsTests: XCTestCase {
         XCTAssertTrue(ShadedSprite.rooms.rows.allSatisfy { $0.count == 16 } && ShadedSprite.rooms.height <= 16)
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.railRooms), "bubble.left")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarPeople), "person.2")
-        XCTAssertEqual(MainShortcut.action(for: MainShortcut.Press(key: "m", keyCode: 46, command: true, control: false, option: false, shift: true), on: .terminals, canGoBack: false), .page(.rooms))
+        XCTAssertEqual(MainShortcut.action(for: MainShortcut.Press(key: "m", keyCode: 46, command: true, control: false, option: false, shift: true), on: .terminals), .page(.rooms))
     }
 
     // MARK: rounds, the Kit, notes, files (docs/chatroom-v0.md §7, §6, §9, §3)

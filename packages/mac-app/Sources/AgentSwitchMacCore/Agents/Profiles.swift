@@ -26,9 +26,6 @@ public struct ProfileHealth: Decodable, Sendable {
 }
 
 extension DaemonClient {
-    public func profileGateKey() async throws -> PairingPayload.Gate {
-        try decode(PairingPayload.Gate.self, try await call("GET", "/gate/pubkey"))
-    }
     /// `endTerminals`: the Codex terminals that run under the profile are ended first (the service refuses with 409
     /// while one runs).
     public func setCodexAuth(id: String, content: String, endTerminals: Bool = false) async throws -> [String: AgentProfiles] {

@@ -5,7 +5,6 @@ import SwiftUI
 /// What the bar's, the rail's and the status bar's controls do (MainWindowController).
 struct MainBarActions {
     var switchPage: (MainPage) -> Void = { _ in }
-    var back: () -> Void = {}
     var toggleList: () -> Void = {}
     var newTerminal: () -> Void = {}
     var newTab: () -> Void = {}
@@ -184,8 +183,7 @@ private struct ChromeGround: View {
 
 /// The bar (docs/dispatch-v0.md §1, proposal B): the page's own toolbar. The traffic lights, then the list's button
 /// pinned beside them on every page (Terminals' list, Browser's tabs, ⌘B; dimmed in place on Dispatch, which has none);
-/// the title in the centre — the terminal on screen and its git, Dispatch's task or topic page as `‹` + mark + title,
-/// the tab on screen —; at the end only the page's own action, `+` (a new terminal, a new tab; none on Dispatch). The
+/// the title in the centre — the terminal on screen and its git, the tab on screen, the page's name —; at the end only the page's own action, `+` (a new terminal, a new tab; none on Dispatch). The
 /// pages and what they have going on are the rail's, the trouble and the page's context the status bar's. Its empty
 /// part moves the window and a double click zooms, as a title bar does. All of it changes with the page, at once.
 struct MainBar: View {
@@ -256,18 +254,16 @@ struct MainBar: View {
             switch state.page {
             case .terminals:
                 TerminalTitle(name: head.name, git: head.git, status: head.status, help: head.help).allowsHitTesting(false)
-            case .dispatch where OldDispatch.off:
-                DispatchTitleView(title: BarTitle("Dispatch · 调度台"), back: false, action: {})
             case .dispatch:
-                DispatchTitleView(title: state.dispatchTitle, back: state.showsBack, action: actions.back)
+                DispatchTitleView(title: BarTitle("Dispatch · 调度台"))
             case .browser:
-                DispatchTitleView(title: state.browserTitle, back: false, action: {})
+                DispatchTitleView(title: state.browserTitle)
             case .clash:
-                DispatchTitleView(title: BarTitle("Clash Integration"), back: false, action: {})
+                DispatchTitleView(title: BarTitle("Clash Integration"))
             case .passwords:
-                DispatchTitleView(title: BarTitle("Passwords"), back: false, action: {})
+                DispatchTitleView(title: BarTitle("Passwords"))
             case .rooms:
-                DispatchTitleView(title: BarTitle(state.roomsTitle.map { "Chat Room · \($0)" } ?? "Chat Room"), back: false, action: {})
+                DispatchTitleView(title: BarTitle(state.roomsTitle.map { "Chat Room · \($0)" } ?? "Chat Room"))
             }
         }
     }
@@ -472,35 +468,13 @@ struct BlinkingSquare: View {
     }
 }
 
-/// Dispatch's title: nothing on the conversation; `‹` + mark + title on a task's or topic's page (the arrow goes back,
-/// the rest lets the bar move the window). Browser's is the same without the arrow: the tab on screen.
+/// A page's title in the bar's centre: a mark and a title (the Browser's tab on screen, the page's own name); it lets
+/// the bar move the window.
 private struct DispatchTitleView: View {
     let title: BarTitle?
-    let back: Bool
-    let action: () -> Void
-    @State private var hovering = false
-    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 8) {
-            if back {
-                Button(action: action) {
-                    Group {
-                        if look.isClassic {
-                            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
-                        } else {
-                            Text("‹").font(.system(size: 15, design: .monospaced))
-                        }
-                    }
-                    .foregroundStyle(hovering ? .primary : .secondary)
-                    .padding(.horizontal, 4)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onHover { hovering = $0 }
-                .help(ClassicWords.help("Back esc", in: look))
-                .accessibilityLabel("Back")
-            }
             if let title {
                 HStack(spacing: 8) {
                     BarTitleMark(mark: title.mark)

@@ -19,17 +19,6 @@ public struct StatusLine: Sendable, Equatable {
 
 /// The menu's status lines, as pure functions of supervisor state and the last poll.
 public enum StatusText {
-    public static func gate(_ s: SupervisorState, healthy: Bool, port: Int, now: Date = Date()) -> StatusLine {
-        switch s.phase {
-        case .running(let pid, _):
-            return healthy ? StatusLine("OK · 127.0.0.1:\(port) · PID \(pid)", .ok) : StatusLine("Starting · PID \(pid)", .busy)
-        case .external:
-            return healthy ? StatusLine("OK · Reusing Running Gateway · 127.0.0.1:\(port)", .ok) : StatusLine("Running Gateway: No Response", .warning)
-        default:
-            return common(s, now: now)
-        }
-    }
-
     public static func daemon(_ s: SupervisorState, ready: Bool, port: Int, now: Date = Date()) -> StatusLine {
         switch s.phase {
         case .running(let pid, _):
@@ -79,7 +68,7 @@ public enum StatusText {
         return StatusLine("\(active.count) Paired · \(live) Online", .ok)
     }
 
-    /// The menu-bar icon's level: the worst of gate and daemon.
+    /// The menu-bar icon's level: the worst of its lines (the daemon's).
     public static func overall(_ lines: [StatusLine]) -> StatusLevel {
         lines.map(\.level).max() ?? .off
     }

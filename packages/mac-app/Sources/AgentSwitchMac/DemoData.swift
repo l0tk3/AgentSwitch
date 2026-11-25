@@ -25,64 +25,6 @@ enum DemoData {
     static let tailscaleStopped = TailscaleStatus(state: .stopped, binary: "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
                                                   backendState: "Stopped", dnsName: nil, ipv4: [])
 
-    /// The one keypair (gate-simple-v0 §1) of the user-process gate.
-    static let keys = [
-        Keypair(name: "default", public: "_nzdpiOxlAndoW9gDWmE3d85lFS0fU1wnJCM7bqniLQ", created: "2026-09-20T03:41:00Z"),
-    ]
-
-    /// The service's own key, made fresh at install: nothing is taken from the user's home.
-    static let serviceKeys = [
-        Keypair(name: "main", public: "Q2x7mV0pT9cWfL3aRk8uN5eYh1sJd6gBzO4iPq7tXwE", created: "2026-11-23T06:12:00Z"),
-    ]
-
-    /// The installed gate program (`<secret-gate>+<built>`, as `system install` records it), and an earlier build for
-    /// the update state.
-    static let installedGateBuild = "0.1.0+2026-09-24T09:12:40Z"
-    static let olderGateBuild = "0.1.0+2026-09-20T03:41:10Z"
-
-    static func gateService(installed: Bool, running: Bool = true, runtimeVersion: String? = nil) -> GateServiceState {
-        GateServiceState(availability: installed ? .installed : .notInstalled, running: installed ? running : false,
-                         socketPresent: installed, proxyPort: installed ? 8080 : nil, runtimeVersion: runtimeVersion,
-                         ownerUid: installed ? Int(getuid()) : nil, problem: nil)
-    }
-
-    /// What `system install` prints, and a run that stopped half-way (gate-service-v0 §5.7: done and not done steps).
-    static let installOutput = """
-        创建系统账户 _agentswitchgate（uid 451）
-        复制程序到 /Library/Application Support/AgentSwitch/runtime
-        生成密钥对 main
-        生成网关证书，发布 gate-public/ca.pem
-        启动 com.agentswitch.gate.rpc、com.agentswitch.gate.proxy
-        """
-    static let installFailedOutput = """
-        已完成：创建系统账户 _agentswitchgate（uid 451）
-        已完成：复制程序
-        未完成：生成密钥对、生成网关证书、启动服务
-        无法创建 /Library/Application Support/AgentSwitch/gate/keys：设备上没有空间
-        """
-
-    /// `logs tail` as the service would answer it.
-    static func gateLog(_ name: GateLogName) -> String {
-        switch name {
-        case .proxy:
-            return """
-            2026-09-27 14:02:11 proxy listening on 127.0.0.1:8080 (key: main)
-            2026-09-27 14:05:37 api.github.com POST /repos/…/issues  enc:ref:3 → header Authorization (task 7f2c)
-            2026-09-27 14:05:38 api.github.com 201
-            2026-09-27 14:20:02 SIGHUP: reloaded upstream exceptions and keys
-            2026-09-27 14:31:45 denied: enc:ref:9 host not allowed (example.org)
-            """
-        case .rpc:
-            return """
-            2026-09-27 14:02:10 rpc listening on /Library/Application Support/AgentSwitch/gate-public/gate.sock
-            2026-09-27 14:02:12 uid 501 status ok
-            2026-09-27 14:05:36 uid 501 refs.register scope=task-7f2c tokens=1 ok
-            2026-09-27 14:20:01 uid 501 keys.new name=travel ok
-            2026-09-27 14:40:12 uid 501 refs.release scope=task-7f2c released=1
-            """
-        }
-    }
-
     static func devices(now: Date) -> [Device] {
         [Device(id: "dev-1", name: "小林的 iPhone", platform: "ios", createdAt: now.addingTimeInterval(-5 * 86_400),
                 lastSeenAt: now.addingTimeInterval(-120), revokedAt: nil, online: true,
@@ -189,16 +131,6 @@ enum DemoData {
         "opencode": AgentChannels(stable: "2.0.24", beta: "0.0.0-beta-19507"), "pi": AgentChannels(stable: "1.0.4"),
     ], checkedAt: Date(timeIntervalSinceNow: -120))
 
-    /// The daemon's categories (engine/approvalPolicy.ts CATEGORY_TITLES).
-    static let categories: [[String: String]] = [
-        ["id": "delete", "title": "删除文件或数据（rm、git clean、DROP/DELETE）"],
-        ["id": "outside_cwd", "title": "写入工作目录以外的文件"],
-        ["id": "shell", "title": "任何 shell 命令"],
-        ["id": "git_push", "title": "git push / 强制推送"],
-        ["id": "irreversible", "title": "支付、发送消息或邮件、删除账号"],
-        ["id": "browser", "title": "浏览器中的提交操作"],
-    ]
-
     /// `GET /quota`, read two minutes ago (docs/ui-v0.md §4.2): Claude Code's two windows, Codex with no 5h reading and a
     /// 7d one past 90 %, a DeepSeek balance for OpenCode. `fresh`: nothing usable yet (no Claude task seen, Codex not
     /// installed, OpenCode without a key).
@@ -230,35 +162,12 @@ enum DemoData {
         let data = (try? JSONSerialization.data(withJSONObject: quotaJSON(now: now, fresh: fresh))) ?? Data("[]".utf8)
         return (try? QuotaReading.decodeList(data)) ?? []
     }
-
-    static var modelSettings: [String: Any] { [
-        "router": ["model": "deepseek/deepseek-flash", "options": ["deepseek/deepseek-flash", "claude-haiku-4-5-20251001"]],
-        "default": ["harness": "claude-code", "model": "claude-sonnet-4-6"],
-        "harnesses": [
-            "claude-code": ["default_model": "claude-sonnet-4-6",
-                            "models": ["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-4-8",
-                                       "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]],
-            "codex": ["default_model": "gpt-6-astra", "models": ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.5"]],
-            "opencode": ["default_model": "deepseek/deepseek-flash", "models": ["deepseek/deepseek-flash"]],
-        ],
-        "restartRequired": false,
-    ] }
 }
 
-/// The credential gate in the design preview (docs/gate-service-v0.md): the user process before the service, the
-/// service installed, and the states in between.
-enum DemoGate: Equatable {
-    case notInstalled, installing, installed, justInstalled, notResponding, updateAvailable
-
-    var installed: Bool { ![.notInstalled, .installing].contains(self) }
-}
-
-/// The daemon's files as DemoTransport sees them: the approval policy and the work dir, which PUTs change.
+/// The daemon's files as DemoTransport sees them: the work dir, which a PUT changes.
 final class DemoBackend: @unchecked Sendable {
     private let lock = NSLock()
     private let home: String
-    private var mode = "scoped"
-    private var human = ["delete", "git_push", "irreversible"]
     private var workDir: String
     private var workDirProblem: String?
     /// Devices the phone list shows; empty on a fresh Mac.
@@ -271,25 +180,12 @@ final class DemoBackend: @unchecked Sendable {
         workDir = WorkDirSettings.fallbackDefault(home: home)
     }
 
-    func set(mode: ApprovalMode) { locked { self.mode = mode.rawValue } }
     func set(workDir path: String, problem: String?) { locked { workDir = path; workDirProblem = problem } }
     func set(pairedDevices: Bool) { locked { self.pairedDevices = pairedDevices } }
 
     var hasPairedDevices: Bool { locked { pairedDevices } }
     func set(nodes: Bool) { locked { self.nodes = nodes } }
     var hasNodes: Bool { locked { nodes } }
-
-    var policy: [String: Any] {
-        locked { ["policy": ["mode": mode, "human": human], "categories": DemoData.categories] }
-    }
-
-    func savePolicy(_ body: [String: Any]) -> [String: Any] {
-        locked {
-            mode = body["mode"] as? String ?? mode
-            human = body["human"] as? [String] ?? human
-            return ["policy": ["mode": mode, "human": human]]
-        }
-    }
 
     var workDirJSON: [String: Any] {
         locked { ["path": workDir, "default": WorkDirSettings.fallbackDefault(home: home), "problem": workDirProblem ?? NSNull()] }
@@ -333,12 +229,8 @@ struct DemoTransport: HTTPTransport {
         case ("GET", "/devices"): body = backend.hasNodes ? DemoData.nodeDevices(now: now).map(Self.json) : backend.hasPairedDevices ? DemoData.devices(now: now).map(Self.json) : []
         case ("GET", "/nodes"): body = Self.nodes(backend.hasNodes ? DemoData.nodeList.nodes : [])
         case ("GET", "/settings/mesh"), ("PUT", "/settings/mesh"): body = ["keyboard": sent["keyboard"] as? Bool ?? true, "files": sent["files"] as? Bool ?? true]
-        case ("GET", "/settings/models"): body = DemoData.modelSettings
         // A fresh Mac has no paired phone; its usage has no readings either.
         case ("GET", "/quota"): body = DemoData.quotaJSON(now: now, fresh: !backend.hasPairedDevices)
-        case ("PUT", "/settings/models"): body = ["restartRequired": true]
-        case ("GET", "/approvals/policy"): body = backend.policy
-        case ("PUT", "/approvals/policy"): body = backend.savePolicy(sent)
         case ("GET", "/settings/workdir"): body = backend.workDirJSON
         case ("PUT", "/settings/workdir"): (status, body) = backend.saveWorkDir(sent["path"] as? String)
         case ("POST", "/pairing"): body = try Self.pairing(now: now)
@@ -372,7 +264,7 @@ struct DemoTransport: HTTPTransport {
     private static func pairing(now: Date) throws -> [String: Any] {
         let payload = PairingPayload(name: DemoData.computerName, port: 4713, fp: DemoData.fingerprint, code: "K7M2Q9XA",
                                      lan: DemoData.lan, tailnet: DemoData.tailnet, bonjour: DemoData.bonjourName,
-                                     gate: .init(publicKey: DemoData.keys[0].public, keypair: DemoData.keys[0].name))
+                                     gate: nil)
         return ["code": "K7M2Q9XA", "expiresAt": now.addingTimeInterval(272).timeIntervalSince1970 * 1000,
                 "link": try PairingLink.make(payload)]
     }

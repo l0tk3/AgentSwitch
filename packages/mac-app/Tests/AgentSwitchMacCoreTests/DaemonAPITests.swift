@@ -48,33 +48,6 @@ final class DaemonModelsTests: XCTestCase {
         XCTAssertEqual(listOnline.fingerprint, "aa")
     }
 
-    func testModelSettingsShapes() throws {
-        let json = """
-        {"router":{"model":"deepseek/deepseek-flash","options":["deepseek/deepseek-flash","claude-haiku"]},
-         "default":{"harness":"codex","model":"gpt-5.5"},
-         "harnesses":{"codex":{"models":["gpt-6-astra","gpt-5.5"],"default_model":"gpt-6-astra"},
-                      "claude-code":{"models":{"claude-sonnet-5":{"cost":"mid"},"claude-opus-5":{}},"defaultModel":"claude-sonnet-5"},
-                      "opencode":{"models":[{"id":"deepseek/deepseek-flash"}]}},
-         "restartRequired":true}
-        """
-        let m = try JSONDecoder().decode(ModelSettings.self, from: Data(json.utf8))
-        XCTAssertEqual(m.router.options, ["deepseek/deepseek-flash", "claude-haiku"])
-        XCTAssertEqual(m.harnessNames, ["claude-code", "codex", "opencode"])
-        XCTAssertEqual(m.models(for: "claude-code"), ["claude-opus-5", "claude-sonnet-5"])
-        XCTAssertEqual(m.harnesses["claude-code"]?.defaultModel, "claude-sonnet-5")
-        XCTAssertEqual(m.models(for: "opencode"), ["deepseek/deepseek-flash"])
-        XCTAssertEqual(m.models(for: nil), [])
-        XCTAssertTrue(m.restartPending)
-    }
-
-    func testUpdateCarriesOnlyChanges() throws {
-        let current = ModelSettings(router: .init(model: "r1", options: ["r1", "r2"]), harnesses: [:])
-        XCTAssertTrue(ModelSettingsUpdate.diff(current: current, routerModel: "r1").isEmpty)
-        XCTAssertTrue(ModelSettingsUpdate.diff(current: current, routerModel: nil).isEmpty)
-        let routerOnly = ModelSettingsUpdate.diff(current: current, routerModel: "r2")
-        XCTAssertEqual(String(decoding: try JSONEncoder().encode(routerOnly), as: UTF8.self), #"{"router":{"model":"r2"}}"#)
-    }
-
     func testErrorMessageExtraction() {
         XCTAssertEqual(DaemonClient.errorMessage(Data(#"{"error":"bad model"}"#.utf8)), "bad model")
         XCTAssertEqual(DaemonClient.errorMessage(Data(#"{"error":[{"path":"x"}]}"#.utf8)), #"[{"path":"x"}]"#)
@@ -145,7 +118,6 @@ final class DaemonClientTests: XCTestCase {
             switch (req.httpMethod ?? "", req.url?.path ?? "") {
             case ("GET", "/devices"): return (200, "[]")
             case ("DELETE", "/devices/a b"): return (200, #"{"ok":true}"#)
-            case ("PUT", "/settings/models"): return (200, #"{"restartRequired":true}"#)
             case ("GET", "/healthz"): return (200, #"{"ok":true,"version":"0.1.0"}"#)
             default: return (500, #"{"error":"unexpected"}"#)
             }
@@ -154,15 +126,11 @@ final class DaemonClientTests: XCTestCase {
         let listed = try await client.devices()
         XCTAssertEqual(listed, [])
         try await client.revokeDevice(id: "a b")
-        let saved = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "x"))
-        XCTAssertTrue(saved.restartRequired)
         let health = try await client.health()
         XCTAssertEqual(health.version, "0.1.0")
         let urls = stub.requests.map { $0.url!.absoluteString }
         XCTAssertEqual(urls[0], "http://127.0.0.1:4811/devices")
         XCTAssertEqual(urls[1], "http://127.0.0.1:4811/devices/a%20b")
-        XCTAssertEqual(stub.requests[2].value(forHTTPHeaderField: "Content-Type"), "application/json")
-        XCTAssertEqual(stub.requests[2].httpBody.map { String(decoding: $0, as: UTF8.self) }, #"{"router":{"model":"x"}}"#)
     }
 
     func testErrorsAreTyped() async {
@@ -180,7 +148,7 @@ final class DaemonClientTests: XCTestCase {
         do { try await client.revokeDevice(id: "gone"); XCTFail() } catch {
             XCTAssertEqual(error as? DaemonError, .http(status: 404, message: "not found"))
         }
-        do { _ = try await client.modelSettings(); XCTFail() } catch {
+        do { _ = try await client.workDir(); XCTFail() } catch {
             XCTAssertEqual(error as? DaemonError, .http(status: 400, message: "unknown harness"))
         }
     }
@@ -232,7 +200,7 @@ final class DaemonClientTests: XCTestCase {
 
 /// The client against scripts/fake-daemon.mjs over real HTTP (skipped without node).
 final class FakeDaemonIntegrationTests: XCTestCase {
-    func testPairingDevicesModelsRoundTrip() async throws {
+    func testPairingAndDevicesRoundTrip() async throws {
         let node = try XCTUnwrap(TestSupport.findNode(), "node not found")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: node)
@@ -272,18 +240,6 @@ final class FakeDaemonIntegrationTests: XCTestCase {
         XCTAssertEqual(info.port, 4913)
         XCTAssertNotNil(BonjourRecord.fingerprintPrefix(info.fingerprint ?? ""))
 
-        let models = try await client.modelSettings()
-        XCTAssertTrue(models.harnessNames.contains("codex"))
-        let saved = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "claude-haiku-4-5-20251001"))
-        XCTAssertTrue(saved.restartRequired)
-        let reread = try await client.modelSettings()
-        XCTAssertEqual(reread.router.model, "claude-haiku-4-5-20251001")
-        do {
-            _ = try await client.saveModelSettings(ModelSettingsUpdate(routerModel: "nope"))
-            XCTFail()
-        } catch {
-            XCTAssertEqual(error as? DaemonError, .http(status: 400, message: "router.model nope is not a opencode model"))
-        }
     }
 }
 

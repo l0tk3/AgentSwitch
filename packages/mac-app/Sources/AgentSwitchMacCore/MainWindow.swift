@@ -77,8 +77,8 @@ public enum MainPage: String, CaseIterable, Sendable {
     }
 }
 
-/// What a page has going on, from `GET /live`: Dispatch's tasks, Terminals' terminals; the Browser's from its tab list
-/// (PageActivity.of(_ list: BrowserTabList)). The page's icon in the rail carries a mark off its corner, the page on
+/// What a page has going on: Terminals' terminals from `GET /live`; the Browser's from its tab list
+/// (PageActivity.of(_ list: BrowserTabList)); Dispatch's and Chat Room's from their rooms. The page's icon in the rail carries a mark off its corner, the page on
 /// screen too — amber while anything waits for you, else the spinner while anything is busy.
 public struct PageActivity: Equatable, Sendable {
     public enum Mark: Equatable, Sendable { case none, busy, waiting }
@@ -95,18 +95,11 @@ public struct PageActivity: Equatable, Sendable {
 
     public var mark: Mark { waiting > 0 ? .waiting : busy > 0 ? .busy : .none }
 
-    /// The page's rows of the Live Activity's snapshot (nil: the service is not answering). The browser's tabs are not
-    /// in it: `.none` for Browser.
-    public static func of(_ page: MainPage, in snapshot: LiveSnapshot?) -> PageActivity {
-        let kind: LiveSnapshot.Kind
-        switch page {
-        case .dispatch: kind = .task
-        case .terminals: kind = .terminal
-        case .browser, .clash, .rooms, .passwords: return .none
-        }
+    /// The terminals of the Live Activity's snapshot (nil: the service is not answering).
+    public static func terminals(in snapshot: LiveSnapshot?) -> PageActivity {
         // The node's own: what this Mac's service lists of the other nodes it uses (docs/mesh-v0.md §5.2 跨节点的提醒) is
-        // for the menu bar's card, not for these pages' marks.
-        let rows = snapshot?.rows.filter { $0.kind == kind && $0.node == nil } ?? []
+        // for the menu bar's card, not for the page's mark.
+        let rows = snapshot?.rows.filter { $0.node == nil } ?? []
         let waiting = rows.filter(\.needsYou).count
         return PageActivity(busy: rows.count - waiting, waiting: waiting)
     }
@@ -230,10 +223,9 @@ public struct ScanRefresh: Equatable, Sendable {
 
 // MARK: - shortcuts
 
-/// The window's own keys (dispatch-v0 §1): ⌘0 Dispatch, ⌘⇧B Browser, ⌃⇥ the next page and ⌃⇧⇥ the one before, ⌘N a
-/// new task on Dispatch, ⌘, settings; from Dispatch and Browser ⌘1–9 cross to the terminals and from Dispatch ⌘T (on
-/// Terminals they are the terminal page's own, as ⌘B is), and Esc or ⌘[ go back while Dispatch has a page to go back
-/// from. On Browser ⌘T is a new tab, ⌘L the address, ⌘R reload, ⌘[ ⌘] back and forward (a browser's keys; the page
+/// The window's own keys (dispatch-v0 §1): ⌘0 Dispatch, ⌘⇧B Browser, ⌃⇥ the next page and ⌃⇧⇥ the one before,
+/// ⌘, settings; from Dispatch and Browser ⌘1–9 cross to the terminals and from Dispatch ⌘T (on
+/// Terminals they are the terminal page's own, as ⌘B is). On Browser ⌘T is a new tab, ⌘L the address, ⌘R reload, ⌘[ ⌘] back and forward (a browser's keys; the page
 /// itself has no use for them), ⌘B opens and closes the tab list (as on Terminals, docs/browser-v0.md §1 Mac,
 /// 2026-10-03), ⌘⇧T takes the tab over or hands it back (the status bar's `[ Take Over ]` / `[ Hand Back ]`: what is
 /// in a bottom bar is to be had elsewhere too, 2026-10-03), and ⌘+ (⌘= too, with shift or without, and the keypad's +)
@@ -245,9 +237,7 @@ public enum MainShortcut: Equatable, Sendable {
     case nextPage
     case previousPage
     case terminal(Int)
-    case newTask
     case newTerminal
-    case back
     case settings
     /// ⌥⌘B: the rail put away or brought back (MainRailLayout).
     case toggleRail
@@ -283,16 +273,11 @@ public enum MainShortcut: Equatable, Sendable {
         }
     }
 
-    public static let escape: UInt16 = 53
     public static let tab: UInt16 = 48
 
-    /// `page`: the one the bar shows; `canGoBack`: Dispatch shows `‹`; `composing`: an input method has marked text
-    /// (its Esc cancels the composition).
-    public static func action(for press: Press, on page: MainPage, canGoBack: Bool, composing: Bool = false) -> MainShortcut? {
+    /// `page`: the one the bar shows.
+    public static func action(for press: Press, on page: MainPage) -> MainShortcut? {
         if press.keyCode == tab, press.control, !press.command, !press.option { return press.shift ? .previousPage : .nextPage }
-        if press.keyCode == escape, !press.command, !press.control, !press.option, !press.shift {
-            return page == .dispatch && canGoBack && !composing ? .back : nil
-        }
         if press.command, press.option, !press.control, !press.shift, press.key == "b" { return .toggleRail }
         if press.command, press.shift, !press.control, !press.option, press.key == "b" { return .page(.browser) }
         if press.command, press.shift, !press.control, !press.option, press.key == "k" { return .page(.clash) }
@@ -305,11 +290,8 @@ public enum MainShortcut: Equatable, Sendable {
         guard press.command, !press.control, !press.option, !press.shift else { return nil }
         switch press.key {
         case "0": return .page(.dispatch)
-        case "n": return .newTask
         case ",": return .settings
-        case "[":
-            if page == .browser { return .browser(.back) }
-            return page == .dispatch && canGoBack ? .back : nil
+        case "[": return page == .browser ? .browser(.back) : nil
         case "]": return page == .browser ? .browser(.forward) : nil
         case "l": return page == .browser ? .browser(.address) : nil
         case "r": return page == .browser ? .browser(.reload) : nil
@@ -337,13 +319,10 @@ public enum MainShortcut: Equatable, Sendable {
 
 // MARK: - trouble
 
-/// The status bar's word while the service or the credential gateway is down (`■ Gateway Down`, red); none while both
-/// are up or starting.
+/// The status bar's word while the service is down (`■ Service Down`, red); none while it is up or starting.
 public enum ServiceTrouble {
-    public static func word(service: StatusLine, gateway: StatusLine) -> String? {
-        if down(service) { return "Service Down" }
-        if down(gateway) { return "Gateway Down" }
-        return nil
+    public static func word(service: StatusLine) -> String? {
+        down(service) ? "Service Down" : nil
     }
 
     static func down(_ line: StatusLine) -> Bool { line.level == .off || line.level >= .warning }

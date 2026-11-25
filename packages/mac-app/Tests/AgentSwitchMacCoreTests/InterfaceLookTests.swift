@@ -19,13 +19,13 @@ final class InterfaceLookTests: XCTestCase {
     func testTheClassicLookHasItsOwnWordForAFewShortWords() {
         // The concept page's "经典 · English" column; everything else is the same word in both looks.
         for (pixel, classic) in [("Busy", "Working"), ("Waiting", "Needs You"), ("Idle", "Ready"), ("Exited", "Ended"),
-                                 ("[!] Approval", "Approval Needed"), ("? Question", "Question"), ("Gateway", "Gateway OK"),
+                                 ("[!] Approval", "Approval Needed"), ("? Question", "Question"),
                                  ("On Mac", "On This Mac"), ("bypass", "Bypass"), ("auto", "Auto"), ("manual", "Ask Each"), ("OK", "Running"),
                                  ("Open Dispatch", "Open AgentSwitch")] {
             XCTAssertEqual(ClassicWords.word(pixel, in: .classic), classic)
             XCTAssertEqual(ClassicWords.word(pixel, in: .pixel), pixel, "the pixel look's words are never changed")
         }
-        for same in ["Allow", "Deny", "Take Over", "Hand Back", "Failed", "Done", "Dispatch", "Terminals", "Browser", "iPhone Online", "Gateway Down"] {
+        for same in ["Allow", "Deny", "Take Over", "Hand Back", "Failed", "Done", "Dispatch", "Terminals", "Browser", "iPhone Online", "Service", "Service Down"] {
             XCTAssertEqual(ClassicWords.word(same, in: .classic), same)
         }
         // How many wait for you.

@@ -6,8 +6,8 @@ import XCTest
 final class MainWindowTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_790_000_000)
 
-    private func row(_ id: String, _ kind: LiveSnapshot.Kind, waiting: Bool = false) -> LiveSnapshot.Row {
-        LiveSnapshot.Row(id: id, kind: kind, title: id, step: "", startedAt: t0, needsYou: waiting)
+    private func row(_ id: String, waiting: Bool = false, node: LiveSnapshot.Node? = nil) -> LiveSnapshot.Row {
+        LiveSnapshot.Row(id: id, title: id, step: "", startedAt: t0, needsYou: waiting, node: node)
     }
 
     // MARK: pages
@@ -38,7 +38,7 @@ final class MainWindowTests: XCTestCase {
             default: nil
             }
             XCTAssertNotNil(press, page.railHelp)
-            let action = press.flatMap { MainShortcut.action(for: $0, on: .dispatch, canGoBack: false) }
+            let action = press.flatMap { MainShortcut.action(for: $0, on: .dispatch) }
             XCTAssertTrue(action == .page(page) || (page == .terminals && action == .terminal(1)), "\(page.railHelp) goes to \(page)")
         }
     }
@@ -73,21 +73,18 @@ final class MainWindowTests: XCTestCase {
 
     // MARK: activity
 
-    func testEachPageCountsItsOwnRows() {
-        let snapshot = LiveSnapshot(rows: [row("t1", .task), row("t2", .task, waiting: true), row("t3", .task),
-                                           row("k1", .terminal)], now: t0)
-        let dispatch = PageActivity.of(.dispatch, in: snapshot)
-        XCTAssertEqual(dispatch, PageActivity(busy: 2, waiting: 1))
-        XCTAssertEqual(dispatch.mark, .waiting, "anything waiting for you comes before busy")
-        let terminals = PageActivity.of(.terminals, in: snapshot)
-        XCTAssertEqual(terminals, PageActivity(busy: 1, waiting: 0))
-        XCTAssertEqual(terminals.mark, .busy)
-        XCTAssertEqual(PageActivity.of(.browser, in: snapshot), .none, "the browser's tabs come from its own list")
+    func testTheTerminalsPageCountsThisMacsTerminals() {
+        let there = LiveSnapshot.Node(id: "7c1e5a90b3d2", name: "Studio")
+        let snapshot = LiveSnapshot(rows: [row("k1"), row("k2", waiting: true), row("k3"), row("k4", waiting: true, node: there)], now: t0)
+        let terminals = PageActivity.terminals(in: snapshot)
+        XCTAssertEqual(terminals, PageActivity(busy: 2, waiting: 1), "another node's are the menu bar's card's, not this page's")
+        XCTAssertEqual(terminals.mark, .waiting, "anything waiting for you comes before busy")
+        XCTAssertEqual(PageActivity.terminals(in: LiveSnapshot(rows: [row("k1")], now: t0)).mark, .busy)
     }
 
     func testNothingGoingOnHasNoMark() {
-        XCTAssertEqual(PageActivity.of(.dispatch, in: nil), .none)
-        XCTAssertEqual(PageActivity.of(.terminals, in: LiveSnapshot(rows: [row("t1", .task)], now: t0)).mark, .none)
+        XCTAssertEqual(PageActivity.terminals(in: nil), .none)
+        XCTAssertEqual(PageActivity.terminals(in: LiveSnapshot(rows: [], now: t0)).mark, .none)
     }
 
     // MARK: the refresh
@@ -149,83 +146,81 @@ final class MainWindowTests: XCTestCase {
 
     func testFilesColumnOnEveryPage() {
         for page in MainPage.allCases {
-            XCTAssertEqual(MainShortcut.action(for: MainShortcut.Press(key: "f", keyCode: 3, command: true, control: false, option: false, shift: true), on: page, canGoBack: false), .files)
+            XCTAssertEqual(MainShortcut.action(for: MainShortcut.Press(key: "f", keyCode: 3, command: true, control: false, option: false, shift: true), on: page), .files)
         }
     }
 
     func testShortcutsOnBothPages() {
         for page in MainPage.allCases {
-            XCTAssertEqual(MainShortcut.action(for: press("0"), on: page, canGoBack: false), .page(.dispatch))
-            XCTAssertEqual(MainShortcut.action(for: press("n"), on: page, canGoBack: false), .newTask)
-            XCTAssertEqual(MainShortcut.action(for: press(","), on: page, canGoBack: false), .settings)
-            XCTAssertEqual(MainShortcut.action(for: press("\t", keyCode: MainShortcut.tab, command: false, control: true), on: page, canGoBack: false), .nextPage)
-            XCTAssertEqual(MainShortcut.action(for: press("\t", keyCode: MainShortcut.tab, command: false, control: true, shift: true), on: page, canGoBack: false), .previousPage)
-            XCTAssertEqual(MainShortcut.action(for: press("b", shift: true), on: page, canGoBack: false), .page(.browser), "⌘⇧B")
+            XCTAssertEqual(MainShortcut.action(for: press("0"), on: page), .page(.dispatch))
+            XCTAssertNil(MainShortcut.action(for: press("n"), on: page), "⌘N is the page's")
+            XCTAssertEqual(MainShortcut.action(for: press(","), on: page), .settings)
+            XCTAssertEqual(MainShortcut.action(for: press("\t", keyCode: MainShortcut.tab, command: false, control: true), on: page), .nextPage)
+            XCTAssertEqual(MainShortcut.action(for: press("\t", keyCode: MainShortcut.tab, command: false, control: true, shift: true), on: page), .previousPage)
+            XCTAssertEqual(MainShortcut.action(for: press("b", shift: true), on: page), .page(.browser), "⌘⇧B")
         }
     }
 
     func testTheBrowsersOwnKeys() {
-        XCTAssertEqual(MainShortcut.action(for: press("t"), on: .browser, canGoBack: false), .browser(.newTab))
-        XCTAssertEqual(MainShortcut.action(for: press("l"), on: .browser, canGoBack: false), .browser(.address))
-        XCTAssertEqual(MainShortcut.action(for: press("r"), on: .browser, canGoBack: false), .browser(.reload))
-        XCTAssertEqual(MainShortcut.action(for: press("["), on: .browser, canGoBack: false), .browser(.back))
-        XCTAssertEqual(MainShortcut.action(for: press("]"), on: .browser, canGoBack: false), .browser(.forward))
-        XCTAssertEqual(MainShortcut.action(for: press("b"), on: .browser, canGoBack: false), .browser(.toggleList), "⌘B: the tab list, as on Terminals")
-        XCTAssertNil(MainShortcut.action(for: press("b"), on: .terminals, canGoBack: false), "the terminal page's own ⌘B")
-        XCTAssertEqual(MainShortcut.action(for: press("2"), on: .browser, canGoBack: false), .terminal(2), "⌘1–9 cross to the terminals")
+        XCTAssertEqual(MainShortcut.action(for: press("t"), on: .browser), .browser(.newTab))
+        XCTAssertEqual(MainShortcut.action(for: press("l"), on: .browser), .browser(.address))
+        XCTAssertEqual(MainShortcut.action(for: press("r"), on: .browser), .browser(.reload))
+        XCTAssertEqual(MainShortcut.action(for: press("["), on: .browser), .browser(.back))
+        XCTAssertEqual(MainShortcut.action(for: press("]"), on: .browser), .browser(.forward))
+        XCTAssertEqual(MainShortcut.action(for: press("b"), on: .browser), .browser(.toggleList), "⌘B: the tab list, as on Terminals")
+        XCTAssertNil(MainShortcut.action(for: press("b"), on: .terminals), "the terminal page's own ⌘B")
+        XCTAssertEqual(MainShortcut.action(for: press("2"), on: .browser), .terminal(2), "⌘1–9 cross to the terminals")
         for page in [MainPage.dispatch, .terminals] {
-            XCTAssertNil(MainShortcut.action(for: press("l"), on: page, canGoBack: false))
-            XCTAssertNil(MainShortcut.action(for: press("r"), on: page, canGoBack: false))
-            XCTAssertNil(MainShortcut.action(for: press("]"), on: page, canGoBack: false))
+            XCTAssertNil(MainShortcut.action(for: press("l"), on: page))
+            XCTAssertNil(MainShortcut.action(for: press("r"), on: page))
+            XCTAssertNil(MainShortcut.action(for: press("]"), on: page))
         }
-        XCTAssertEqual(MainShortcut.action(for: press("t", shift: true), on: .browser, canGoBack: false), .browser(.hold),
+        XCTAssertEqual(MainShortcut.action(for: press("t", shift: true), on: .browser), .browser(.hold),
                        "⌘⇧T: the status bar's Take Over / Hand Back")
-        XCTAssertNil(MainShortcut.action(for: press("t", shift: true), on: .terminals, canGoBack: false), "nothing to take over there")
-        XCTAssertNil(MainShortcut.action(for: press("t", shift: true), on: .dispatch, canGoBack: false))
-        XCTAssertNil(MainShortcut.action(for: press("a"), on: .browser, canGoBack: false), "⌘A is the page's")
-        XCTAssertNil(MainShortcut.action(for: press("v"), on: .browser, canGoBack: false), "⌘V is the screen's")
-        let esc = press("\u{1b}", keyCode: MainShortcut.escape, command: false)
-        XCTAssertNil(MainShortcut.action(for: esc, on: .browser, canGoBack: true), "Esc is the page's")
+        XCTAssertNil(MainShortcut.action(for: press("t", shift: true), on: .terminals), "nothing to take over there")
+        XCTAssertNil(MainShortcut.action(for: press("t", shift: true), on: .dispatch))
+        XCTAssertNil(MainShortcut.action(for: press("a"), on: .browser), "⌘A is the page's")
+        XCTAssertNil(MainShortcut.action(for: press("v"), on: .browser), "⌘V is the screen's")
+        let esc = press("\u{1b}", keyCode: 53, command: false)
+        XCTAssertNil(MainShortcut.action(for: esc, on: .browser), "Esc is the page's")
     }
 
     func testTheBrowsersZoomKeys() {
         // docs/browser-v0.md §1 页面缩放 (2026-10-03): ⌘= and ⌘+ zoom in, ⌘− out; the keypad's keys too.
         let keypadPlus: UInt16 = 69, keypadMinus: UInt16 = 78
-        XCTAssertEqual(MainShortcut.action(for: press("="), on: .browser, canGoBack: false), .browser(.zoomIn), "⌘=")
-        XCTAssertEqual(MainShortcut.action(for: press("+", shift: true), on: .browser, canGoBack: false), .browser(.zoomIn), "⌘+ is ⌘⇧= on most layouts")
-        XCTAssertEqual(MainShortcut.action(for: press("+"), on: .browser, canGoBack: false), .browser(.zoomIn), "a layout with + on a key of its own")
-        XCTAssertEqual(MainShortcut.action(for: press("=", shift: true), on: .browser, canGoBack: false), .browser(.zoomIn), "a layout with = under shift")
-        XCTAssertEqual(MainShortcut.action(for: press("+", keyCode: keypadPlus), on: .browser, canGoBack: false), .browser(.zoomIn), "the keypad's +")
-        XCTAssertEqual(MainShortcut.action(for: press("-"), on: .browser, canGoBack: false), .browser(.zoomOut), "⌘−")
-        XCTAssertEqual(MainShortcut.action(for: press("-", keyCode: keypadMinus), on: .browser, canGoBack: false), .browser(.zoomOut), "the keypad's −")
-        XCTAssertEqual(MainShortcut.action(for: press("0"), on: .browser, canGoBack: false), .page(.dispatch), "⌘0 stays Dispatch: Actual Size has no key")
+        XCTAssertEqual(MainShortcut.action(for: press("="), on: .browser), .browser(.zoomIn), "⌘=")
+        XCTAssertEqual(MainShortcut.action(for: press("+", shift: true), on: .browser), .browser(.zoomIn), "⌘+ is ⌘⇧= on most layouts")
+        XCTAssertEqual(MainShortcut.action(for: press("+"), on: .browser), .browser(.zoomIn), "a layout with + on a key of its own")
+        XCTAssertEqual(MainShortcut.action(for: press("=", shift: true), on: .browser), .browser(.zoomIn), "a layout with = under shift")
+        XCTAssertEqual(MainShortcut.action(for: press("+", keyCode: keypadPlus), on: .browser), .browser(.zoomIn), "the keypad's +")
+        XCTAssertEqual(MainShortcut.action(for: press("-"), on: .browser), .browser(.zoomOut), "⌘−")
+        XCTAssertEqual(MainShortcut.action(for: press("-", keyCode: keypadMinus), on: .browser), .browser(.zoomOut), "the keypad's −")
+        XCTAssertEqual(MainShortcut.action(for: press("0"), on: .browser), .page(.dispatch), "⌘0 stays Dispatch: Actual Size has no key")
         for key in ["=", "+", "-"] {
-            XCTAssertNil(MainShortcut.action(for: press(key, command: false), on: .browser, canGoBack: false), "typed into the page")
-            XCTAssertNil(MainShortcut.action(for: press(key, control: true), on: .browser, canGoBack: false), "not with control")
+            XCTAssertNil(MainShortcut.action(for: press(key, command: false), on: .browser), "typed into the page")
+            XCTAssertNil(MainShortcut.action(for: press(key, control: true), on: .browser), "not with control")
             let option = MainShortcut.Press(key: key, keyCode: 0, command: true, control: false, option: true, shift: false)
-            XCTAssertNil(MainShortcut.action(for: option, on: .browser, canGoBack: false), "⌥⌘= ⌥⌘− are the system's zoom")
+            XCTAssertNil(MainShortcut.action(for: option, on: .browser), "⌥⌘= ⌥⌘− are the system's zoom")
             for page in [MainPage.dispatch, .terminals] {
-                XCTAssertNil(MainShortcut.action(for: press(key), on: page, canGoBack: false), "only the Browser page has a page to zoom")
+                XCTAssertNil(MainShortcut.action(for: press(key), on: page), "only the Browser page has a page to zoom")
             }
         }
     }
 
     func testTheTerminalsShortcutsCrossFromDispatchAndAreThePagesOnTerminals() {
-        XCTAssertEqual(MainShortcut.action(for: press("3"), on: .dispatch, canGoBack: false), .terminal(3))
-        XCTAssertEqual(MainShortcut.action(for: press("t"), on: .dispatch, canGoBack: false), .newTerminal)
-        XCTAssertNil(MainShortcut.action(for: press("3"), on: .terminals, canGoBack: false), "the terminal page's own ⌘1–9")
-        XCTAssertNil(MainShortcut.action(for: press("t"), on: .terminals, canGoBack: false), "the terminal page's own ⌘T")
-        XCTAssertNil(MainShortcut.action(for: press("b"), on: .dispatch, canGoBack: false), "⌘B is the terminals' list")
+        XCTAssertEqual(MainShortcut.action(for: press("3"), on: .dispatch), .terminal(3))
+        XCTAssertEqual(MainShortcut.action(for: press("t"), on: .dispatch), .newTerminal)
+        XCTAssertNil(MainShortcut.action(for: press("3"), on: .terminals), "the terminal page's own ⌘1–9")
+        XCTAssertNil(MainShortcut.action(for: press("t"), on: .terminals), "the terminal page's own ⌘T")
+        XCTAssertNil(MainShortcut.action(for: press("b"), on: .dispatch), "⌘B is the terminals' list")
     }
 
-    func testBackOnlyWhereThereIsABack() {
-        let esc = press("\u{1b}", keyCode: MainShortcut.escape, command: false)
-        XCTAssertEqual(MainShortcut.action(for: esc, on: .dispatch, canGoBack: true), .back)
-        XCTAssertEqual(MainShortcut.action(for: press("["), on: .dispatch, canGoBack: true), .back)
-        XCTAssertNil(MainShortcut.action(for: esc, on: .dispatch, canGoBack: false), "Esc is the page's own")
-        XCTAssertNil(MainShortcut.action(for: esc, on: .terminals, canGoBack: true), "Esc belongs to the terminal")
-        XCTAssertNil(MainShortcut.action(for: press("["), on: .terminals, canGoBack: true))
-        XCTAssertNil(MainShortcut.action(for: esc, on: .dispatch, canGoBack: true, composing: true), "an input method's Esc cancels its composition")
+    func testEscAndBackAreThePagesOwn() {
+        let esc = press("\u{1b}", keyCode: 53, command: false)
+        for page in MainPage.allCases {
+            XCTAssertNil(MainShortcut.action(for: esc, on: page), "Esc is the page's own")
+            if page != .browser { XCTAssertNil(MainShortcut.action(for: press("["), on: page)) }
+        }
     }
 
     // MARK: the rail, put away (2026-10-04)
@@ -271,33 +266,31 @@ final class MainWindowTests: XCTestCase {
     func testOptionCommandBPutsTheRailAwayAndBringsItBackOnEveryPage() {
         let key = MainShortcut.Press(key: "b", keyCode: 11, command: true, control: false, option: true, shift: false)
         for page in MainPage.allCases {
-            XCTAssertEqual(MainShortcut.action(for: key, on: page, canGoBack: false), .toggleRail)
-            XCTAssertEqual(MainShortcut.action(for: key, on: page, canGoBack: true), .toggleRail)
+            XCTAssertEqual(MainShortcut.action(for: key, on: page), .toggleRail)
+            XCTAssertEqual(MainShortcut.action(for: key, on: page), .toggleRail)
         }
         var shifted = key
         shifted.shift = true
-        XCTAssertNil(MainShortcut.action(for: shifted, on: .terminals, canGoBack: false))
-        XCTAssertNil(MainShortcut.action(for: press("b"), on: .terminals, canGoBack: false), "⌘B is still the list's")
+        XCTAssertNil(MainShortcut.action(for: shifted, on: .terminals))
+        XCTAssertNil(MainShortcut.action(for: press("b"), on: .terminals), "⌘B is still the list's")
         XCTAssertEqual(MainRailLayout.help(hidden: false), "Hide Rail ⌥⌘B")
         XCTAssertEqual(MainRailLayout.help(hidden: true), "Show Rail ⌥⌘B")
     }
 
     func testOtherModifiersAreNotTheseShortcuts() {
-        XCTAssertNil(MainShortcut.action(for: press("n", shift: true), on: .dispatch, canGoBack: false))
-        XCTAssertNil(MainShortcut.action(for: press("0", command: false), on: .dispatch, canGoBack: false))
-        XCTAssertNil(MainShortcut.action(for: press("\t", keyCode: MainShortcut.tab, command: false), on: .dispatch, canGoBack: false), "plain Tab")
-        XCTAssertNil(MainShortcut.action(for: press("12"), on: .dispatch, canGoBack: false))
+        XCTAssertNil(MainShortcut.action(for: press("n", shift: true), on: .dispatch))
+        XCTAssertNil(MainShortcut.action(for: press("0", command: false), on: .dispatch))
+        XCTAssertNil(MainShortcut.action(for: press("\t", keyCode: MainShortcut.tab, command: false), on: .dispatch), "plain Tab")
+        XCTAssertNil(MainShortcut.action(for: press("12"), on: .dispatch))
     }
 
     // MARK: the status bar
 
-    func testTheGatewayWord() {
-        let ok = StatusLine("OK", .ok)
-        XCTAssertEqual(MainStatus.gateway(service: ok, gateway: ok), MainStatus.Word("Gateway", .ok))
-        XCTAssertEqual(MainStatus.gateway(service: StatusLine("Starting", .busy), gateway: ok), MainStatus.Word("Starting", .busy))
-        XCTAssertEqual(MainStatus.gateway(service: ok, gateway: StatusLine("Failed", .error)), MainStatus.Word("Gateway Down", .failed))
-        XCTAssertEqual(MainStatus.gateway(service: StatusLine("Stopped", .off), gateway: StatusLine("Starting", .busy)),
-                       MainStatus.Word("Service Down", .failed), "down before starting")
+    func testTheServiceWord() {
+        XCTAssertEqual(MainStatus.service(StatusLine("OK", .ok)), MainStatus.Word("Service", .ok))
+        XCTAssertEqual(MainStatus.service(StatusLine("Starting", .busy)), MainStatus.Word("Starting", .busy))
+        XCTAssertEqual(MainStatus.service(StatusLine("Failed", .error)), MainStatus.Word("Service Down", .failed))
+        XCTAssertEqual(MainStatus.service(StatusLine("Stopped", .off)), MainStatus.Word("Service Down", .failed))
     }
 
     func testThePhonesOnline() {
@@ -315,12 +308,6 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(MainStatus.phones(nil, online: 2, remoteEnabled: true), "2 Devices Online", "the count without the list")
         XCTAssertEqual(MainStatus.phones([device("a", online: true), device("b", online: false)], online: nil, remoteEnabled: true), "iPhone Online",
                        "the list without the count")
-    }
-
-    func testDispatchsRouterAndTopics() {
-        XCTAssertEqual(MainStatus.dispatch(router: "deepseek/deepseek-v4.1-flash", topics: 2), ["Router · DeepSeek V4.1 Flash", "2 Topics"])
-        XCTAssertEqual(MainStatus.dispatch(router: nil, topics: 1), ["1 Topic"])
-        XCTAssertEqual(MainStatus.dispatch(router: "", topics: 0), [])
     }
 
     func testTheTerminalOnScreen() {
@@ -375,13 +362,11 @@ final class MainWindowTests: XCTestCase {
 
     // MARK: trouble
 
-    func testTheBarSaysWhenTheServiceOrTheGatewayIsDown() {
-        let ok = StatusLine("OK", .ok)
-        XCTAssertNil(ServiceTrouble.word(service: ok, gateway: ok))
-        XCTAssertNil(ServiceTrouble.word(service: StatusLine("Starting", .busy), gateway: ok), "starting is not down")
-        XCTAssertEqual(ServiceTrouble.word(service: ok, gateway: StatusLine("Failed", .error)), "Gateway Down")
-        XCTAssertEqual(ServiceTrouble.word(service: ok, gateway: StatusLine("No Response", .warning)), "Gateway Down")
-        XCTAssertEqual(ServiceTrouble.word(service: StatusLine("Stopped", .off), gateway: StatusLine("Failed", .error)), "Service Down",
-                       "the service before the gateway")
+    func testTheBarSaysWhenTheServiceIsDown() {
+        XCTAssertNil(ServiceTrouble.word(service: StatusLine("OK", .ok)))
+        XCTAssertNil(ServiceTrouble.word(service: StatusLine("Starting", .busy)), "starting is not down")
+        XCTAssertEqual(ServiceTrouble.word(service: StatusLine("Failed", .error)), "Service Down")
+        XCTAssertEqual(ServiceTrouble.word(service: StatusLine("No Response", .warning)), "Service Down")
+        XCTAssertEqual(ServiceTrouble.word(service: StatusLine("Stopped", .off)), "Service Down")
     }
 }

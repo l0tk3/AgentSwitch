@@ -148,10 +148,9 @@ final class StatusTextTests: XCTestCase {
         SupervisorState(phase: phase, wanted: true, failures: 1, restarts: 0, lastExit: lastExit)
     }
 
-    func testGateAndDaemonLines() {
-        XCTAssertEqual(StatusText.gate(state(.running(pid: 7, since: now)), healthy: true, port: 8080).level, .ok)
-        XCTAssertEqual(StatusText.gate(state(.running(pid: 7, since: now)), healthy: false, port: 8080).level, .busy)
-        XCTAssertTrue(StatusText.gate(state(.external("x")), healthy: true, port: 8180).text.contains("8180"))
+    func testDaemonLines() {
+        XCTAssertEqual(StatusText.daemon(state(.running(pid: 7, since: now)), ready: true, port: 4711).level, .ok)
+        XCTAssertEqual(StatusText.daemon(state(.running(pid: 7, since: now)), ready: false, port: 4711).level, .busy)
         XCTAssertEqual(StatusText.daemon(state(.failed("端口已被占用")), ready: false, port: 4711), StatusLine("端口已被占用", .error))
         let exit = ExitRecord(status: 1, signaled: false, at: now, uptime: 3)
         let waiting = StatusText.daemon(state(.waitingToRestart(attempt: 2, until: now.addingTimeInterval(4)), lastExit: exit), ready: false, port: 4711, now: now)

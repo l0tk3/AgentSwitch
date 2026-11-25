@@ -28,8 +28,6 @@ private let browserLog = Logger(subsystem: "com.agentswitch.mac", category: "bro
 ///   the browser area ÷ its site's zoom, remembered on this Mac.
 /// - New tabs (the address field, the recent addresses, the Mac's local servers), closing, navigation (a mouse's side
 ///   buttons too).
-/// - Fill Ciphertext (BrowserFillSheet), on your own tabs only: a whole ciphertext, or one sealed here by this Mac's
-///   gate, typed into the page's focused input field through the gate; the footer names what was filled and where.
 @MainActor
 @Observable
 final class BrowserPageModel {
@@ -59,10 +57,6 @@ final class BrowserPageModel {
     private(set) var recents: [String]
     /// Asks the address bar to take the keyboard (⌘L).
     private(set) var addressRequests = 0
-    /// Fill Ciphertext's sheet is open, for this tab.
-    var fillTarget: BrowserFillTarget?
-    /// A fill, or the seal before it, is under way.
-    private(set) var filling = false
     /// The tab list's column: its width and whether it is open, kept on this Mac (`browser.side`).
     var side: BrowserSide {
         didSet { if side != oldValue { defaults?.set(side.stored, forKey: BrowserSide.storeKey) } }
@@ -105,17 +99,6 @@ final class BrowserPageModel {
         }
     }
 
-    /// `[ Fill Ciphertext ]` is offered: this Mac drives the tab on screen, one of your own, on an http(s) page (an
-    /// agent's tab never: the daemon refuses it even while held, as the agent sees the page after the hand-back).
-    var canFill: Bool {
-        // Fill Ciphertext is retired with the gate's ciphertexts (2026-11-25, user #369); DesignPreview still draws it.
-        if !BrowserFillText.stillOffered { return false }
-        if windows { return current.map { BrowserWindowText.buttons($0).contains(.fill) } ?? false }
-        return canDrive && current.map(BrowserFillText.offered(on:)) ?? false
-    }
-    /// `New…` in Fill Ciphertext: this Mac's gate seals here.
-    var canSeal: Bool { sealer != nil }
-
     // MARK: plumbing
 
     /// The browser's identity and engine: the status bar's right end and its box.
@@ -124,10 +107,6 @@ final class BrowserPageModel {
     /// The service as it was given; `service()` is it for the browser chosen.
     @ObservationIgnored private let baseService: () -> any BrowserService
     @ObservationIgnored private let scope: BrowserScope
-    /// Seals a value with this Mac's gate (`GateCLI.seal`, the value on stdin); nil where sealing is not offered.
-    @ObservationIgnored private let sealer: BrowserSealer?
-    /// The fill under way; nil once its sheet is closed (a token still being sealed then fills nothing).
-    @ObservationIgnored private var fillAttempt: UUID?
     @ObservationIgnored private weak var state: MainWindowState?
     @ObservationIgnored private let defaults: UserDefaults?
     /// The window's title follows the tab on screen.
@@ -167,16 +146,15 @@ final class BrowserPageModel {
     private static let claimRetry: Duration = .seconds(5)
 
     /// `defaults`: where the recent addresses, the list's column and the sites' zoom are kept (nil: not kept, the design
-    /// preview). `sealer`: this Mac's gate, for `New…` in Fill Ciphertext.
+    /// preview). `vaultSealer`: seals the proxy's password (BrowserSealer).
     init(service: @escaping () -> any BrowserService, state: MainWindowState?, defaults: UserDefaults? = .standard, recents: [String]? = nil,
-         sealer: BrowserSealer? = nil, vaultSealer: BrowserSealer? = nil) {
+         vaultSealer: BrowserSealer? = nil) {
         let scope = BrowserScope()
         self.scope = scope
         baseService = service
-        self.sealer = sealer
         // The proxy's password is sealed by the node that keeps it (its vault key), on this Mac or another.
         identity = BrowserIdentityModel(service: { scope.scoped(service()) as? any BrowserIdentityService },
-                                        sealer: vaultSealer ?? sealer)
+                                        sealer: vaultSealer)
         self.state = state
         self.defaults = defaults
         self.recents = recents ?? defaults?.stringArray(forKey: BrowserRecents.storeKey) ?? []
@@ -272,8 +250,6 @@ final class BrowserPageModel {
         }
         shown = false
         visible = false
-        fillTarget = nil
-        fillAttempt = nil
         for task in [pollTask, streamTask, inputTask, resizeTask, noteTask, previewTask] { task?.cancel() }
         previewTask = nil
         pollTask = nil
@@ -837,7 +813,6 @@ final class BrowserPageModel {
     func perform(_ action: BrowserWindowText.Action) {
         switch action {
         case .show: Task { await showWindow() }
-        case .fill: openFill()
         case .handBack: Task { await handBackWindow() }
         case .copy: copyURL()
         case .close: if let id = selectedID { Task { await close(id) } }
@@ -862,71 +837,6 @@ final class BrowserPageModel {
         defaults?.set(recents, forKey: BrowserRecents.storeKey)
     }
 
-    // MARK: Fill Ciphertext
-
-    /// `[ Fill Ciphertext ]`: the sheet, for the tab on screen (the fill goes to that tab even if another comes on
-    /// screen meanwhile), with the page's site for a new ciphertext.
-    func openFill() {
-        guard canFill, let tab = current else { return }
-        fillTarget = BrowserFillTarget(tabId: tab.id, site: GateSealRequest.host(of: tab.url))
-    }
-
-    /// A pasted ciphertext into the tab's focused input field. Nil when it was filled (the footer names what and
-    /// where); the reason otherwise, for the sheet.
-    func fill(_ token: String, into tabId: String) async -> String? {
-        let attempt = beginFill()
-        defer { endFill(attempt) }
-        return await send(token, into: tabId)
-    }
-
-    /// `New…`: the value sealed by this Mac's gate for the sites given (`GateSealRequest`, as the Dispatch page's New
-    /// Ciphertext), then filled at once, unless the sheet was closed meanwhile (nothing is typed then). The token comes
-    /// back for the sheet to keep when the fill fails (a ciphertext, not the value; the value is kept nowhere).
-    func sealAndFill(_ request: GateSealRequest, into tabId: String) async -> (token: String?, failure: String?) {
-        guard let sealer else { return (nil, "此处无法生成密文。") }
-        let attempt = beginFill()
-        defer { endFill(attempt) }
-        let token: String
-        do {
-            token = try await sealer(request)
-        } catch {
-            return (nil, error.localizedDescription)
-        }
-        guard fillAttempt == attempt else { return (token, nil) }
-        return (token, await send(token, into: tabId))
-    }
-
-    /// The sheet is closed: a seal still under way fills nothing.
-    func cancelFill() { fillAttempt = nil }
-
-    private func beginFill() -> UUID {
-        let attempt = UUID()
-        fillAttempt = attempt
-        filling = true
-        return attempt
-    }
-
-    /// A newer attempt may be under way: only it says when filling is over.
-    private func endFill(_ attempt: UUID) {
-        if fillAttempt == nil || fillAttempt == attempt { filling = false }
-    }
-
-    private func send(_ token: String, into tabId: String) async -> String? {
-        if let problem = BrowserFillText.problem(token) { return problem }
-        guard let tab = list.tab(tabId) else { return "此标签已关闭。" }
-        guard BrowserFillText.offered(on: tab.url) else { return "只能在 http(s) 页面中填入密文。" }
-        do {
-            let result = try await service().fill(tabId: tabId, token: token.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  screen: screenID)
-            if let fresh = result.tab { replace(fresh) }
-            say(BrowserFillText.done(result))
-            screen.window?.makeFirstResponder(screen)
-            return nil
-        } catch {
-            return BrowserFillText.reason(error)
-        }
-    }
-
     // MARK: notes
 
     /// A line in the footer for a few seconds (four, unless said otherwise).
@@ -948,16 +858,8 @@ final class BrowserPageModel {
     }
 }
 
-/// Seals one value with this Mac's gate and gives the ciphertext (`GateCLI.seal`).
+/// Seals one value with the vault key of the node that keeps it (`POST /vault/seal`) and gives what stands for it.
 typealias BrowserSealer = @MainActor (GateSealRequest) async throws -> String
-
-/// Fill Ciphertext's sheet: the tab it fills (the one on screen when it opened) and that page's site, prefilled as the
-/// sites a new ciphertext may be used on.
-struct BrowserFillTarget: Identifiable, Equatable {
-    let tabId: String
-    let site: String
-    var id: String { tabId }
-}
 
 /// Which browser a Browser page's calls are for, shared by the page's model and its identity's.
 final class BrowserScope: @unchecked Sendable {

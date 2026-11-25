@@ -4,9 +4,7 @@ import Foundation
 import Observation
 import SystemConfiguration
 
-/// App state and the runtime: two supervised children (gate, daemon), a poll loop, Bonjour, environment checks.
-/// With the gate installed as a system service (docs/gate-service-v0.md) the gate child is never started: the app
-/// watches the service and passes its public directory on (AppModel+GateService.swift).
+/// App state and the runtime: the supervised daemon, a poll loop, Bonjour, environment checks.
 /// Everything the views show lives here; every mutation replaces whole values.
 @MainActor
 @Observable
@@ -25,12 +23,10 @@ final class AppModel {
 
     // MARK: runtime state
 
-    private(set) var gateState = SupervisorState.initial
     private(set) var daemonState = SupervisorState.initial
-    private(set) var gateHealthy = false
     private(set) var daemonReady = false
     #if DEBUG
-    /// DispatchProbe: a service this app does not supervise is up (the probe's `-localPort`).
+    /// A probe: a service this app does not supervise is up (the probe's `-localPort`).
     func probeServiceUp() { daemonReady = true }
     #endif
     private(set) var remote: RemoteInfo?
@@ -39,13 +35,8 @@ final class AppModel {
     private(set) var loginPath: LoginShellPath.Resolution?
     private(set) var harnesses: [HarnessReport] = []
     private(set) var tailscale: TailscaleStatus?
-    private(set) var caCopy: GateCA.CopyResult?
-    private(set) var caTrusted = false
-    private(set) var keys: [Keypair] = []
     private(set) var bonjourStatus = StatusLine("Off", .off)
     private(set) var detecting = false
-    /// First-run facts worth telling once (keypair created, CA copied).
-    private(set) var notices: [String] = []
     /// The build time of a newer AgentSwitch.app staged next to this one (assistant-v0 §5), if any.
     private(set) var stagedUpdate: String?
     /// `GET /quota` (docs/ui-v0.md §4.2): nil until the daemon first answers, empty from one without the route.
@@ -80,28 +71,10 @@ final class AppModel {
     @ObservationIgnored var agentsShare: Task<Void, Never>?
     @ObservationIgnored var agentsShared: Data?
 
-    // MARK: gate service (docs/gate-service-v0.md); written by AppModel+GateService.swift
-
-    /// What `system status --json` and the disk say; `.unknown` until the first check at launch.
-    var gateService = GateServiceState.unknown
-    /// The mode the children run in; switches only through `adoptGateMode()`.
-    var gateMode: GateRunMode = .userProcess
-    var serviceHealth = GateServiceHealth.initial
-    /// An install, update or uninstall under way (one at a time).
-    var gateServiceOperation: GateServiceOperation?
-    /// The last one's outcome, shown by the sheet that started it.
-    var gateServiceResult: GateServiceResult?
-    /// The confirmation sheet on screen (环境, 通用, the wizard).
-    var gateServiceRequest: GateServiceRequest?
-    /// Keychain trust of the pre-install CA and the regenerated one, while a copy of the old one is kept.
-    var previousCA: PreviousCATrust?
-    /// When `system status --json` last ran (AppModel+GateService throttles it).
-    @ObservationIgnored var lastServiceStatus: Date?
-
     let pairingSession = PairingSession()
     /// The nodes this Mac uses (docs/mesh-v0.md).
     let nodes = NodesStore()
-    /// The daemon-side settings of control-v0 §1–2: approval policy and the default work dir.
+    /// The daemon-side setting of control-v0 §2: the default work dir.
     let control = ControlSettings()
     /// The device list has been read at least once; until then the checklist and the first-run wizard do not know
     /// whether a phone is paired.
@@ -120,15 +93,12 @@ final class AppModel {
     // MARK: plumbing
 
     @ObservationIgnored let config: Locked<RuntimeConfig>
-    @ObservationIgnored private(set) var gate: ProcessSupervisor!
     @ObservationIgnored private(set) var daemon: ProcessSupervisor!
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private let bonjour = BonjourAdvertiser()
-    @ObservationIgnored private var gateMisses = 0
     @ObservationIgnored private var daemonMisses = 0
     static let pollInterval: Duration = .seconds(3)
-    /// Consecutive failed checks before a running child is restarted (after its start-up grace).
-    static let gateMissLimit = 5
+    /// Consecutive failed checks before the running daemon is restarted (after its start-up grace).
     static let daemonMissLimit = 10
     /// The daemon discovers models before it listens; a Claude CLI that waits on a Keychain prompt takes its full
     /// 30 s discovery timeout, so the grace must cover that plus start-up.
@@ -168,8 +138,6 @@ final class AppModel {
         config = Locked(RuntimeConfig(paths: paths, ports: ports, options: options, path: LoginShellPath.merge(shellPath: nil, home: home.path),
                                       baseEnvironment: base, remoteName: name, remoteEnabled: remoteEnabled))
         let box = config
-        gate = ProcessSupervisor(name: "gate", preflight: { await RuntimePreflight.gate(box.get()) },
-                                 observer: { [weak self] s in Task { @MainActor in self?.gateChanged(s) } })
         daemon = ProcessSupervisor(name: "daemon", preflight: { await RuntimePreflight.daemon(box.get()) },
                                    observer: { [weak self] s in Task { @MainActor in self?.daemonChanged(s) } })
         bonjour.onStatus = { [weak self] line in self?.bonjourStatus = line }
@@ -183,24 +151,14 @@ final class AppModel {
     }
     /// The service of node `id` through this Mac's own (docs/mesh-v0.md §5.2); nil: this Mac's.
     func client(on id: String?) -> DaemonClient { client.onNode(id, as: nodes.node(id)?.deviceId) }
-    var gateCLI: GateCLI { config.get().gateCLI }
 
     // MARK: status lines
 
-    /// The service's line while it is installed or an operation runs; the own child's otherwise.
-    var gateLine: StatusLine {
-        showsServiceGate ? GateServiceText.line(gateServiceFacts) : StatusText.gate(gateState, healthy: gateHealthy, port: ports.gate)
-    }
-    /// One word for the menu row.
-    var gateShortLine: StatusLine {
-        showsServiceGate ? GateServiceText.short(gateServiceFacts) : StatusText.service(gateState, ready: gateHealthy)
-    }
-    private var showsServiceGate: Bool { gateMode.isService || gateServiceOperation != nil }
     var daemonLine: StatusLine { StatusText.daemon(daemonState, ready: daemonReady, port: ports.local) }
     var remoteLine: StatusLine { StatusText.remote(remote, problem: remoteProblem, daemonReady: daemonReady, enabled: remoteEnabled) }
     var devicesLine: StatusLine { StatusText.devices(devices, online: remote?.onlineDevices) }
     var bonjourLine: StatusLine { StatusText.bonjour(bonjourStatus, remoteEnabled: remoteEnabled) }
-    var overallLevel: StatusLevel { StatusText.overall([gateLine, daemonLine]) }
+    var overallLevel: StatusLevel { StatusText.overall([daemonLine]) }
     var lanAddresses: [String] { remote?.lan.isEmpty == false ? remote!.lan : NetworkAddresses.lanIPv4() }
     var tailnetAddresses: [String] { remote?.tailnet ?? [] }
     var activeDevices: [Device] { devices.filter { !$0.isRevoked } }
@@ -210,8 +168,7 @@ final class AppModel {
 
     // MARK: lifecycle
 
-    /// First run and every launch: login PATH, which gate (system service or own child), the gate (keypair on first
-    /// run), then the daemon, then polling.
+    /// First run and every launch: login PATH, then the daemon, then polling.
     func launch() {
         Task {
             do {
@@ -224,15 +181,11 @@ final class AppModel {
             loginPath = resolution
             config.set(makeConfig(ports: ports, path: resolution.path))
             sweepAgentStore()
-            await detectGateService()
-            setGateMode(gateService.runMode(paths: paths.gateService, fallbackPort: ports.gate))
-            await startGate()
             await daemon.start()
             startPolling()
             detectEnvironment()
             watchAgentUpdates()
             shareAgents()
-            refreshKeys()
         }
     }
 
@@ -241,31 +194,11 @@ final class AppModel {
         agentWatch?.cancel()
         bonjour.update(nil)
         await daemon.stop()
-        await gate.stop()
     }
 
-    /// 重启服务: the daemon, and the gate when it is the app's own child (the system service is launchd's).
+    /// 重启服务: the daemon.
     func restartAll() {
-        Task {
-            if gateMode.isService {
-                await detectGateService()
-            } else {
-                await gate.restart()
-                _ = await waitFor(seconds: 20) { self.gateState.isServing && self.gateHealthy || self.gateState.phase.isFailed }
-            }
-            await daemon.restart()
-        }
-    }
-
-    /// User process: a keypair first, then the child, waited for. Service: nothing to start; a short wait for it.
-    func startGate() async {
-        if gateMode.isService {
-            _ = await waitFor(seconds: 10) { self.serviceHealth.verdict == .responding }
-            return
-        }
-        await ensureKeypair()
-        await gate.start()
-        _ = await waitFor(seconds: 20) { self.gateState.isServing && self.gateHealthy || self.gateState.phase.isFailed }
+        Task { await daemon.restart() }
     }
 
     func restartDaemon() {
@@ -273,8 +206,7 @@ final class AppModel {
         Task { await daemon.restart() }
     }
 
-    /// New ports take effect by restarting both children (the daemon also points at the gate port). In service mode
-    /// a new gate port goes through `system update --port` first (GeneralView asks; AppModel+GateService saves).
+    /// New ports take effect by restarting the daemon.
     func applyPorts(_ next: PortSettings) {
         storePorts(next)
         restartAll()
@@ -312,24 +244,7 @@ final class AppModel {
         let chosen = AgentSelection.binaries(AgentInventory.scan(layout: agentLayout, path: path), saved: agentUse)
         return RuntimeConfig(paths: paths, ports: ports, options: options, path: path, baseEnvironment: baseEnvironment,
                              remoteName: computerName, opencodeBinary: chosen[.opencode], claudeBinary: chosen[.claude],
-                             codexBinary: chosen[.codex], piBinary: chosen[.pi], remoteEnabled: remoteEnabled, gateMode: gateMode)
-    }
-
-    /// The mode and the ports that follow from it (the service's proxy port is the gate port), saved, and the config
-    /// the next launches read. Starts and stops nothing.
-    func setGateMode(_ mode: GateRunMode) {
-        gateMode = mode
-        serviceHealth = .initial
-        if case .service(_, let port) = mode, port != ports.gate {
-            ports = ports.with(gate: port)
-            UserDefaults.standard.set(port, forKey: PortSettings.Keys.gate)
-        }
-        config.set(makeConfig(ports: ports, path: config.get().path))
-    }
-
-    private func gateChanged(_ s: SupervisorState) {
-        if !s.isServing { gateHealthy = false }
-        gateState = s
+                             codexBinary: chosen[.codex], piBinary: chosen[.pi], remoteEnabled: remoteEnabled)
     }
 
     private func daemonChanged(_ s: SupervisorState) {
@@ -342,16 +257,6 @@ final class AppModel {
             pairingSession.reset()
         }
         daemonState = s
-    }
-
-    func waitFor(seconds: TimeInterval, _ condition: @MainActor () -> Bool) async -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while Date() < deadline {
-            if condition() { return true }
-            await pollGate()
-            try? await Task.sleep(for: .milliseconds(300))
-        }
-        return condition()
     }
 
     // MARK: polling
@@ -368,7 +273,6 @@ final class AppModel {
 
     func pollOnce() async {
         guard !isDemo else { return }
-        await pollGate()
         await pollDaemon()
         pollUpdate()
     }
@@ -487,32 +391,6 @@ final class AppModel {
         exitApp()
     }
 
-    /// The system service's health in service mode; the own child's otherwise, plus a look for a service installed
-    /// meanwhile (the app then switches over).
-    private func pollGate() async {
-        if gateMode.isService { return await pollService() }
-        await pollUserGate()
-        await watchForService()
-    }
-
-    private func pollUserGate() async {
-        let port = ports.gate
-        let result = await Task.detached { GateProbe.probe(port: port) }.value
-        gateHealthy = gateState.isServing && result.isGate
-        gateMisses = result.isGate ? 0 : gateMisses + 1
-        switch gateState.phase {
-        case .external where gateMisses >= 2:
-            gateMisses = 0
-            await gate.reportExternalLost()
-        case .running(_, let since) where gateMisses >= AppModel.gateMissLimit && Date().timeIntervalSince(since) > AppModel.startupGrace:
-            gateMisses = 0
-            await gate.reportUnhealthy(result.detail)
-        default:
-            break
-        }
-        if gateHealthy, caCopy == nil || caCopy == .sourceMissing { syncCA() }
-    }
-
     private func pollDaemon() async {
         guard case .running(_, let since) = daemonState.phase else { return }
         let client = client
@@ -598,15 +476,12 @@ final class AppModel {
         let path = config.get().path
         let home = paths.userHome.path
         let env = baseEnvironment
-        let ca = gateCA
         Task {
             async let reports = HarnessDetector(path: path, home: home, environment: env).detectAll()
             async let ts = Tailscale.detect(path: path, environment: env)
             harnesses = await reports
             loginWatch = loginWatch.settled(by: harnesses, now: Date())
             tailscale = await ts
-            caTrusted = await Task.detached { GateCA.isTrusted(ca) }.value
-            await checkPreviousCA()
             lastDetected = Date()
             detecting = false
         }
@@ -642,7 +517,7 @@ final class AppModel {
     var setupItems: [SetupItem] {
         SetupChecklist.items(SetupFacts(harnesses: harnesses, devices: devicesKnown ? devices : nil, tailscale: tailscale,
                                         tailnet: tailnetAddresses, workDir: control.workDir, home: paths.userHome.path,
-                                        gateService: gateServiceFacts, installing: harnessesInstalling, installFailed: harnessInstallsFailed,
+                                        installing: harnessesInstalling, installFailed: harnessInstallsFailed,
                                         agentUpdates: agentUpdateCount))
     }
 
@@ -659,69 +534,6 @@ final class AppModel {
     }
 
     var setupUnmet: Int { SetupChecklist.unmet(setupItems) }
-
-    /// `~/.secret-gate/ca.pem` follows the CA mitmproxy wrote on the proxy's first start (no keychain change).
-    func syncCA() {
-        let source = paths.mitmproxyCA, target = paths.gateCA
-        Task {
-            do {
-                let result = try await Task.detached { try GateCA.ensureCopy(from: source, to: target) }.value
-                caCopy = result
-                if result == .copied { notices.append("网关证书已复制到 \(shortPath(target))") }
-                if result == .replaced { notices.append("网关证书已更新：\(shortPath(target))") }
-                caTrusted = await Task.detached { GateCA.isTrusted(target) }.value
-            } catch {
-                errorMessage = "复制网关证书失败：\(error.localizedDescription)"
-            }
-        }
-    }
-
-    // MARK: keys
-
-    /// First run: `keygen` when the gate home has no key (the gate preflight would make one too). Never in service
-    /// mode: the service made its own key at install.
-    func ensureKeypair() async {
-        guard paths.runtime.missing().isEmpty, !gateMode.isService else { return }
-        do {
-            let (list, created) = try await gateCLI.ensureKeypair()
-            keys = list
-            if created { notices.append("已新建网关密钥对（\(shortPath(paths.gateHome))）") }
-        } catch {
-            errorMessage = "无法准备网关密钥对：\(error.localizedDescription)"
-        }
-    }
-
-    func refreshKeys() {
-        guard !isDemo else { return }
-        let cli = gateCLI
-        Task {
-            do { keys = try await cli.listKeys() } catch { errorMessage = error.localizedDescription }
-        }
-    }
-
-    /// No service: `keygen --force` after the Keys page's confirmation (with the service it is the administrator path,
-    /// GateServiceOperation.rotateKey). Ciphertexts sealed for the old key stop working.
-    func rotateKeyLocally() {
-        guard !isDemo, !gateMode.isService else { return }
-        let cli = gateCLI
-        Task {
-            do {
-                keys = try await cli.keygen(force: true)
-                notices.append("网关密钥已轮换。已有的密文需要用新公钥重新封装。")
-            } catch {
-                errorMessage = "无法轮换网关密钥：\(error.localizedDescription)"
-            }
-        }
-    }
-
-    func addNotice(_ text: String) { notices.append(text) }
-    func clearNotices() { notices = [] }
-
-    /// The gate CA executors trust: `~/.secret-gate/ca.pem`, or the service's published `gate-public/ca.pem`.
-    var gateCA: URL { paths.gateCA(in: gateMode) }
-
-    /// The CA file is there (the user gate copies it on its first start; the service publishes it).
-    var caFilePresent: Bool { isDemo || FileManager.default.fileExists(atPath: gateCA.path) }
 
     /// `name=version` of the bundled runtime (VERSIONS).
     var runtimeVersions: [String: String] {
@@ -741,17 +553,13 @@ final class AppModel {
 
     /// `-designPreview`: every piece of state a view reads, from DemoData; the daemon API answers from DemoTransport.
     /// `fresh`: a Mac on its first run (no phone paired, Codex missing, OpenCode logged out, Tailscale stopped).
-    /// `gate`: the credential gate's state (docs/gate-service-v0.md); a set-up Mac runs it as a system service.
-    func loadDemo(fresh: Bool = false, gate demoGate: DemoGate? = nil) {
+    func loadDemo(fresh: Bool = false) {
         isDemo = true
         let backend = demoBackend ?? DemoBackend(home: paths.userHome.path)
         backend.set(pairedDevices: !fresh)
         demoBackend = backend
         demoTransport = DemoTransport(backend: backend)
         let now = Date()
-        gateState = SupervisorState(phase: .running(pid: 51234, since: now.addingTimeInterval(-3 * 3600)), wanted: true,
-                                    failures: 0, restarts: 0, lastExit: nil)
-        gateHealthy = true
         daemonState = SupervisorState(phase: .running(pid: 51240, since: now.addingTimeInterval(-3 * 3600)), wanted: true,
                                       failures: 0, restarts: 0, lastExit: nil)
         daemonReady = true
@@ -764,48 +572,9 @@ final class AppModel {
         harnesses = fresh ? DemoData.freshHarnesses(home: paths.userHome.path) : DemoData.harnesses(home: paths.userHome.path)
         loadDemoAgents(fresh: fresh)
         tailscale = fresh ? DemoData.tailscaleStopped : DemoData.tailscale
-        caCopy = .upToDate
-        caTrusted = false
-        keys = DemoData.keys
-        loadDemoGate(demoGate ?? (fresh ? .notInstalled : .installed))
         bonjourStatus = StatusLine("Published · Port 4713", .ok)
-        // The user-process gate makes `default` on first run; the service makes `main` at install (no notice).
-        notices = fresh || (demoGate ?? .installed).installed ? [] : ["已新建网关密钥对"]
         stagedUpdate = fresh ? nil : DemoData.stagedBuild
         quota = DemoData.quota(now: now, fresh: fresh)
     }
-
-    /// The gate part of the demo: the service's state, health, keys and keychain rows.
-    private func loadDemoGate(_ demo: DemoGate) {
-        let service = paths.gateService
-        gateServiceOperation = demo == .installing ? .install : nil
-        gateServiceResult = nil
-        gateServiceRequest = nil
-        previousCA = demo == .justInstalled ? PreviousCATrust(oldTrusted: true, newTrusted: false) : nil
-        guard demo.installed else {
-            gateService = DemoData.gateService(installed: false)
-            gateMode = .userProcess
-            serviceHealth = .initial
-            if demo == .installing {
-                gateState = SupervisorState(phase: .stopped, wanted: false, failures: 0, restarts: 0, lastExit: nil)
-                gateHealthy = false
-            }
-            return
-        }
-        gateService = DemoData.gateService(installed: true, running: demo != .notResponding,
-                                           runtimeVersion: demo == .updateAvailable ? DemoData.olderGateBuild : DemoData.installedGateBuild)
-        gateMode = .service(publicDir: service.publicDir, proxyPort: ports.gate)
-        serviceHealth = demo == .notResponding ? GateServiceHealth(checks: 40, misses: 3) : GateServiceHealth(checks: 40, misses: 0)
-        gateState = .initial
-        gateHealthy = false
-        keys = DemoData.serviceKeys
-    }
     #endif
-}
-
-extension SupervisorPhase {
-    var isFailed: Bool {
-        if case .failed = self { return true }
-        return false
-    }
 }

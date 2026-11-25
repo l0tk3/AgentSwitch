@@ -2,40 +2,24 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// Opens the settings window on a page, from anywhere in the app (the Dispatch page's `Settings…`).
+/// Opens the settings window on a page, from anywhere in the app.
 @MainActor enum SettingsOpener {
     static var show: (SettingsTab) -> Void = { _ in }
 }
 
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, nodes, models, keys, redaction, agents, profiles, addons, environment, general
-    /// The new dispatch (2026-11-24): a session at the 调度台 room (DispatchDeskView).
+    case pairing, nodes, models, redaction, agents, profiles, addons, environment, general
+    /// The dispatch (2026-11-24): a session at the 调度台 room (DispatchDeskView).
     case desk
-    /// Dispatch's own settings (docs/dispatch-v0.md §3): one row in the sidebar, its parts chosen at the top of the
-    /// page (2026-11-22, user: dispatch应该单独做一个选项，然后里面是分组的各个设置). `dispatchModels` and `permissions`
-    /// were among the app's pages before: the model that dispatches and the default target, and who approves what
-    /// a dispatched task asks for — neither is about anything but Dispatch.
-    case dispatchModels, permissions, context, extensions, log, history
 
     var id: String { rawValue }
-
-    /// The sidebar's first block, without a header.
-    // Keys (the gate's keypair) is retired (2026-11-25, user #369: secret-gate 弃用): nothing new is sealed with it.
-    static let app: [SettingsTab] = [.pairing, .nodes, .models, .redaction, .agents, .profiles, .addons, .environment, .general, .desk]
-    /// The parts of the sidebar's `Dispatch` page, in the order its switch shows them.
-    static let dispatch: [SettingsTab] = [.dispatchModels, .permissions, .context, .extensions, .log, .history]
-    var isDispatch: Bool { Self.dispatch.contains(self) }
-    /// What the window is called while this page shows.
-    var windowTitle: String { isDispatch ? "Dispatch" : title }
 
     var title: String {
         switch self {
         case .pairing: return "Pairing"
         case .nodes: return "Nodes"
-        case .models, .dispatchModels: return "Models"
-        case .permissions: return "Permissions"
-        case .keys: return "Keys"
+        case .models: return "Models"
         case .redaction: return "Redaction"
         case .agents: return "Agents"
         case .profiles: return "Profiles"
@@ -43,10 +27,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .environment: return "Environment"
         case .general: return "General"
         case .desk: return "Dispatch"
-        case .context: return "Context"
-        case .extensions: return "Extensions"
-        case .log: return "Log"
-        case .history: return "History"
         }
     }
 
@@ -54,9 +34,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "qrcode"
         case .nodes: return "point.3.connected.trianglepath.dotted"
-        case .models, .dispatchModels: return "cpu"
-        case .permissions: return "checkmark.shield"
-        case .keys: return "key"
+        case .models: return "cpu"
         case .redaction: return "eye.slash"
         case .agents: return "shippingbox"
         case .profiles: return "person.crop.rectangle.stack"
@@ -64,10 +42,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .environment: return "checklist"
         case .general: return "gearshape"
         case .desk: return "person.crop.circle.badge.checkmark"
-        case .context: return "doc.text"
-        case .extensions: return "puzzlepiece.extension"
-        case .log: return "list.bullet.rectangle"
-        case .history: return "clock.arrow.circlepath"
         }
     }
 }
@@ -101,25 +75,17 @@ extension EnvironmentValues {
 @MainActor
 @Observable
 final class SettingsNavigation {
-    var tab: SettingsTab = .pairing { didSet { if tab.isDispatch { dispatchPart = tab } } }
-    /// The part of the Dispatch page shown last: the sidebar's row goes back to it.
-    private(set) var dispatchPart: SettingsTab = .dispatchModels
+    var tab: SettingsTab = .pairing
     /// The first-run wizard's current step while it is open over the window (docs/control-v0.md §6).
     var wizardStep: SetupStep?
     @ObservationIgnored let wizardStore: SetupWizardStore
-    /// Context's files and edits (ContextSettingsStore): kept while the window is closed.
-    @ObservationIgnored let context = ContextSettingsStore()
-    /// A page asked for while Context has edits not yet saved: the window asks first (Save, Don't Save, Cancel).
-    var pendingTab: SettingsTab?
 
     init(wizardStore: SetupWizardStore = SetupWizardStore(defaults: .standard)) {
         self.wizardStore = wizardStore
     }
 
-    /// Another page; leaving Context with unsaved edits waits for the answer to `pendingTab`.
     func select(_ next: SettingsTab) {
-        guard next != tab else { return }
-        if tab == .context && context.dirty { pendingTab = next } else { tab = next }
+        if next != tab { tab = next }
     }
 
     func openWizard(at step: SetupStep = .executors) { wizardStep = step }
@@ -150,8 +116,6 @@ final class SettingsWindowController {
     private(set) var window: NSWindow?
     /// Told when the window opens (true) or closes (false), for the Dock icon.
     var onVisibilityChange: (Bool) -> Void = { _ in }
-    /// Opens a task's page in the main window (History's hits and topics, Log's and Context's links to a task).
-    var openTask: (String) -> Void = { _ in }
     private var closeObserver: NSObjectProtocol?
     private var pageObserver: NSObjectProtocol?
     private var keyMonitor: Any?
@@ -173,8 +137,7 @@ final class SettingsWindowController {
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// Opens the settings window on `tab` from a view that has no hold of the controller (the main window's settings
-    /// button opens the Dispatch group's first page, docs/dispatch-v0.md §1).
+    /// Opens the settings window on `tab` from a view that has no hold of the controller.
     nonisolated static func request(_ tab: SettingsTab) {
         NotificationCenter.default.post(name: pageRequest, object: nil, userInfo: ["tab": tab.rawValue])
     }
@@ -190,8 +153,8 @@ final class SettingsWindowController {
     /// The window, not yet on screen; `-designPreview` draws the same one off-screen. System Settings style: a sidebar
     /// under a unified toolbar that carries the page title and the page's own actions (SwiftUI bridges both).
     static func makeWindow(model: AppModel, navigation: SettingsNavigation, windowClass: NSWindow.Type = NSWindow.self,
-                           appearance: NSAppearance? = nil, dispatch: DispatchSettingsEnvironment = DispatchSettingsEnvironment()) -> NSWindow {
-        let root = SettingsView().environment(model).environment(navigation).environment(\.dispatchSettings, dispatch).followsWindow()
+                           appearance: NSAppearance? = nil) -> NSWindow {
+        let root = SettingsView().environment(model).environment(navigation).followsWindow()
         let window = windowClass.init(contentRect: NSRect(origin: .zero, size: contentSize),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                       backing: .buffered, defer: false)
@@ -210,9 +173,7 @@ final class SettingsWindowController {
     static let contentSize = NSSize(width: 780, height: 560)
 
     private func makeWindow() -> NSWindow {
-        let window = SettingsWindowController.makeWindow(
-            model: model, navigation: navigation,
-            dispatch: DispatchSettingsEnvironment(openTask: { [weak self] id in self?.openTask(id) }))
+        let window = SettingsWindowController.makeWindow(model: model, navigation: navigation)
         window.center()
         closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.onVisibilityChange(false) }
@@ -254,73 +215,37 @@ final class SettingsWindowController {
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(SettingsNavigation.self) private var navigation
-    @Environment(\.dispatchSettings) private var dispatch
 
     var body: some View {
         NavigationSplitView {
             List(selection: selection) {
-                ForEach(SettingsTab.app) { tab in
+                ForEach(SettingsTab.allCases) { tab in
                     // Agents: how many installs have an update (docs/agents-v0.md §4). The tag goes on last: with the
                     // badge outside it the list does not take the row for one it may select (macOS 27; the whole
                     // first group could not be clicked, 2026-10-06).
                     Label(tab.title, systemImage: tab.symbol).badge(tab == .agents ? model.agentUpdateCount : 0).tag(tab)
                 }
-                // One row for all of Dispatch's settings: tagged with the part it opens, the one shown last.
-                // Greyed out and not clickable while the old dispatch is off (OldDispatch).
-                Label("Old Dispatch", systemImage: "arrow.triangle.branch").oldDispatchOff().tag(navigation.dispatchPart)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             VStack(spacing: 0) {
                 ErrorBanner()
-                if navigation.tab.isDispatch, !OldDispatch.off {
-                    Picker("Dispatch", selection: selection) {
-                        ForEach(SettingsTab.dispatch) { part in Text(part.title).tag(Optional(part)) }
-                    }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize()
-                    .padding(.top, 12).padding(.bottom, 4)
-                }
-                // Any of Dispatch's parts while the old dispatch is off (`-openSettings log`, say): `Dispatch Off`.
-                Group { if navigation.tab.isDispatch && OldDispatch.off { OldDispatchPlaceholder() } else { page(navigation.tab) } }
+                page(navigation.tab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            // The wizard shows it itself while it is up: one sheet at a time.
-            .gateServiceSheet(model, active: navigation.wizardStep == nil)
         }
-        .navigationTitle(navigation.tab.windowTitle)
-        .background(WindowTitle(title: navigation.tab.windowTitle))
+        .navigationTitle(navigation.tab.title)
+        .background(WindowTitle(title: navigation.tab.title))
         .frame(minWidth: 720, minHeight: 480)
         .tint(.brand)
         .sheet(isPresented: wizardShown) {
             SetupWizardView().environment(model).environment(navigation)
         }
-        .alert("保存更改？", isPresented: leaving, presenting: navigation.pendingTab) { next in
-            // Each button dismisses the alert (which clears `pendingTab`); the page changes once the edits are dealt with.
-            Button("Save") {
-                Task {
-                    if await navigation.context.save(DispatchSettingsSource(model: model, environment: dispatch).service) {
-                        navigation.tab = next
-                    }
-                }
-            }
-            Button("Don't Save", role: .destructive) {
-                navigation.context.revert()
-                navigation.tab = next
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("\(navigation.context.dirtyFiles.joined(separator: " 和 ")) 有未保存的更改。")
-        }
     }
 
     private var wizardShown: Binding<Bool> {
         Binding(get: { navigation.wizardStep != nil }, set: { if !$0 { navigation.wizardStep = nil } })
-    }
-
-    /// Context's unsaved edits, asked about before another page opens.
-    private var leaving: Binding<Bool> {
-        Binding(get: { navigation.pendingTab != nil }, set: { if !$0 { navigation.pendingTab = nil } })
     }
 
     private var selection: Binding<SettingsTab?> {
@@ -333,9 +258,6 @@ struct SettingsView: View {
         case .pairing: PairingView()
         case .nodes: NodesView()
         case .models: ModelsView()
-        case .dispatchModels: ModelsView(dispatch: true)
-        case .permissions: PermissionsView()
-        case .keys: KeysView()
         case .redaction: RedactionView()
         case .agents: AgentsSettingsView()
         case .profiles: ProfilesSettingsView()
@@ -343,10 +265,6 @@ struct SettingsView: View {
         case .environment: EnvironmentView()
         case .desk: DispatchDeskView()
         case .general: GeneralView()
-        case .context: ContextSettingsPage()
-        case .extensions: ExtensionsSettingsPage()
-        case .log: RoutingLogSettingsPage()
-        case .history: HistorySettingsPage()
         }
     }
 }

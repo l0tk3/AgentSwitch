@@ -53,12 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var main: MainWindowController { mainWindows.main }
     /// Terminals in windows of their own, beside the main window (docs/dispatch-v0.md §1 单独的窗口).
     lazy var windows = TerminalWindows(client: { [model] in model.client })
-    /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's. A task opens on the main
-    /// window's Dispatch page, a terminal on its Terminals page; what is open there in the window in use needs no telling.
+    /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's. A terminal opens on the
+    /// main window's Terminals page; what is on screen there in the window in use needs no telling.
     lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id, node in self?.mainWindows.show(terminal: id, node: node) },
-                                 openTask: { [weak self] id, node in self?.mainWindows.show(task: id, node: node) },
-                                 watching: { [weak self] in (self?.mainWindows.watchingTerminals ?? []).union(self?.windows.watching ?? []) },
-                                 watchingTask: { [weak self] in self?.mainWindows.watchingTask })
+                                 watching: { [weak self] in (self?.mainWindows.watchingTerminals ?? []).union(self?.windows.watching ?? []) })
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []
@@ -84,11 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    /// `-terminalProbe <dir>` / `-dispatchProbe <dir>` / `-browserProbe <dir>`: the main window on one page alone against
-    /// a running service (TerminalProbe.swift, DispatchProbe.swift, BrowserProbe.swift).
+    /// `-terminalProbe <dir>` / `-browserProbe <dir>`: the main window on one page alone against a running service
+    /// (TerminalProbe.swift, BrowserProbe.swift).
     static var probeOnly: Bool {
         #if DEBUG
-        return TerminalProbe.directory != nil || DispatchProbe.directory != nil || BrowserProbe.directory != nil || PerfProbe.directory != nil || NodesProbe.directory != nil || FilesProbe.directory != nil
+        return TerminalProbe.directory != nil || BrowserProbe.directory != nil || PerfProbe.directory != nil || NodesProbe.directory != nil || FilesProbe.directory != nil
         #else
         return false
         #endif
@@ -118,11 +116,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
             wireWindows()
             TerminalProbe.run(main, into: dir)
-            return
-        }
-        if let dir = DispatchProbe.directory {
-            NSApp.setActivationPolicy(.accessory)
-            DispatchProbe.run(main, model: model, into: dir)
             return
         }
         if let dir = FilesProbe.directory {
@@ -160,7 +153,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsOpener.show = { [weak self] tab in self?.settings.show(tab) }
         wireWindows()
         windows.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminal-windows", open) }
-        settings.openTask = { [weak self] id in self?.mainWindows.show(task: id) }
         live.onSnapshot = { [weak self] snapshot in
             self?.mainWindows.liveChanged(snapshot)
             self?.bringForward(snapshot?.shown, now: snapshot?.now ?? Date())

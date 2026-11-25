@@ -5,8 +5,8 @@ import XCTest
 final class LiveActivityTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_790_000_000)
 
-    private func row(_ id: String, waiting: Bool = false, ask: LiveSnapshot.Ask? = nil, kind: LiveSnapshot.Kind = .task, at: TimeInterval = 0) -> LiveSnapshot.Row {
-        LiveSnapshot.Row(id: id, kind: kind, title: id, step: "", startedAt: t0.addingTimeInterval(at), needsYou: waiting, ask: ask)
+    private func row(_ id: String, waiting: Bool = false, ask: LiveSnapshot.Ask? = nil, at: TimeInterval = 0) -> LiveSnapshot.Row {
+        LiveSnapshot.Row(id: id, title: id, step: "", startedAt: t0.addingTimeInterval(at), needsYou: waiting, ask: ask)
     }
 
     private func snap(_ rows: [LiveSnapshot.Row], ended: [LiveSnapshot.End] = [], at: TimeInterval) -> LiveSnapshot {
@@ -14,7 +14,7 @@ final class LiveActivityTests: XCTestCase {
     }
 
     private func end(_ id: String, ok: Bool = true, at: TimeInterval) -> LiveSnapshot.End {
-        LiveSnapshot.End(taskId: id, title: id, line: "done", ok: ok, at: t0.addingTimeInterval(at))
+        LiveSnapshot.End(id: id, title: id, line: "done", ok: ok, at: t0.addingTimeInterval(at))
     }
 
     private let perm = LiveSnapshot.Ask.decide(id: "p1", tool: "Bash", target: "npm test", place: "~/Projects/web")
@@ -23,7 +23,7 @@ final class LiveActivityTests: XCTestCase {
     /// change), every three while there is nothing: an open terminal doing nothing, the service not answering.
     func testLiveIsReadLessOftenWhileNothingIsUnderWay() {
         XCTAssertEqual(LivePace.interval(after: snap([row("t1")], at: 0)), .seconds(1))
-        XCTAssertEqual(LivePace.interval(after: snap([row("k1", waiting: true, kind: .terminal)], at: 0)), .seconds(1))
+        XCTAssertEqual(LivePace.interval(after: snap([row("k1", waiting: true)], at: 0)), .seconds(1))
         XCTAssertEqual(LivePace.interval(after: snap([], ended: [end("t9", at: -5)], at: 0)), .seconds(1), "a result still on the capsule")
         XCTAssertEqual(LivePace.interval(after: LiveSnapshot(rows: [], open: 3, now: t0)), .seconds(3), "terminals open, none at work")
         XCTAssertEqual(LivePace.interval(after: snap([], at: 0)), .seconds(3))
@@ -41,17 +41,24 @@ final class LiveActivityTests: XCTestCase {
          "running":1,"waiting":2,"ended":[{"kind":"task","id":"t9","taskId":"t9","title":"总结","line":"好了","ok":true,"at":1789999999000},
            {"kind":"terminal","id":"k1","title":"fix-login","line":"rate_limit: You have hit your limit","ok":false,"at":1789999998000}],"now":1790000010000}
         """
+        // A service that still lists the old dispatch's tasks: only the terminals are read, and counted.
         let s = try JSONDecoder().decode(LiveSnapshot.self, from: Data(json.utf8))
-        XCTAssertEqual(s.rows.map(\.id), ["k1", "t2", "t3"])
+        XCTAssertEqual(s.rows.map(\.id), ["k1"])
         XCTAssertEqual(s.rows[0].ask, perm)
-        XCTAssertEqual(s.rows[0].kind, .terminal)
         XCTAssertEqual(s.rows[0].startedAt, t0.addingTimeInterval(2))
-        XCTAssertEqual(s.rows[1].ask, .question(id: "a2", questionId: "q0", text: "要删掉吗？", options: ["删掉", "保留"], answerable: true))
-        XCTAssertNil(s.rows[2].ask)
-        XCTAssertEqual(s.ended, [LiveSnapshot.End(taskId: "t9", title: "总结", line: "好了", ok: true, at: t0.addingTimeInterval(-1)),
-                                 LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix-login", line: "rate_limit: You have hit your limit", ok: false, at: t0.addingTimeInterval(-2))])
+        XCTAssertEqual(s.ended, [LiveSnapshot.End(id: "k1", title: "fix-login", line: "rate_limit: You have hit your limit", ok: false, at: t0.addingTimeInterval(-2))])
         XCTAssertEqual(s.now, t0.addingTimeInterval(10))
-        XCTAssertEqual([s.running, s.waiting], [1, 2])
+        XCTAssertEqual([s.running, s.waiting], [0, 1])
+    }
+
+    /// What the service sends once it has no tasks: the same keys, the terminals alone, its own counts kept.
+    func testDecodesAnAnswerOfTerminalsAlone() throws {
+        let json = #"{"rows":[{"id":"k2","kind":"terminal","title":"web","step":"Edit a.ts","startedAt":1790000000000,"needsYou":false,"ask":null}],"running":1,"waiting":0,"ended":[],"tasks":[],"approvals":[],"open":2,"now":1790000010000}"#
+        let s = try JSONDecoder().decode(LiveSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(s.rows.map(\.id), ["k2"])
+        XCTAssertNil(s.rows[0].ask)
+        XCTAssertEqual([s.running, s.waiting, s.open], [1, 0, 2])
+        XCTAssertEqual(try JSONDecoder().decode(LiveSnapshot.self, from: Data(#"{"rows":[],"ended":[]}"#.utf8)).rows, [])
     }
 
     func testWhatWaitsWhenTheAppStartsIsKnownAlready() {
@@ -147,45 +154,30 @@ final class LiveActivityTests: XCTestCase {
         p.receive(snap([row("k1", waiting: true, ask: perm), row("t3")], ended: [end("t2", ok: false, at: 9), end("t1", ok: false, at: 8)], at: 30), at: t0)
         XCTAssertNil(p.shownEnd, "a request is never covered")
         XCTAssertEqual(p.look, .waiting)
-        p.opened(LiveSnapshot.End(taskId: "t2", title: "", line: "", ok: false, at: t0))
+        p.opened(LiveSnapshot.End(id: "t2", title: "", line: "", ok: false, at: t0))
         XCTAssertEqual(p.unseenFailures.map(\.id), ["t1"])
     }
 
     func testTheTerminalOnScreenSaysNothingOfItsOwnTurns() {
         var p = LivePresenter()
-        p.receive(snap([row("k1", kind: .terminal)], at: 0), at: t0)
-        let failed = LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(9))
+        p.receive(snap([row("k1")], at: 0), at: t0)
+        let failed = LiveSnapshot.End(id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(9))
         XCTAssertNil(p.receive(snap([], ended: [failed], at: 10), at: t0, watching: ["k1", "k7"]), "one of the panes on screen")
         XCTAssertFalse(p.isOpen)
         XCTAssertTrue(p.unseenFailures.isEmpty)
-        let again = LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(19))
+        let again = LiveSnapshot.End(id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(19))
         XCTAssertEqual(p.receive(snap([], ended: [again, failed], at: 20), at: t0, watching: []), .failed, "another turn, not looked at")
         p.receive(snap([], ended: [again, failed], at: 21), at: t0, watching: ["k1"])
         XCTAssertTrue(p.unseenFailures.isEmpty, "opened in the window: seen")
     }
 
-    /// The main window open on a task's page (dispatch-v0 §1): its result drops no card and rings nothing, its failure
-    /// is seen; another task's still does.
-    func testTheTaskOnScreenSaysNothingOfItsOwnResult() {
-        var p = LivePresenter()
-        p.receive(snap([row("t1"), row("t2")], at: 0), at: t0)
-        let failed = end("t1", ok: false, at: 9)
-        XCTAssertNil(p.receive(snap([row("t2")], ended: [failed], at: 10), at: t0, watchingTask: "t1"))
-        XCTAssertFalse(p.isOpen)
-        XCTAssertTrue(p.unseenFailures.isEmpty)
-        XCTAssertEqual(p.receive(snap([], ended: [end("t2", at: 19), failed], at: 20), at: t0, watchingTask: "t1"), .done, "another task")
-        XCTAssertEqual(p.opener, .result)
-        let terminal = LiveSnapshot.End(kind: .terminal, id: "t3", title: "t3", line: "", ok: false, at: t0.addingTimeInterval(29))
-        XCTAssertEqual(p.receive(snap([], ended: [terminal], at: 30), at: t0, watchingTask: "t3"), .failed, "a terminal of the same id is not the task")
-    }
-
     /// docs/mesh-v0.md §5.2 跨节点的提醒 (2026-10-11, user: 我用其他mac的时候没有实时通知): this Mac's service lists what
-    /// waits on the nodes it uses and what ended there, each with its node. Two nodes may both have a task `t5`.
+    /// waits on the nodes it uses and what ended there, each with its node. Two nodes may both have a terminal `t5`.
     func testAnotherNodesRowsAndResultsAreToldApartByTheirNode() throws {
         let json = """
         {"rows":[
-          {"id":"t5","kind":"task","title":"这台的任务","step":"","startedAt":1790000000000,"needsYou":true,"ask":{"kind":"approval","id":"a1","tool":"Bash","target":"ls","where":"~"}},
-          {"id":"t5","kind":"task","title":"那台的任务","step":"","startedAt":1790000000000,"needsYou":true,"ask":{"kind":"approval","id":"a1","tool":"Bash","target":"ls","where":"~"},
+          {"id":"t5","kind":"terminal","title":"这台的终端","step":"","startedAt":1790000000000,"needsYou":true,"ask":{"kind":"permission","id":"a1","tool":"Bash","target":"ls","where":"~"}},
+          {"id":"t5","kind":"terminal","title":"那台的终端","step":"","startedAt":1790000000000,"needsYou":true,"ask":{"kind":"permission","id":"a1","tool":"Bash","target":"ls","where":"~"},
            "node":{"id":"7c1e5a90b3d2","name":"Studio"}}],
          "running":0,"waiting":2,
          "ended":[{"kind":"terminal","id":"k1","title":"那台的终端","line":"好了","ok":true,"at":1790000001000,"node":{"id":"7c1e5a90b3d2","name":"Studio"}}],
@@ -206,7 +198,7 @@ final class LiveActivityTests: XCTestCase {
 
         // A terminal `k1` on screen in a window on this Mac is not that node's `k1`: its result is told. With the
         // window on that node and the terminal on screen, it is not.
-        let theirEnd = LiveSnapshot.End(kind: .terminal, id: "k1", title: "k1", line: "好了", ok: true, at: t0.addingTimeInterval(9), node: theirs.node)
+        let theirEnd = LiveSnapshot.End(id: "k1", title: "k1", line: "好了", ok: true, at: t0.addingTimeInterval(9), node: theirs.node)
         var here = LivePresenter()
         here.receive(snap([], at: 8), at: t0.addingTimeInterval(8))
         XCTAssertEqual(here.receive(snap([], ended: [theirEnd], at: 10), at: t0.addingTimeInterval(10), watching: ["k1"]), .done)
@@ -282,16 +274,11 @@ final class LiveActivityTests: XCTestCase {
     func testAnswersGoToTheRightRoutes() async throws {
         let stub = StubTransport { _ in (200, #"{"ok":true}"#) }
         let client = DaemonClient(port: 4811, transport: stub)
-        try await client.decide(row("k 1", waiting: true, ask: perm, kind: .terminal), allow: true)
-        try await client.decide(row("t1", waiting: true, ask: .decide(id: "a1", tool: "Bash", target: "rm", place: "~")), allow: false)
-        try await client.answer(row("t2", waiting: true, ask: .question(id: "a2", questionId: "q0", text: "?", options: ["删掉"], answerable: true)), option: "删掉")
-        try await client.answer(row("t3", waiting: true, ask: .question(id: "a3", questionId: "q0", text: "?", options: [], answerable: false)), option: "x")
+        try await client.decide(row("k 1", waiting: true, ask: perm), allow: true)
+        try await client.decide(row("k2", waiting: true, ask: .decide(id: "p2", tool: "Bash", target: "rm", place: "~")), allow: false)
+        try await client.decide(row("k3", waiting: true), allow: true)
         let sent = stub.requests.map { "\($0.httpMethod ?? "") \($0.url?.path(percentEncoded: true) ?? "") \(String(decoding: $0.httpBody ?? Data(), as: UTF8.self))" }
-        XCTAssertEqual(sent.count, 3, "a question that is not answerable on the card sends nothing")
-        XCTAssertEqual(sent[0], #"POST /terminals/k%201/permissions/p1 {"decision":"allow"}"#)
-        XCTAssertTrue(sent[1].hasPrefix("POST /tasks/t1/approve "))
-        XCTAssertTrue(sent[1].contains(#""approval_id":"a1""#) && sent[1].contains(#""decision":"deny""#))
-        XCTAssertTrue(sent[2].hasPrefix("POST /tasks/t2/answer "))
-        XCTAssertTrue(sent[2].contains(#""answers":{"q0":["删掉"]}"#) || sent[2].contains(#""answers":{"q0":["删掉"]}"#))
+        XCTAssertEqual(sent, [#"POST /terminals/k%201/permissions/p1 {"decision":"allow"}"#, #"POST /terminals/k2/permissions/p2 {"decision":"deny"}"#],
+                       "a row with nothing to allow sends nothing")
     }
 }

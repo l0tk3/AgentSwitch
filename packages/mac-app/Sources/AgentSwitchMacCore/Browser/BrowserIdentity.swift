@@ -430,7 +430,7 @@ extension DaemonClient {
             }
             enum Key: String, CodingKey { case proxy }
         }
-        return try decode(BrowserIdentity.self, try await dispatchCall("PUT", "/browser/identity", json: Body(proxy: proxy), timeout: BrowserTimeouts.fill))
+        return try decode(BrowserIdentity.self, try await dispatchCall("PUT", "/browser/identity", json: Body(proxy: proxy), timeout: BrowserTimeouts.identity))
     }
 
     /// `GET /browser/engine` (`check`: asks what could be installed first).

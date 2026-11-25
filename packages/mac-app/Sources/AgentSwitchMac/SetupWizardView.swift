@@ -1,7 +1,7 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// The first-run wizard (docs/control-v0.md §6), a sheet on the settings window: 执行器 → 配对手机 → 权限与启动 → 完成.
+/// The first-run wizard (docs/control-v0.md §6), a sheet on the settings window: 执行器 → 配对手机 → 启动 → 完成.
 /// Every step can be passed without doing it; Esc asks before leaving; progress is saved after each step
 /// (SettingsNavigation → SetupWizardStore).
 struct SetupWizardView: View {
@@ -41,7 +41,6 @@ struct SetupWizardView: View {
         .frame(width: SetupWizardView.size.width, height: SetupWizardView.size.height)
         .tint(.brand)
         .interactiveDismissDisabled()
-        .gateServiceSheet(model, active: true)
         .confirmationDialog("跳过引导？", isPresented: $confirmSkip) {
             Button("Skip") { navigation.closeWizard(.skipped, at: step) }
         } message: {
@@ -57,7 +56,7 @@ struct SetupWizardView: View {
         switch step {
         case .executors: return "任务由这台 Mac 上的 Claude Code、Codex 或 OpenCode 执行，至少需要一个可用。"
         case .pairing: return "在 iPhone 上打开 AgentSwitch，扫描此二维码。"
-        case .permissions: return "选择执行器进行有风险的操作时由谁批准。推荐「Auto」，之后可在「Permissions」中更改。"
+        case .launch: return "选择 AgentSwitch 是否在登录时自动运行。"
         case .done: return "在 iPhone 上打开 AgentSwitch 并发送任务。"
         }
     }
@@ -69,7 +68,7 @@ struct SetupWizardView: View {
         switch step {
         case .executors: ExecutorsStep()
         case .pairing: PairingStep()
-        case .permissions: PermissionsStep()
+        case .launch: LaunchStep()
         case .done: DoneStep()
         }
     }
@@ -79,7 +78,7 @@ struct SetupWizardView: View {
         switch step {
         case .executors: return model.harnesses.contains { $0.state == .ready }
         case .pairing: return !model.activeDevices.isEmpty
-        case .permissions, .done: return true
+        case .launch, .done: return true
         }
     }
 
@@ -116,7 +115,7 @@ struct SetupWizardView: View {
     }
 }
 
-/// `(1) 执行器 ── (2) 配对手机 ── (3) 权限与启动 ── (4) 完成`: the current step filled with the accent, passed ones ticked.
+/// `(1) 执行器 ── (2) 配对手机 ── (3) 启动 ── (4) 完成`: the current step filled with the accent, passed ones ticked.
 private struct StepIndicator: View {
     let current: SetupStep
 
@@ -216,41 +215,18 @@ private struct PairingStep: View {
     }
 }
 
-// MARK: - 3 权限与启动
+// MARK: - 3 启动
 
-private struct PermissionsStep: View {
-    @Environment(AppModel.self) private var model
-
+private struct LaunchStep: View {
     var body: some View {
         Form {
-            Section {
-                if let policy = model.control.policy {
-                    ApprovalModePicker(policy: policy, compact: true)
-                } else if !model.daemonReady {
-                    Text("服务未就绪。之后可在「Permissions」中选择。").foregroundStyle(.secondary)
-                } else if let problem = model.control.policyLoadProblem {
-                    Text(problem).foregroundStyle(.secondary)
-                } else {
-                    ProgressView().controlSize(.small)
-                }
-                if let problem = model.control.policySaveProblem {
-                    Text(problem).foregroundStyle(.red)
-                }
-            }
             Section {
                 LoginItemRows()
             } footer: {
                 Footer("打开后，AgentSwitch 在登录时自动运行，iPhone 可随时连接这台 Mac。")
             }
-            if let item = model.setupItems.first(where: { $0.id == SetupChecklist.gateServiceID }) {
-                // The row says why; the confirmation sheet says what happens.
-                Section { SetupItemRow(item: item) }
-            }
         }
         .formStyle(.grouped)
-        .task(id: model.daemonReady) {
-            if model.daemonReady { await model.control.loadPolicy(model.client) }
-        }
     }
 }
 

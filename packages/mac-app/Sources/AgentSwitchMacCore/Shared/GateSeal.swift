@@ -1,0 +1,56 @@
+import Foundation
+
+/// One value to seal under a node's vault key (`POST /vault/seal`: a profile's API key or session key, a proxy's
+/// password), checked first by the rules the gate had for a website password (the Kit's SecretDraft): a name, the
+/// sites it is for, a value long enough to hide. Only the value is sent.
+public struct GateSealRequest: Sendable, Equatable {
+    public let label: String
+    /// As typed: comma, space, `|`, `;`, `，` or newline separated; bare `host[:port]`, `*.example.com`, or a URL.
+    public let sites: String
+    public let value: String
+
+    public init(label: String, sites: String, value: String) {
+        self.label = label
+        self.sites = sites
+        self.value = value
+    }
+
+    /// secret_gate.constants.MIN_SEAL_LENGTH (gate-simple-v0 §3.3): `enc` refuses a shorter `http` / `fill` value, so
+    /// the sheet says so before running it. Unicode scalars, as Python's `len` counts code points.
+    public static let minValueLength = 8
+    /// constants.VALUE_TOO_SHORT_MESSAGE, word for word (the phones' GatePolicyError.valueTooShort).
+    public static let valueTooShort = "值至少需要 \(minValueLength) 个字符（过短的值遮不住，也容易被猜到）"
+    /// secret_gate.constants.LABEL_PATTERN.
+    public static let labelPattern = #"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"#
+
+    public var trimmedLabel: String { label.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// What the gate binds the value to: `host[:port]` of each site, deduplicated in order.
+    public var hostList: [String] {
+        var seen = Set<String>()
+        return sites.split(whereSeparator: { ",|; \n，".contains($0) })
+            .map { Self.host(of: $0.trimmingCharacters(in: .whitespaces)) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// `https://user@core.example:8600/login?x` → `core.example:8600`; a bare host passes through (SecretDraft.hostOf).
+    public static func host(of site: String) -> String {
+        var s = Substring(site)
+        if let r = s.range(of: "://") { s = s[r.upperBound...] }
+        if let end = s.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) { s = s[..<end] }
+        if let at = s.lastIndex(of: "@") { s = s[s.index(after: at)...] }
+        return String(s).lowercased()
+    }
+
+    /// Why it cannot be sealed yet, in the sheet's words; nil when it can. The gate checks hosts itself.
+    public var problem: String? {
+        if trimmedLabel.isEmpty { return "缺少名称" }
+        if trimmedLabel.range(of: Self.labelPattern, options: .regularExpression) == nil {
+            return "名称以字母或数字开头，仅可使用字母、数字和 . _ / -，最多 64 个字符"
+        }
+        if hostList.isEmpty { return "须填写可使用此密文的站点" }
+        if value.isEmpty { return "缺少值" }
+        if value.unicodeScalars.count < Self.minValueLength { return Self.valueTooShort }
+        return nil
+    }
+}

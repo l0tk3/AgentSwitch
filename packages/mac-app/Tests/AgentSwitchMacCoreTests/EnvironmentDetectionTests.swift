@@ -163,34 +163,3 @@ final class NetworkTests: XCTestCase {
                                                  fallbackPort: 1, computerName: "M"))
     }
 }
-
-final class GateCATests: XCTestCase {
-    private func makeCert(_ dir: URL, _ name: String) throws -> URL {
-        let key = dir.appendingPathComponent("\(name).key"), cert = dir.appendingPathComponent("\(name).pem")
-        let r = try ProcessRunner.runBlocking(URL(fileURLWithPath: "/usr/bin/openssl"),
-                                              ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
-                                               "-keyout", key.path, "-out", cert.path, "-days", "1", "-subj", "/CN=\(name)"], timeout: 20)
-        try XCTSkipUnless(r.ok, "openssl failed: \(r.stderrText)")
-        return cert
-    }
-
-    func testCopyStatesAndDER() throws {
-        let dir = TestSupport.tempDir("ca")
-        let target = dir.appendingPathComponent("gate/ca.pem")
-        XCTAssertEqual(try GateCA.ensureCopy(from: dir.appendingPathComponent("none.pem"), to: target), .sourceMissing)
-        let a = try makeCert(dir, "a"), b = try makeCert(dir, "b")
-        XCTAssertNotNil(GateCA.derFromPEM(try String(contentsOf: a, encoding: .utf8)))
-        XCTAssertNil(GateCA.derFromPEM("not a pem"))
-        XCTAssertEqual(try GateCA.ensureCopy(from: a, to: target), .copied)
-        XCTAssertEqual(try GateCA.ensureCopy(from: a, to: target), .upToDate)
-        XCTAssertEqual(try GateCA.ensureCopy(from: b, to: target), .replaced)
-        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), try String(contentsOf: b, encoding: .utf8))
-        XCTAssertFalse(GateCA.isTrusted(target), "a fresh self-signed cert is not a trusted root")
-    }
-
-    func testTrustCommandIsTheKeychainStepOnly() {
-        let (exe, args) = GateCA.trustCommand(ca: URL(fileURLWithPath: "/Users/u/.secret-gate/ca.pem"), userHome: URL(fileURLWithPath: "/Users/u"))
-        XCTAssertEqual(exe.path, "/usr/bin/security")
-        XCTAssertEqual(args, ["add-trusted-cert", "-r", "trustRoot", "-k", "/Users/u/Library/Keychains/login.keychain-db", "/Users/u/.secret-gate/ca.pem"])
-    }
-}

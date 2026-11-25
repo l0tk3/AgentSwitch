@@ -11,12 +11,9 @@ final class PathsTests: XCTestCase {
         XCTAssertEqual(p.gateHome.path, "/Users/someone/.secret-gate")
         XCTAssertEqual(p.logsDir.path, "/Users/someone/Library/Logs/AgentSwitch")
         XCTAssertEqual(p.daemonLog.lastPathComponent, "daemon.log")
-        XCTAssertEqual(p.gateLog.lastPathComponent, "gate.log")
         XCTAssertEqual(p.runtime.node.path, "/Applications/AgentSwitch.app/Contents/Resources/runtime/node/bin/node")
         XCTAssertEqual(p.runtime.daemonCLI.path, "/Applications/AgentSwitch.app/Contents/Resources/runtime/daemon/dist/cli.js")
         XCTAssertEqual(p.runtime.secretGate.path, "/Applications/AgentSwitch.app/Contents/Resources/runtime/python/bin/secret-gate")
-        XCTAssertEqual(p.gateCA.path, "/Users/someone/.secret-gate/ca.pem")
-        XCTAssertEqual(p.mitmproxyCA.path, "/Users/someone/.mitmproxy/mitmproxy-ca-cert.pem")
     }
 
     func testEnvironmentOverridesWin() {
@@ -54,16 +51,18 @@ final class PathsTests: XCTestCase {
 
 final class SettingsTests: XCTestCase {
     func testDefaultsAndProblems() {
-        XCTAssertEqual(PortSettings.defaults, PortSettings(local: 4711, remote: 4713, gate: 8080, opencode: 4712))
+        XCTAssertEqual(PortSettings.defaults, PortSettings(local: 4711, remote: 4713, opencode: 4712))
         XCTAssertEqual(PortSettings.defaults.problems(), [])
-        XCTAssertEqual(PortSettings.defaults.with(remote: 4711).problems(), ["四个端口必须互不相同"])
-        XCTAssertEqual(PortSettings.defaults.with(gate: 80).problems().count, 1)
+        XCTAssertEqual(PortSettings.defaults.with(remote: 4711).problems(), ["三个端口必须互不相同"])
+        XCTAssertEqual(PortSettings.defaults.with(opencode: 80).problems().count, 1)
     }
 
     func testLoadFallsBackKeyByKey() {
+        // A gate port kept from before the gate's own process went is not read.
         let stored: [String: Int] = ["localPort": 4811, "gatePort": 8180]
         let s = PortSettings.load { stored[$0] }
-        XCTAssertEqual(s, PortSettings(local: 4811, remote: 4713, gate: 8180, opencode: 4712))
+        XCTAssertEqual(s, PortSettings(local: 4811, remote: 4713, opencode: 4712))
+        XCTAssertNil(s.keyed["gatePort"])
         XCTAssertEqual(PortSettings.load { s.keyed[$0] }, s)
     }
 
@@ -108,7 +107,8 @@ final class ChildEnvironmentTests: XCTestCase {
         XCTAssertNil(env["AGENTSWITCH_ROUTER"])
         XCTAssertEqual(env["SECRET_GATE_HOME"], "/Users/u/.secret-gate")
         XCTAssertEqual(env["SECRET_GATE_BIN"], "/A.app/Contents/Resources/runtime/python/bin/secret-gate")
-        XCTAssertEqual(env["SECRET_GATE_PROXY"], "http://127.0.0.1:8080")
+        XCTAssertNil(env["SECRET_GATE_PROXY"], "the old credential proxy is not run")
+        XCTAssertNil(env["SECRET_GATE_PUBLIC"])
         XCTAssertEqual(env["PATH"], "/opt/homebrew/bin:/usr/bin")
         XCTAssertNil(env["NODE_OPTIONS"], "never leaks into executor shells")
         XCTAssertEqual(env["TAILSCALE_BE_CLI"], "1")
@@ -151,7 +151,7 @@ final class ChildEnvironmentTests: XCTestCase {
                              logsDir: root.appendingPathComponent("logs"), runtime: RuntimeLayout(root: runtime))
         let busy = CannedServer(response: "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
         defer { busy.stop() }
-        let ports = PortSettings(local: TestSupport.freePort(), remote: busy.port, gate: TestSupport.freePort(), opencode: TestSupport.freePort())
+        let ports = PortSettings(local: TestSupport.freePort(), remote: busy.port, opencode: TestSupport.freePort())
         let on = RuntimeConfig(paths: paths, ports: ports, options: .standard, path: "/usr/bin", baseEnvironment: [:])
         guard case .fail(let why) = await RuntimePreflight.daemon(on) else { return XCTFail("remote port is busy") }
         XCTAssertTrue(why.contains("远程接口 \(busy.port)"), why)
@@ -160,21 +160,8 @@ final class ChildEnvironmentTests: XCTestCase {
         XCTAssertEqual(spec.environment["AGENTSWITCH_REMOTE"], "0")
     }
 
-    func testGateEnvironmentIsMinimal() {
-        let env = ChildEnvironment.gate(base: ["HOME": "/Users/u"], paths: paths)
-        XCTAssertEqual(env["PATH"], "/A.app/Contents/Resources/runtime/python/bin:/usr/bin:/bin:/usr/sbin:/sbin")
-        XCTAssertEqual(env["SECRET_GATE_HOME"], "/Users/u/.secret-gate")
-        XCTAssertEqual(env["PYTHONDONTWRITEBYTECODE"], "1")
-        XCTAssertNil(env["HTTP_PROXY"])
-    }
-
-    func testLaunchSpecs() {
+    func testLaunchSpec() {
         let config = RuntimeConfig(paths: paths, ports: .defaults, options: .standard, path: "/usr/bin", baseEnvironment: ["HOME": "/Users/u"])
-        let gate = RuntimePlan.gateSpec(config)
-        XCTAssertEqual(gate.executable, paths.runtime.secretGate)
-        XCTAssertEqual(gate.arguments, ["proxy", "--port", "8080"])
-        XCTAssertEqual(gate.stopSignal, SIGTERM)
-        XCTAssertEqual(gate.logFile, paths.gateLog)
         let daemon = RuntimePlan.daemonSpec(config)
         XCTAssertEqual(daemon.executable, paths.runtime.node)
         XCTAssertEqual(daemon.arguments, ["--no-warnings=ExperimentalWarning", paths.runtime.daemonCLI.path, "serve"])

@@ -88,10 +88,6 @@ struct BrowserDemoService: BrowserService {
     func setViewport(tabId: String, _ viewport: BrowserViewportRequest, screen: String) async throws -> BrowserTab { try tab(tabId) }
     func localServers() async throws -> [BrowserLocalServer] { servers }
 
-    func fill(tabId: String, token: String, screen: String) async throws -> BrowserFillResult {
-        throw DaemonError.http(status: 403, message: "演示数据，未填入。")
-    }
-
     func showTab(id: String) async throws {}
 
     /// The tab's made-up page as a still picture.

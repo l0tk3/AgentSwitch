@@ -1,10 +1,23 @@
 import Foundation
 
 /// The Mac's Live Activity (assistant-v0 §4, docs/design/implemented/mac-live.html): `GET /live` as the daemon sends it —
-/// the tasks in progress and the terminals waiting for you, the waiting first, and the tasks that ended in the last
-/// minute. The daemon builds the titles and steps by the phone's rules; the Mac only draws them.
+/// the terminals at work and the ones waiting for you, the waiting first, and the turns that ended in the last
+/// minute. The daemon builds the titles and steps by the phone's rules; the Mac only draws them. Rows and results of
+/// any other kind (a service that still lists the old dispatch's tasks, a node that does) are left out as they are read.
 public struct LiveSnapshot: Decodable, Equatable, Sendable {
-    public enum Kind: String, Decodable, Sendable { case task, terminal }
+    /// The one kind of row read: a terminal's.
+    static let terminal = "terminal"
+
+    /// A row or a result as it is sent: read only when it is a terminal's.
+    private struct Sent<Value: Decodable>: Decodable {
+        let value: Value?
+        private enum CodingKeys: String, CodingKey { case kind }
+
+        init(from decoder: Decoder) throws {
+            let kind = try? decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .kind)
+            value = kind == LiveSnapshot.terminal ? try Value(from: decoder) : nil
+        }
+    }
 
     /// Another node a row or a result is of (docs/mesh-v0.md §5.2 跨节点的提醒): this Mac's service lists what waits
     /// for you on the nodes it uses, and what ended there, beside its own. Absent: this Mac's.
@@ -16,30 +29,26 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
 
     /// What a row waits for, in a form the card can answer.
     public enum Ask: Equatable, Sendable {
-        /// Allow or deny: a terminal's permission request or a task's approval. `target`: the command, file or page;
-        /// `place`: the folder it works in.
+        /// Allow or deny a terminal's permission request. `target`: the command, file or page; `place`: the folder
+        /// it works in.
         case decide(id: String, tool: String, target: String, place: String)
-        /// A task's question: one of `options` answers it on the card when `answerable` (one question, one choice,
-        /// nothing secret); else it is answered on the task's page.
-        case question(id: String, questionId: String, text: String, options: [String], answerable: Bool)
 
         public var id: String {
             switch self {
-            case .decide(let id, _, _, _), .question(let id, _, _, _, _): return id
+            case .decide(let id, _, _, _): return id
             }
         }
     }
 
     public struct Row: Decodable, Equatable, Sendable, Identifiable {
         public let id: String
-        public let kind: Kind
         public let title: String
         public let step: String
         /// The model at work (as people say it); a terminal's agent.
         public let model: String?
         /// A terminal's agent id (its pixel mark).
         public let agent: String?
-        /// For the clock: when the task started, when the terminal asked.
+        /// For the clock: when the terminal's turn started, when it asked.
         public let startedAt: Date
         public let needsYou: Bool
         public let ask: Ask?
@@ -47,14 +56,13 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         public let doing: String?
         /// The node it is on; nil: this Mac.
         public let node: Node?
-        /// The row among every node's: ids are each node's own (two nodes both have a task `t5`).
+        /// The row among every node's: ids are each node's own (two nodes both have a terminal `s5`).
         public var key: String { LiveSnapshot.key(id, on: node) }
 
-        public init(id: String, kind: Kind, title: String, step: String, model: String? = nil, agent: String? = nil,
+        public init(id: String, title: String, step: String, model: String? = nil, agent: String? = nil,
                     startedAt: Date, needsYou: Bool = false, ask: Ask? = nil, doing: String? = nil, node: Node? = nil) {
             self.id = id
             self.node = node
-            self.kind = kind
             self.title = title
             self.step = step
             self.doing = doing
@@ -65,14 +73,13 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
             self.ask = ask
         }
 
-        private enum CodingKeys: String, CodingKey { case id, kind, title, step, model, agent, startedAt, needsYou, ask, doing, node }
-        private enum AskKeys: String, CodingKey { case kind, id, tool, target, `where`, questionId, text, options, answerable }
+        private enum CodingKeys: String, CodingKey { case id, title, step, model, agent, startedAt, needsYou, ask, doing, node }
+        private enum AskKeys: String, CodingKey { case id, tool, target, `where` }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
             node = try? c.decodeIfPresent(Node.self, forKey: .node)
-            kind = (try? c.decode(Kind.self, forKey: .kind)) ?? .task
             title = try c.decode(String.self, forKey: .title)
             step = try c.decodeIfPresent(String.self, forKey: .step) ?? ""
             doing = (try c.decodeIfPresent(String.self, forKey: .doing)).flatMap { $0.isEmpty ? nil : $0 }
@@ -82,29 +89,18 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
             needsYou = try c.decodeIfPresent(Bool.self, forKey: .needsYou) ?? false
             if c.contains(.ask), try !c.decodeNil(forKey: .ask) {
                 let a = try c.nestedContainer(keyedBy: AskKeys.self, forKey: .ask)
-                let askID = try a.decode(String.self, forKey: .id)
-                switch try a.decode(String.self, forKey: .kind) {
-                case "question":
-                    ask = .question(id: askID, questionId: try a.decodeIfPresent(String.self, forKey: .questionId) ?? "",
-                                    text: try a.decodeIfPresent(String.self, forKey: .text) ?? "",
-                                    options: try a.decodeIfPresent([String].self, forKey: .options) ?? [],
-                                    answerable: try a.decodeIfPresent(Bool.self, forKey: .answerable) ?? false)
-                default:
-                    ask = .decide(id: askID, tool: try a.decodeIfPresent(String.self, forKey: .tool) ?? "",
-                                  target: try a.decodeIfPresent(String.self, forKey: .target) ?? "",
-                                  place: try a.decodeIfPresent(String.self, forKey: .where) ?? "")
-                }
+                ask = .decide(id: try a.decode(String.self, forKey: .id), tool: try a.decodeIfPresent(String.self, forKey: .tool) ?? "",
+                              target: try a.decodeIfPresent(String.self, forKey: .target) ?? "",
+                              place: try a.decodeIfPresent(String.self, forKey: .where) ?? "")
             } else {
                 ask = nil
             }
         }
     }
 
-    /// A result in the last minute: a task that ended, or a terminal's turn (assistant-v0 §4 "结果要提示"), and what it
-    /// came to.
+    /// A result in the last minute: a terminal's turn (assistant-v0 §4 "结果要提示"), and what it came to.
     public struct End: Decodable, Equatable, Sendable, Identifiable {
-        public let kind: Kind
-        /// The task's or the terminal's id.
+        /// The terminal's id.
         public let id: String
         public let title: String
         public let line: String
@@ -113,12 +109,11 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         /// The node it ended on; nil: this Mac.
         public let node: Node?
         /// One result: a terminal has one per turn.
-        public var key: String { LiveSnapshot.key("\(kind.rawValue):\(id):\(Int(at.timeIntervalSince1970 * 1000))", on: node) }
+        public var key: String { LiveSnapshot.key("\(LiveSnapshot.terminal):\(id):\(Int(at.timeIntervalSince1970 * 1000))", on: node) }
         /// What ended, among every node's (`LiveSnapshot.key`): what a window says it is showing is named the same way.
         public var itemKey: String { LiveSnapshot.key(id, on: node) }
 
-        public init(kind: Kind = .task, id: String, title: String, line: String, ok: Bool, at: Date, node: Node? = nil) {
-            self.kind = kind
+        public init(id: String, title: String, line: String, ok: Bool, at: Date, node: Node? = nil) {
             self.node = node
             self.id = id
             self.title = title
@@ -127,17 +122,12 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
             self.at = at
         }
 
-        public init(taskId: String, title: String, line: String, ok: Bool, at: Date) {
-            self.init(kind: .task, id: taskId, title: title, line: line, ok: ok, at: at)
-        }
-
-        private enum CodingKeys: String, CodingKey { case kind, id, taskId, title, line, ok, at, node }
+        private enum CodingKeys: String, CodingKey { case id, title, line, ok, at, node }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .task
             node = try? c.decodeIfPresent(Node.self, forKey: .node)
-            id = try c.decodeIfPresent(String.self, forKey: .id) ?? c.decode(String.self, forKey: .taskId)
+            id = try c.decode(String.self, forKey: .id)
             title = try c.decode(String.self, forKey: .title)
             line = try c.decodeIfPresent(String.self, forKey: .line) ?? ""
             ok = try c.decode(Bool.self, forKey: .ok)
@@ -145,7 +135,7 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         }
     }
 
-    /// A task's or a terminal's id among every node's: its own on this Mac, `<node>/<id>` on another.
+    /// A terminal's id among every node's: its own on this Mac, `<node>/<id>` on another.
     public static func key(_ id: String, on node: Node?) -> String { node.map { "\($0.id)/\(id)" } ?? id }
     public static func key(_ id: String, on node: String?) -> String { node.map { "\($0)/\(id)" } ?? id }
 
@@ -197,10 +187,13 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        rows = try c.decodeIfPresent([Row].self, forKey: .rows) ?? []
-        running = try c.decodeIfPresent(Int.self, forKey: .running) ?? rows.filter { !$0.needsYou }.count
-        waiting = try c.decodeIfPresent(Int.self, forKey: .waiting) ?? rows.filter(\.needsYou).count
-        ended = try c.decodeIfPresent([End].self, forKey: .ended) ?? []
+        let sent = try c.decodeIfPresent([Sent<Row>].self, forKey: .rows) ?? []
+        rows = sent.compactMap(\.value)
+        // The service's own counts, unless rows were left out: then what is left is counted.
+        let whole = rows.count == sent.count
+        running = (whole ? try c.decodeIfPresent(Int.self, forKey: .running) : nil) ?? rows.filter { !$0.needsYou }.count
+        waiting = (whole ? try c.decodeIfPresent(Int.self, forKey: .waiting) : nil) ?? rows.filter(\.needsYou).count
+        ended = (try c.decodeIfPresent([Sent<End>].self, forKey: .ended) ?? []).compactMap(\.value)
         open = try c.decodeIfPresent(Int.self, forKey: .open) ?? 0
         now = try c.decodeIfPresent(Double.self, forKey: .now).map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
         shown = try? c.decodeIfPresent(Shown.self, forKey: .shown)
@@ -208,12 +201,11 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
 }
 
 /// When the capsule shows, what it says, and when the card under it opens and closes by itself: a new request drops it
-/// (and sounds) and it stays until every request is answered; a result (a task that ended, a terminal's turn) drops it
+/// (and sounds) and it stays until every request is answered; a result (a terminal's turn) drops it
 /// for a few seconds unless a request waits (a request is never covered), with a tone; a failure stays — the capsule red —
 /// until it has been looked at (assistant-v0 §4 "失败留到你看过"). A click on the capsule opens or closes it, a click
 /// elsewhere closes it. What waits or has ended when the app starts is taken as known, as the phone does; the terminal
-/// on screen in the main window's Terminals page says nothing of its own turns (you saw them), nor the task whose page is
-/// open on its Dispatch page of its result (dispatch-v0 §1).
+/// on screen in the main window's Terminals page says nothing of its own turns (you saw them).
 public struct LivePresenter: Equatable, Sendable {
     /// Who opened the card: a card the user opened stays open when its requests are answered.
     public enum Opener: Equatable, Sendable { case user, request, result }
@@ -224,7 +216,7 @@ public struct LivePresenter: Equatable, Sendable {
     /// The app mark's look (busy, waiting, done, incomplete).
     public enum Look: Equatable, Sendable { case busy, waiting, done, incomplete }
 
-    /// Right of the mark in the capsule: what the one task or terminal is doing in a word (amber when it waits for you;
+    /// Right of the mark in the capsule: what the one terminal is doing in a word (amber when it waits for you;
     /// 2026-10-03, user: 电脑上这个实时活动的设计还是老的计时器设计，改成和手机上一样 — the phone's compact island since
     /// 2026-10-01; the clock stays on the card's rows), how many wait and run, or the result.
     public enum Trail: Equatable, Sendable {
@@ -306,11 +298,11 @@ public struct LivePresenter: Equatable, Sendable {
     public var cardClocks: [Date] { shownEnd == nil ? cardRows.map(\.startedAt) : [] }
 
     /// A new answer from `GET /live` (nil: the service is not answering; everything goes). `watching`: the terminals on
-    /// screen in the main window in use (one a pane); `watchingTask`: the task whose page is open there — each named
-    /// among every node's (`LiveSnapshot.key`), the window may be on another node. Returns the tone for what came
+    /// screen in the main window in use (one a pane), each named among every node's (`LiveSnapshot.key`): the window
+    /// may be on another node. Returns the tone for what came
     /// (a request before a failure before a result).
     @discardableResult
-    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: Set<String> = [], watchingTask: String? = nil) -> Cue? {
+    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: Set<String> = []) -> Cue? {
         snapshot = next
         guard let next else {
             opener = nil
@@ -323,10 +315,8 @@ public struct LivePresenter: Equatable, Sendable {
         let fresh = asks.subtracting(seenAsks)
         seenAsks = asks
         seenEnds = Set(next.ended.map(\.key))
-        let watched = { (end: LiveSnapshot.End) in
-            (end.kind == .terminal && watching.contains(end.itemKey)) || (end.kind == .task && end.itemKey == watchingTask)
-        }
-        // Looking at the terminal (the task) is looking at its failures.
+        let watched = { (end: LiveSnapshot.End) in watching.contains(end.itemKey) }
+        // Looking at the terminal is looking at its failures.
         unseenFailures.removeAll(where: watched)
         guard started else {
             started = true
@@ -374,9 +364,9 @@ public struct LivePresenter: Equatable, Sendable {
         opener = nil
     }
 
-    /// A result's task or terminal was opened: that failure has been seen.
+    /// A result's terminal was opened: that failure has been seen.
     public mutating func opened(_ end: LiveSnapshot.End) {
-        unseenFailures.removeAll { $0.kind == end.kind && $0.itemKey == end.itemKey }
+        unseenFailures.removeAll { $0.itemKey == end.itemKey }
     }
 
     /// One request per key: its id, or the waiting terminal (a form on its screen has no request id).

@@ -1,8 +1,7 @@
 import Foundation
 
-/// Environments for the supervised children. Built from a small allow-list of the app's own environment, never
-/// the whole thing: proxy variables in particular must not leak into the gate or into Codex's process env
-/// (packages/secret-gate/README.md, "Codex specifics").
+/// The environment of the supervised daemon. Built from a small allow-list of the app's own environment, never
+/// the whole thing: proxy variables in particular must not leak into Codex's process env.
 public enum ChildEnvironment {
     /// Carried over from the app when present. A Finder-launched app has little more than these.
     /// SSH_AUTH_SOCK is kept on purpose: executors run `git push` and other ssh-backed commands, which need the
@@ -28,13 +27,12 @@ public enum ChildEnvironment {
     /// `remoteName` is the Mac name in the pairing payload; the daemon derives the Bonjour name
     /// "AgentSwitch on <name>" from it, which is the name the app publishes. `opencodeBinary` because the daemon
     /// looks only at ~/.opencode/bin/opencode otherwise, not PATH.
-    /// `gateMode` `.service`: the gate is the system service (docs/gate-service-v0.md §4); `SECRET_GATE_PROXY` is its
-    /// port, and `SECRET_GATE_PUBLIC` / `SECRET_GATE_CA` point at its public directory and published CA.
+    /// `SECRET_GATE_BIN` and `SECRET_GATE_HOME`: the bundled secret-gate program runs the daemon's model traffic
+    /// gateway, and the daemon reads the old gate's home once to move what it held.
     public static func daemon(base: [String: String], paths: AppPaths, ports: PortSettings, options: DaemonOptions,
                               path: String, remote: Bool = true, remoteName: String? = nil,
                               opencodeBinary: String? = nil, claudeBinary: String? = nil,
-                              codexBinary: String? = nil, piBinary: String? = nil,
-                              gateMode: GateRunMode = .userProcess) -> [String: String] {
+                              codexBinary: String? = nil, piBinary: String? = nil) -> [String: String] {
         var env = base
         env["PATH"] = path
         env["AGENTSWITCH_HOME"] = paths.agentswitchHome.path
@@ -51,8 +49,6 @@ public enum ChildEnvironment {
         env["SECRET_GATE_BIN"] = paths.runtime.secretGate.path
         // Staged updates sit next to the bundle; the daemon offers them to the phone (assistant-v0 §5).
         if let bundle = paths.runtime.appBundle { env["AGENTSWITCH_APP_BUNDLE"] = bundle.path }
-        env["SECRET_GATE_PROXY"] = "http://127.0.0.1:\(gatePort(ports, gateMode))"
-        env.merge(service(gateMode)) { _, new in new }
         if let opencodeBinary { env["OPENCODE_BIN"] = opencodeBinary }
         if let claudeBinary { env["CLAUDE_BIN"] = claudeBinary }
         // The install chosen in 设置 › Agents (docs/agents-v0.md §3); unset, the daemon looks where it always did.
@@ -64,29 +60,5 @@ public enum ChildEnvironment {
         // The daemon runs the bundled secret-gate CLI too: keep Python from writing .pyc into the signed bundle.
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         return env
-    }
-
-    /// `secret-gate proxy` and every other call of the bundled CLI. Like the launchd service: gate home, a
-    /// minimal PATH, no proxy variables. In service mode the CLI finds the service through `SECRET_GATE_PUBLIC`.
-    public static func gate(base: [String: String], paths: AppPaths, gateMode: GateRunMode = .userProcess) -> [String: String] {
-        var env = base
-        env["PATH"] = [paths.runtime.pythonBin.path, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].joined(separator: ":")
-        env["SECRET_GATE_HOME"] = paths.gateHome.path
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["PYTHONNOUSERSITE"] = "1"
-        env.merge(service(gateMode)) { _, new in new }
-        return env
-    }
-
-    /// The proxy port children use: the service's own in service mode.
-    public static func gatePort(_ ports: PortSettings, _ mode: GateRunMode) -> Int {
-        if case .service(_, let port) = mode { return port }
-        return ports.gate
-    }
-
-    /// `SECRET_GATE_PUBLIC` and `SECRET_GATE_CA`; nothing for the user process (today's environment, unchanged).
-    static func service(_ mode: GateRunMode) -> [String: String] {
-        guard let dir = mode.publicDir, let ca = mode.ca else { return [:] }
-        return ["SECRET_GATE_PUBLIC": dir.path, "SECRET_GATE_CA": ca.path]
     }
 }

@@ -1,13 +1,10 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// 环境: the setup checklist, harnesses (installed? logged in?), the services and the network in detail, the gate as a
-/// system service, the gate CA, file access and the PATH children get.
+/// 环境: the setup checklist, harnesses (installed? logged in?), the service and the network in detail, the browser's
+/// engine, file access and the PATH the service gets.
 struct EnvironmentView: View {
     @Environment(AppModel.self) private var model
-    @State private var trusting = false
-    @State private var confirmTrust = false
-    @State private var trustResult: String?
     /// The shared browser's engine, read when the page comes up (docs/browser-v0.md §7.2 第 6 条).
     @State private var engine: BrowserEngine?
 
@@ -28,7 +25,6 @@ struct EnvironmentView: View {
 
             Section {
                 StatusRow(label: "Service", line: model.daemonLine)
-                StatusRow(label: "Gateway", line: model.gateLine)
                 StatusRow(label: "Remote", line: model.remoteLine)
                 StatusRow(label: "Bonjour", line: model.bonjourLine)
                 StatusRow(label: "LAN", line: model.lanAddresses.isEmpty ? StatusLine("No Private Address", .warning)
@@ -40,8 +36,6 @@ struct EnvironmentView: View {
                 if let note = networkFooter { Footer(note) }
             }
 
-            GateServiceSection()
-
             Section {
                 StatusRow(label: "Engine", line: BrowserEngineText.environment(engine))
             } header: {
@@ -50,24 +44,6 @@ struct EnvironmentView: View {
                 Footer(BrowserEngineText.environmentHint)
             }
             .task { engine = try? await model.client.browserEngine(check: false) }
-
-            Section {
-                StatusRow(label: "Cert File", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)
-                                                                   : StatusLine("Created on First Gateway Start", .busy))
-                LabeledContent("Login Keychain") {
-                    HStack(spacing: 8) {
-                        if trusting { ProgressView().controlSize(.small) }
-                        Text(trustResult ?? (model.caTrusted ? "Trusted" : "Not Trusted")).foregroundStyle(.secondary)
-                        if !model.caTrusted {
-                            Button("Trust…") { confirmTrust = true }.disabled(!model.caFilePresent || trusting)
-                        }
-                    }
-                }
-            } header: {
-                SectionLabel("Gateway Cert")
-            } footer: {
-                Footer("执行器通过环境变量单独信任此证书，通常无需加入钥匙串。")
-            }
 
             Section {
                 LabeledContent("System Settings") {
@@ -116,11 +92,6 @@ struct EnvironmentView: View {
                     .disabled(model.detecting)
             }
         }
-        .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
-            Button("Trust") { Task { await trust() } }
-        } message: {
-            Text(GateCATrustText.confirmation(service: model.gateMode.isService))
-        }
     }
 
     private var tailscaleLine: StatusLine {
@@ -138,13 +109,6 @@ struct EnvironmentView: View {
         case .stopped: return "打开并登录 Tailscale 后，iPhone 可在局域网外连接。"
         default: return nil
         }
-    }
-
-    /// The keychain step of `secret-gate install-ca`, only on this click; macOS asks for the login password.
-    private func trust() async {
-        trusting = true
-        defer { trusting = false }
-        trustResult = await model.trustGateCA()
     }
 }
 

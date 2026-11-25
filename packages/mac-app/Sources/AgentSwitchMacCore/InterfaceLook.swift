@@ -33,7 +33,7 @@ public enum InterfaceLook: String, CaseIterable, Sendable {
 public enum ClassicWords {
     static let table: [String: String] = [
         "Busy": "Working", "Waiting": "Needs You", "Idle": "Ready", "Exited": "Ended",
-        "[!] Approval": "Approval Needed", "? Question": "Question", "Gateway": "Gateway OK", "On Mac": "On This Mac",
+        "[!] Approval": "Approval Needed", "? Question": "Question", "On Mac": "On This Mac",
         "bypass": "Bypass", "auto": "Auto", "manual": "Ask Each", "plan": "Plan", "ask": "Ask", "edits": "Edits",
         "OK": "Running", "Remote": "Remote Access", "Open Dispatch": "Open AgentSwitch",
     ]

@@ -178,7 +178,7 @@ final class SetupChecklistTests: XCTestCase {
 
 final class SetupWizardTests: XCTestCase {
     func testStepsAndProgress() {
-        XCTAssertEqual(SetupStep.allCases.map(\.title), ["Executors", "Pair iPhone", "Permissions & Launch", "Done"])
+        XCTAssertEqual(SetupStep.allCases.map(\.title), ["Executors", "Pair iPhone", "Launch", "Done"])
         XCTAssertEqual(SetupStep.executors.next, .pairing)
         XCTAssertNil(SetupStep.done.next)
         XCTAssertNil(SetupStep.executors.previous)
@@ -186,7 +186,7 @@ final class SetupWizardTests: XCTestCase {
         XCTAssertEqual(fresh.resumeStep, .executors)
         let two = fresh.completing(.executors).completing(.pairing)
         XCTAssertEqual(two.lastCompletedStep, 1)
-        XCTAssertEqual(two.resumeStep, .permissions)
+        XCTAssertEqual(two.resumeStep, .launch)
         XCTAssertEqual(two.completing(.executors).lastCompletedStep, 1, "going back never lowers the progress")
         XCTAssertEqual(fresh.lastCompletedStep, -1, "completing returns a new state")
         XCTAssertEqual(fresh.completing(.done).resumeStep, .done)

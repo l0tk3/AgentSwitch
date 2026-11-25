@@ -53,18 +53,12 @@ final class BrowserWindowTests: XCTestCase {
     }
 
     func testWhoHasATabAndWhatCanBeDoneWithIt() {
-        // Fill Ciphertext is retired (2026-11-25): offered nowhere; the old way, switched on, below.
-        XCTAssertEqual(BrowserWindowText.buttons(tab()), [.show, .copy, .close])
-        BrowserFillText.stillOffered = true
-        defer { BrowserFillText.stillOffered = false }
         // Your own tab.
         let mine = tab()
         XCTAssertEqual(BrowserWindowText.state(mine), .yours)
         XCTAssertEqual(BrowserWindowText.who(mine), "You")
-        XCTAssertEqual(BrowserWindowText.buttons(mine), [.show, .fill, .copy, .close])
+        XCTAssertEqual(BrowserWindowText.buttons(mine), [.show, .copy, .close])
         XCTAssertEqual(BrowserWindowText.primary(mine), .show)
-        // Not http(s): nothing to fill a ciphertext into.
-        XCTAssertEqual(BrowserWindowText.buttons(tab(url: "file:///Users/me/site/index.html")), [.show, .copy, .close])
 
         // An agent's, at work.
         let theirs = tab(codex, status: .busy, action: BrowserAction(tool: "browser_click", description: #"click "Merge pull request""#))
@@ -78,7 +72,7 @@ final class BrowserWindowTests: XCTestCase {
         let took = tab(codex, held: BrowserDefaults.windowScreen)
         XCTAssertEqual(BrowserWindowText.state(took), .steppedIn)
         XCTAssertEqual(BrowserWindowText.who(took), "You · Taken Over from Codex")
-        XCTAssertEqual(BrowserWindowText.buttons(took), [.handBack, .show, .copy])  // not an http(s) page: no Fill
+        XCTAssertEqual(BrowserWindowText.buttons(took), [.handBack, .show, .copy])
         XCTAssertEqual(BrowserWindowText.primary(took), .handBack)
         XCTAssertEqual(BrowserWindowText.hint(took), "2 分钟无操作将自动交还。agent 排队等待的操作在交还后继续。")
 

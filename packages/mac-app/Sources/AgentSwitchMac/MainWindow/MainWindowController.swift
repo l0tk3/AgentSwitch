@@ -2,8 +2,8 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// The main window `AgentSwitch` (docs/dispatch-v0.md §1): one window, its pages — Dispatch (the phone's home on a desk,
-/// `DispatchPage`), Terminals (the terminal window as it was, `TerminalsPageController`) and Browser (the shared
+/// The main window `AgentSwitch` (docs/dispatch-v0.md §1): one window, its pages — Dispatch (the 调度台 room,
+/// `RoomsPage` as the desk), Terminals (the terminal window as it was, `TerminalsPageController`) and Browser (the shared
 /// browser's screen, `BrowserPage`, docs/browser-v0.md §1 Mac) — chosen in the rail on the left (MainRail.swift), under
 /// one row of bar that is the page's own (MainBar.swift), over one status bar across the window (MainStatusBar.swift;
 /// proposal B, 2026-10-03, docs/design/implemented/window-bars.html). All pages are in
@@ -89,8 +89,7 @@ final class MainWindowController: NSObject {
         self.model = model
         self.frameName = frameName
         self.firstFrame = firstFrame
-        // A Dispatch kept from before the old dispatch was switched off opens on Terminals (OldDispatch).
-        state = MainWindowState(page: OldDispatch.landing(MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey))),
+        state = MainWindowState(page: MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey)),
                                 railHidden: MainRailLayout.hidden(UserDefaults.standard.object(forKey: MainRailLayout.hiddenKey) as? Bool))
         super.init()
         if let node { state.use(node: node) }
@@ -136,19 +135,6 @@ final class MainWindowController: NSObject {
         bringForward()
     }
 
-    /// One task's page on Dispatch (the Live Activity): the window asks the page to open it (`requestedTask`).
-    func show(task id: String, node: String? = nil) {
-        // The old dispatch is off: its tasks' pages are not opened (OldDispatch).
-        guard !OldDispatch.off else { return }
-        if let node, model.nodes.node(node) == nil { return }
-        let watched = inUse
-        use(node: node.flatMap { model.nodes.node($0) })
-        open()
-        state.request(task: id)
-        go(to: .dispatch, animated: watched)
-        bringForward()
-    }
-
     /// A new terminal's panel on the Terminals page (⌘T in a terminal's own window).
     func newTerminal() {
         show(.terminals)
@@ -162,14 +148,8 @@ final class MainWindowController: NSObject {
     /// among every node's, the window may be on another node.
     var watchingTerminals: Set<String> { Set((terminals?.watching ?? []).map { LiveSnapshot.key($0, on: state.nodeId) }) }
 
-    /// The task whose page is open in the window in use: the Live Activity says nothing of its result.
-    var watchingTask: String? {
-        guard let window, window.isKeyWindow, window.isVisible, state.page == .dispatch else { return nil }
-        return state.openTask.map { LiveSnapshot.key($0, on: state.nodeId) }
-    }
-
-    /// What `GET /live` said (the Live Activity's poll): the pages' marks and Dispatch's counts — this Mac's, so not
-    /// while the window's pages are another node's.
+    /// What `GET /live` said (the Live Activity's poll): the Terminals page's mark — this Mac's, so not while the
+    /// window's pages are another node's.
     func liveChanged(_ snapshot: LiveSnapshot?) {
         ownLive = snapshot
         if state.node == nil { state.liveChanged(snapshot) }
@@ -178,8 +158,8 @@ final class MainWindowController: NSObject {
     // MARK: the node
 
     /// The window's pages become another node's, or this Mac's again (the bar's node menu, the strip's way back;
-    /// docs/mesh-v0.md §5.2). Every page is one node's — the terminals' streams, the browser's picture, Dispatch's
-    /// record — so they are made anew for it, and drawn in as a page change is.
+    /// docs/mesh-v0.md §5.2). Every page is one node's — the terminals' streams, the browser's picture, the rooms
+    /// — so they are made anew for it, and drawn in as a page change is.
     func use(node: NodeStatus?) {
         guard node?.id != state.nodeId else { return }
         let watched = inUse
@@ -319,12 +299,10 @@ final class MainWindowController: NSObject {
             self?.windows?.close(id)
             self?.terminals?.show(terminal: id)
         }
-        let dispatch = NSHostingView(rootView: DispatchRoot(model: model, state: state))
-        // Fill Ciphertext's `New…` seals with this Mac's gate, for this Mac's gate: not on another node's browser.
-        let ownSealer: BrowserSealer = { [model] request in try await model.gateCLI.seal(request) }
-        let sealer: BrowserSealer? = node == nil ? ownSealer : nil
+        // The Dispatch page: the 调度台 room (RoomsPage as the desk).
+        let dispatch = NSHostingView(rootView: RoomsPage(state: state, desk: true).environment(model))
         let kept: UserDefaults? = node == nil ? .standard : nil
-        let browser = BrowserPageModel(service: { [model] in model.client(on: node) }, state: state, defaults: kept, sealer: sealer,
+        let browser = BrowserPageModel(service: { [model] in model.client(on: node) }, state: state, defaults: kept,
                                        vaultSealer: { [model] request in try await model.client(on: node).vaultSeal(request.value) })
         if node != nil {
             browser.remote = true
@@ -456,20 +434,9 @@ final class MainWindowController: NSObject {
         files?.toggle(at: state.page == .terminals ? terminals?.paneFolder : nil)
     }
 
-    /// Where `Add to Reply` lands (docs/files-v0.md §4): the pane in focus on Terminals; Dispatch's input (its files are
-    /// read from this Mac's disk: this Mac's own pages only, and no folder); nothing on Browser and Clash.
+    /// Where `Add to Reply` lands (docs/files-v0.md §4): the pane in focus on Terminals; nothing on the other pages.
     private func filesTarget() -> FilesTarget? {
-        switch state.page {
-        case .terminals:
-            return terminals?.filesTarget()
-        case .dispatch:
-            guard state.node == nil, !OldDispatch.off else { return nil }
-            return FilesTarget(name: "Dispatch") { [weak self] picks in
-                self?.state.give(files: picks.filter { !$0.folder }.map { URL(fileURLWithPath: $0.path) })
-            }
-        case .browser, .clash, .rooms, .passwords:
-            return nil
-        }
+        state.page == .terminals ? terminals?.filesTarget() : nil
     }
 
     /// esc in the column beside the page: the keyboard back to the page.
@@ -516,25 +483,15 @@ final class MainWindowController: NSObject {
 
     // MARK: pages
 
-    /// The user changes pages (the rail, ⌘0, ⌘⇧B, ⌃⇥, ⌘1–9 or ⌘T from Dispatch, ⌘N from another page): drawn in.
+    /// The user changes pages (the rail, ⌘0, ⌘⇧B, ⌃⇥, ⌘1–9 or ⌘T from Dispatch): drawn in.
     func switchPage(to page: MainPage) { go(to: page, animated: true) }
-
-    /// The rail: another page; the current Dispatch on a task's page goes back (as the bar's word did).
-    private func clicked(_ page: MainPage) {
-        guard page != state.page else {
-            if page == .dispatch, state.showsBack { state.requestBack() }
-            return
-        }
-        switchPage(to: page)
-    }
 
     /// The page goes in at once, then is drawn in from the top; a refresh under way gives way to it (nothing of it
     /// left). The page already on screen: nothing (a refresh drawing it in plays on). In the classic look and under
     /// Reduce Motion the page goes in and that is all (`ScanRefresh.plays`).
     private func go(to page: MainPage, animated: Bool) {
         // A page the node on screen does not have (Clash on another node): not gone to.
-        // Nor Dispatch while the old dispatch is off (OldDispatch).
-        guard page != state.page, state.pages.contains(page), OldDispatch.reachable(page) else { return }
+        guard page != state.page, state.pages.contains(page) else { return }
         container?.refresh.cancel()
         swap(to: page)
         guard animated, ScanRefresh.playsNow else { return }
@@ -551,8 +508,7 @@ final class MainWindowController: NSObject {
         container.show(page)
         terminals?.onScreen = page == .terminals
         browser?.setActive(shown: page == .browser, visible: state.windowVisible)
-        // The keyboard off the hidden pages: to the Dispatch page (its input takes it on `focusRequests`), to the
-        // browser's screen.
+        // The keyboard off the hidden pages: to the Dispatch page, to the browser's screen.
         switch page {
         case .dispatch:
             if let dispatchHost, !window.makeFirstResponder(dispatchHost) { window.makeFirstResponder(nil) }
@@ -592,8 +548,7 @@ final class MainWindowController: NSObject {
 
     private var barActions: MainBarActions {
         MainBarActions(
-            switchPage: { [weak self] page in self?.clicked(page) },
-            back: { [weak self] in self?.state.requestBack() },
+            switchPage: { [weak self] page in self?.switchPage(to: page) },
             toggleList: { [weak self] in
                 guard let self else { return }
                 if self.state.page == .browser { self.browser?.toggleList() } else { self.terminals?.toggleList() }
@@ -619,8 +574,8 @@ final class MainWindowController: NSObject {
 
     // MARK: keys
 
-    /// The window's own keys (MainShortcut), taken before the page in focus sees them; on Dispatch the edit keys too, and
-    /// on Browser while its address is edited (the screen itself sends ⌘V as typing, ⌘A ⌘Z to the page).
+    /// The window's own keys (MainShortcut), taken before the page in focus sees them; on Dispatch, Chat Room, Clash
+    /// and Passwords the edit keys too, and on Browser while its address is edited (the screen itself sends ⌘V as typing, ⌘A ⌘Z to the page).
     private func watchKeys() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             nonisolated(unsafe) let key = event
@@ -635,12 +590,11 @@ final class MainWindowController: NSObject {
         let press = MainShortcut.Press(key: event.charactersIgnoringModifiers?.lowercased() ?? "", keyCode: event.keyCode,
                                        command: flags.contains(.command), control: flags.contains(.control),
                                        option: flags.contains(.option), shift: flags.contains(.shift))
-        // A sheet on the window (New Ciphertext, a file's source, Rename Topic, a folder to choose): the edit keys only,
+        // A sheet on the window (a file's source, a folder to choose): the edit keys only,
         // as the settings window does.
         if target !== window { return target.sheetParent === window && edit(press, in: target) }
         guard window.attachedSheet == nil else { return false }
-        let composing = (window.firstResponder as? NSTextInputClient)?.hasMarkedText() ?? false
-        if let action = MainShortcut.action(for: press, on: state.page, canGoBack: state.showsBack, composing: composing) {
+        if let action = MainShortcut.action(for: press, on: state.page) {
             perform(action)
             return true
         }
@@ -654,21 +608,15 @@ final class MainWindowController: NSObject {
         case .page(let page):
             switchPage(to: page)
         case .nextPage:
-            switchPage(to: OldDispatch.step(from: state.page, forward: true))
+            switchPage(to: state.page.next)
         case .previousPage:
-            switchPage(to: OldDispatch.step(from: state.page, forward: false))
+            switchPage(to: state.page.previous)
         case .terminal(let n):
             switchPage(to: .terminals)
             terminals?.shortcut(String(n))
-        case .newTask:
-            guard !OldDispatch.off else { return }
-            switchPage(to: .dispatch)
-            state.requestFocus()
         case .newTerminal:
             switchPage(to: .terminals)
             terminals?.newTerminal()
-        case .back:
-            state.requestBack()
         case .settings:
             openSettings()
         case .toggleRail:
@@ -706,29 +654,5 @@ final class MainWindowController: NSObject {
         }
         guard let action else { return false }
         return NSApp.sendAction(action, to: nil, from: target)
-    }
-}
-
-/// The Dispatch page with what it reads: the app's model and the window's state.
-struct DispatchRoot: View {
-    let model: AppModel
-    let state: MainWindowState
-
-    var body: some View {
-        if OldDispatch.off {
-            // The new dispatch: the 调度台 room (RoomsPage on the Dispatch page).
-            RoomsPage(state: state, desk: true).environment(model)
-        } else {
-            page
-        }
-    }
-
-    private var page: some View {
-        DispatchPage()
-            .environment(model)
-            .environment(state)
-            .tint(.brand)
-            // Its spinners and clocks stop while another page is shown or the window is not seen (ui-v0 §7.4).
-            .followsWindow()
     }
 }

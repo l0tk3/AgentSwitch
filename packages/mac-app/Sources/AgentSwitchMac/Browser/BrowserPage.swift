@@ -6,7 +6,7 @@ import SwiftUI
 // MAIN WINDOW, THIRD PAGE"): on the left the tabs grouped by owner — the terminals' agents, the tasks, yours — each with
 // its status mark, title and place; on the right the address bar (‹ › ↻, the address as text, a click to edit it, ↩ to
 // go, the lock for https) and the live screen (BrowserScreenView). The tab's hold — whose tab it is, what an agent waits
-// for, `[ Fill Ciphertext ]` while this Mac drives an http(s) page of your own, `[ Take Over ]` / `[ Hand Back ]` — was the
+// for, `[ Take Over ]` / `[ Hand Back ]` — was the
 // page's footer; since 2026-10-03 (proposal B, docs/dispatch-v0.md §1) it is the right of the window's status bar
 // (BrowserHoldItems, drawn by MainStatusBar), the page's zoom after it (BrowserZoomItems). Always dark, as the
 // Terminals page. The data and the actions are BrowserPageModel's.
@@ -40,9 +40,6 @@ struct BrowserPage: View {
             }
         }
         .background(Color.black)
-        .sheet(item: Binding(get: { model.fillTarget }, set: { model.fillTarget = $0 })) { target in
-            BrowserFillSheet(model: model, target: target)
-        }
     }
 
     private func column(width: Double, pageWidth: Double) -> some View {
@@ -396,8 +393,7 @@ private struct BarGlyph: View {
 
 // MARK: - the hold (the status bar's right on Browser)
 
-/// Whose tab it is, what is going on, `[ Fill Ciphertext ]` while this Mac drives an http(s) page of yours (nobody else
-/// holding it; never an agent's, even taken over), and the hold: `[ Take Over ]` for an agent's tab (filled while it
+/// Whose tab it is, what is going on, and the hold: `[ Take Over ]` for an agent's tab (filled while it
 /// waits for you), `[ Hand Back ]` while this Mac holds it (both also ⌘⇧T, `hold()`). Your own tab held here is simply on
 /// this screen (尺寸有主): `You`, nothing to hand back. Once the page's footer; the window's status bar since 2026-10-03.
 struct BrowserHoldItems: View {
@@ -414,11 +410,6 @@ struct BrowserHoldItems: View {
                     Text("其他屏幕已接手此标签。").foregroundStyle(Look.ink2).lineLimit(1)
                 } else if let waiting = BrowserTabText.waiting(tab) {
                     Text(waiting).foregroundStyle(Color.waiting).lineLimit(1).truncationMode(.tail)
-                }
-                if model.canFill {
-                    Button { model.openFill() } label: { BracketLabel(word: "Fill Ciphertext") }
-                        .buttonStyle(BracketButtonStyle(size: 12))
-                        .help("从密文填入页面中当前的输入框")
                 }
                 hold(tab, holder: holder)
             }

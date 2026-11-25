@@ -2,8 +2,8 @@ import Foundation
 
 // The main window's status bar (docs/dispatch-v0.md §1, 左侧图标栏与整窗状态栏; demo `implemented/window-bars.html`):
 // one row across the whole window, under the rail and the page. Its left is the app's and the same on every page — the
-// gateway and the phones; its right is the page's — the terminal on screen, the browser tab's hold, Dispatch's router
-// and topics. The words are here; the bar only draws them.
+// service and the phones; its right is the page's — the terminal on screen, the browser tab's hold, how the dispatch
+// stands. The words are here; the bar only draws them.
 
 public enum MainStatus {
     /// A word of the bar and how it is drawn.
@@ -19,12 +19,11 @@ public enum MainStatus {
         }
     }
 
-    /// `Gateway` (green) while the service and the gateway answer; `Service Down` or `Gateway Down` (red) while one does
-    /// not (the service first, as the bar said it before); `Starting` while one is on its way up.
-    public static func gateway(service: StatusLine, gateway: StatusLine) -> Word {
-        if let trouble = ServiceTrouble.word(service: service, gateway: gateway) { return Word(trouble, .failed) }
-        if service.level == .busy || gateway.level == .busy { return Word("Starting", .busy) }
-        return Word("Gateway", .ok)
+    /// `Service` (green) while the service answers; `Service Down` (red) while it does not; `Starting` on its way up.
+    public static func service(_ service: StatusLine) -> Word {
+        if let trouble = ServiceTrouble.word(service: service) { return Word(trouble, .failed) }
+        if service.level == .busy { return Word("Starting", .busy) }
+        return Word("Service", .ok)
     }
 
     /// The phones, from `GET /remote/info`'s count and the paired devices (nil: not read yet): `iPhone Online` (the one
@@ -43,14 +42,6 @@ public enum MainStatus {
             return iPhone.map { $0.platform.lowercased() == "ios" } == true ? "iPhone Online" : "1 Device Online"
         default: return "\(live) Devices Online"
         }
-    }
-
-    /// Dispatch's right: the router's model (`Router · DeepSeek Flash`) and the topics (`2 Topics`); each only when known.
-    public static func dispatch(router: String?, topics: Int) -> [String] {
-        var words: [String] = []
-        if let router, !router.isEmpty { words.append("Router · \(ModelName.display(router))") }
-        if topics > 0 { words.append(topics == 1 ? "1 Topic" : "\(topics) Topics") }
-        return words
     }
 }
 

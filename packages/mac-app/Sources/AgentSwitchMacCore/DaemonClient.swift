@@ -150,26 +150,6 @@ public struct DaemonClient: Sendable {
         try decode(RemoteInfo.self, try await call("GET", "/remote/info"))
     }
 
-    public func modelSettings() async throws -> ModelSettings {
-        try decode(ModelSettings.self, try await call("GET", "/settings/models"))
-    }
-
-    public func saveModelSettings(_ update: ModelSettingsUpdate) async throws -> ModelSettingsSaveResult {
-        let body = try JSONEncoder().encode(update)
-        return try decode(ModelSettingsSaveResult.self, try await call("PUT", "/settings/models", body: body))
-    }
-
-    /// `GET /approvals/policy`: the mode, the categories kept for the user, and every category with its title.
-    public func approvalPolicy() async throws -> ApprovalPolicySettings {
-        try decode(ApprovalPolicySettings.self, try await call("GET", "/approvals/policy"))
-    }
-
-    /// `PUT /approvals/policy` (local only): applies to approvals from now on, no restart. The answer has no categories.
-    public func saveApprovalPolicy(_ update: ApprovalPolicyUpdate) async throws -> ApprovalPolicySettings {
-        let body = try JSONEncoder().encode(update)
-        return try decode(ApprovalPolicySettings.self, try await call("PUT", "/approvals/policy", body: body))
-    }
-
     /// `GET /settings/workdir` (control-v0 §2).
     public func workDir() async throws -> WorkDirSettings {
         try decode(WorkDirSettings.self, try await call("GET", "/settings/workdir"))
@@ -194,27 +174,11 @@ public struct DaemonClient: Sendable {
         try decode(LiveSnapshot.self, try await call("GET", "/live"))
     }
 
-    /// Allow or deny what a row waits for: a terminal's permission request (`POST /terminals/:id/permissions/:pid`) or
-    /// a task's approval (`POST /tasks/:id/approve`).
+    /// Allow or deny the terminal's permission request a row waits for (`POST /terminals/:id/permissions/:pid`).
     public func decide(_ row: LiveSnapshot.Row, allow: Bool) async throws {
         guard case .decide(let id, _, _, _)? = row.ask else { return }
-        let decision = allow ? "allow" : "deny"
-        switch row.kind {
-        case .terminal:
-            _ = try await call("POST", "/terminals/\(Self.segment(row.id))/permissions/\(Self.segment(id))",
-                               body: try JSONEncoder().encode(["decision": decision]))
-        case .task:
-            _ = try await call("POST", "/tasks/\(Self.segment(row.id))/approve",
-                               body: try JSONEncoder().encode(["approval_id": id, "decision": decision]))
-        }
-    }
-
-    /// Answer a task's question with one of its options (`POST /tasks/:id/answer`).
-    public func answer(_ row: LiveSnapshot.Row, option: String) async throws {
-        guard case .question(let id, let questionId, _, _, true)? = row.ask else { return }
-        struct Body: Encodable { let approval_id: String; let answers: [String: [String]] }
-        _ = try await call("POST", "/tasks/\(Self.segment(row.id))/answer",
-                           body: try JSONEncoder().encode(Body(approval_id: id, answers: [questionId: [option]])))
+        _ = try await call("POST", "/terminals/\(Self.segment(row.id))/permissions/\(Self.segment(id))",
+                           body: try JSONEncoder().encode(["decision": allow ? "allow" : "deny"]))
     }
 
     static func segment(_ id: String) -> String {

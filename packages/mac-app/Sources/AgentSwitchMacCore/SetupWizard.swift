@@ -2,7 +2,7 @@ import Foundation
 
 /// The first-run wizard's steps (docs/control-v0.md §6); each can be skipped.
 public enum SetupStep: Int, CaseIterable, Sendable, Identifiable {
-    case executors, pairing, permissions, done
+    case executors, pairing, launch, done
 
     public var id: Int { rawValue }
 
@@ -10,7 +10,7 @@ public enum SetupStep: Int, CaseIterable, Sendable, Identifiable {
         switch self {
         case .executors: return "Executors"
         case .pairing: return "Pair iPhone"
-        case .permissions: return "Permissions & Launch"
+        case .launch: return "Launch"
         case .done: return "Done"
         }
     }

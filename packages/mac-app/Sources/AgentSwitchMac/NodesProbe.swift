@@ -63,11 +63,9 @@ enum NodesProbe {
         let there = main.probeClient
         await step("there: is another node's") { "remote=\(there.isRemote) prefix=\(there.nodePrefix) screens=\(TerminalSizeHolder.screen(onNodeAs: there.screenOwner, unique: "x"))" }
         await step("there: node") { let i = try await there.nodeInfo(); return "\(i.name) kind=\(i.kind) has=\(i.has.joined(separator: ","))" }
-        await step("there: tasks") { try await there.tasks(limit: 20).map { "\($0.id)=\($0.status.label)" }.joined(separator: " ") }
         await step("there: live") { let l = try await there.live(); return "rows=\(l.rows.count)" }
         await step("there: terminals") { "\(try await there.terminals().terminals.count) terminal(s)" }
         await step("there: what a paired node may not reach (a FAIL is right)") { _ = try await there.devices(); return "REACHED the device list" }
-        await step("here: tasks") { try await model.client.tasks(limit: 20).map { "\($0.id)=\($0.status.label)" }.joined(separator: " ") }
         main.show(.terminals)
         try? await Task.sleep(for: .seconds(4))
         shot(main.window?.contentView, dir.appendingPathComponent("node-terminals.png"))

@@ -10,9 +10,7 @@ struct GeneralView: View {
     @Environment(SettingsNavigation.self) private var navigation
     @State private var local = ""
     @State private var remote = ""
-    @State private var gate = ""
     @State private var opencode = ""
-    @State private var showingGateLog = false
     /// On by default: the Dock icon opens the main window, Dispatch and Terminals (AgentSwitchApp registers the default).
     @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = true
     @AppStorage(AppDelegate.quitWithoutAskingKey) private var quitWithoutAsking = false
@@ -25,8 +23,8 @@ struct GeneralView: View {
     @AppStorage(CodeEditor.key) private var editor = CodeEditor.vscode.rawValue
 
     private var draft: PortSettings? {
-        guard let l = Int(local), let r = Int(remote), let g = Int(gate), let o = Int(opencode) else { return nil }
-        return PortSettings(local: l, remote: r, gate: g, opencode: o)
+        guard let l = Int(local), let r = Int(remote), let o = Int(opencode) else { return nil }
+        return PortSettings(local: l, remote: r, opencode: o)
     }
 
     var body: some View {
@@ -87,8 +85,6 @@ struct GeneralView: View {
             Section {
                 portField("Local", $local, help: "供网页控制台和本应用使用")
                 portField("Remote", $remote, help: "供已配对的 iPhone 使用（HTTPS）")
-                portField("Gateway", $gate, help: model.gateMode.isService ? "凭据网关服务的代理端口，更改时需要管理员授权"
-                                                                            : "端口上已运行 secret-gate 时直接复用")
                 portField("OpenCode", $opencode, help: "服务常驻使用的 OpenCode 实例")
                 ForEach(portProblems, id: \.self) { problem in
                     HStack(spacing: 6) {
@@ -148,10 +144,6 @@ struct GeneralView: View {
                 LabeledContent("Logs") {
                     HStack(spacing: 8) {
                         Button("daemon.log") { open(model.paths.daemonLog) }
-                        Button("gate.log") {
-                            if model.gateMode.isService { showingGateLog = true } else { open(model.paths.gateLog) }
-                        }
-                        .help(model.gateMode.isService ? "凭据网关服务的日志" : model.shortPath(model.paths.gateLog))
                         Button("Open Folder") { open(model.paths.logsDir) }
                     }
                 }
@@ -193,7 +185,6 @@ struct GeneralView: View {
         .formStyle(.grouped)
         .onAppear { fill(model.ports) }
         .onChange(of: model.ports) { _, ports in fill(ports) }
-        .sheet(isPresented: $showingGateLog) { GateLogSheet().environment(model) }
         .task(id: model.daemonReady) {
             if model.daemonReady { await model.control.loadWorkDir(model.client) }
         }
@@ -201,15 +192,7 @@ struct GeneralView: View {
 
     private var portProblems: [String] { draft?.problems() ?? ["端口必须是数字"] }
 
-    /// A new gate port in service mode is the service's to change (`system update --port`, administrator prompt); the
-    /// other ports are saved with it once that succeeded.
-    private func save(_ next: PortSettings) {
-        if model.gateMode.isService && next.gate != model.ports.gate {
-            model.requestGateService(.changePort(next.gate), ports: next)
-        } else {
-            model.applyPorts(next)
-        }
-    }
+    private func save(_ next: PortSettings) { model.applyPorts(next) }
 
     private func portField(_ label: String, _ text: Binding<String>, help: String) -> some View {
         TextField(label, text: text).monospacedDigit().help(help)
@@ -218,7 +201,6 @@ struct GeneralView: View {
     private func fill(_ p: PortSettings) {
         local = String(p.local)
         remote = String(p.remote)
-        gate = String(p.gate)
         opencode = String(p.opencode)
     }
 

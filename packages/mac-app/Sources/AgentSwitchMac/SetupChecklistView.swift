@@ -58,8 +58,6 @@ struct SetupItemRow: View {
     @Environment(AppModel.self) private var model
     @Environment(SettingsNavigation.self) private var navigation
     let item: SetupItem
-    @State private var confirmTrust = false
-    @State private var busy = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -74,18 +72,13 @@ struct SetupItemRow: View {
                 }
             }
             Spacer(minLength: 12)
-            if item.state == .working || busy { ProgressView().controlSize(.small) }
+            if item.state == .working { ProgressView().controlSize(.small) }
             Text(item.status).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             if let action = item.action {
-                Button(action.title) { perform(action) }.disabled(busy)
+                Button(action.title) { perform(action) }
             }
         }
         .padding(.vertical, 2)
-        .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
-            Button("Trust") { run { _ = await model.trustGateCA() } }
-        } message: {
-            Text(GateCATrustText.confirmation(service: model.gateMode.isService))
-        }
     }
 
     private var level: StatusLevel {
@@ -114,25 +107,6 @@ struct SetupItemRow: View {
             if let url = URL(string: "https://tailscale.com/download/mac") { NSWorkspace.shared.open(url) }
         case .chooseWorkDir:
             model.chooseWorkDir()
-        case .installGateService:
-            model.requestGateService(.install)
-        case .updateGateService:
-            model.requestGateService(.update)
-        case .repairGateService:
-            model.requestGateService(.repair)
-        case .trustGateCA:
-            confirmTrust = true
-        case .removePreviousGateCA:
-            run { await model.removePreviousCA() }
-        }
-    }
-
-    /// A keychain step: macOS asks for the password; the row waits for it.
-    private func run(_ work: @escaping @MainActor () async -> Void) {
-        busy = true
-        Task {
-            await work()
-            busy = false
         }
     }
 
@@ -151,13 +125,5 @@ extension AppModel {
     func chooseWorkDir() {
         guard let url = FolderPanel.choose(message: "未指定文件夹的任务将在此处创建子文件夹。", startingAt: control.workDir.settings?.path) else { return }
         Task { await control.setWorkDir(url.path, client) }
-    }
-}
-
-/// The confirmation before 加入 (环境 › 网关证书 and the checklist row).
-enum GateCATrustText {
-    static func confirmation(service: Bool) -> String {
-        let key = service ? "签发用的私钥由凭据网关服务保管" : "签发用的私钥位于 ~/.mitmproxy"
-        return "加入后，本机所有程序都将信任此证书签发的任何网站证书，\(key)。仅建议在个人电脑上执行此操作。macOS 将要求输入登录密码。"
     }
 }

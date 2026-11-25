@@ -121,13 +121,6 @@ public protocol BrowserService: Sendable {
     func setViewport(tabId: String, _ viewport: BrowserViewportRequest, screen: String) async throws -> BrowserTab
     /// `GET /browser/servers`: the Mac's local servers a new tab offers.
     func localServers() async throws -> [BrowserLocalServer]
-    /// `POST /browser/tabs/:id/fill {token, screen}` → `{tab, filled: {label, host}}` (docs/browser-v0.md §1
-    /// `Fill Ciphertext`, §6): a whole `enc:v1:` ciphertext typed into the page's focused input field, the gate checking
-    /// it against that field's frame and every frame above it. Only from a screen that may drive the tab. 400: no
-    /// focused input field (or a bad body); 403: the gate's refusal (its reason) or a page or frame that is not
-    /// http(s); 404: an unknown tab; 409: not the holder, or the focus moved meanwhile; 503: no gate. The value never
-    /// comes back; `BrowserFillText.reason` words the refusals.
-    func fill(tabId: String, token: String, screen: String) async throws -> BrowserFillResult
     /// `POST /browser/tabs/:id/show` (docs/browser-v0.md §7.3 窗口): the tab's window before the browser's other
     /// windows; bringing the browser before other apps is this app's to do. 503 where tabs have no windows.
     func showTab(id: String) async throws
@@ -147,6 +140,6 @@ public enum BrowserTimeouts {
     public static let open: TimeInterval = 45
     /// Listing the local servers runs `lsof` (up to 5 s twice in the daemon).
     public static let servers: TimeInterval = 20
-    /// Filling: the gate's answer (up to 15 s in the daemon), the page's focus read before and after it.
-    public static let fill: TimeInterval = 40
+    /// Setting the browser's proxy: its password is turned into the value on the way (up to 15 s in the daemon).
+    public static let identity: TimeInterval = 40
 }

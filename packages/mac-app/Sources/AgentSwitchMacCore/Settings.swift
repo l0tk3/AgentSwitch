@@ -1,31 +1,28 @@
 import Foundation
 
 /// Ports the app hands to its children. Defaults follow app-v0 §4; all are editable because a developer's own
-/// daemon may already hold 4711/4712 and a hand-started gate 8080.
+/// daemon may already hold 4711/4712.
 public struct PortSettings: Codable, Equatable, Sendable {
     public let local: Int      // AGENTSWITCH_PORT, loopback HTTP
     public let remote: Int     // AGENTSWITCH_REMOTE_PORT, TLS for paired devices
-    public let gate: Int       // secret-gate proxy
     public let opencode: Int   // AGENTSWITCH_OPENCODE_PORT, the daemon's resident router server
 
-    public static let defaults = PortSettings(local: 4711, remote: 4713, gate: 8080, opencode: 4712)
+    public static let defaults = PortSettings(local: 4711, remote: 4713, opencode: 4712)
     public static let validRange = 1024...65535
 
-    public init(local: Int, remote: Int, gate: Int, opencode: Int) {
+    public init(local: Int, remote: Int, opencode: Int) {
         self.local = local
         self.remote = remote
-        self.gate = gate
         self.opencode = opencode
     }
 
-    public func with(local: Int? = nil, remote: Int? = nil, gate: Int? = nil, opencode: Int? = nil) -> PortSettings {
-        PortSettings(local: local ?? self.local, remote: remote ?? self.remote,
-                     gate: gate ?? self.gate, opencode: opencode ?? self.opencode)
+    public func with(local: Int? = nil, remote: Int? = nil, opencode: Int? = nil) -> PortSettings {
+        PortSettings(local: local ?? self.local, remote: remote ?? self.remote, opencode: opencode ?? self.opencode)
     }
 
     /// Named ports in display order.
     public var labelled: [(label: String, port: Int)] {
-        [("本地接口", local), ("远程接口", remote), ("凭据网关", gate), ("OpenCode 服务", opencode)]
+        [("本地接口", local), ("远程接口", remote), ("OpenCode 服务", opencode)]
     }
 
     /// Human-readable problems; empty means the set can be applied.
@@ -35,7 +32,7 @@ public struct PortSettings: Codable, Equatable, Sendable {
             out.append("\(label)端口 \(port) 不在 1024–65535 之间")
         }
         let ports = labelled.map(\.port)
-        if Set(ports).count != ports.count { out.append("四个端口必须互不相同") }
+        if Set(ports).count != ports.count { out.append("三个端口必须互不相同") }
         return out
     }
 
@@ -44,18 +41,16 @@ public struct PortSettings: Codable, Equatable, Sendable {
     public static func load(_ lookup: (String) -> Int?) -> PortSettings {
         PortSettings(local: lookup(Keys.local) ?? defaults.local,
                      remote: lookup(Keys.remote) ?? defaults.remote,
-                     gate: lookup(Keys.gate) ?? defaults.gate,
                      opencode: lookup(Keys.opencode) ?? defaults.opencode)
     }
 
     public var keyed: [String: Int] {
-        [Keys.local: local, Keys.remote: remote, Keys.gate: gate, Keys.opencode: opencode]
+        [Keys.local: local, Keys.remote: remote, Keys.opencode: opencode]
     }
 
     public enum Keys {
         public static let local = "localPort"
         public static let remote = "remotePort"
-        public static let gate = "gatePort"
         public static let opencode = "opencodePort"
     }
 }

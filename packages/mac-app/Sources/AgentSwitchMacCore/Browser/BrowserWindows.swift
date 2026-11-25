@@ -2,7 +2,7 @@ import Foundation
 
 /// The Browser page when the browser's tabs have windows of their own (docs/browser-v0.md §7.2; design page
 /// `docs/design/implemented/browser-window.html`): the page is the list of tabs and what AgentSwitch adds to the one
-/// selected — whose it is, what an agent does in it, taking over and handing back, Fill Ciphertext. The page itself
+/// selected — whose it is, what an agent does in it, taking over and handing back. The page itself
 /// is in the window.
 public enum BrowserWindowText {
     public enum State: Sendable, Equatable {
@@ -17,7 +17,7 @@ public enum BrowserWindowText {
     }
 
     public enum Action: Sendable, Equatable {
-        case show, fill, handBack, copy, close
+        case show, handBack, copy, close
     }
 
     public static func state(_ tab: BrowserTab) -> State {
@@ -49,9 +49,8 @@ public enum BrowserWindowText {
     /// The buttons, in order; `primary` is the one drawn as the main one.
     public static func buttons(_ tab: BrowserTab) -> [Action] {
         switch state(tab) {
-        case .yours: BrowserFillText.stillOffered && BrowserFillText.offered(on: tab) ? [.show, .fill, .copy, .close] : [.show, .copy, .close]
-        case .agent: [.show, .copy, .close]
-        case .steppedIn: BrowserFillText.stillOffered && BrowserFillText.offered(on: tab) ? [.handBack, .fill, .show, .copy] : [.handBack, .show, .copy]
+        case .yours, .agent: [.show, .copy, .close]
+        case .steppedIn: [.handBack, .show, .copy]
         case .elsewhere: [.show, .copy]
         }
     }
@@ -63,7 +62,6 @@ public enum BrowserWindowText {
     public static func word(_ action: Action) -> String {
         switch action {
         case .show: "Show Window"
-        case .fill: "Fill Ciphertext"
         case .handBack: "Hand Back"
         case .copy: "Copy URL"
         case .close: "Close Tab"
@@ -73,7 +71,7 @@ public enum BrowserWindowText {
     /// The sentence under the buttons.
     public static func hint(_ tab: BrowserTab) -> String {
         switch state(tab) {
-        case .yours: BrowserFillText.stillOffered && BrowserFillText.offered(on: tab) ? "Fill Ciphertext 填入该窗口中当前的焦点输入框，仅限密码与验证码输入框。" : ""
+        case .yours: ""
         case .agent: "在它的窗口里操作即视为接手。"
         case .steppedIn: "2 分钟无操作将自动交还。agent 排队等待的操作在交还后继续。"
         case .elsewhere: (tab.heldBy ?? "").hasPrefix("phone") ? "正在 iPhone 上使用。手机交还后窗口恢复原来的大小。" : "正在其他设备上使用。交还后窗口恢复原来的大小。"

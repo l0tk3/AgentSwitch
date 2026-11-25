@@ -27,7 +27,6 @@ final class LiveActivity {
 
     @ObservationIgnored private let model: AppModel
     @ObservationIgnored private let openTerminal: (String, String?) -> Void
-    @ObservationIgnored private let openTask: (String, String?) -> Void
     /// Every answer of `GET /live` (nil: none), shown or not: the main window's bar counts from it.
     @ObservationIgnored var onSnapshot: (LiveSnapshot?) -> Void = { _ in }
     @ObservationIgnored private var item: NSStatusItem?
@@ -42,20 +41,16 @@ final class LiveActivity {
     @ObservationIgnored private let tones: [LivePresenter.Cue: NSSound] = [
         .needsYou: NSSound(data: Tones.wav(Tones.needsYou)), .done: NSSound(data: Tones.wav(Tones.done)), .failed: NSSound(data: Tones.wav(Tones.failed)),
     ].compactMapValues { $0 }
-    /// The terminal on screen, and the task whose page is open, in the main window in use.
+    /// The terminals on screen in the main window in use.
     @ObservationIgnored private let watching: () -> Set<String>
-    @ObservationIgnored private let watchingTask: () -> String?
     @ObservationIgnored private let sleepGuard = SleepGuard()
 
-    /// `openTerminal`, `openTask`: an id and the node it is on (nil: this Mac). `watching`, `watchingTask`: named among
-    /// every node's (`LiveSnapshot.key`).
-    init(model: AppModel, openTerminal: @escaping (String, String?) -> Void, openTask: @escaping (String, String?) -> Void,
-         watching: @escaping () -> Set<String> = { [] }, watchingTask: @escaping () -> String? = { nil }) {
+    /// `openTerminal`: an id and the node it is on (nil: this Mac). `watching`: named among every node's
+    /// (`LiveSnapshot.key`).
+    init(model: AppModel, openTerminal: @escaping (String, String?) -> Void, watching: @escaping () -> Set<String> = { [] }) {
         self.model = model
         self.openTerminal = openTerminal
-        self.openTask = openTask
         self.watching = watching
-        self.watchingTask = watchingTask
         UserDefaults.standard.register(defaults: [Self.enabledKey: true, Self.soundKey: true])
     }
 
@@ -78,7 +73,7 @@ final class LiveActivity {
                 try? await Task.sleep(for: .seconds(7))
                 if let self, let row = self.presenter.snapshot?.rows.first(where: { $0.id == "k1" }) { self.cardActions.decide(row, true) }
                 try? await Task.sleep(for: .seconds(16))
-                if let self, let row = self.presenter.snapshot?.rows.first(where: { $0.id == "t7" }) { self.cardActions.pick(row, "删掉") }
+                if let self, let row = self.presenter.snapshot?.rows.first(where: { $0.id == "k7" }) { self.cardActions.decide(row, true) }
             }
         }
         start()
@@ -148,7 +143,7 @@ final class LiveActivity {
         onSnapshot(next)
         if !enabled { next = nil }
         let now = Date()
-        if let cue = presenter.receive(next, at: now, watching: watching(), watchingTask: watchingTask()),
+        if let cue = presenter.receive(next, at: now, watching: watching()),
            UserDefaults.standard.bool(forKey: Self.soundKey) {
             for tone in tones.values { tone.stop() }
             tones[cue]?.play()
@@ -169,13 +164,10 @@ final class LiveActivity {
         sync()
     }
 
-    /// The thing a row names, in the main window: its terminal on the Terminals page, its task's page on Dispatch.
+    /// The terminal a row names, on the main window's Terminals page.
     private func open(_ row: LiveSnapshot.Row) {
         close()
-        switch row.kind {
-        case .terminal: openTerminal(row.id, row.node?.id)
-        case .task: openTask(row.id, row.node?.id)
-        }
+        openTerminal(row.id, row.node?.id)
     }
 
     /// Double click: the first thing the card shows.
@@ -183,20 +175,15 @@ final class LiveActivity {
         if let end = presenter.shownEnd { openEnd(end) } else if let row = presenter.cardRows.first { open(row) }
     }
 
-    /// A result's task or terminal; a failure opened is a failure seen.
+    /// A result's terminal; a failure opened is a failure seen.
     private func openEnd(_ end: LiveSnapshot.End) {
         presenter.opened(end)
         close()
-        switch end.kind {
-        case .terminal: openTerminal(end.id, end.node?.id)
-        case .task: openTask(end.id, end.node?.id)
-        }
+        openTerminal(end.id, end.node?.id)
         sync()
     }
 
     private func answer(_ row: LiveSnapshot.Row, _ send: @escaping @Sendable (DaemonClient) async throws -> Void) {
-        // The old dispatch is off: its tasks are not answered (OldDispatch).
-        guard row.kind != .task || !OldDispatch.off else { return }
         let key = row.ask?.id ?? row.id
         guard !pending.contains(key) else { return }
         pending.insert(key)
@@ -213,8 +200,7 @@ final class LiveActivity {
         LiveCardActions(
             open: { [weak self] row in self?.open(row) },
             openEnd: { [weak self] end in self?.openEnd(end) },
-            decide: { [weak self] row, allow in self?.answer(row) { try await $0.decide(row, allow: allow) } },
-            pick: { [weak self] row, option in self?.answer(row) { try await $0.answer(row, option: option) } })
+            decide: { [weak self] row, allow in self?.answer(row) { try await $0.decide(row, allow: allow) } })
     }
 
     // MARK: the menu bar and the card

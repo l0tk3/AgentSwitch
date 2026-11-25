@@ -2,7 +2,7 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// The menu-bar panel (docs/ui-v0.md §7): the mark and one status word, the four services, usage, what needs the
+/// The menu-bar panel (docs/ui-v0.md §7): the mark and one status word, the three services, usage, what needs the
 /// user, a new version, the actions. Short words monospaced in title-case English, sentences formal Chinese; every row
 /// keeps the same mark column so the words start in one line. Details (ports, pids, addresses) are in settings ›
 /// environment; hovering a row shows its full line.
@@ -33,7 +33,7 @@ struct MenuContentView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 12)
             }
-            if !attention.isEmpty || !model.notices.isEmpty {
+            if !attention.isEmpty {
                 SectionLabel("Waiting").padding(.horizontal, 16).padding(.top, 4)
                 attentionList
                     .padding(.horizontal, 16)
@@ -88,7 +88,6 @@ struct MenuContentView: View {
     private var services: some View {
         VStack(alignment: .leading, spacing: 8) {
             ServiceRow(label: "Service", line: StatusText.service(model.daemonState, ready: model.daemonReady), detail: model.daemonLine.text)
-            ServiceRow(label: "Gateway", line: model.gateShortLine, detail: model.gateLine.text)
             ServiceRow(label: "iPhone", line: StatusText.phone(remote: model.remoteLine, enabled: model.remoteEnabled,
                                                                 devices: model.devices, online: model.remote?.onlineDevices),
                        detail: model.remoteLine.text)
@@ -115,19 +114,9 @@ struct MenuContentView: View {
                     StatusMark(level: item.level).frame(width: 10)
                     Text(item.text).mono(12)
                     Spacer(minLength: 8)
-                    Button(item.action) {
-                        // Update…: the confirmation sheet, in Environment where the outcome stays readable.
-                        if item.id == "gate" && item.offersUpdate { model.requestGateService(.update) }
-                        showSettings(.environment)
-                    }
+                    Button(item.action) { showSettings(.environment) }
                     .controlSize(.small)
                     .mono(11)
-                }
-            }
-            ForEach(model.notices, id: \.self) { notice in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    LookGlyph(glyph: "i", symbol: "info.circle", size: 11).foregroundStyle(.secondary).frame(width: 10).accessibilityHidden(true)
-                    Text(notice).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -169,9 +158,7 @@ struct MenuContentView: View {
             // open terminal 了; dispatch-v0 §1); without a Dock icon these are the way in, one per page.
             if !alwaysShowInDock {
                 MenuAction(title: "Open Terminals", rows: PixelArt.railTerminals, enabled: model.daemonReady) { showMainWindow(.terminals) }
-                // The old dispatch is off: greyed out and not clickable (OldDispatch).
                 MenuAction(title: "Open Dispatch", rows: PixelArt.railDispatch, enabled: model.daemonReady) { showMainWindow(.dispatch) }
-                    .oldDispatchOff()
             }
             // No `Open in Browser` (the web console in the system's browser): taken out 2026-10-07, user: open in brower
             // 删掉，把这个功能直接删掉.

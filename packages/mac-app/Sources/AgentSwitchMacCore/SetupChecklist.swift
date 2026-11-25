@@ -11,14 +11,6 @@ public enum SetupAction: Equatable, Sendable {
     case openTailscale
     case installTailscale
     case chooseWorkDir
-    /// 凭据网关服务 (docs/gate-service-v0.md §4): each opens a confirmation first, then macOS's administrator prompt.
-    case installGateService
-    case updateGateService
-    case repairGateService
-    /// The regenerated gate CA into the login keychain (the 环境 › 网关证书 flow).
-    case trustGateCA
-    /// The pre-install CA out of the login keychain (its key was readable by this user).
-    case removePreviousGateCA
 
     /// Verb first, in title case (docs/ui-v0.md §4, §7.2.7) where the product name allows.
     public var title: String {
@@ -30,11 +22,6 @@ public enum SetupAction: Equatable, Sendable {
         case .openTailscale: return "Open Tailscale"
         case .installTailscale: return "Get Tailscale"
         case .chooseWorkDir: return "Choose…"
-        case .installGateService: return "Install…"
-        case .updateGateService: return "Update…"
-        case .repairGateService: return "Repair…"
-        case .trustGateCA: return "Trust…"
-        case .removePreviousGateCA: return "Remove…"
         }
     }
 }
@@ -72,8 +59,6 @@ public struct SetupFacts: Sendable {
     public let tailnet: [String]
     public let workDir: WorkDirFact
     public let home: String
-    /// nil: the rows are left out (nothing known about the service yet in a caller that does not ask).
-    public let gateService: GateServiceFacts?
     /// The harnesses 设置 › Agents is installing now, and why the last install of one stopped.
     public let installing: Set<Harness>
     public let installFailed: [Harness: String]
@@ -81,7 +66,7 @@ public struct SetupFacts: Sendable {
     public let agentUpdates: Int
 
     public init(harnesses: [HarnessReport], devices: [Device]?, tailscale: TailscaleStatus?, tailnet: [String] = [],
-                workDir: WorkDirFact, home: String, gateService: GateServiceFacts? = nil, installing: Set<Harness> = [], installFailed: [Harness: String] = [:],
+                workDir: WorkDirFact, home: String, installing: Set<Harness> = [], installFailed: [Harness: String] = [:],
                 agentUpdates: Int = 0) {
         self.installing = installing
         self.installFailed = installFailed
@@ -92,17 +77,14 @@ public struct SetupFacts: Sendable {
         self.tailnet = tailnet
         self.workDir = workDir
         self.home = home
-        self.gateService = gateService
     }
 }
 
-/// The setup checklist from real state: each harness installed and logged in, the gate as a system service (and the
-/// keychain after its install), a paired phone, Tailscale connected, the default work dir usable. 「文件和文件夹」 is left out: macOS offers no way to read that grant without asking
+/// The setup checklist from real state: each harness installed and logged in, a paired phone, Tailscale connected, the default work dir usable. 「文件和文件夹」 is left out: macOS offers no way to read that grant without asking
 /// for it, and a check must never raise a prompt.
 public enum SetupChecklist {
     public static func items(_ facts: SetupFacts) -> [SetupItem] {
         harnessItems(facts.harnesses, installing: facts.installing, failed: facts.installFailed) + [agentUpdates(facts.agentUpdates)].compactMap { $0 }
-            + gateServiceItems(facts.gateService)
             + [phone(facts.devices), tailscale(facts.tailscale, tailnet: facts.tailnet)]
             + [workDir(facts.workDir, home: facts.home)].compactMap { $0 }
     }

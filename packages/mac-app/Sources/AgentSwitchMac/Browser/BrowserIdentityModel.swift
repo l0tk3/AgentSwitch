@@ -4,8 +4,8 @@ import Observation
 
 /// The browser's identity and engine on the Browser page (docs/browser-v0.md §7.2 第 5、6 条; design page
 /// `docs/design/implemented/browser-window.html`, states identity / update / missing): what the status bar's right end
-/// says and what its box changes — the fingerprint (a restart), the proxy (at once; its password sealed by this Mac's
-/// gate before anything is sent) and the engine (download, update, cancel).
+/// says and what its box changes — the fingerprint (a restart), the proxy (at once; its password sealed under
+/// the vault key before anything is sent) and the engine (download, update, cancel).
 @MainActor
 @Observable
 final class BrowserIdentityModel {
@@ -102,14 +102,14 @@ final class BrowserIdentityModel {
 
     // MARK: proxy
 
-    /// `Apply`: a typed password is sealed by this Mac's gate for the proxy's own host, and the ciphertext sent.
+    /// `Apply`: a typed password is sealed under the node's vault key, and what stands for it sent.
     func applyProxy() {
         guard draft.canApply, let site = BrowserIdentityText.proxySite(draft.server) else { return }
         let draft = draft, current = identity?.proxy, sealer = sealer
         run(.proxy) { [self] service in
             var ciphertext: String?
             if !draft.password.isEmpty {
-                guard let sealer else { throw CommandError("此 Mac 的凭据网关不可用，无法保存代理密码。") }
+                guard let sealer else { throw CommandError("此处无法保存代理密码。") }
                 ciphertext = try await sealer(GateSealRequest(label: BrowserIdentityText.proxyLabel, sites: site, value: draft.password))
             }
             take(try await service.setProxy(draft.request(ciphertext: ciphertext, current: current)), resetDraft: true)
