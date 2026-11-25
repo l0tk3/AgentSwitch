@@ -580,6 +580,10 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(bold(list), "结果")
         XCTAssertTrue(list.runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true && String(list[$0.range].characters) == "过期" })
         XCTAssertTrue(list.runs.contains { $0.inlinePresentationIntent?.contains(.strikethrough) == true })
+        // An address written out ends where its own characters end, Chinese text right after it or not (user #458).
+        let bare = RoomMarkdown.attributed("渲染图：http://127.0.0.1:18891/passwords-v2.html（经典暗夜 / 白天）", lineStart: true)
+        XCTAssertEqual(bare.runs.compactMap { $0.link?.absoluteString }, ["http://127.0.0.1:18891/passwords-v2.html"])
+        XCTAssertEqual(bare.runs.filter { $0.link != nil }.map { String(bare[$0.range].characters) }, ["http://127.0.0.1:18891/passwords-v2.html"])
         let link = RoomMarkdown.attributed("看 [文档](https://example.com/a)", lineStart: true)
         XCTAssertEqual(String(link.characters), "看 文档")
         XCTAssertEqual(link.runs.compactMap(\.link).first, URL(string: "https://example.com/a"))

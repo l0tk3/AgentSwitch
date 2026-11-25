@@ -147,6 +147,10 @@ final class RoomsTests: XCTestCase {
         XCTAssertEqual(RoomText.pieces("看：\n```text\na@b.com\nc@d.com\n```\n好了", handles: []), [.plain("看：\n"), .code("a@b.com\nc@d.com"), .plain("\n好了")])
         XCTAssertEqual(RoomText.pieces("```\nx", handles: []), [.code("x")])
         XCTAssertEqual(RoomText.links("见 https://a.com/x，和 https://b.org."), ["https://a.com/x", "https://b.org"])
+        // An address ends where its own characters end, Chinese text right after it (user #458).
+        XCTAssertEqual(RoomText.address("http://127.0.0.1:18891/passwords-v2.html（经典暗夜"), "http://127.0.0.1:18891/passwords-v2.html")
+        XCTAssertEqual(RoomText.links("渲染图：http://127.0.0.1:18891/p.html（经典 / 白天）"), ["http://127.0.0.1:18891/p.html"])
+        XCTAssertEqual(RoomText.address("https://example.com/a_(b))."), "https://example.com/a_(b)")
         // Folding (user #280) and a deleted message (user #278).
         XCTAssertFalse(RoomText.isLong("短", lines: 12))
         XCTAssertTrue(RoomText.isLong(Array(repeating: "x", count: 13).joined(separator: "\n"), lines: 12))

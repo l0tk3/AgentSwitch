@@ -825,11 +825,27 @@ public enum RoomText {
     /// The web links a message's text holds, for its menu's Copy Link (user #282: 超链接应该可以选择复制).
     public static func links(_ text: String) -> [String] {
         var found: [String] = []
-        for m in text.matches(of: /https?:\/\/[^\s<>()"'`）】」，。]+/) {
-            let s = String(m.output).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?"))
-            if !found.contains(s) { found.append(s) }
+        for m in text.matches(of: /https?:\/\/[^\s]+/) {
+            let s = address(m.output)
+            if s.count > 8, !found.contains(s) { found.append(s) }
         }
         return found
+    }
+
+    /// The address a written-out link begins with: its own characters only — printable ASCII but for what ends an
+    /// address in prose —, with a sentence's punctuation and an unpaired `)` taken off its end. Chinese text and its
+    /// brackets follow an address without a space and are no part of it (user #458, of `…/passwords-v2.html（经典暗夜`
+    /// linked as one: html链接标注的不对).
+    public static func address(_ written: some StringProtocol) -> String {
+        let ends: Set<Character> = ["<", ">", "\"", "`", "{", "}", "|", "\\", "^"]
+        var s = Substring(String(written.prefix { c in c.asciiValue.map { $0 > 0x20 && $0 < 0x7F } == true && !ends.contains(c) }))
+        let trailing: Set<Character> = [".", ",", ";", ":", "!", "?", "'", "*", "_", "~"]
+        while let last = s.last {
+            if trailing.contains(last) { s = s.dropLast(); continue }
+            if last == ")", s.filter({ $0 == ")" }).count > s.filter({ $0 == "(" }).count { s = s.dropLast(); continue }
+            break
+        }
+        return String(s)
     }
 
     private static func wordish(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "@" || c == "." || c == "-" }

@@ -37,7 +37,9 @@ struct RoomPage: View {
     @State private var flash: Int?
     /// Where the page was asked to open (等你处理): a task, a message, a member's card; taken once.
     @State private var opening: RoomRoute.Open?
-    @FocusState private var writing: Bool
+    /// The box has the keyboard. A plain state: the box is UIKit's text view (it takes pasted pictures), which SwiftUI's
+    /// focus does not follow.
+    @State private var writing = false
     /// Shown as the Dispatch tab's own page (the dispatch desk), not pushed from the list: the tab bar stays, and the
     /// title is this instead of the room's name.
     private let tabTitle: String?
@@ -587,7 +589,8 @@ private struct RoomMessageRow: View {
 private struct RoomWriter: View {
     let model: RoomPageModel
     let seats: [RoomSeat]
-    var writing: FocusState<Bool>.Binding
+    @Binding var writing: Bool
+    @State private var pending: [String] = []
     let send: () -> Void
     @Environment(\.interfaceLook) private var look
     @State private var pickingPhotos = false
@@ -610,11 +613,10 @@ private struct RoomWriter: View {
                 .disabled(model.sending || model.preparing || model.attachmentRoom == 0)
                 .opacity(model.attachmentRoom == 0 ? 0.4 : 1)
                 .accessibilityLabel("Add Photos")
-                TextField(placeholder, text: $model.draft, axis: .vertical)
-                    .lineLimit(1...6)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .focused(writing)
+                // UIKit's text view, as the terminal's reply box has: its Paste takes a picture off the clipboard, which
+                // becomes one of the message's files (user #458: 群聊消息框手机上不能直接粘贴图).
+                ReplyTextView(prompt: placeholder, text: $model.draft, pending: $pending, focused: $writing, lines: 1...6,
+                              onImages: model.attachmentRoom == 0 ? nil : { images in Task { await model.attach(PickedFiles.files(from: images)) } })
                     .padding(.vertical, 7)
                 Button(action: send) {
                     if model.sending {

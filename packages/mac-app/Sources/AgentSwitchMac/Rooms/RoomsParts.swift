@@ -482,6 +482,16 @@ enum RoomRich {
             var run = (try? AttributedString(markdown: String(line), options: .init(allowsExtendedAttributes: false, interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(line)
             // An e-mail address is words, not a link to open (user #282: 这种邮箱就不要出现超链接).
             for r in run.runs where r.link?.scheme == "mailto" { run[r.range].link = nil }
+            // A written-out address ends where its own characters end, Chinese text right after it or not (user #458).
+            for r in run.runs where r.link != nil {
+                let text = String(run[r.range].characters)
+                guard text.hasPrefix("http://") || text.hasPrefix("https://") else { continue }
+                let address = RoomText.address(text)
+                guard address.count < text.count else { continue }
+                run[r.range].link = nil
+                let end = run.characters.index(r.range.lowerBound, offsetBy: address.count)
+                run[r.range.lowerBound..<end].link = URL(string: address)
+            }
             for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
                 run[r.range].font = .system(size: size - 1, design: .monospaced)
                 run[r.range].backgroundColor = Look.code

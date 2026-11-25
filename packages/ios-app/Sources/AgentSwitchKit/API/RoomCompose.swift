@@ -106,7 +106,9 @@ public enum RoomMarkdown {
             if heading {
                 for r in run.runs { run[r.range].inlinePresentationIntent = (r.inlinePresentationIntent ?? []).union(.stronglyEmphasized) }
             }
-            out += run
+            // An address ends where an address's characters end: Chinese text and its brackets follow one without a
+            // space (user #458, of `…/passwords-v2.html（经典暗夜` linked as one: html链接标注的不对).
+            out += Markdown.relinked(run)
         }
         return out
     }
