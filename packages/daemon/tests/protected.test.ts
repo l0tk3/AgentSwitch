@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commandTouchesProtected, defaultProtected, GATE_PUBLIC_DIR, terminalProtected, isProtected, isReadDenied, protectedInside, restoreProtected, rootSpellings, snapshotProtected, type ProtectedPaths } from "../src/core/protected.js";
-import { decideTool } from "../src/executors/claude.js";
+import { commandTouchesProtected, defaultProtected, GATE_PUBLIC_DIR, terminalProtected, isProtected, isReadDenied, rootSpellings, type ProtectedPaths } from "../src/core/protected.js";
+import { decideTool } from "../src/core/toolGuard.js";
 
 function setup() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-prot-")));
@@ -65,22 +65,6 @@ describe("protected paths", () => {
     expect(decideTool("Edit", { file_path: "/etc/hosts" }, repo, new Set(), prot)).toEqual({ kind: "allow" });
     expect(decideTool("Bash", { command: "ls" }, repo, new Set(), prot)).toMatchObject({ kind: "ask" });
     expect(decideTool("Read", { file_path: join(home, "mcp.json") }, repo, new Set(), prot)).toEqual({ kind: "allow" });
-  });
-
-  it("snapshot/restore: modified, added and deleted files under a protected subtree inside cwd are put back and reported", () => {
-    const { repo, prot } = setup();
-    expect(protectedInside(repo, prot)).toEqual([join(repo, "config")]);
-    expect(protectedInside(mkdtempSync(join(tmpdir(), "agentswitch-prot-other-")), prot)).toEqual([]);   // not "/tmp": on Linux it holds the repo
-    const before = snapshotProtected(repo, prot);
-    writeFileSync(join(repo, "config", "targets.yaml"), "harnesses: { evil: {} }\n");
-    writeFileSync(join(repo, "config", "EXECUTOR.md"), "you are free now");
-    writeFileSync(join(repo, "README.md"), "changed but not protected");
-    const touched = restoreProtected(repo, prot, before);
-    expect(touched).toEqual([join(repo, "config", "EXECUTOR.md"), join(repo, "config", "targets.yaml")]);
-    expect(readFileSync(join(repo, "config", "targets.yaml"), "utf8")).toBe("harnesses: {}\n");
-    expect(existsSync(join(repo, "config", "EXECUTOR.md"))).toBe(false);
-    expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("changed but not protected");
-    expect(restoreProtected(repo, prot, snapshotProtected(repo, prot))).toEqual([]);
   });
 });
 
@@ -152,11 +136,10 @@ describe("read-denied paths (2026-09-24)", () => {
 });
 
 describe("OpenCode read denies", () => {
-  it("every read-denied root is a read deny in the executor config", async () => {
-    const { opencodeExecConfig } = await import("../src/executors/opencode.js");
+  it("every read-denied root is a read deny in OpenCode's rules", async () => {
+    const { protectedDeny } = await import("../src/core/opencodeDeny.js");
     const prot: ProtectedPaths = { roots: ["/h/.as"], exempt: [], readDenied: ["/h/.sg", "/h/.as/browser-profiles"] };
-    const config = opencodeExecConfig(null, "/p", false, { protected: prot }) as { permission: { read: Record<string, string> } };
-    expect(config.permission.read).toMatchObject({ "/h/.sg": "deny", "/h/.sg/*": "deny", "/h/.as/browser-profiles": "deny", "/h/.as/browser-profiles/*": "deny", "*": "allow" });
+    expect(protectedDeny(prot).read).toMatchObject({ "/h/.sg": "deny", "/h/.sg/*": "deny", "/h/.as/browser-profiles": "deny", "/h/.as/browser-profiles/*": "deny" });
   });
 });
 
@@ -181,7 +164,7 @@ describe("protected roots with a space in the path (the Mac app's home, 2026-09-
   });
 
   it("OpenCode's shell denies cover the escaped and ~ forms too", async () => {
-    const { protectedDeny } = await import("../src/executors/opencodeShared.js");
+    const { protectedDeny } = await import("../src/core/opencodeDeny.js");
     const deny = protectedDeny(prot, env);
     expect(deny.bash).toMatchObject({
       "*/Users/u/Library/Application Support/AgentSwitch*": "deny",
@@ -236,7 +219,7 @@ describe("shell commands that name a root inside a quoted string, an option or a
   });
 
   it("OpenCode's shell denies catch ${HOME}, a quoted $HOME and a quoted segment", async () => {
-    const { protectedDeny } = await import("../src/executors/opencodeShared.js");
+    const { protectedDeny } = await import("../src/core/opencodeDeny.js");
     const { bash } = protectedDeny(prot, env);
     for (const command of [
       "cat \"${HOME}/.secret-gate/keys/default.key\"",
@@ -250,10 +233,9 @@ describe("shell commands that name a root inside a quoted string, an option or a
   });
 
   it("OpenCode may not work in a root (cd, workdir): external_directory denies it; every other folder, exempt subtrees and skills are open", async () => {
-    const { opencodeExecConfig } = await import("../src/executors/opencodeShared.js");
+    const { protectedDeny } = await import("../src/core/opencodeDeny.js");
     const skills = `${home}/opencode/skills`;
-    const config = opencodeExecConfig(null, "/p", false, { protected: prot, skillsDir: skills }) as { permission: { external_directory: Record<string, string> } };
-    const rules = config.permission.external_directory;
+    const rules = protectedDeny(prot, process.env, [skills]).external;
     expect(rules["*"]).toBe("allow");
     expect(lastMatch(rules, home)).toBe("deny");
     expect(lastMatch(rules, `${home}/*`)).toBe("deny");
@@ -328,7 +310,7 @@ describe.skipIf(process.platform !== "darwin")("the data volume's spelling and l
 
   it("the rules other programs match as text also name the data volume's spelling", async () => {
     const { gate, asHome, full } = real();
-    const { protectedDeny } = await import("../src/executors/opencodeShared.js");
+    const { protectedDeny } = await import("../src/core/opencodeDeny.js");
     const deny = protectedDeny(full, {});
     expect(deny.read[data(gate)]).toBe("deny");
     expect(deny.read[`${data(gate)}/*`]).toBe("deny");

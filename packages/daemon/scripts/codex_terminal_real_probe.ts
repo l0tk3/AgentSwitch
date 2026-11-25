@@ -52,7 +52,7 @@ const short = (v: unknown, n = 260) => (typeof v === "string" ? v : JSON.stringi
 const say = (what: string, ...rest: unknown[]) => console.log(`${what}`, ...rest.map((r) => short(r)));
 
 let port = 0;
-const cfg = { home, targetsPath: resolve(here, "..", "config", "targets.yaml"), port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" } as unknown as DaemonConfig;
+const cfg = { home, targetsPath: resolve(here, "..", "config", "targets.yaml"), port: 0, opencodeBinary: "" } as unknown as DaemonConfig;
 // As the service's own environment is: not a terminal's. Run from inside an AgentSwitch terminal, this process has the
 // gate's proxy and its CA as the only trusted one — with those Codex cannot reach its own service ("invalid peer
 // certificate: UnknownIssuer"; the service gives them to the commands Codex runs, never to Codex).

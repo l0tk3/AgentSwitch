@@ -1058,7 +1058,7 @@ describe("terminals over HTTP", () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
     let base = "";
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => base, true), ...(elsewhere ? { terminalElsewhere: elsewhere } : {}) });
     const token = ensureLocalToken(home);
     const port = await new Promise<number>((done) => {
@@ -1132,7 +1132,7 @@ describe("terminals over HTTP", () => {
     const project = join(records, "claude", "-w");
     mkdirSync(project, { recursive: true });
     let base = "";
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "", watchSessions: true };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "", watchSessions: true };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => base, true), sessionSources: { claudeProjects: join(records, "claude"), codexSessions: join(records, "codex"), opencodeDb: join(records, "none.db"), excluded: [] } });
     const token = ensureLocalToken(home);
     const port = await new Promise<number>((done) => {
@@ -1504,7 +1504,7 @@ describe("terminals over HTTP", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-codex-pictures-")));
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const pictures = new KeptPictures(join(home, "sessions", "pictures"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "", watchSessions: true };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "", watchSessions: true };
     const daemon = buildDaemon(cfg, {
       terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", true),
       sessionSources: { claudeProjects: join(root, "claude"), codexSessions: join(root, "codex"), opencodeDb: join(root, "none.db"), excluded: [], pictures },
@@ -1639,7 +1639,7 @@ describe("terminals over HTTP", () => {
   it("bypass can be chosen from a paired device too (the phone asks first); every terminal may switch to it later", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => daemon.close());
     const post = (body: unknown, env?: object) => daemon.api.request("/terminals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, env);
@@ -1688,7 +1688,7 @@ describe("terminals over HTTP", () => {
   it("a reply is typed as written, whatever an older screen asks for", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false) });
     closers.push(() => daemon.close());
     const req = (path: string, body: unknown) => daemon.api.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, markRemote({}, { deviceId: "phone" }));
@@ -1715,7 +1715,7 @@ describe("terminals over HTTP", () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-")));
     mkdirSync(join(root, "Pi"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false) });
     closers.push(() => daemon.close());
     // A Mac's disk ignores case: `pi` is `Pi`. A disk that tells them apart has no `pi` here, and the terminal is refused.
@@ -1730,10 +1730,10 @@ describe("terminals over HTTP", () => {
   it("a paired device gives a path of this node's in a reply only inside its scope, and only while this node lets paired devices read files (docs/files-v0.md §7.5)", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-")));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false) });
     closers.push(() => daemon.close());
-    const { device } = registerDevice(daemon.store, { name: "iPhone", platform: "ios" });
+    const { device } = registerDevice(daemon.devices, { name: "iPhone", platform: "ios" });
     const phone = markRemote({}, { deviceId: device.id });
     const json = (method: string, body: unknown) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const req = (path: string, body: unknown) => daemon.api.request(path, json("POST", body), phone);
@@ -1776,7 +1776,7 @@ describe("terminals over HTTP", () => {
   it("another node's real terminal screen types with keystrokes as they are, unless this node says paired nodes may not (docs/mesh-v0.md §10)", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false) });
     closers.push(() => daemon.close());
     const node = markRemote({}, { deviceId: "node-b" });
@@ -1866,7 +1866,7 @@ describe("terminals over HTTP", () => {
       JSON.stringify({ type: "message", id: "a", timestamp: new Date().toISOString(), message: { role: "user", content: [{ type: "text", text: "看看目录" }] } }),
     ].join("\n") + "\n");
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "", watchSessions: true };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "", watchSessions: true };
     const daemon = buildDaemon(cfg, {
       terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", true),
       sessionSources: { claudeProjects: join(root, "claude"), codexSessions: join(root, "codex"), piSessions: join(root, "pi"), opencodeDb: join(root, "none.db"), excluded: [] },

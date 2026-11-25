@@ -60,9 +60,3 @@ export class RateLimitCache {
     return seen.length ? this.now() - Math.max(...seen) : null;
   }
 }
-
-/** Fraction left = worst window. */
-export function remainingFromWindows(windows: readonly Window[]): number | null {
-  if (!windows.length) return null;
-  return Math.max(0, Math.min(1, 1 - Math.max(...windows.map((w) => w.usedPercent)) / 100));
-}

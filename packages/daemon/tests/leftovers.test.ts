@@ -120,7 +120,7 @@ describe("the host tells when a terminal's program is gone", () => {
 });
 
 describe("the routes (docs/terminal-v0.md §11)", () => {
-  const cfg = () => ({ home: mkdtempSync(join(tmpdir(), "agentswitch-leftovers-")), targetsPath: TARGETS_PATH, port: 0, router: "echo" as const, executors: "echo" as const, browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" });
+  const cfg = () => ({ home: mkdtempSync(join(tmpdir(), "agentswitch-leftovers-")), targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" });
 
   it("list and end what this service's terminals left, on this machine only; a service not cleaning says so", async () => {
     // Cleaning on: the real process table is read, for a service address nothing on this machine carries (port 0).

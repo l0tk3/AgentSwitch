@@ -367,7 +367,7 @@ describe("wiring", () => {
   it("the daemon has the browser unless AGENTSWITCH_BROWSER_HOST=0; tests turn it on with a fake", async () => {
     expect(defaultConfig({ HOME: root }).browserHost).toBe(true);
     expect(defaultConfig({ HOME: root, AGENTSWITCH_BROWSER_HOST: "0" }).browserHost).toBe(false);
-    const cfg = (): DaemonConfig => ({ home: mkdtempSync(join(root, "daemon-")), targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" });
+    const cfg = (): DaemonConfig => ({ home: mkdtempSync(join(root, "daemon-")), targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" });
     const off = buildDaemon(cfg());
     expect(off.browser).toBeNull();
     expect((await off.api.request("/browser/tabs")).status).toBe(404);

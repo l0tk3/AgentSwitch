@@ -51,14 +51,10 @@ describe("the pictures", () => {
     }
     expect(S.TONE_COLORS.dark["--tw"]).toBe("#ffffff");
     expect(S.TONE_COLORS.light["--tw"]).toBe("#000000");
-    // Each page's styles carry the tones the pictures are filled with: the terminal page (its light ones come from
-    // terminal.js with the screen's colour), the console (dark and light).
-    const terminal = readFileSync(join(UI, "terminal.css"), "utf8"), console_ = readFileSync(join(UI, "app.css"), "utf8");
-    for (const [name, hex] of Object.entries(S.TONE_COLORS.dark)) {
-      expect(terminal, name).toContain(`${name}: ${hex};`);
-      expect(console_, name).toContain(`${name}: ${hex};`);
-    }
-    for (const [name, hex] of Object.entries(S.TONE_COLORS.light)) expect(console_, name).toContain(`${name}: ${hex};`);
+    // The terminal page's styles carry the tones the pictures are filled with (its light ones come from terminal.js
+    // with the screen's colour).
+    const terminal = readFileSync(join(UI, "terminal.css"), "utf8");
+    for (const [name, hex] of Object.entries(S.TONE_COLORS.dark)) expect(terminal, name).toContain(`${name}: ${hex};`);
     expect(readFileSync(join(UI, "terminal.js"), "utf8")).toContain("...TONE_COLORS.light");
   });
 });

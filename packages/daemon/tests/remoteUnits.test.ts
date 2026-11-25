@@ -5,7 +5,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Store } from "../src/engine/store.js";
+import { DeviceStore } from "../src/remote/deviceStore.js";
 import { ADDRESS_LIMIT, defaultRouteInterfaces, guardConnection, isAllowedSource, lanAddresses, lanOverride, normalizeAddress, overlayAddresses } from "../src/remote/address.js";
 import { authenticate, hashToken, LAST_SEEN_THROTTLE_MS, newToken, ONLINE_WINDOW_MS, Presence, registerDevice } from "../src/remote/devices.js";
 import { currentKey, gateKeyReader } from "../src/remote/gateKey.js";
@@ -16,8 +16,8 @@ import { parseIps, parseStatus, tailnetAddresses, tailscaleBin } from "../src/re
 
 const KEY = Buffer.alloc(32, 7).toString("base64url");
 
-function memStore(now?: () => number): Store {
-  return new Store({ dbPath: ":memory:", ...(now ? { now } : {}) });
+function memStore(now?: () => number): DeviceStore {
+  return new DeviceStore({ dbPath: ":memory:", ...(now ? { now } : {}) });
 }
 
 describe("remote source addresses", () => {
@@ -335,12 +335,9 @@ describe("device tokens", () => {
 describe("remote route allowlist", () => {
   it("lists exactly the doc's routes", () => {
     expect(REMOTE_ROUTES.map(([m, p]) => `${m} ${p}`)).toEqual([
-      "GET /healthz", "POST /pair", "GET /me", "DELETE /me", "GET /node", "GET /addresses", "GET /gate/pubkey", "GET /tasks", "POST /tasks", "GET /tasks/:id", "GET /tasks/:id/events",
-      "POST /tasks/:id/answer", "POST /tasks/:id/approve", "POST /tasks/:id/cancel", "POST /tasks/:id/handoff", "POST /tasks/:id/rate",
-      "POST /tasks/:id/ack", "GET /search", "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /attachments", "DELETE /attachments", "DELETE /attachments/:id", "GET /files", "GET /files/stat", "GET /files/preview", "GET /files/thumbnail", "GET /files/content",
-      "POST /files/folder", "POST /files/file", "POST /files/rename", "POST /files/trash", "POST /files/restore", "PUT /files/content", "GET /approvals", "GET /threads", "GET /threads/:id", "PATCH /threads/:id",
-      "POST /threads/:id/archive", "POST /threads/:id/reopen", "DELETE /tasks/:id", "DELETE /threads/:id", "GET /quota", "POST /quota/refresh",
-      "GET /targets", "POST /uploads", "GET /context", "PUT /context", "GET /context/example", "POST /assistant", "GET /assistant", "DELETE /assistant/:seq", "DELETE /history",
+      "GET /healthz", "POST /pair", "GET /me", "DELETE /me", "GET /node", "GET /addresses", "GET /gate/pubkey",
+      "GET /files", "GET /files/stat", "GET /files/preview", "GET /files/thumbnail", "GET /files/content",
+      "POST /files/folder", "POST /files/file", "POST /files/rename", "POST /files/trash", "POST /files/restore", "PUT /files/content", "POST /uploads",
       "GET /sessions", "GET /sessions/:harness/:id", "GET /sessions/:harness/:id/record", "GET /sessions/:harness/:id/changes", "GET /sessions/:harness/:id/images/:item/:n", "GET /sessions/:harness/:id/steps/:item/:n", "GET /sessions/:harness/:id/steps/:item/:n/images/:k", "GET /sessions/search", "DELETE /sessions/:harness/:id", "POST /sessions/delete", "GET /sessions/folders", "POST /sessions/folders",
       "GET /terminals", "GET /terminals/style", "POST /terminals", "POST /terminals/resume", "GET /terminals/:id", "PATCH /terminals/:id", "GET /terminals/:id/stream", "GET /terminals/:id/commands", "POST /terminals/:id/input",
       "POST /terminals/:id/attach", "POST /terminals/:id/keys", "POST /terminals/:id/write", "POST /terminals/:id/model", "POST /terminals/:id/effort", "POST /terminals/:id/daybreak", "POST /terminals/:id/choices", "GET /profiles", "GET /profiles/health", "GET /profiles/claude-code/copy-options", "GET /profiles/codex/copy-options", "GET /profiles/claude-code/:id/copies", "PUT /profiles/claude-code/:id/copies", "POST /profiles", "POST /profiles/models", "DELETE /profiles/:agent/:id", "PUT /profiles/:agent/:id/api", "PUT /profiles/:agent/:id/session-key", "PUT /profiles/:agent/:id/telemetry", "PUT /profiles/:agent/:id/color", "PUT /profiles/codex/:id/auth", "POST /profiles/:agent/:id/health", "POST /profiles/current", "PUT /profiles/:agent/:id/proxy", "POST /profiles/:agent/:id/check", "POST /terminals/:id/mode", "GET /terminals/:id/files", "POST /terminals/:id/resize", "POST /terminals/:id/redraw", "POST /terminals/:id/permissions/:pid", "POST /terminals/:id/kill", "DELETE /terminals/:id", "GET /folders/git",
@@ -350,7 +347,7 @@ describe("remote route allowlist", () => {
       "GET /browser/identity", "PUT /browser/identity", "POST /browser/identity/restart",
       "GET /clash", "PUT /clash/settings", "GET /clash/templates/:name", "GET /clash/dns", "POST /clash/check", "POST /clash/source", "DELETE /clash/source", "POST /clash/update", "POST /clash/subscriptions", "PATCH /clash/subscriptions/:id", "DELETE /clash/subscriptions/:id", "POST /clash/subscriptions/:id/update", "POST /clash/node", "POST /clash/select", "POST /clash/delays", "POST /clash/phone", "GET /agents/board", "POST /agents/actions", "GET /rooms", "POST /rooms", "GET /rooms/attention", "GET /rooms/avatars", "GET /passwords", "POST /passwords", "PATCH /passwords/:id", "DELETE /passwords/:id", "POST /passwords/:id/reveal", "POST /passwords/import", "GET /passwords/generate", "POST /vault/seal", "PUT /rooms/:id/seats/:handle/avatar", "GET /rooms/models", "PUT /rooms/models/:agent/:profile", "GET /rooms/:id", "GET /rooms/:id/messages", "GET /rooms/:id/files", "GET /rooms/:id/files/content", "PUT /rooms/:id/files/content", "PATCH /rooms/:id", "DELETE /rooms/:id", "POST /rooms/:id/seats", "PATCH /rooms/:id/seats/:handle", "POST /rooms/:id/seats/:handle/resume", "GET /rooms/:id/seats/:handle/rewind/files", "POST /rooms/:id/seats/:handle/rewind/files", "DELETE /rooms/:id/seats/:handle", "POST /rooms/:id/messages", "DELETE /rooms/:id/messages/:seq", "POST /rooms/:id/read", "POST /rooms/:id/poke", "POST /rooms/:id/rounds/ok", "PUT /rooms/:id/notes", "POST /rooms/:id/resume", "POST /rooms/:id/trust", "POST /rooms/:id/tasks", "PATCH /rooms/:id/tasks/:n", "DELETE /rooms/:id/tasks/:n",
       "GET /dispatch/desk", "PUT /dispatch/desk",
-      "GET /approvals/policy", "GET /settings/workdir", "GET /update", "GET /update/release", "POST /update/release/check", "POST /update/release/prepare", "POST /update/release/install", "POST /update/install", "GET /live",
+      "GET /settings/workdir", "GET /update", "GET /update/release", "POST /update/release/check", "POST /update/release/prepare", "POST /update/release/install", "POST /update/install", "GET /live",
     ]);
   });
 
@@ -365,13 +362,16 @@ describe("remote route allowlist", () => {
   });
 
   it("matches methods and single path segments exactly", () => {
-    for (const [m, p] of [["GET", "/tasks/abc"], ["GET", "/tasks/abc/files/out/a.png"], ["PATCH", "/threads/t1"], ["POST", "/tasks/abc/rate"], ["GET", "/context"],
-      ["PUT", "/context"], ["GET", "/context/example"], ["DELETE", "/tasks/abc"], ["DELETE", "/threads/t1"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
-    for (const [m, p] of [["PUT", "/memory"], ["DELETE", "/platform-memory/x"], ["DELETE", "/mcp/x"], ["DELETE", "/skills/x"], ["DELETE", "/tasks/a/b"], ["DELETE", "/threads/"],
-      ["POST", "/context"], ["DELETE", "/context"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
+    for (const [m, p] of [["GET", "/terminals/abc"], ["GET", "/terminals/abc/files"], ["PATCH", "/rooms/r1"], ["POST", "/terminals/abc/input"], ["GET", "/settings/workdir"],
+      ["PUT", "/files/content"], ["GET", "/files/content"], ["DELETE", "/terminals/abc"], ["DELETE", "/rooms/r1"], ["POST", "/uploads"], ["GET", "/gate/pubkey"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
+    for (const [m, p] of [["PUT", "/memory"], ["DELETE", "/platform-memory/x"], ["DELETE", "/mcp/x"], ["DELETE", "/skills/x"], ["DELETE", "/terminals/a/b"], ["DELETE", "/rooms/"],
+      ["POST", "/settings/workdir"], ["DELETE", "/files/content"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
       ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["GET", "/settings/trusted-folders"], ["PUT", "/settings/trusted-folders"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
-      ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/tasks/"], ["GET", "/tasks/a/b"], ["GET", "/tasks/a/files/"], ["POST", "/route/preview"],
-      ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"],
+      ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/terminals/"], ["GET", "/terminals/a/b"], ["GET", "/terminals/a/files/x"], ["POST", "/route/preview"],
+      ["GET", "/platform-memory"], ["POST", "/terminals/a/delete"], ["PUT", "/projects"], ["POST", "/update"],
+      // The old Dispatch's routes are gone from the list with it (2026-11-25).
+      ["GET", "/tasks"], ["POST", "/tasks"], ["GET", "/tasks/abc"], ["GET", "/tasks/abc/events"], ["GET", "/threads"], ["GET", "/approvals"], ["GET", "/quota"], ["GET", "/targets"],
+      ["GET", "/context"], ["PUT", "/context"], ["POST", "/assistant"], ["GET", "/attachments"], ["GET", "/search"], ["DELETE", "/history"], ["GET", "/approvals/policy"],
       // Proxies are a phone's to manage; making, removing and colouring a profile, what Clash Verge fetches, and a profile browser's identity are not.
       ["GET", "/clash/sub.yaml"], ["GET", "/clash/rules/as-claude.yaml"],
       ["GET", "/clash/nodes/as-claude.yaml"], ["GET", "/clash/providers/abc.yaml"], ["GET", "/browser/engine"], ["GET", "/profile-browser/claude-code.abc/browser/identity"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);

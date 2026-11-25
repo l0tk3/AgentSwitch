@@ -1,25 +1,16 @@
-/** File naming rules and limits shared by uploads, attachments and downloads. */
+/** File naming rules and limits shared by uploads and downloads. */
 
 import { basename, extname } from "node:path";
 
-/** A task's files live in AgentSwitch's own data folder, `$AGENTSWITCH_HOME/artifacts/<taskId>/` (2026-11-11, user: 你就
- *  不能在agentswitch的应用数据文件夹做点文章么 — nothing of this is made in the folder a task works in any more): what the
- *  user attached under `in/`, what the agent hands back under `out/`. Tasks from before kept both in their working
- *  directory under the same two names; those are still read from there. */
-export const ATTACH_DIR = "in";
-export const OUT_DIR = "out";
-/** Where task `id` hands files to the user. */
-export const taskOutDir = (artifactsDir: string, id: string): string => `${artifactsDir}/${id}/${OUT_DIR}`;
-export const taskInDir = (artifactsDir: string, id: string): string => `${artifactsDir}/${id}/${ATTACH_DIR}`;
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_FILES_PER_UPLOAD = 20;
 export const MAX_NAME_LENGTH = 120;
 /** A shortened name keeps its extension, up to this long. */
 const MAX_EXT_LENGTH = 16;
 export const UPLOAD_TTL_MS = 24 * 3600_000;
+/** What the old Dispatch's tasks kept under `$AGENTSWITCH_HOME/artifacts` goes after this long, as it always did. */
 export const ARTIFACT_TTL_MS = 7 * 86400_000;
 
-const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".avif"]);
 const TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
   ".bmp": "image/bmp", ".heic": "image/heic", ".avif": "image/avif",
@@ -40,11 +31,4 @@ export function safeName(raw: string): string {
   return noDot.slice(0, MAX_NAME_LENGTH - ext.length) + ext;
 }
 
-export const isImage = (name: string): boolean => IMAGE_EXT.has(extname(name).toLowerCase());
 export const contentType = (name: string): string => TYPES[extname(name).toLowerCase()] ?? "application/octet-stream";
-
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}

@@ -1,38 +1,20 @@
-/** Everything the console reads or edits besides tasks: approval policy, route preview, quota, catalog, routing
- *  log, CONTEXT.md, MEMORY.md, the track record. */
+/** Whether the service is up, and the settings every screen shares: the default work folder and the folders trusted
+ *  once in AgentSwitch. */
 
 import type { Hono } from "hono";
-import { existsSync, mkdirSync, rmdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmdirSync } from "node:fs";
 import { z } from "zod";
-import { ApprovalPolicy, CATEGORIES, CATEGORY_TITLES, loadPolicy, savePolicy } from "../engine/approvalPolicy.js";
-import { exampleContext } from "../router/context.js";
-import { lintContext, loadContext } from "../core/contextDoc.js";
-import { keepPrevious } from "../core/contextHistory.js";
-import { remoteCaller } from "../core/caller.js";
-import { route } from "../router/route.js";
-import { loadMemory } from "../threads/memory.js";
-import { deletePlatformMemory, loadPlatformMemory } from "../threads/platformMemory.js";
-import { aggregateRecords, RECORD_WINDOW_MS } from "../router/record.js";
 import { checkCwd } from "./cwdPolicy.js";
-import { issues, limitParam, type ApiDeps } from "./shared.js";
-import { NewTaskBody } from "./tasks.js";
-import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
+import { issues, type ApiDeps } from "./shared.js";
 import { defaultWorkdir, expandWorkdir, loadWorkdir, saveWorkdir } from "../files/workdir.js";
 import { loadTrustedFolders, saveTrustedFolders } from "../terminals/trustedFolders.js";
 
 const WorkdirBody = z.object({ path: z.string().min(1).max(1024) });
 const TrustedFoldersBody = z.object({ folders: z.array(z.string().min(1).max(4096)).max(500) });
 
-const ContextBody = z.object({ text: z.string() });
 export function mountSettings(app: Hono, deps: ApiDeps): void {
-  app.get("/healthz", (c) => c.json({ ok: true, version: deps.version, pendingApprovals: deps.store.pendingApprovals().length }));
-  app.get("/approvals/policy", (c) => c.json({ policy: loadPolicy(deps.policyPath), categories: CATEGORIES.map((c2) => ({ id: c2, title: CATEGORY_TITLES[c2] })) }));
-  app.put("/approvals/policy", async (c) => {
-    const body = ApprovalPolicy.safeParse(await c.req.json().catch(() => ({})));
-    if (!body.success) return c.json({ error: issues(body.error) }, 400);
-    savePolicy(deps.policyPath, body.data);
-    return c.json({ policy: body.data });
-  });
+  // `pendingApprovals`: the old Dispatch's count, always 0 since it was removed (2026-11-25), for the apps that read it.
+  app.get("/healthz", (c) => c.json({ ok: true, version: deps.version, pendingApprovals: 0 }));
 
   // The default work folder (docs/control-v0.md §2): read from anywhere, set on the Mac only (not in the remote list).
   if (deps.home) {
@@ -75,62 +57,6 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
       catch (err) { return c.json({ error: (err as Error).message }, 400); }
     });
   }
-
-  app.post("/route/preview", async (c) => {
-    const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!body.success) return c.json({ error: "task and cwd required" }, 400);
-    const { pin, needs_browser, ephemeral: _e, parent_id: _p, cwd, ...rest } = body.data;
-    if (!cwd) return c.json({ error: "cwd required for preview" }, 400);
-    const cwdProblem = checkCwd(cwd, deps.cwdRules);
-    if (cwdProblem) return c.json({ error: cwdProblem }, 400);
-    const result = await route({ ...rest, cwd, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) }, deps.routeDeps());
-    deps.routingLog.record(rest.task, cwd, result);
-    return c.json(result);
-  });
-
-  app.get("/quota", async (c) => c.json(await deps.quota.refresh(c.req.query("refresh") === "1")));
-  app.post("/quota/refresh", async (c) => c.json(await deps.quota.refresh(true)));
-
-  app.get("/targets", (c) => c.json({ ...deps.targets, quota: deps.quota.map() }));
-  app.get("/routing/log", (c) => c.json(deps.routingLog.recent(limitParam(c, DEFAULT_LIST_LIMIT))));
-
-  app.get("/context/example", (c) => c.json({ text: exampleContext() }));
-  app.get("/context", (c) => {
-    const ctx = loadContext(deps.contextPath);
-    return c.json({ path: deps.contextPath, text: ctx.text, warnings: ctx.warnings });
-  });
-  app.put("/context", async (c) => {
-    const body = ContextBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!body.success) return c.json({ error: "text required" }, 400);
-    const current = loadContext(deps.contextPath);
-    if (current.source && body.data.text === current.text) return c.json({ path: deps.contextPath, warnings: current.warnings, sealed: [] });
-    // Saved as typed: the automatic sealing of CONTEXT.md (router-v0 §9) was removed on 2026-11-23.
-    const lint = lintContext(body.data.text);
-    const caller = remoteCaller(c.env);
-    keepPrevious(deps.contextPath, lint.text, caller ? `device-${caller.deviceId}` : "local");
-    writeFileSync(deps.contextPath, lint.text, { mode: 0o600 }); // the stripped lines never reach disk
-    // `sealed` stays, always empty, for the apps that still read it.
-    return c.json({ path: deps.contextPath, warnings: lint.warnings, sealed: [] });
-  });
-
-  // MEMORY.md: facts the summarizer appended; same lint as CONTEXT.md, the user edits or clears it here.
-  app.get("/memory", (c) => {
-    const m = loadMemory(deps.memoryPath);
-    return c.json({ path: deps.memoryPath, text: m.text, warnings: m.warnings });
-  });
-  app.put("/memory", async (c) => {
-    const body = ContextBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!body.success) return c.json({ error: "text required" }, 400);
-    const lint = lintContext(body.data.text);
-    writeFileSync(deps.memoryPath, lint.text, { mode: 0o600 });
-    return c.json({ path: deps.memoryPath, warnings: lint.warnings });
-  });
-  app.get("/records", (c) => c.json(aggregateRecords(deps.store.recordsSince(Date.now() - RECORD_WINDOW_MS))));
-  app.get("/platform-memory", (c) => c.json({ records: deps.platformMemoryPath ? loadPlatformMemory(deps.platformMemoryPath, Date.now(), true) : [] }));
-  app.delete("/platform-memory/:id", (c) => {
-    if (!deps.platformMemoryPath || !deletePlatformMemory(deps.platformMemoryPath, c.req.param("id"))) return c.json({ error: "该平台经验不存在" }, 404);
-    return c.json({ ok: true });
-  });
 }
 
 /** The folder rules' reasons (api/cwdPolicy.ts, English for the API and the models) as the Mac and the phone show

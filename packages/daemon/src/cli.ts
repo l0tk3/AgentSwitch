@@ -1,13 +1,8 @@
-/** agentswitch CLI. Daemon-backed commands talk to http://127.0.0.1:4711; `route`/`reroute`/`context init` run locally.
+/** agentswitch CLI. Daemon-backed commands talk to http://127.0.0.1:4711.
  *
- *   serve                       start the daemon (AGENTSWITCH_ROUTER=echo, AGENTSWITCH_PORT=...; AGENTSWITCH_REMOTE=1 adds
- *                               the HTTPS listener for paired phones on AGENTSWITCH_REMOTE_PORT, default 4713)
- *   task "<text>" [--cwd d | --ephemeral] [--pin h/m] [--browser] [--no-watch] [--reply <taskId>]   (--reply: follow-up with context)
- *   tasks | show <id> | watch <id> | approve <task> <approval> --allow|--deny | cancel <id>
- *   handoff <taskId> [--pin h/m]     hand a task to another executor (same thread)
- *   threads [--archived] | thread <id> | archive <id> | reopen <id> | rmthread <id>
- *   approvals | quota [--refresh] | preview "<text>" [--cwd d] | log
- *   route "<text>" ... (local, no daemon) | reroute ... | context init
+ *   serve                       start the daemon (AGENTSWITCH_PORT=...; AGENTSWITCH_REMOTE=1 adds the HTTPS listener for
+ *                               paired phones on AGENTSWITCH_REMOTE_PORT, default 4713)
+ *   health                      whether the service answers, and its version
  *   engine [check [--prerelease]] | engine update [--camoufox <version>|latest] [--playwright <version>|bundled] [--prerelease]
  *     | engine cancel         the browser engine, Camoufox and its Playwright (docs/browser-v0.md §7): what is installed,
  *                               what could be, updating the pair (download, digest, self-check, switch, the old copy deleted)
@@ -20,7 +15,7 @@
  *                               from its link and offers this node in return (`--one-way`: does not); `remove` stops
  *                               using one (`--both`: and it stops using this one)
  *   --on <node>                 with any daemon-backed command: the same on another node, by its id or name
- *                               (`agentswitch --on studio tasks`)
+ *                               (`agentswitch --on studio profiles`)
  *   node [run | name ["<name>"] | restart]   this node (docs/mesh-v0.md §4): what it is and offers; `run` keeps the gate
  *                               and the daemon running in the foreground (what the systemd service runs, and the Mac
  *                               app does on a Mac); `name` names it; `restart` restarts the daemon with node.json
@@ -33,31 +28,19 @@
  *                               [--base-url u] [--model m] [--key]` (a key asked for, never echoed, sealed by this
  *                               node's gate), `color`, `rm`; with --on, listing only (keeper/profiles.ts)
  *   console [--open]            a one-time link that signs a browser on this machine into the web console
- *   config [agents | models | permissions | keys | node | environment | context | extensions] [--lang <en|zh-Hans|
- *                               zh-Hant|ja|es>]   this node's settings on a full screen (docs/tui-v0.md): profiles and
- *                               their keys, models, approvals, the gate's key pairs, the node's own, doctor, CONTEXT.md
- *                               and MEMORY.md, MCP servers and skills; with --on another node's, read only (tui/)
+ *   config [agents | node | environment] [--lang <en|zh-Hans|zh-Hant|ja|es>]   this node's settings on a full screen
+ *                               (docs/tui-v0.md): profiles and their keys, the node's own, doctor; with --on another
+ *                               node's, read only (tui/)
+ *   leftovers [end]             what the terminals left running (docs/terminal-v0.md §11); `end` ends it now
  */
 
 import { readLocalToken } from "./api/localAuth.js";
 import { NODES_KEY_HEADER, readNodesKey } from "./nodes/book.js";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Client } from "./client.js";
 import { defaultConfig, serve } from "./daemon.js";
-import type { TaskEvent } from "./engine/types.js";
-import { CONTEXT_EXAMPLE } from "./router/context.js";
-import { loadContext } from "./core/contextDoc.js";
-import { NO_SIDE_EFFECTS, type FailureKind } from "./core/outcome.js";
-import { RoutingLog } from "./router/log.js";
-import { reroute, route } from "./router/route.js";
-import { echoRouter } from "./router/routers/echo.js";
-import { opencodeRouter } from "./router/routers/opencode.js";
-import { loadTargets } from "./models/targets.js";
-import { withModelOverlay } from "./models/modelOverlay.js";
 import { doctor } from "./keeper/doctor.js";
 import { layout, readSettings, writeSettings } from "./keeper/plan.js";
 import { qrLines } from "./keeper/qr.js";
@@ -65,37 +48,20 @@ import { homes, runningKeeper, runNode } from "./keeper/run.js";
 import { service } from "./keeper/systemd.js";
 import { profilesCommand, readKey, sealWithGate } from "./keeper/profiles.js";
 import { localeOf, messages, pickLocale } from "./i18n/index.js";
-import { GateKeys, gateRunner } from "./keeper/gateKeys.js";
 import { gateReport, reportLines } from "./keeper/gateService.js";
 import { portsOf } from "./keeper/plan.js";
 
 const cfg = defaultConfig();
 // A node without the Mac app keeps its ports in node.json (keeper/plan.ts); the commands find its service there too.
 const nodePort = (() => { try { return process.env.AGENTSWITCH_PORT ? null : readSettings(cfg.home).ports?.local ?? null; } catch { return null; } })();
-/** How much of an agent summary, a task and a thread title one output line shows. */
-const SUMMARY_CHARS = 120;
-const TASK_CHARS = 60;
-const TITLE_CHARS = 50;
+/** How much of a command one output line shows. */
+const COMMAND_CHARS = 60;
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
   allowPositionals: true,
   allowNegative: true,
   options: {
-    cwd: { type: "string" },
-    ephemeral: { type: "boolean", default: false },
-    reply: { type: "string" },
-    thread: { type: "string" },
-    archived: { type: "boolean", default: false },
-    router: { type: "string", default: cfg.router },
-    pin: { type: "string" },
-    browser: { type: "boolean", default: false },
-    targets: { type: "string", default: cfg.targetsPath },
-    log: { type: "string", default: join(cfg.home, "routing.db") },
-    context: { type: "string", default: join(cfg.home, "CONTEXT.md") },
-    failed: { type: "string" },
-    kind: { type: "string", default: "refusal" },
-    excerpt: { type: "string", default: "" },
     server: { type: "string", default: `http://127.0.0.1:${nodePort ?? cfg.port}` },
     camoufox: { type: "string" },
     playwright: { type: "string" },
@@ -103,10 +69,6 @@ const { values, positionals } = parseArgs({
     json: { type: "boolean", default: false },
     qr: { type: "boolean", default: true },
     open: { type: "boolean", default: false },
-    watch: { type: "boolean", default: true },
-    refresh: { type: "boolean", default: false },
-    allow: { type: "boolean", default: false },
-    deny: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
     session: { type: "string" },
     on: { type: "string" },
@@ -132,64 +94,7 @@ const here = new Client(values.server, fetch, readLocalToken(cfg.home), nodesKey
 const client = values.on ? here.on(values.on) : here;
 const out = (v: unknown) => console.log(JSON.stringify(v, null, 2));
 
-function splitPin(text: string): { harness: string; model: string } {
-  const i = text.indexOf("/");
-  if (i <= 0) throw new Error("--pin must be harness/model");
-  return { harness: text.slice(0, i), model: text.slice(i + 1) };
-}
-
-function showEvent(ev: TaskEvent): void {
-  const p = ev.payload as Record<string, unknown>;
-  const t = new Date(ev.ts).toISOString().slice(11, 19);
-  switch (ev.type) {
-    case "routed": { const v = p.verdict as { ok: boolean; harness?: string; model?: string; notes?: string[] }; console.log(`${t} routed   ${v.ok ? `${v.harness}/${v.model}` : "NONE"} (${p.source}${p.routerMs ? `, ${p.routerMs} ms` : ""})${v.notes?.length ? `  ${v.notes.join("; ")}` : ""}`); break; }
-    case "dispatched": console.log(`${t} dispatch ${p.harness}/${p.model}${p.effort ? ` effort=${p.effort}` : ""} [${p.chosen}]`); break;
-    case "text": console.log(`${t}   ${String(p.text).replace(/\n/g, "\n           ")}`); break;
-    case "tool_call": console.log(`${t}   tool ${p.tool}: ${p.command ?? JSON.stringify(p)}`); break;
-    case "approval_request": console.log(`${t} ${p.kind === "question" ? "QUESTION" : "APPROVAL"} ${p.approvalId}: ${p.action}\n           ${p.evidence}`); break;
-    case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status}, by ${p.by ?? "user"})`); break;
-    case "supervisor": console.log(`${t} supervisor ${p.kind}: ${p.decision ?? p.action ?? (p.accepted ? "accepted" : `rejected: ${(p.missing as string[] | undefined)?.join("; ") ?? ""}`)}${p.reason || p.note ? ` — ${p.reason ?? p.note}` : ""} [${p.source}]`); break;
-    case "attempt_failed": console.log(`${t} FAILED   ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (side effects)" : ""}`); break;
-    case "refusal": console.log(`${t} refusal  ${p.action}: ${p.note ?? p.reason ?? ""}`); break;
-    case "redispatch": console.log(`${t} reroute  ${p.kind}${p.target ? ` -> ${(p.target as { harness: string; model: string }).harness}/${(p.target as { model: string }).model}` : ""}${p.source ? ` (${p.source})` : ""}`); break;
-    case "waiting": console.log(`${t} waiting  ${p.for}${p.taskId ? ` (${p.taskId})` : ""}`); break;
-    case "agent": console.log(`${t}   agent ${p.status} ${p.description ?? p.agentId ?? ""}${p.summary ? `: ${String(p.summary).slice(0, SUMMARY_CHARS)}` : ""}`); break;
-    case "thread": console.log(`${t} thread   ${p.threadId} (${p.source}${p.confidence !== null && p.confidence !== undefined ? `, confidence ${p.confidence}` : ""})`); break;
-    case "handoff": console.log(`${t} handoff  ${p.from ? `${(p.from as { harness: string }).harness} -> ` : ""}${p.to ? `${(p.to as { harness?: string }).harness ?? "?"}/${(p.to as { model?: string }).model ?? "?"}` : "router"} (${p.reason})${p.taskId ? `  task ${p.taskId}` : ""}`); break;
-    case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}"${p.spoken ? ` — ${p.spoken}` : ""} (${p.ms} ms)` : `failed: ${p.error}`}`); break;
-    case "done": console.log(`${t} DONE     ${p.result}`); break;
-    case "partial": console.log(`${t} PARTIAL  ${p.result || p.error || "部分完成"}`); break;
-    case "blocked": console.log(`${t} BLOCKED  ${p.error || p.result || "等待补充条件"}`); break;
-    case "failed": console.log(`${t} FAILED   ${p.error}${p.security ? "  [security]" : ""}`); break;
-    case "cancelled": console.log(`${t} CANCELLED`); break;
-    case "cleaned": console.log(`${t} cleaned  workdir=${p.workDirRemoved} claude=${(p.claudeProjectsRemoved as string[]).length} opencode=${p.opencodeSessionsRemoved}${(p.errors as string[]).length ? `  ${(p.errors as string[]).join("; ")}` : ""}`); break;
-    default: console.log(`${t} ${ev.type} ${JSON.stringify(p)}`);
-  }
-}
-
-async function watchInteractive(id: string): Promise<void> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    await client.watch(id, async (ev) => {
-      if (values.json) return out(ev);
-      showEvent(ev);
-      if (ev.type === "approval_request" && process.stdin.isTTY) {
-        if (ev.payload.kind === "question") {
-          const text = await new Promise<string>((r) => rl.question("           answer: ", r));
-          if (text.trim()) await client.answer(id, String(ev.payload.approvalId), text.trim());
-          else await client.approve(id, String(ev.payload.approvalId), "deny");
-          return;
-        }
-        const answer = await new Promise<string>((r) => rl.question("           allow? [y/N] ", r));
-        await client.approve(id, String(ev.payload.approvalId), /^y/i.test(answer) ? "allow" : "deny");
-      }
-    });
-  } finally {
-    rl.close();
-  }
-}
-
-const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | gate | leftovers [end] | profiles [new|api|color|rm] | config [page] [--lang l] | console; --on <node>";
+const USAGE = "usage: serve | health | engine | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | gate | leftovers [end] | profiles [new|api|color|rm] | config [page] [--lang l] | console; --on <node>";
 
 const ago = (ts: number | null): string => {
   if (ts === null) return "never";
@@ -210,63 +115,6 @@ async function main(): Promise<number> {
       await new Promise(() => undefined);
       return 0;
     }
-    case "task": {
-      if (!a1) throw new Error('task "<text>"');
-      const cwd = values.ephemeral || (values.reply && !values.cwd) ? undefined : resolve(values.cwd ?? process.cwd());
-      const task = await client.submit(a1, cwd, { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser, ephemeral: values.ephemeral, ...(values.reply ? { parentId: values.reply } : {}), ...(values.thread ? { threadId: values.thread } : {}) });
-      if (values.json && !values.watch) return (out(task), 0);
-      console.log(`task ${task.id} queued`);
-      if (values.watch) await watchInteractive(task.id);
-      return 0;
-    }
-    case "tasks": {
-      const tasks = await client.tasks();
-      if (values.json) return (out(tasks), 0);
-      for (const t of tasks) console.log(`${t.id}  ${t.status.padEnd(16)} ${t.harness ? `${t.harness}/${t.model}` : "-"}  ${t.task.slice(0, TASK_CHARS)}`);
-      return 0;
-    }
-    case "show": { if (!a1) throw new Error("show <id>"); out(await client.task(a1)); return 0; }
-    case "watch": { if (!a1) throw new Error("watch <id>"); await watchInteractive(a1); return 0; }
-    case "approve": {
-      if (!a1 || !a2 || values.allow === values.deny) throw new Error("approve <task> <approval> --allow|--deny");
-      out(await client.approve(a1, a2, values.allow ? "allow" : "deny")); return 0;
-    }
-    case "cancel": { if (!a1) throw new Error("cancel <id>"); out(await client.cancel(a1)); return 0; }
-    case "rate": { if (!a1 || !["up", "down", "clear"].includes(a2 ?? "")) throw new Error("rate <task> up|down|clear"); out(await client.rate(a1, a2 === "up" ? 1 : a2 === "down" ? -1 : null)); return 0; }
-    case "answer": { if (!a1 || !a2 || !positionals[3]) throw new Error('answer <task> <approval> "<text>"'); out(await client.answer(a1, a2, positionals[3])); return 0; }
-    case "policy": {
-      if (!a1) { out(await client.policy()); return 0; }
-      if (a1 !== "manual" && a1 !== "auto" && a1 !== "scoped" && a1 !== "skip") throw new Error("policy [manual|auto|scoped|skip] [cat,cat,…]");
-      out(await client.setPolicy({ mode: a1, ...(a2 ? { human: a2.split(",") } : {}) })); return 0;
-    }
-    case "handoff": {
-      if (!a1) throw new Error("handoff <taskId> [--pin h/m]");
-      const next = await client.handoff(a1, values.pin ? splitPin(values.pin) : undefined);
-      console.log(`task ${next.id} queued in thread ${next.threadId}`);
-      if (values.watch) await watchInteractive(next.id);
-      return 0;
-    }
-    case "threads": {
-      const list = await client.threads(values.archived ? "archived" : "open");
-      if (values.json) return (out(list), 0);
-      for (const t of list) console.log(`${t.id}  ${t.status.padEnd(8)} ${String(t.taskCount).padStart(2)} tasks  ${t.lastTarget ? `${t.lastTarget.harness}/${t.lastTarget.model}` : "-"}  ${(t.title ?? "(untitled)").slice(0, TITLE_CHARS)}  ${t.cwd}`);
-      return 0;
-    }
-    case "thread": { if (!a1) throw new Error("thread <id>"); out(await client.thread(a1)); return 0; }
-    case "archive": { if (!a1) throw new Error("archive <id>"); out(await client.archiveThread(a1)); return 0; }
-    case "reopen": { if (!a1) throw new Error("reopen <id>"); out(await client.reopenThread(a1)); return 0; }
-    case "rmthread": { if (!a1) throw new Error("rmthread <id>"); out(await client.deleteThread(a1)); return 0; }
-    case "approvals": { out(await client.approvals()); return 0; }
-    case "quota": {
-      const q = await client.quota(values.refresh) as { harness: string; remaining: number | null; source: string; error: string | null; detail: Record<string, unknown> }[];
-      if (values.json) return (out(q), 0);
-      for (const r of q) console.log(`${r.harness.padEnd(12)} ${r.remaining === null ? "  ?  " : `${Math.round(r.remaining * 100)}%`.padStart(5)}  ${r.error ? `ERROR ${r.error}` : JSON.stringify(r.detail)}`);
-      return 0;
-    }
-    case "preview": { if (!a1) throw new Error('preview "<text>"'); out(await client.preview(a1, resolve(values.cwd ?? process.cwd()))); return 0; }
-    case "log": { out(await client.routingLog()); return 0; }
-    case "mcp": { out(await client.mcp()); return 0; }
-    case "skills": { out(await client.skills()); return 0; }
     case "health": { out(await client.health()); return 0; }
     // docs/mesh-v0.md: who uses this node, and the nodes it uses. Always this node's own service, whatever `--on` says.
     case "pair": {
@@ -323,15 +171,6 @@ async function main(): Promise<number> {
       if (!nodes.length) console.log("this node uses no other node");
       return 0;
     }
-    case "context": {
-      if (a1 !== "init") { out(await client.context()); return 0; }
-      if (existsSync(values.context)) console.log(`exists: ${values.context}`);
-      else { mkdirSync(dirname(values.context), { recursive: true }); copyFileSync(CONTEXT_EXAMPLE, values.context); console.log(`written: ${values.context}`); }
-      return 0;
-    }
-    case "route":
-    case "reroute":
-      return localRoute(cmd, a1);
     case "engine": {
       if (!a1) { out(await client.browserEngine()); return 0; }
       if (a1 === "check") { out(await client.browserEngine({ check: true, prerelease: values.prerelease })); return 0; }
@@ -392,7 +231,7 @@ async function main(): Promise<number> {
       if (values.json) { out(leftovers); return 0; }
       if (!on) console.log("this service does not clean what its terminals leave behind (AGENTSWITCH_LEFTOVERS=0)");
       if (!leftovers.length) { console.log("nothing left behind"); return 0; }
-      for (const p of leftovers) console.log(`${String(p.pid).padStart(6)}  ${p.terminal}  ${p.elapsed.padStart(11)}  ${String(Math.round(p.rssKb / 1024)).padStart(5)} MB  ${p.cpu.toFixed(1).padStart(5)}%  ${p.command.slice(0, TASK_CHARS)}`);
+      for (const p of leftovers) console.log(`${String(p.pid).padStart(6)}  ${p.terminal}  ${p.elapsed.padStart(11)}  ${String(Math.round(p.rssKb / 1024)).padStart(5)} MB  ${p.cpu.toFixed(1).padStart(5)}%  ${p.command.slice(0, COMMAND_CHARS)}`);
       if (a1 === "end") { const { ended } = await client.endLeftovers(); console.log(`ended ${ended.length}`); }
       return 0;
     }
@@ -414,7 +253,6 @@ async function main(): Promise<number> {
       if (!process.stdin.isTTY || !process.stdout.isTTY) { console.error(messages(locale).common.needsTerminal); return 2; }
       const gate = { bin: layout().gate, home: homes().gateHome };
       const { runConfig } = await import("./tui/run.js");
-      const { editText } = await import("./tui/editor.js");
       return runConfig({
         client, remote: values.on ?? null,
         seal: (label, host, value) => {
@@ -426,9 +264,6 @@ async function main(): Promise<number> {
           write: (next) => writeSettings(home, next),
           restart: () => { const pid = runningKeeper(runDir); if (!pid) return false; process.kill(pid, "SIGHUP"); return true; },
         },
-        edit: async (text, name) => editText(text, name),
-        keys: new GateKeys(gateRunner(gate)),
-        gate: () => gateReport({ layout: layout(), ports: portsOf(readSettings(home)), uid: process.getuid?.() ?? 0 }),
         doctor: async () => { const lines: string[] = []; await doctor(process.env, (l) => lines.push(l), locale); return lines; },
       }, locale, a1);
     }
@@ -447,31 +282,6 @@ async function main(): Promise<number> {
       console.error(USAGE);
       return 2;
   }
-}
-
-async function localRoute(kind: "route" | "reroute", task: string | undefined): Promise<number> {
-  if (!task) throw new Error(`${kind} "<text>"`);
-  const targets = withModelOverlay(loadTargets(values.targets), join(cfg.home, "models.json"));
-  const context = loadContext(values.context);
-  for (const w of context.warnings) console.error(`context warning: ${w}`);
-  const router = values.router === "echo"
-    ? echoRouter([JSON.stringify({ harness: targets.router.default.harness, model: null, brief: task, confidence: 0.9 })])
-    : opencodeRouter({ model: targets.router.model });
-  const deps = { targets, router, quota: {}, context };
-  if (kind === "reroute") {
-    if (!values.failed) throw new Error("reroute needs --failed harness/model");
-    const attempt = { ...splitPin(values.failed), kind: values.kind as FailureKind, excerpt: values.excerpt, sideEffects: NO_SIDE_EFFECTS };
-    out(await reroute({ task, cwd: resolve(values.cwd ?? process.cwd()), needsBrowser: values.browser, decision: null, attempts: [attempt], routerAsks: 0 }, deps));
-    return 0;
-  }
-  const pin = values.pin ? splitPin(values.pin) : undefined;
-  const cwd = resolve(values.cwd ?? process.cwd());
-  const result = await route({ task, cwd, ...(pin ? { pin } : {}), needsBrowser: values.browser }, deps);
-  const log = new RoutingLog(values.log);
-  const id = log.record(task, cwd, result);
-  log.close();
-  out({ id, ...result });
-  return result.verdict.ok ? 0 : 1;
 }
 
 main().then((code) => { process.exitCode = code; }, (err: Error) => { console.error(`error: ${err.message}`); process.exitCode = 1; });

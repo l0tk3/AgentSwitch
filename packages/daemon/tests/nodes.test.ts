@@ -15,12 +15,12 @@ import { buildDaemon, startRemote, type Daemon, type DaemonConfig } from "../src
 import { NodeBook, NODES_KEY_HEADER, rememberLan, type Peer } from "../src/nodes/book.js";
 import { dialable, Dialer, PinMismatch } from "../src/nodes/dial.js";
 import { nodePlatform } from "../src/nodes/nodes.js";
-import { QuotaService } from "../src/quota/index.js";
 import { PAIR_LINK_PREFIX, PairingDesk, parsePairLink, type PairPayload } from "../src/remote/pairing.js";
 import { remoteRuntime, type RemoteRuntime } from "../src/remote/runtime.js";
 import type { RemoteListener } from "../src/remote/server.js";
 import { ensureTls, SYSTEM_OPENSSL } from "../src/remote/tls.js";
-import { TARGETS_PATH } from "./helpers.js";
+import type { Launcher } from "../src/terminals/host.js";
+import { TARGETS_PATH, workDir } from "./helpers.js";
 
 const KEY = Buffer.alloc(32, 9).toString("base64url");
 type Json = Record<string, unknown>;
@@ -40,15 +40,17 @@ type TestNode = {
 };
 const open: TestNode[] = [];
 
-async function node(name: string): Promise<TestNode> {
+/** A terminal's program that prints a line and waits (no agent). */
+const fakeLauncher: Launcher = () => ({ file: process.execPath, args: ["-e", "console.log('hi from studio'); setInterval(() => {}, 1000)"], env: process.env as Record<string, string>, hooks: false });
+
+async function node(name: string, terminals = false): Promise<TestNode> {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-node-"));
-  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const quota = new QuotaService([{ harness: "codex", read: async () => ({ remaining: 0.5, detail: {}, source: "fake", error: null }) }]);
+  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
   const runtime = remoteRuntime({
     home, port: await freePort(), name, gate: () => null, tls: ensureTls(join(home, "remote")),
     addresses: async () => ({ lan: ["127.0.0.1"], tailnet: [] }), gateKey: async () => ({ publicKey: KEY, keypair: "default" }),
   });
-  const d = buildDaemon(cfg, { quota, remote: runtime, oldDispatchOff: false });
+  const d = buildDaemon(cfg, { remote: runtime, ...(terminals ? { terminalLauncher: fakeLauncher } : {}) });
   const listener = await startRemote(d, runtime, "127.0.0.1");
   const key = readFileSync(join(home, "nodes", "key"), "utf8").trim();
   const raw = async (method: string, path: string, init: RequestInit = {}): Promise<Response> => d.app.request(path, { method, ...init, headers: { [NODES_KEY_HEADER]: key, ...(init.headers as Record<string, string> | undefined) } });
@@ -106,27 +108,33 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("two nodes", () => {
   });
 
   it("`/nodes/<id>/<route>` is the other node's route: answers, an event stream, its own refusals", async () => {
-    const [a, b] = [await node("Studio"), await node("Laptop")];
+    const [a, b] = [await node("Studio", true), await node("Laptop")];
     await pair(b, a);
     const id = (await nodesOf(b))[0]!.id;
     // Who the other node takes this one for, and what it says of itself.
     const me = await b.local("GET", `/nodes/${id}/me`);
     expect(me.body).toMatchObject({ name: "Laptop", platform: nodePlatform() });
     expect(me.headers.get(NODE_HEADER)).toBe(id);
-    expect((await b.local("GET", `/nodes/${id}/node`)).body).toMatchObject({ name: "Studio", has: expect.arrayContaining(["dispatch", "keyboard"]) });
+    // Studio has terminals, and so the dispatch desk; Laptop has neither.
+    expect((await b.local("GET", `/nodes/${id}/node`)).body).toMatchObject({ name: "Studio", has: expect.arrayContaining(["dispatch", "terminals", "keyboard", "files"]) });
+    expect((await a.local("GET", `/nodes/${(await nodesOf(a))[0]!.id}/node`)).body.has).not.toContain("dispatch");
     expect((await b.local("GET", "/nodes/Studio/me")).status).toBe(200);   // by name, while one node has it
-    expect((await b.local("GET", "/nodes/studio/tasks?limit=1")).body).toEqual([]);   // the route and its query went through: the other node's list of tasks
-    // A task made there from here, and its events followed to the end through this node.
-    const created = await b.local("POST", `/nodes/${id}/tasks`, { task: 'hello @echo {"delayMs":50,"result":"hi from studio"}' });
+    expect((await b.local("GET", "/nodes/studio/sessions/folders?x=1")).status).toBe(404);   // the route and its query went through: the other node watches no sessions
+    expect((await b.local("GET", "/nodes/studio/rooms")).body).toEqual({ rooms: [] });
+    // A terminal started there from here, and its stream followed through this node.
+    const created = await b.local("POST", `/nodes/${id}/terminals`, { harness: "claude-code", cwd: workDir() });
     expect(created.status).toBe(201);
-    const taskId = String(created.body.id);
-    expect(a.d.store.getTask(taskId)).toBeDefined();
-    expect(b.d.store.getTask(taskId)).toBeUndefined();
-    const stream = await b.raw("GET", `/nodes/${id}/tasks/${taskId}/events`, { headers: { accept: "text/event-stream" } });
+    const terminalId = String((created.body.terminal as { id: string }).id);
+    expect(a.d.terminals!.get(terminalId)).toBeDefined();
+    expect(b.d.terminals).toBeNull();
+    const stream = await b.raw("GET", `/nodes/${id}/terminals/${terminalId}/stream`, { headers: { accept: "text/event-stream" } });
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
-    const text = await stream.text();
-    expect(text).toContain("event: done");
-    expect(text).toContain("hi from studio");
+    const reader = stream.body!.getReader();
+    let text = "";
+    while (!text.includes("\n\n")) { const { value, done } = await reader.read(); if (done) break; text += new TextDecoder().decode(value); }
+    await reader.cancel();
+    expect(text).toMatch(/^(event|data|id): /m);
+    a.d.terminals!.closeAll();
     // The local token of this node is not what the other one is shown.
     const seen = await b.raw("GET", `/nodes/${id}/me`, { headers: { authorization: "Bearer this-nodes-own-local-token-stays-here-0000" } });
     expect(seen.status).toBe(200);
@@ -392,7 +400,7 @@ describe("the local guard", () => {
     const req = (path: string) => ({ method: "POST", path, host: "127.0.0.1:4711", origin: undefined, contentType: "multipart/form-data; boundary=x", hasBody: true });
     expect(localRefusal(req("/uploads"), 4711)).toBeNull();
     expect(localRefusal(req("/nodes/abababababab/uploads"), 4711)).toBeNull();
-    expect(localRefusal(req("/nodes/abababababab/tasks"), 4711)?.status).toBe(415);
+    expect(localRefusal(req("/nodes/abababababab/rooms"), 4711)?.status).toBe(415);
     expect(localRefusal(req("/nodes/a/b/uploads"), 4711)?.status).toBe(415);
   });
 });

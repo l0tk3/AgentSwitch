@@ -152,8 +152,8 @@ export function createRemoteApp(deps: RemoteAppDeps): Hono<Env> {
     return key ? c.json(key) : c.json({ error: "secret-gate public key unavailable" }, 503);
   });
 
-  // The mark lets the API hold a phone to the Mac's decisions (no approval override, no cwd; see api/tasks.ts, api/threads.ts).
-  // Every write from a phone leaves a line in the daemon log, deletes and CONTEXT.md saves included (app-v0 §6).
+  // The mark lets the API hold a phone to the Mac's decisions (what is chosen on the Mac alone: api/terminals.ts,
+  // api/settings.ts). Every write from a phone leaves a line in the daemon log, deletes included (app-v0 §6).
   // Typing, scrolling and resizing are a line a minute each (requestLog.ts).
   app.all("*", async (c) => {
     const device = c.get("device");

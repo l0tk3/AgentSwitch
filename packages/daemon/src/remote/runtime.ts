@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import type { GateOptions } from "../executors/gate.js";
+import type { Gate } from "../core/gateBin.js";
 import { ADDRESS_LIMIT, lanAddresses, lanOverride, overlayAddresses } from "./address.js";
 import { Presence } from "./devices.js";
 import { gateKeyReader, type GateKeyReader } from "./gateKey.js";
@@ -51,7 +51,7 @@ export type RemoteRuntimeOptions = {
   readonly home: string;
   readonly port: number;
   readonly name?: string;
-  readonly gate: () => Pick<GateOptions, "bin" | "home"> | null;
+  readonly gate: () => Gate | null;
   readonly tls?: TlsMaterial;
   readonly addresses?: () => Promise<Addresses>;
   readonly gateKey?: GateKeyReader;

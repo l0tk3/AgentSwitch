@@ -10,12 +10,10 @@ import { describe, expect, it } from "vitest";
 import { mountSessions } from "../src/api/sessions.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { RATE_LIMIT_PROBE_PROMPT } from "../src/core/probes.js";
-import { folderLines, sessionsNear } from "../src/sessions/folders.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
 import { SessionTitles } from "../src/sessions/titles.js";
 import { canonicalFolder, folderWithin, ShownFoldersStore, typedFolder } from "../src/sessions/shownFolders.js";
 import { SessionSearch } from "../src/sessions/search.js";
-import { maskSecrets, type SessionSummary } from "../src/sessions/types.js";
 import { claudeFacts, claudeMode } from "../src/sessions/claude.js";
 import { codexMode, codexProviderOf } from "../src/sessions/codex.js";
 import { codexFileOf } from "../src/sessions/monitor.js";
@@ -364,52 +362,6 @@ describe("the Mac's coding sessions", () => {
     }
     const list = new SessionMonitor({ ...sources, scanFiles: 2 }, () => NOW).list();
     expect(list.map((s) => s.cwd)).toContain(repo);
-  });
-});
-
-describe("what the models see of the sessions", () => {
-  const s = (harness: SessionSummary["harness"], id: string, cwd: string, title: string, minutesAgo: number): SessionSummary =>
-    ({ harness, id, cwd, title, lastText: "", updatedAt: NOW - minutesAgo * 60_000, startedAt: NOW - minutesAgo * 60_000, active: minutesAgo < 1 });
-  const sessions = [
-    s("claude-code", "c1", "/Users/u/code/site", "修一下登录页 key=sk-ant-abcdefghijklmnop", 0),
-    s("codex", "x1", "/Users/u/code/site", "跑一下测试", 1320),
-    s("claude-code", "c2", "/Users/u/code/site", "older one", 2000),
-    s("opencode", "o1", "/Users/u/notes", "整理笔记", 3000),
-    s("codex", "x2", "/Users/u/code/site/packages/api", "api 的接口", 60),
-  ];
-
-  it("the assistant sees one line per folder: when, which executors and each one's latest title, secrets masked", () => {
-    const lines = folderLines(sessions, NOW);
-    expect(lines.split("\n")).toEqual([
-      "- /Users/u/code/site · running now · Claude Code 2 (latest just now: \"修一下登录页 key=🔒\"), Codex 1 (latest 22 h ago: \"跑一下测试\")",
-      "- /Users/u/code/site/packages/api · 1 h ago · Codex 1 (latest 1 h ago: \"api 的接口\")",
-      "- /Users/u/notes · 2 d ago · OpenCode 1 (latest 2 d ago: \"整理笔记\")",
-    ]);
-    expect(folderLines([], NOW)).toBe("(none)");
-    expect(folderLines(sessions, NOW, 1).split("\n")).toHaveLength(1);
-  });
-
-  it("the router sees the user's sessions in the task's folder, its subfolders and the folder it sits in", () => {
-    expect(sessionsNear(sessions, "/Users/u/code/site", NOW)).toBe([
-      "- /Users/u/code/site · running now · Claude Code 2 (latest just now: \"修一下登录页 key=🔒\"), Codex 1 (latest 22 h ago: \"跑一下测试\")",
-      "- /Users/u/code/site/packages/api · 1 h ago · Codex 1 (latest 1 h ago: \"api 的接口\")",
-    ].join("\n"));
-    expect(sessionsNear(sessions, "/Users/u/code/site/packages/api/src", NOW)).toContain("/Users/u/code/site ·");
-    expect(sessionsNear(sessions, "/Users/u/code/sitemap", NOW)).toBeNull();
-    expect(sessionsNear(sessions, "/Users/u/elsewhere", NOW)).toBeNull();
-  });
-
-  it("the home folder is not offered as a place to work, nor counted as the folder a project sits in", () => {
-    const home = [...sessions, s("claude-code", "h1", "/Users/u", "你好", 10)];
-    expect(folderLines(home, NOW, 20, ["/Users/u"])).not.toContain("- /Users/u ·");
-    expect(sessionsNear(home, "/Users/u/notes", NOW, ["/Users/u"])).not.toContain("- /Users/u ·");
-  });
-
-  it("paths stay readable while tokens, email addresses and user@host are masked", () => {
-    expect(maskSecrets("用 maute.tarantino\\@gmail.com 登录，再 ssh root@38.47.102.122")).toBe("用 🔒 登录，再 ssh 🔒");
-    expect(maskSecrets("/Users/l07k3/Downloads/917/baseline.xlsx 首页的公式")).toBe("/Users/l07k3/Downloads/917/baseline.xlsx 首页的公式");
-    expect(maskSecrets("token Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eA== end")).toBe("token 🔒 end");
-    expect(maskSecrets("ab3/Kx9Qm2Lp8Zt4Wv6Yr1Ns5Hd7Fg0Jc2Bn4Mx8Pq")).toBe("🔒");
   });
 });
 

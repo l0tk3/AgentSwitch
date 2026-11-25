@@ -119,7 +119,7 @@ describe("how hard each model can be asked to think (terminal-v0 §1 思考强�
   it("GET /terminals says each model's levels; a new terminal is started at one the model takes, refused at any other", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-efforts-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-efforts-cwd-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const modelOffers = new ModelOffers({ log: () => undefined, listClaude: async () => claude, listCodex: async () => codex,
       openCodeVariants: async () => ({ "deepseek/deepseek-v4.1-flash": ["none", "low", "high", "max"] }) });
     await modelOffers.refresh();
@@ -244,7 +244,7 @@ describe("model offers: each agent's own list for the terminals' model menus", (
     // Through the API: the listing, a terminal with the switch, the switch turned, and what follows.
     const home = mkdtempSync(join(tmpdir(), "agentswitch-daybreak-"));
     const flag = join(home, "daybreak-flag");
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const fake = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
     const launcher: Launcher = (req) => {
       const plan = { file: process.execPath, args: [fake], env: { ...(process.env as Record<string, string>), FAKE_DAYBREAK_FILE: flag }, hooks: true };
@@ -281,7 +281,7 @@ describe("model offers: each agent's own list for the terminals' model menus", (
 
   it("GET /terminals serves the offers (and what default is), the catalog for an agent not asked", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-offers-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
     const modelOffers = new ModelOffers({ log: () => undefined, listClaude: async () => CLAUDE, listCodex: async () => [] });
     await modelOffers.refresh();
     const launcher: Launcher = () => { throw new Error("not started here"); };

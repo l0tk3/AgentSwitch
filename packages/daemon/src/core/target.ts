@@ -1,5 +1,4 @@
-/** A selectable executor: one model on one harness. The identity every layer passes around (catalog, decisions, track
- *  record, thread handoffs); the catalog itself is router/targets.ts. */
+/** One model on one agent, as the catalog names it (models/targets.ts). */
 
 import { z } from "zod";
 

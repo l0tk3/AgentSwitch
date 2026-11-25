@@ -2,7 +2,7 @@
  *  the user's Keychain by the app, which hands it to the service on its stdin when it starts it
  *  (`AGENTSWITCH_VAULT_STDIN=1`): never in a file, an environment or a command line. Elsewhere (a node with no app, a
  *  service started by hand) it is a file only this account reads, in a folder no terminal's agent may read
- *  (executors/protected.ts). */
+ *  (core/protected.ts). */
 
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";

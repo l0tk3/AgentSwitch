@@ -4,7 +4,7 @@
 import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { extname, join } from "node:path";
-import { ATTACH_DIR, contentType, safeName } from "./names.js";
+import { contentType, safeName } from "./names.js";
 
 export type Attachment = {
   readonly name: string;
@@ -59,18 +59,6 @@ export class Uploads {
     });
   }
 
-  /** Move staged uploads into <cwd>/in/; every id must exist (checked before anything moves). */
-  moveInto(ids: readonly string[], cwd: string): Attachment[] {
-    const found = ids.map((id) => ({ id, ...this.staged(id) }));
-    const dest = join(cwd, ATTACH_DIR);
-    mkdirSync(dest, { recursive: true });
-    return found.map(({ id, name, size }) => {
-      const target = freeName(dest, name);
-      moveFile(join(this.dir, id, name), join(dest, target));
-      rmSync(join(this.dir, id), { recursive: true, force: true });
-      return { name: target, path: `${ATTACH_DIR}/${target}`, size, type: contentType(target) };
-    });
-  }
 }
 
 /** A file moved, also to another file system: a terminal's attachments go to the system's temporary folder, which on

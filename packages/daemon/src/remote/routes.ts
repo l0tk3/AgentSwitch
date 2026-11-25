@@ -1,7 +1,6 @@
-/** The routes a paired phone may use (app-v0 §2 远程可用的路由), exactly as the doc lists them; the remote listener answers
- *  404 to everything else, so the MCP and skill registries, MEMORY.md and platform memory, records, routing log,
- *  approval policy, device and pairing management and the web UI never reach it. `:id` (any `:name`) is one path segment, `*` the
- *  rest. */
+/** The routes a paired phone or node may use (app-v0 §2 远程可用的路由); the remote listener answers 404 to everything
+ *  else, so device and pairing management, the settings that are this node's own and the web UI never reach it. `:id`
+ *  (any `:name`) is one path segment, `*` the rest. */
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -15,23 +14,6 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/node"],
   ["GET", "/addresses"],
   ["GET", "/gate/pubkey"],
-  ["GET", "/tasks"],
-  ["POST", "/tasks"],
-  ["GET", "/tasks/:id"],
-  ["GET", "/tasks/:id/events"],
-  ["POST", "/tasks/:id/answer"],
-  ["POST", "/tasks/:id/approve"],
-  ["POST", "/tasks/:id/cancel"],
-  ["POST", "/tasks/:id/handoff"],
-  ["POST", "/tasks/:id/rate"],
-  ["POST", "/tasks/:id/ack"],
-  ["GET", "/search"],
-  ["GET", "/tasks/:id/files"],
-  ["GET", "/tasks/:id/files/*"],
-  // Every task's kept files together, and their removal (Dispatch › Files; the tasks stay).
-  ["GET", "/attachments"],
-  ["DELETE", "/attachments"],
-  ["DELETE", "/attachments/:id"],
   // The Files column (docs/files-v0.md §7): read only, and only while this node lets paired devices read its files,
   // inside the device's scope (`GET /settings/mesh`, `GET /devices`; both this node's own).
   ["GET", "/files"],
@@ -47,25 +29,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/files/trash"],
   ["POST", "/files/restore"],
   ["PUT", "/files/content"],
-  ["GET", "/approvals"],
-  ["GET", "/threads"],
-  ["GET", "/threads/:id"],
-  ["PATCH", "/threads/:id"],
-  ["POST", "/threads/:id/archive"],
-  ["POST", "/threads/:id/reopen"],
-  ["DELETE", "/tasks/:id"],
-  ["DELETE", "/threads/:id"],
-  ["GET", "/quota"],
-  ["POST", "/quota/refresh"],
-  ["GET", "/targets"],
   ["POST", "/uploads"],
-  ["GET", "/context"],
-  ["PUT", "/context"],
-  ["GET", "/context/example"],
-  ["POST", "/assistant"],
-  ["GET", "/assistant"],
-  ["DELETE", "/assistant/:seq"],
-  ["DELETE", "/history"],
   ["GET", "/sessions"],
   ["GET", "/sessions/:harness/:id"],
   ["GET", "/sessions/:harness/:id/record"],
@@ -224,7 +188,6 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   // The dispatch desk of that node, opened from another Mac's Dispatch page (user #263).
   ["GET", "/dispatch/desk"],
   ["PUT", "/dispatch/desk"],
-  ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],
   ["GET", "/update/release"],

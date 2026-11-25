@@ -22,7 +22,7 @@ export type NodeSettings = {
   readonly remote?: boolean;
   /** `echo` only for trying things out; real agents otherwise. */
   readonly executors?: "real" | "echo";
-  /** `echo` skips the dispatch model (no OpenCode); the default is OpenCode's. */
+  /** Read from before the old Dispatch was removed (2026-11-25); it chose its router and now chooses nothing. */
   readonly router?: "opencode" | "echo";
   /** The addresses to offer instead of the ones found (`AGENTSWITCH_LAN`, remote/address.ts). */
   readonly lan?: string;

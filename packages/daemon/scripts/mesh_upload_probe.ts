@@ -3,7 +3,7 @@
  *  `/nodes/<id>/uploads`), forwarded over the pinned HTTPS connection to the other node's remote listener, staged there.
  *
  *  Two services in this process, each with its own certificate and real listeners on 127.0.0.1, on throw-away homes
- *  under the temporary folder; echo router and executors, no terminal, no agent, no model. Not part of the tests.
+ *  under the temporary folder; no terminal, no agent, no model. Not part of the tests.
  *
  *    env -i PATH=… HOME=$HOME TMPDIR=$TMPDIR node --import tsx scripts/mesh_upload_probe.ts [--frozen | --only-frozen]
  *
@@ -17,7 +17,6 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { buildDaemon, listenLocal, startRemote, type Daemon, type DaemonConfig } from "../src/daemon.js";
 import { NODES_KEY_HEADER } from "../src/nodes/book.js";
-import { QuotaService } from "../src/quota/index.js";
 import { remoteRuntime, type RemoteRuntime } from "../src/remote/runtime.js";
 import type { RemoteListener } from "../src/remote/server.js";
 import { ensureTls } from "../src/remote/tls.js";
@@ -42,13 +41,13 @@ type Node = { name: string; d: Daemon; runtime: RemoteRuntime; listener: RemoteL
 async function node(name: string, advertised?: number): Promise<Node> {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-upload-probe-"));
   homes.push(home);
-  const cfg: DaemonConfig = { home, targetsPath: TARGETS, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+  const cfg: DaemonConfig = { home, targetsPath: TARGETS, port: 0, opencodeBinary: "" };
   const listensOn = await freePort();
   const runtime = remoteRuntime({
     home, port: advertised ?? listensOn, name, gate: () => null, tls: ensureTls(join(home, "remote")),
     addresses: async () => ({ lan: ["127.0.0.1"], tailnet: [] }), gateKey: async () => ({ publicKey: KEY, keypair: "default" }),
   });
-  const d = buildDaemon(cfg, { quota: new QuotaService([]), remote: runtime });
+  const d = buildDaemon(cfg, { remote: runtime });
   const listener = await startRemote(d, { ...runtime, port: listensOn }, "127.0.0.1");
   const port = await new Promise<number>((done) => { const server = listenLocal(d, 0, (info) => done(info.port)); closers.push(() => { server.close(); }); });
   d.setLocalPort(port);

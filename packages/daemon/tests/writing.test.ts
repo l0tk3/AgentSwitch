@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { WritingFeed, WritingText, type Writing } from "../src/core/writing.js";
-import { streamWriting } from "../src/executors/claude.js";
 import { openCodeWriting } from "../src/harness/opencodeEvents.js";
 
 afterEach(() => { vi.useRealTimers(); });
@@ -44,24 +42,6 @@ describe("what an agent is writing", () => {
     expect(t.add("b", "先想", true)).toEqual({ text: "先想", thinking: true });
     t.reset();
     expect(t.add("b", "又")).toEqual({ text: "又" });
-  });
-
-  it("reads Claude Code's own pieces of its answer, not a sub-agent's", () => {
-    const t = new WritingText();
-    const event = (e: object, parent: string | null = null) => ({ type: "stream_event", event: e, parent_tool_use_id: parent, uuid: "u", session_id: "s" }) as unknown as SDKMessage;
-    expect(streamWriting(event({ type: "message_start" }), t)).toBeUndefined();
-    expect(streamWriting(event({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }), t)).toBeUndefined();
-    expect(streamWriting(event({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "先看" } }), t)).toEqual({ text: "先看", thinking: true });
-    expect(streamWriting(event({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "终端" } }), t)).toEqual({ text: "终端" });
-    expect(streamWriting(event({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "怎样" } }), t)).toEqual({ text: "终端怎样" });
-    // A tool call begins: what was written is done.
-    expect(streamWriting(event({ type: "content_block_start", index: 2, content_block: { type: "tool_use" } }), t)).toBeNull();
-    // A sub-agent's stream is its own; other messages say nothing.
-    expect(streamWriting(event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "子代理" } }, "toolu_1"), t)).toBeUndefined();
-    expect(streamWriting({ type: "rate_limit_event" } as unknown as SDKMessage, t)).toBeUndefined();
-    // The next message's blocks count from 0 again: begun afresh.
-    streamWriting(event({ type: "message_start" }), t);
-    expect(streamWriting(event({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "新" } }), t)).toEqual({ text: "新" });
   });
 
   it("reads OpenCode's pieces of the session's answer from its event stream", () => {

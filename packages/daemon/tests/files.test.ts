@@ -1,11 +1,9 @@
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectOut, listTree, resolveInside, sweepDir } from "../src/files/artifacts.js";
-import { ATTACH_DIR, contentType, isImage, OUT_DIR, safeName } from "../src/files/names.js";
-import { attachmentsNote, handOverNote } from "../src/files/notes.js";
-import { composePrompt } from "../src/executors/instructions.js";
+import { sweepDir } from "../src/files/artifacts.js";
+import { contentType, safeName } from "../src/files/names.js";
 import { moveFile, Uploads } from "../src/files/uploads.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "agentswitch-files-"));
@@ -19,29 +17,26 @@ describe("names", () => {
     expect(safeName("x".repeat(300) + ".txt").length).toBeLessThanOrEqual(120);
     expect(safeName("截图 2026-09-21.png")).toBe("截图 2026-09-21.png");
   });
-  it("classifies images and content types", () => {
-    expect(isImage("a.PNG")).toBe(true);
-    expect(isImage("a.pdf")).toBe(false);
-    expect(contentType("a.png")).toBe("image/png");
+  it("names content types", () => {
+    expect(contentType("a.PNG")).toBe("image/png");
     expect(contentType("a.bin")).toBe("application/octet-stream");
-    expect(ATTACH_DIR).toBe("in");
-    expect(OUT_DIR).toBe("out");
   });
 });
 
 describe("uploads", () => {
-  it("stages, moves into <cwd>/in with de-duplicated names, rejects unknown ids", () => {
+  it("stages, moves into a folder under names of one word, de-duplicated, with absolute paths; rejects unknown ids", () => {
     const u = new Uploads(join(tmp(), "uploads"));
     const a = u.stage("shot.png", Buffer.from("png1"), "image/png");
     const b = u.stage("shot.png", Buffer.from("png2"), "image/png");
     expect(a.id).not.toBe(b.id);
     expect(a).toMatchObject({ name: "shot.png", size: 4, type: "image/png" });
-    const cwd = tmp();
-    const attached = u.moveInto([a.id, b.id], cwd);
-    expect(attached.map((x) => x.path)).toEqual(["in/shot.png", "in/shot-2.png"]);
-    expect(readFileSync(join(cwd, "in", "shot-2.png"), "utf8")).toBe("png2");
+    const c = u.stage("my notes.md", Buffer.from("n"), "text/markdown");
+    const dir = join(tmp(), "attach");
+    const attached = u.moveToDir([a.id, b.id, c.id], dir);
+    expect(attached.map((x) => x.path)).toEqual([join(dir, "shot.png"), join(dir, "shot-2.png"), join(dir, "my-notes.md")]);
+    expect(readFileSync(join(dir, "shot-2.png"), "utf8")).toBe("png2");
     expect(existsSync(join(u.dir, a.id))).toBe(false);
-    expect(() => u.moveInto(["nope"], cwd)).toThrow(/unknown upload/);
+    expect(() => u.moveToDir(["nope"], dir)).toThrow(/unknown upload/);
   });
   it("sweeps stale staging dirs", () => {
     const u = new Uploads(join(tmp(), "uploads"));
@@ -67,70 +62,5 @@ describe("moving a file", () => {
     // Any other failure is said as it is.
     expect(() => moveFile(join(dir, "c.png"), join(dir, "d.png"), () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); })).toThrow("EACCES");
     expect(existsSync(join(dir, "c.png"))).toBe(true);
-  });
-});
-
-describe("artifacts", () => {
-  it("lists a tree without .git/node_modules and confines paths", () => {
-    const root = tmp();
-    mkdirSync(join(root, "out", "deep"), { recursive: true });
-    mkdirSync(join(root, ".git"), { recursive: true });
-    mkdirSync(join(root, "node_modules", "x"), { recursive: true });
-    writeFileSync(join(root, "out", "deep", "r.md"), "# r");
-    writeFileSync(join(root, "a.txt"), "a");
-    writeFileSync(join(root, ".git", "HEAD"), "ref");
-    writeFileSync(join(root, "node_modules", "x", "i.js"), "1");
-    expect(listTree(root).map((f) => f.path)).toEqual(["a.txt", "out/deep/r.md"]);
-    expect(listTree(root)[1]).toMatchObject({ size: 3 });
-    expect(resolveInside(root, "out/deep/r.md")).toBe(join(root, "out", "deep", "r.md"));
-    expect(resolveInside(root, "../x")).toBeNull();
-    expect(resolveInside(root, "out/deep/../../../x")).toBeNull();
-    expect(resolveInside(root, "missing.txt")).toBeNull();
-    expect(resolveInside(root, "out")).toBeNull();   // directories are not downloadable
-  });
-  it("copies out/ into the artifacts dir and reports the count", () => {
-    const cwd = tmp();
-    const dest = join(tmp(), "artifacts", "t1");
-    expect(collectOut(cwd, dest)).toBe(0);
-    expect(existsSync(dest)).toBe(false);
-    mkdirSync(join(cwd, "out", "img"), { recursive: true });
-    writeFileSync(join(cwd, "out", "report.md"), "r");
-    writeFileSync(join(cwd, "out", "img", "p.png"), "p");
-    expect(collectOut(cwd, dest)).toBe(2);
-    expect(readFileSync(join(dest, "img", "p.png"), "utf8")).toBe("p");
-  });
-  it("keeps only the task's own files: no symlink, hard link or symlinked out/ reaches the artifacts store", () => {
-    const outside = tmp();
-    writeFileSync(join(outside, "id_ed25519"), "KEY");
-    const cwd = tmp();
-    mkdirSync(join(cwd, "out"));
-    writeFileSync(join(cwd, "out", "report.md"), "r");
-    symlinkSync(join(outside, "id_ed25519"), join(cwd, "out", "key"));
-    symlinkSync(outside, join(cwd, "out", "dir"));
-    linkSync(join(outside, "id_ed25519"), join(cwd, "out", "hard"));
-    const dest = join(tmp(), "artifacts", "t2");
-    expect(collectOut(cwd, dest)).toBe(1);
-    expect(listTree(dest).map((f) => f.path)).toEqual(["report.md"]);
-    expect(existsSync(join(dest, "key")) || existsSync(join(dest, "dir")) || existsSync(join(dest, "hard"))).toBe(false);
-
-    const linked = tmp();
-    symlinkSync(outside, join(linked, "out"));
-    expect(collectOut(linked, join(tmp(), "artifacts", "t3"))).toBe(0);
-  });
-});
-
-describe("attachments note", () => {
-  it("is empty without attachments and lists paths with sizes otherwise", () => {
-    expect(attachmentsNote([])).toBe("");
-    const note = attachmentsNote([{ name: "a.png", path: "in/a.png", size: 245760, type: "image/png" }, { name: "s.pdf", path: "in/s.pdf", size: 1200, type: "application/pdf" }]);
-    expect(note).toContain("in/a.png (240 KB, image/png)");
-    expect(note).toContain("in/s.pdf (1.2 KB, application/pdf)");
-    expect(note).toContain("paths relative to the working directory");
-    expect(note).not.toContain("out/");
-    expect(attachmentsNote([{ name: "a.png", path: "/data/artifacts/t1/in/a.png", size: 1, type: "image/png" }])).toContain("absolute paths, outside the working directory");
-    // Where the files for the user go is said apart, in every executor's prompt.
-    expect(handOverNote("/data/artifacts/t1/out")).toContain("\n/data/artifacts/t1/out\n");
-    expect(composePrompt({ brief: "do it", handoffNote: null, context: null, outDir: "/data/artifacts/t1/out" })).toContain("Files for the user:");
-    expect(composePrompt({ brief: "do it", handoffNote: null, context: null })).toBe("do it");
   });
 });

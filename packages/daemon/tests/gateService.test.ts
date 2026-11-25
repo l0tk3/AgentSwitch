@@ -37,7 +37,7 @@ describe("where the gate runs", () => {
     expect(bad.kind === "service" && bad.error).toMatch(/gate-service\.json/);
     const unreadable = gateMode({ SECRET_GATE_PUBLIC: "/x/gate-public" }, { lstat: () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); }, read: () => { throw new Error("denied"); } });
     expect(unreadable.kind).toBe("service");
-    // The default public directory is the one the daemon's deny list already names (executors/protected.ts).
+    // The default public directory is the one the daemon's deny list already names (core/protected.ts).
     expect(gateMode({}, { lstat: (p) => { expect(String(p)).toMatch(/(Library\/Application Support\/AgentSwitch|\/var\/lib\/agentswitch)\/gate-service\.json$/); throw Object.assign(new Error(), { code: "ENOENT" }); }, read: () => "" })).toEqual({ kind: "user" });
   });
 

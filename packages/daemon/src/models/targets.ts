@@ -129,66 +129,9 @@ export function modelKey(harness: HarnessSpec, model: string): string | undefine
   return undefined;
 }
 
-export function modelSpec(harness: HarnessSpec, model: string): ModelSpec | undefined {
-  const key = modelKey(harness, model);
-  return key === undefined ? undefined : harness.models[key];
-}
-
-/** Copy of the catalog with the given models flagged unavailable (discovery said the backend lacks them). */
-export function markUnavailable(targets: Targets, missing: readonly TargetRef[]): Targets {
-  const harnesses = Object.fromEntries(
-    Object.entries(targets.harnesses).map(([name, h]) => {
-      const models = Object.fromEntries(
-        Object.entries(h.models).map(([m, spec]) => {
-          const gone = missing.some((ref) => ref.harness === name && ref.model === m);
-          return [m, gone ? { ...spec, unavailable: true } : spec];
-        }),
-      );
-      return [name, { ...h, models }];
-    }),
-  );
-  return { ...targets, harnesses };
-}
-
-/** Compact catalog text for the router prompt: one line per model, no enforcement fields. */
-export function catalogText(targets: Targets): string {
-  const lines: string[] = [];
-  for (const [name, h] of Object.entries(targets.harnesses)) {
-    lines.push(`harness ${name} (browser: ${h.browser ? "yes" : "no"}, default: ${h.default_model})`);
-    for (const [m, spec] of Object.entries(h.models)) {
-      if (spec.unavailable) continue;
-      const efforts = spec.efforts ? `; efforts: ${spec.efforts.join("/")}` : "";
-      lines.push(`  - ${m}: cost ${spec.cost}; ${spec.strengths.join(", ")}${spec.preferred ? "; preferred" : ""}${efforts}`);
-    }
-  }
-  for (const [name, cat] of Object.entries(targets.categories)) {
-    lines.push(`\ncategory "${name}": ${cat.description}`);
-    lines.push(`  only these targets accept it${cat.note ? ` (${cat.note})` : ""}: ${cat.allow.map((r) => `${r.harness}/${r.model}`).join(", ")}`);
-  }
-  return lines.join("\n");
-}
-
-/** ASCII keywords match whole words ("rop" must not match "drop"); anything else matches as a substring. */
-export function keywordMatches(keyword: string, text: string): boolean {
-  const k = keyword.toLowerCase();
-  if (!/^[\x20-\x7e]+$/.test(k)) return text.includes(k);
-  const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tail = /[a-z0-9]$/.test(k) ? "(?![a-z0-9])" : "";
-  return new RegExp(`(?<![a-z0-9])${escaped}${tail}`).test(text);
-}
-
-/** Keyword floor: the first category whose keywords appear in the task text (case-insensitive). */
-export function categoryOf(task: string, targets: Targets): string | null {
-  const text = task.toLowerCase();
-  for (const [name, cat] of Object.entries(targets.categories)) {
-    if (cat.keywords.some((k) => keywordMatches(k, text))) return name;
-  }
-  return null;
-}
-
-/** Whether `ref` may run a task of `category`; unknown or null categories restrict nothing. */
-export function allowedFor(targets: Targets, category: string | null, ref: TargetRef): boolean {
-  const cat = category === null ? undefined : targets.categories[category];
-  if (!cat) return true;
-  return cat.allow.some((a) => a.harness === ref.harness && a.model === ref.model);
+/** The models of one agent a person may pick, in the catalog's order: concrete ids (no `prefix/*` wildcard), none
+ *  flagged unavailable. What a terminal's model menu lists of an agent that has not said what it offers. */
+export function selectableModels(targets: Targets, harness: string): string[] {
+  const h = targets.harnesses[harness];
+  return h ? Object.entries(h.models).filter(([id, spec]) => !id.endsWith("/*") && !spec.unavailable).map(([id]) => id) : [];
 }

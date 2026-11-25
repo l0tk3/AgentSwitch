@@ -1,8 +1,9 @@
 /** Where the secret-gate program is: what runs the model traffic gateway (`secret-gate model-proxy`,
- *  vault/modelGate.ts). Apart from the executors' gate wiring so that it stays when that goes. */
+ *  vault/modelGate.ts), opens the ciphertexts kept from before one last time (sealedMove.ts) and says the public key
+ *  phones still seal with (remote/gateKey.ts). */
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { which } from "../util/which.js";
 
@@ -19,9 +20,12 @@ export function gateBin(env: NodeJS.ProcessEnv = process.env, venv: string = VEN
   return which("secret-gate", env.PATH);
 }
 
-/** Why `gateBin` found nothing, naming the three places it looks, in its order. */
-export function gateNotFound(env: NodeJS.ProcessEnv = process.env, venv: string = VENV_GATE_BIN): string {
-  if (env.SECRET_GATE_BIN) return `secret-gate not found: $SECRET_GATE_BIN=${env.SECRET_GATE_BIN} does not exist (when set, it is the only place looked at; unset it to use the repo venv ${venv} or \`secret-gate\` on $PATH)`;
-  return `secret-gate not found: $SECRET_GATE_BIN is not set, the repo venv ${venv} does not exist, and there is no \`secret-gate\` on $PATH`;
-}
+/** The gate as it is run: its program, and the folder its keys are in. */
+export type Gate = { readonly bin: string; readonly home: string };
 
+/** This machine's gate (its folder: $SECRET_GATE_HOME, else `.secret-gate` in the home folder), or null when there is
+ *  no program. */
+export function defaultGate(env: NodeJS.ProcessEnv = process.env, venv: string = VENV_GATE_BIN): Gate | null {
+  const bin = gateBin(env, venv);
+  return bin ? { bin, home: env.SECRET_GATE_HOME ?? join(env.HOME ?? "", ".secret-gate") } : null;
+}

@@ -79,8 +79,6 @@ const MODES = [
   { id: "auto", name: "Auto" },
   { id: "bypass", name: "Bypass" },
 ];
-/** The first time, the Mac's approval policy (control-v0 §1) picks the mode; after that, the last one chosen. */
-const MODE_FROM_POLICY = { manual: "manual", scoped: "auto", auto: "auto", skip: "bypass" };
 const TOOL_WORDS = { Write: "Write File", Edit: "Edit File", MultiEdit: "Edit File", NotebookEdit: "Edit Notebook", Bash: "Run Command", WebFetch: "Fetch Page", WebSearch: "Search Web" };
 /** A terminal's status as it is shown (docs/ui-v0.md §7.2 第 7 条); the value from the service stays as it is. */
 const STATUS_WORDS = { working: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited" };
@@ -2104,10 +2102,8 @@ async function refreshSessions() {
 // ---------- start ----------
 dock();
 const workdir = await api("GET", "/settings/workdir").catch(() => null);
-if (!MODES.some((m) => m.id === pickedMode)) {
-  const policy = await api("GET", "/approvals/policy").catch(() => null);
-  pickedMode = MODE_FROM_POLICY[policy?.policy?.mode] ?? "manual";
-}
+// The first time, every action is asked about; after that, the last mode chosen.
+if (!MODES.some((m) => m.id === pickedMode)) pickedMode = "manual";
 $("cwd").value = recall("terminal.cwd") || (workdir?.path ? tilde(workdir.path) : "~");
 if (PANES) {
   // The panes as they were left (terminal.panes), read before the first list settles them.

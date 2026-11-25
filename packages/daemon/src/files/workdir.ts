@@ -1,15 +1,11 @@
-/** Where a task with no folder of its own works (docs/control-v0.md §2): a dated subfolder of a visible folder the user
- *  picks on the Mac (default `~/AgentSwitch`), kept after the task, instead of a hidden throw-away one in the data
- *  directory. A subfolder still empty when its task ends is removed, so a quick question leaves nothing behind; one
- *  with files goes when its last task is deleted (threads-v0 手动删除). */
+/** The default work folder (docs/control-v0.md §2): a visible folder the user picks on the Mac (default
+ *  `~/AgentSwitch`), kept in `workdir.json`. */
 
-import { randomBytes } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
 export const WORKDIR_FILE = "workdir.json";
-const FOLDER_NAME = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$/;
 
 const Saved = z.object({ path: z.string().min(1).max(1024) });
 
@@ -34,49 +30,4 @@ export function expandWorkdir(path: string, env: NodeJS.ProcessEnv = process.env
   const home = env.HOME ?? "";
   const full = path === "~" ? home : path.startsWith("~/") ? home + path.slice(1) : path;
   return isAbsolute(full) ? resolve(full) : null;
-}
-
-/** A new `<yyyy-MM-dd>-<8 hex>` folder under `root` (created with its parents). */
-export function newTaskFolder(root: string, now: Date = new Date()): string {
-  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const dir = join(root, `${day}-${randomBytes(4).toString("hex")}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-/** Puts back one of our task folders under `root` that was removed for being empty, before a follow-up or handoff
- *  runs in it; any other missing folder is left for the task to report. */
-export function restoreTaskFolder(cwd: string, root: string): boolean {
-  if (existsSync(cwd) || !isTaskFolder(cwd, root)) return false;
-  mkdirSync(cwd, { recursive: true });
-  return true;
-}
-
-/** Removes `cwd` when it is one of our task folders directly under `root` and nothing was put in it. */
-export function removeIfEmptyTaskFolder(cwd: string, root: string): boolean {
-  if (!isTaskFolder(cwd, root)) return false;
-  try {
-    if (readdirSync(cwd).length) return false;
-    rmdirSync(cwd);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Removes `cwd` with what is in it, when it is one of our task folders directly under `root` (never a symlink, never
- *  anywhere else): the caller has checked no other task works there. */
-export function removeTaskFolder(cwd: string, root: string): boolean {
-  if (!isTaskFolder(cwd, root) || !existsSync(cwd)) return false;
-  try {
-    if (lstatSync(cwd).isSymbolicLink() || realpathSync(dirname(cwd)) !== realpathSync(root)) return false;
-    rmSync(cwd, { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isTaskFolder(cwd: string, root: string): boolean {
-  return resolve(dirname(cwd)) === resolve(root) && FOLDER_NAME.test(basename(cwd));
 }

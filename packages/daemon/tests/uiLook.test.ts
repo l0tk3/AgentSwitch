@@ -8,7 +8,6 @@ type LookLib = {
   lookOf: (v: unknown) => Look;
   accentOf: (v: unknown) => string | null;
   word: (text: string, look: Look) => string;
-  phrase: (text: string, look: Look) => string;
   age: (text: string, look: Look) => string;
   help: (text: string, look: Look) => string;
   label: (text: string, look: Look) => string;
@@ -19,8 +18,6 @@ type LookLib = {
   mark: (state?: string, size?: number) => string;
   spinner: (size?: number) => string;
   dot: (state: string) => string;
-  dress: (html: string, look: Look) => string;
-  pageLook: () => Look;
 };
 const L = (await import(join(resolve(import.meta.dirname, "..", "ui"), "lib/look.js"))) as LookLib;
 
@@ -57,11 +54,6 @@ describe("the classic look's words", () => {
     expect(L.word("Still Waiting", "classic")).toBe("Still Waiting");
   });
 
-  it("writes a line of words word by word", () => {
-    expect(L.phrase("Waiting · Run Command", "classic")).toBe("Needs You · Run Command");
-    expect(L.phrase("Waiting · Run Command", "pixel")).toBe("Waiting · Run Command");
-  });
-
   it("says an age with ago, except now and a date", () => {
     expect(L.age("3h", "classic")).toBe("3h ago");
     expect(L.age("5m", "classic")).toBe("5m ago");
@@ -92,38 +84,6 @@ describe("the classic look's words", () => {
     expect(L.bracket("Take Over", "classic")).toBe("Take Over");
     expect(L.bracket("+ New Terminal", "classic")).toBe("New Terminal");
     expect(L.bracket("+ New Terminal", "pixel")).toBe("[ + New Terminal ]");
-  });
-});
-
-describe("a page built from strings", () => {
-  it("drops the slashes of its labels in the classic look, and only of labels", () => {
-    expect(L.dress('<div class="lbl">// Files</div>', "classic")).toBe('<div class="lbl">Files</div>');
-    expect(L.dress('<div class="sec lbl">// Topics</div>', "classic")).toBe('<div class="sec lbl">Topics</div>');
-    expect(L.dress('<div class="sec lbl usage-h"><span>// Usage</span>', "classic")).toBe('<div class="sec lbl usage-h"><span>Usage</span>');
-    expect(L.dress('<span class="lbl">// Hand To</span>', "classic")).toBe('<span class="lbl">Hand To</span>');
-    expect(L.dress("<label>// Name</label>", "classic")).toBe("<label>Name</label>");
-    expect(L.dress('<label title="工作目录">// Folder <input></label>', "classic")).toBe('<label title="工作目录">Folder <input></label>');
-    expect(L.dress('<label><span>// Model</span><input id="c-pin"></label>', "classic")).toBe('<label><span>Model</span><input id="c-pin"></label>');
-    expect(L.dress("<summary>// Events 12</summary>", "classic")).toBe("<summary>Events 12</summary>");
-    expect(L.dress('<div class="hd"><span>// CONTEXT.md</span>', "classic")).toBe('<div class="hd"><span>CONTEXT.md</span>');
-    // What a model or you wrote keeps its slashes: a comment in code, a line of a message.
-    for (const kept of ["<code>// a comment</code>", '<div class="say">// not a label</div>', '<pre><code>// x</code></pre>', '<div class="lblx">// no</div>']) {
-      expect(L.dress(kept, "classic")).toBe(kept);
-    }
-    expect(L.dress('<div class="lbl">// Files</div>', "pixel")).toBe('<div class="lbl">// Files</div>');
-  });
-
-  it("writes the status words of word and badge spans as the classic look does", () => {
-    expect(L.dress('<span class="word busy">Busy</span>', "classic")).toBe('<span class="word busy">Working</span>');
-    expect(L.dress('<span class="badge waiting_approval">Waiting</span>', "classic")).toBe('<span class="badge waiting_approval">Needs You</span>');
-    expect(L.dress('<span class="word ok">Done</span>', "classic")).toBe('<span class="word ok">Done</span>');
-    expect(L.dress('<span class="w"><span class="sq waiting"></span>2 Waiting</span>', "classic")).toBe('<span class="w"><span class="sq waiting"></span>2 Need You</span>');
-    expect(L.dress('<span class="say">Busy</span>', "classic")).toBe('<span class="say">Busy</span>');
-    expect(L.dress('<span class="word busy">Busy</span>', "pixel")).toBe('<span class="word busy">Busy</span>');
-  });
-
-  it("is the pixel look where there is no document", () => {
-    expect(L.pageLook()).toBe("pixel");
   });
 });
 

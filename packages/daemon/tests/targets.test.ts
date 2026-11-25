@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogText, markUnavailable, modelKey, modelSpec, parseTargets } from "../src/models/targets.js";
+import { modelKey, parseTargets } from "../src/models/targets.js";
 import { realTargets } from "./helpers.js";
 
 describe("targets.yaml", () => {
@@ -28,8 +28,6 @@ describe("targets.yaml", () => {
     const preferred = Object.entries(t.harnesses).flatMap(([h, spec]) => Object.entries(spec.models).filter(([, m]) => m.preferred).map(([id]) => `${h}/${id}`));
     expect(preferred).toEqual(["claude-code/claude-opus-5-5", "claude-code/claude-opus-5-5[1m]", "claude-code/claude-opus-5", "claude-code/claude-opus-5[1m]",
       "codex/gpt-6-astra", "codex/gpt-6-sol", "codex/gpt-6-luna"]);
-    expect(catalogText(t)).toContain("claude-opus-5-5: cost high; complex-code, refactor, review; preferred");
-    expect(catalogText(t)).toMatch(/gpt-5\.5: cost mid; code, shell; efforts: [^\n]*$/m);   // no marker on the others
     expect(t.router.planner).toEqual({ harness: "claude-code", model: "claude-opus-5-5" });
   });
 
@@ -80,15 +78,5 @@ router: {harness: oc, model: d/m, default: {harness: oc, model: d/m}}`);
     expect(modelKey(h, "openrouter/anthropic/claude")).toBe("openrouter/*");
     expect(modelKey(h, "openrouter/")).toBeUndefined();
     expect(modelKey(h, "other/x")).toBeUndefined();
-    expect(modelSpec(h, "d/m")?.cost).toBe("low");
-  });
-
-  it("markUnavailable returns a new catalog and hides the model from the prompt", () => {
-    const t2 = markUnavailable(t, [{ harness: "codex", model: "gpt-5.5" }]);
-    expect(t2.harnesses.codex!.models["gpt-5.5"]!.unavailable).toBe(true);
-    expect(t.harnesses.codex!.models["gpt-5.5"]!.unavailable).toBeUndefined();
-    expect(catalogText(t2)).not.toContain("gpt-5.5:");
-    expect(catalogText(t)).toContain("gpt-5.5: cost mid");
-    expect(catalogText(t)).toContain("efforts: low/medium/high/xhigh/max/ultra");
   });
 });

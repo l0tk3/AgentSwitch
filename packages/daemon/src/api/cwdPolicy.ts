@@ -71,12 +71,6 @@ function deniedPlaces(rules: CwdRules): { readonly root: string; readonly places
 /** Paths directly under "/" whose name starts with a dot are resolution tricks on macOS (/.vol, /.nofollow, /.resolve). */
 const special = (path: string): boolean => path.split(sep)[1]?.startsWith(".") ?? false;
 
-/** The denied root that `path` (a file or directory) lies in, or null. For re-checking what the API is about to serve. */
-export function deniedRootOf(path: string, rules: CwdRules): string | null {
-  const target = place(path);
-  return deniedPlaces(rules).find((d) => d.places.some((p) => contains(p, target)))?.root ?? null;
-}
-
 /** null when `cwd` is somewhere a task may run, whether or not it exists yet, else the reason. */
 function placeProblem(cwd: string, rules: CwdRules): string | null {
   if (!isAbsolute(cwd)) return "cwd must be an absolute path";
@@ -102,18 +96,4 @@ export function checkCwd(cwd: string, rules: CwdRules): string | null {
 /** A terminal's folder (docs/terminal-v0.md §2, 2026-09-30): any existing one, as in any terminal. */
 export function checkTerminalCwd(cwd: string): string | null {
   return isDirectory(cwd) ? null : `cwd ${physicalPath(cwd)} is not an existing directory`;
-}
-
-/** True when `cwd` is a work dir the daemon made (under `workRoot`, inside the daemon's own home). */
-export function isWorkDir(cwd: string, workRoot: string): boolean {
-  const p = physicalPath(cwd);
-  const root = physicalPath(workRoot);
-  return p.startsWith(root + sep);
-}
-
-/** For a cwd taken over from an earlier task (follow-up, handoff, file downloads): a daemon work dir is fine, any other
- *  must still be an allowed place (a task stored before the rules were tightened may hold one they refuse). Whether it
- *  still exists is left to the caller, as before. */
-export function checkStoredCwd(cwd: string, rules: CwdRules, workRoot: string): string | null {
-  return isWorkDir(cwd, workRoot) ? null : placeProblem(cwd, rules);
 }

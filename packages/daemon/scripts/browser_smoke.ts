@@ -52,7 +52,7 @@ import type { ApiDeps } from "../src/api/shared.js";
 import { bridgeCommand, terminalOwner } from "../src/browser/agents.js";
 import { gateFill } from "../src/browser/fill.js";
 import { listenLocal } from "../src/daemon.js";
-import { VENV_GATE_BIN } from "../src/executors/gate.js";
+import { VENV_GATE_BIN } from "../src/core/gateBin.js";
 import { defaultProtected } from "../src/core/protected.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { camoufoxDriver } from "../src/browser/camoufoxDriver.js";

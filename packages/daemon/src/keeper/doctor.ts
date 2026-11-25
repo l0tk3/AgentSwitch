@@ -7,7 +7,6 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { findDeepSeekKey } from "../quota/deepseek.js";
 import { claudeSignedIn } from "../terminals/signIn.js";
 import { which } from "../util/which.js";
 import { homes, probeDaemon, probeGate, runningKeeper } from "./run.js";
@@ -82,15 +81,11 @@ export async function doctor(env: NodeJS.ProcessEnv = process.env, print: (line:
       const auth = join(env.CODEX_HOME ?? join(home, ".codex"), "auth.json");
       say(existsSync(auth) ? "ok" : "no", "  signed in", existsSync(auth) ? auth : "no: codex login --device-auth");
     }
-    if (name === "opencode") say(findDeepSeekKey(env) ? "ok" : "warn", "  deepseek", findDeepSeekKey(env) ? "a key is there (the dispatch model)" : "no DeepSeek key: opencode auth login (Dispatch's router uses deepseek/deepseek-flash)");
   }
-  if (!which("opencode", path)) say("warn", "dispatch", "without OpenCode the router and the assistant do not run (docs/router-v0.md)");
 
   section("tools");
   for (const [name, why] of [["git", "the folders' git state"], ["unzip", "installing the browser engine"], ["lsof", "the browser's list of local servers; sessions open elsewhere"], ["openssl", "the remote listener's certificate"]] as const) {
     say(which(name, path) ? "ok" : "warn", name, which(name, path) ? why : `missing: ${why}`);
   }
-  const chrome = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser"].map((n) => which(n, path)).find(Boolean);
-  say(chrome ? "ok" : "warn", "chrome", chrome ?? "none: Dispatch's browser tasks (Playwright MCP) need Google Chrome");
   return bad ? 1 : 0;
 }

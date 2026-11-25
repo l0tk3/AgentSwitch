@@ -55,7 +55,7 @@ export const UpdateResult = z.object({
 });
 export type UpdateResult = z.infer<typeof UpdateResult>;
 
-/** The last install's outcome, announced or not. */
+/** The last install's outcome (the second name: one the conversation of the old Dispatch had told, before 2026-11-25). */
 export function lastResult(home: string): UpdateResult | null {
   for (const name of [UPDATE_RESULT_FILE, UPDATE_RESULT_FILE + ANNOUNCED_SUFFIX]) {
     try {
@@ -64,13 +64,4 @@ export function lastResult(home: string): UpdateResult | null {
     } catch { /* next */ }
   }
   return null;
-}
-
-/** An outcome not told yet, which is marked told: each install is announced once, whichever daemon starts after it. */
-export function takeUnannounced(home: string): UpdateResult | null {
-  const path = join(home, UPDATE_RESULT_FILE);
-  if (!existsSync(path)) return null;
-  const result = lastResult(home);
-  renameSync(path, path + ANNOUNCED_SUFFIX);
-  return result;
 }

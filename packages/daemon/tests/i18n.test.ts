@@ -59,8 +59,8 @@ describe("languages", () => {
     const sentence = (v: unknown) => typeof v === "string" && /[.?]$/.test(v.trim());
     for (const l of ["ja", "es"] as const) {
       const same = lines(messages(l)).filter(([k, v], i) => v === source[i]![1] && !/^keys\.|portOpencode$|exitAt$|viaProxy$/.test(k));
-      // A few words are the same in Spanish (Proxy, Color, Manual, Local).
-      expect(same.map(([k]) => k), l).toEqual(l === "es" ? ["agents.proxy", "agents.color", "agents.proxyTitle", "agents.colorTitle", "permissions.modes.manual", "node.portLocal"] : []);
+      // A few words are the same in Spanish (Proxy, Color, Local).
+      expect(same.map(([k]) => k), l).toEqual(l === "es" ? ["agents.proxy", "agents.color", "agents.proxyTitle", "agents.colorTitle", "node.portLocal"] : []);
     }
     for (const l of ["zh-Hans", "zh-Hant"] as const) {
       const untranslated = lines(messages(l)).filter(([, v], i) => sentence(source[i]![1]) && v === source[i]![1]);

@@ -11,21 +11,18 @@ import { describe, expect, it } from "vitest";
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const ROOT = "(root)";
 
-const UPPER = ["util", "core", "harness", "files", "extensions", "secrets", "quota", "sessions", "models"] as const;
+const UPPER = ["util", "core", "harness", "files", "quota", "sessions", "models"] as const;
 
-/** Which layers each layer may import (besides itself). Peers not listed may not import each other: router and
- *  executors, router and threads, threads and secrets. */
+/** Which layers each layer may import (besides itself). Peers not listed may not import each other: terminals and
+ *  browser, rooms and profiles, clash and vault. */
 const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   util: [],
   core: ["util"],
   harness: ["util", "core"],
   files: ["util", "core"],
-  extensions: ["util", "core"],
-  secrets: ["util", "core"],
   quota: ["util", "core", "harness"],
   /** control-v0 §3: reads the Mac's own Claude Code / Codex / OpenCode session stores; a leaf like files. */
   sessions: ["util", "core"],
-  threads: ["util", "core"],
   /** clash-v0: Clash Verge as it is found, its core's controller, the subscription made for it; a leaf. */
   clash: ["util", "core"],
   /** chatroom-v0: the rooms, their seats and what was said, as kept; a leaf. */
@@ -33,34 +30,29 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   vault: [],
   /** profiles-v0: each agent's sign-ins and their folders; a leaf like sessions. */
   profiles: ["util", "core"],
-  /** The catalog of models and what each agent offers: the terminals' menus too. */
+  /** The catalog of models and what each agent offers: the terminals' menus. */
   models: ["util", "core", "harness"],
-  router: ["util", "core", "harness", "models"],
-  executors: [...UPPER],
-  engine: [...UPPER, "threads", "router", "executors"],
-  /** assistant-v0 §1.1: the router as the user's assistant; above the engine, below the API. */
-  assistant: [...UPPER, "router", "engine"],
-  /** terminal-v0: AgentSwitch's own terminals (the manual entry); the executors' gate wiring, below the API. */
-  terminals: [...UPPER, "executors"],
-  /** browser-v0: the shared browser the daemon holds; the executors' protected table and browser profiles, below the API. */
-  browser: [...UPPER, "executors"],
-  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "rooms", "nodes", "vault"],
+  /** terminal-v0: AgentSwitch's own terminals; below the API. */
+  terminals: [...UPPER],
+  /** browser-v0: the shared browser the daemon holds; below the API. */
+  browser: [...UPPER],
+  api: [...UPPER, "terminals", "browser", "profiles", "clash", "rooms", "nodes", "vault"],
   /** app-v0 §2: the remote listener, device tokens and pairing; a peer of api, which it reaches only over fetch. */
-  remote: [...UPPER, "threads", "router", "executors", "engine"],
+  remote: [...UPPER],
   /** mesh-v0: the other nodes this one uses — their book, the pinned connections to them, pairing with them. Above the
    *  remote listener, whose pairing desk and addresses it uses and which knows it only as an interface; below the API. */
-  nodes: [...UPPER, "executors", "engine", "remote"],
+  nodes: [...UPPER, "remote"],
   /** mesh-v0 §4.2: the keeper of a node without the Mac app (`agentswitch node run`, the systemd service, `doctor`);
    *  it starts the daemon as a process, so it imports none of it but the checks it reuses, and the profiles' shapes and
    *  rules for `agentswitch profiles`. Only the CLI imports it. Where the gate runs (gate-simple-v0 §5) is said in the
-   *  node's language (i18n, a leaf), and the gate service's public directory is the one the executors' deny list names. */
-  keeper: [...UPPER, "terminals", "profiles", "executors", "i18n"],
+   *  node's language (i18n, a leaf), and the gate service's public directory is the one the protected paths name. */
+  keeper: [...UPPER, "terminals", "profiles", "i18n"],
   /** tui-v0 §5: the languages AgentSwitch's own words come in; a leaf. */
   i18n: [],
   /** tui-v0: `agentswitch config`, one more face of the HTTP API (given its client by the CLI), node.json through the
    *  keeper's own reading and writing of it. Only the CLI imports it. */
   tui: [...UPPER, "profiles", "keeper", "i18n"],
-  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "rooms", "api", "remote", "nodes", "keeper", "i18n", "tui", "vault"],
+  [ROOT]: [...UPPER, "terminals", "browser", "profiles", "clash", "rooms", "api", "remote", "nodes", "keeper", "i18n", "tui", "vault"],
 };
 
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)(["'])(\.{1,2}\/[^"']+)\1/gm;
@@ -122,10 +114,5 @@ describe("layer directions in src/", () => {
     const violations = all.filter((e) => e.from !== e.to && !(ALLOWED[e.from] ?? []).includes(e.to))
       .map((e) => `${e.from} -> ${e.to}: ${e.file} imports ${e.target}`);
     expect(violations).toEqual([]);
-  });
-
-  it("threads never imports router, and router never imports threads, executors or engine", () => {
-    const crossing = edges().filter((e) => (e.from === "threads" && e.to === "router") || (e.from === "router" && ["threads", "executors", "engine"].includes(e.to)));
-    expect(crossing).toEqual([]);
   });
 });

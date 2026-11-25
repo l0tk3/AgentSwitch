@@ -2,10 +2,8 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { delimiter, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { realExecutors } from "../src/daemon.js";
-import { chromeExecutable, claudeMcpServers, defaultGate, gateBin, gateNotFound, VENV_GATE_BIN, warmBrowserMcp } from "../src/executors/gate.js";
+import { defaultGate, gateBin } from "../src/core/gateBin.js";
 import { which } from "../src/util/which.js";
-import { realTargets } from "./helpers.js";
 
 let dir: string;
 /** An executable (or not) file at dir/rel; nothing ever runs it. */
@@ -51,28 +49,6 @@ describe("secret-gate binary lookup: SECRET_GATE_BIN, then the repo venv, then P
   });
 });
 
-describe("secret-gate not found", () => {
-  it("names all three places, in lookup order", () => {
-    const text = gateNotFound({}, "/repo/packages/secret-gate/.venv/bin/secret-gate");
-    expect(text).toBe("secret-gate not found: $SECRET_GATE_BIN is not set, the repo venv /repo/packages/secret-gate/.venv/bin/secret-gate does not exist, and there is no `secret-gate` on $PATH");
-    const explicit = gateNotFound({ SECRET_GATE_BIN: "/opt/missing" }, "/v");
-    expect(explicit).toContain("$SECRET_GATE_BIN=/opt/missing does not exist");
-    expect(explicit).toContain("repo venv /v");
-    expect(explicit).toContain("`secret-gate` on $PATH");
-    expect(gateNotFound({})).toContain(VENV_GATE_BIN);
-  });
-
-  it("real executors refuse to start with that message", () => {
-    const saved = process.env.SECRET_GATE_BIN;
-    process.env.SECRET_GATE_BIN = join(dir, "missing");
-    try {
-      expect(() => realExecutors(realTargets(), false)).toThrow(/SECRET_GATE_BIN=.*missing does not exist.*repo venv .*secret-gate` on \$PATH\): refusing to start real executors/);
-    } finally {
-      if (saved === undefined) delete process.env.SECRET_GATE_BIN; else process.env.SECRET_GATE_BIN = saved;
-    }
-  });
-});
-
 describe("which", () => {
   it("skips non-executable files, directories, empty and relative entries", () => {
     file("a/tool", 0o644);
@@ -110,38 +86,5 @@ describe("claudeBinary (the user's own Claude Code CLI)", () => {
     expect(claudeBinary({})).toBeUndefined();
     expect(claudeBinary({ CLAUDE_BIN: "" })).toBeUndefined();
     expect(claudeBinary({ CLAUDE_BIN: "/definitely/missing/claude", PATH: "/nonexistent" })).toBe("/definitely/missing/claude");
-  });
-
-  it("a claude-code planner runs the same CLI as the executor, from a neutral directory", async () => {
-    const { claudePlannerOptions } = await import("../src/daemon.js");
-    expect(claudePlannerOptions("claude-opus-5-5", { CLAUDE_BIN: "/opt/me/claude", PATH: "/nonexistent" }))
-      .toEqual({ model: "claude-opus-5-5", cwd: tmpdir(), executable: "/opt/me/claude" });
-    expect(claudePlannerOptions("claude-opus-5-5", {})).toEqual({ model: "claude-opus-5-5", cwd: tmpdir() });
-  });
-});
-
-describe("the browser Dispatch's Playwright MCP starts (mesh-v0 §4.4)", () => {
-  it("is fetched once at start-up without --prefer-offline, so a stale cached version list is refreshed", () => {
-    const calls: string[][] = [];
-    const gate = defaultGate({ SECRET_GATE_BIN: file("sg"), HOME: dir, PW_MCP_VERSION: "0.0.82" })!;
-    warmBrowserMcp(gate, (cmd, args, done) => { calls.push([cmd, ...args]); done(null); });
-    warmBrowserMcp(null, (cmd, args) => { calls.push([cmd, ...args]); });
-    expect(calls).toEqual([["npx", "-y", "@playwright/mcp@0.0.82", "--version"]]);
-    expect(claudeMcpServers(gate, "/p", true).playwright!.args).toContain("@playwright/mcp@0.0.82");
-  });
-
-  it("off macOS without Google Chrome where Playwright looks: a Chromium on the PATH, passed as --executable-path", () => {
-    const chromium = file("bin/chromium");
-    const none = () => false;
-    expect(chromeExecutable({ PATH: join(dir, "bin") }, "linux", none)).toBe(chromium);
-    expect(chromeExecutable({ PATH: join(dir, "bin") }, "linux", (p) => p === "/opt/google/chrome/chrome")).toBeNull();
-    expect(chromeExecutable({ PATH: join(dir, "bin") }, "darwin", none)).toBeNull();
-    expect(chromeExecutable({ PATH: "/nonexistent" }, "linux", none)).toBeNull();
-    expect(chromeExecutable({ PATH: "/nonexistent", AGENTSWITCH_CHROME: "/opt/x/chrome" }, "darwin", none)).toBe("/opt/x/chrome");
-    const gate = { ...defaultGate({ SECRET_GATE_BIN: file("sg"), HOME: dir, AGENTSWITCH_CHROME: chromium })!, allowedOrigins: [] };
-    expect(gate.browserExecutable).toBe(chromium);
-    expect(claudeMcpServers(gate, "/p", true).playwright!.args).toContain(`--executable-path=${chromium}`);
-    const { browserExecutable: _, ...chrome } = gate;
-    expect(claudeMcpServers(chrome, "/p", true).playwright!.args.some((a) => a.startsWith("--executable-path"))).toBe(false);
   });
 });

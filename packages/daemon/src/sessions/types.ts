@@ -57,19 +57,3 @@ export function clipText(text: string, limit = MESSAGE_CHARS): string {
   const s = text.trim();
   return s.length > limit ? `${s.slice(0, limit)}…（共 ${s.length} 字）` : s;
 }
-
-/** Text shaped like a credential or personal detail (a gate token, a key, an email address or user@host, a long
- *  secret-looking run) masked, for what the router reads. Best effort: titles are short and clipped as well. */
-export function maskSecrets(text: string): string {
-  return text
-    .replace(/enc:(?:v1|ref):[A-Za-z0-9_=-]+/g, "🔒")
-    .replace(/\b(?:sk|pk|ghp|gho|xox[abp])[-_][A-Za-z0-9_-]{8,}/g, "🔒")
-    .replace(/[\w.+-]+\\?@[\w-]+(?:\.[\w-]+)+/g, "🔒")   // email addresses and user@host (Codex escapes the @)
-    .replace(/[A-Za-z0-9+/_=-]{32,}/g, (run) => (isPath(run) ? run : "🔒"));
-}
-
-/** `/Users/me/Downloads/report`: an absolute path of ordinary names, not a long random-looking run. */
-const PATH_SEGMENT_CHARS = 24;
-function isPath(run: string): boolean {
-  return run.startsWith("/") && run.split("/").every((part) => part.length < PATH_SEGMENT_CHARS);
-}

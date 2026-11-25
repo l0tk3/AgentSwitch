@@ -5,6 +5,7 @@
  *  never logged and never part of an error. */
 
 import { spawn } from "node:child_process";
+import type { Gate } from "../core/gateBin.js";
 import { GATE_CLI_TIMEOUT_MS } from "../core/limits.js";
 
 /** The value of `token` for typing into the field whose frame chain (innermost first) is `frames`; a refusal throws
@@ -27,7 +28,6 @@ export const SEALED = /^(?:asv:1:|enc:v1:)[A-Za-z0-9_=-]{16,}$/;
 /** The gate's reason is quoted up to this length. */
 const REASON_CHARS = 300;
 
-type Gate = { readonly bin: string; readonly home: string };
 type Run = { readonly code: number | null; readonly stdout: string; readonly stderr: string };
 
 function run(gate: Gate, body: object, timeoutMs: number): Promise<Run> {

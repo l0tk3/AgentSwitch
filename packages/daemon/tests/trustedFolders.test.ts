@@ -137,8 +137,8 @@ describe("trusted folders", () => {
 
   it("GET/PUT /settings/trusted-folders on the Mac only", async () => {
     const base = temp();
-    const cfg: DaemonConfig = { home: join(base, "as"), targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg, { oldDispatchOff: false });
+    const cfg: DaemonConfig = { home: join(base, "as"), targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
+    const d = buildDaemon(cfg);
     const call = async (method: string, path: string, body?: unknown, remote = false) => {
       const res = await d.app.request(path, { method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, remote ? markRemote({}, { deviceId: "phone" }) : undefined);
       return { status: res.status, body: await res.json().catch(() => ({})) as Record<string, any> };

@@ -1,8 +1,5 @@
 /** What is typed into `agentswitch config`, read as the Mac's sheets read it (tui/text.ts). */
 
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { cleanSessionKey, maskProxyPassword, portsFrom, proxySite, splitProxy, validSessionKey } from "../src/tui/text.js";
 import { vendorOf } from "../src/profiles/vendors.js";
@@ -75,46 +72,5 @@ describe("the client and an older service", () => {
     await expect(old.profileModels("claude-code", { profile: "k1" })).rejects.toThrow("HTTP 404: 404 Not Found");
     const odd = new Client("http://test", (async () => new Response("<html>", { status: 200 })) as unknown as typeof fetch);
     await expect(odd.health()).rejects.toThrow("GET /healthz: not JSON");
-  });
-});
-
-describe("the editor and the gate's key pairs", () => {
-  it("edits text in $VISUAL or $EDITOR (with its own arguments) and leaves no file behind", async () => {
-    const { editText, editorOf } = await import("../src/tui/editor.js");
-    expect(editorOf({ VISUAL: "nvim", EDITOR: "nano" })).toBe("nvim");
-    expect(editorOf({ EDITOR: " " })).toBe("vi");
-    // An editor of our own, given a word as its argument, writes that word into the file it is opened on. (GNU sed's
-    // `-i` with no suffix is not BSD sed's: the Mac has no one-line editor both know.)
-    const dir = mkdtempSync(join(tmpdir(), "agentswitch-editor-"));
-    try {
-      const editor = join(dir, "fake-editor");
-      writeFileSync(editor, `#!/bin/sh\nprintf '%s\\n' "$1" > "$2"\n`);
-      chmodSync(editor, 0o755);
-      const out = editText("hello\n", "CONTEXT.md", { ...process.env, VISUAL: "", EDITOR: `"${editor}" bye` });
-      expect(out).toBe("bye\n");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    expect(() => editText("x", "a.md", { ...process.env, VISUAL: "false", EDITOR: "" })).toThrow(/false exited 1/);
-  });
-
-  it("asks the gate for its one key pair in JSON, makes it with keygen, and says a refusal in the gate's own words", async () => {
-    const { GateKeys } = await import("../src/keeper/gateKeys.js");
-    const calls: (readonly string[])[] = [];
-    let made = false, refuse = false;
-    const keys = new GateKeys(async (args) => {
-      calls.push(args);
-      if (args[0] === "keygen") {
-        if (refuse) return { code: 2, stdout: "", stderr: "error: 已有密钥对\n" };
-        made = true;
-        return { code: 0, stdout: "public key value: P\n", stderr: "" };
-      }
-      return { code: 0, stdout: JSON.stringify(made ? [{ name: "main", public: "P", current: true, legacy: false }] : []), stderr: "" };
-    });
-    expect(await keys.list()).toEqual([]);
-    expect(await keys.create()).toEqual([{ name: "main", public: "P", current: true, legacy: false }]);
-    refuse = true;
-    await expect(keys.create()).rejects.toThrow("已有密钥对");
-    expect(calls).toEqual([["keys", "--json"], ["keygen"], ["keys", "--json"], ["keygen"]]);
   });
 });

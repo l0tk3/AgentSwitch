@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "n
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkCwd, defaultCwdRules, deniedRootOf, physicalPath, type CwdRules } from "../src/api/cwdPolicy.js";
+import { checkCwd, defaultCwdRules, physicalPath, type CwdRules } from "../src/api/cwdPolicy.js";
 
 /** A fake home under the temp dir with a few credential dirs, a daemon home and a project. */
 function world(): { base: string; home: string; project: string; rules: CwdRules } {
@@ -84,15 +84,6 @@ describe("cwd rules", () => {
     expect(checkCwd(`/System/Volumes/Data${home}`, rules)).toMatch(/too broad/);
     expect(checkCwd("/USERS", rules)).toMatch(/contains/);
     if (existsSync(join(home, "Library"))) expect(checkCwd(`/System/Volumes/Data${home}/Library`, rules)).toMatch(/under/);
-  });
-
-  it("deniedRootOf names the root a file lies in, by path or through a symlink", () => {
-    const w = world();
-    const links = mkdtempSync(join(tmpdir(), "agentswitch-cwd-files-"));
-    symlinkSync(join(w.home, ".secret-gate"), join(links, "gate"));
-    expect(deniedRootOf(join(w.home, ".secret-gate", "key"), w.rules)).toBe(join(w.home, ".secret-gate"));
-    expect(deniedRootOf(join(links, "gate", "key"), w.rules)).toBe(join(w.home, ".secret-gate"));
-    expect(deniedRootOf(join(w.project, "out", "a.txt"), w.rules)).toBeNull();
   });
 
   it("physicalPath resolves the existing part and keeps the missing rest", () => {

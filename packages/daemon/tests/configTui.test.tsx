@@ -1,16 +1,14 @@
 /** `agentswitch config` (docs/tui-v0.md) drawn to a string with a made-up service: moving through the pages, a new
  *  key-paying profile asked step by step (its key sealed before it leaves, its model chosen from what the address lists),
- *  a proxy pasted whole, the models saved and the service restarted, Bypass asked twice, node.json written, the language
- *  changed and kept, another node read only. No service, no gate, no model is reached. */
+ *  a proxy pasted whole, node.json written, the language changed and kept, another node read only. No service, no gate,
+ *  no model is reached. */
 
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeSettings } from "../src/keeper/plan.js";
 import type { AgentProfiles, Profile, ProfileAgent } from "../src/profiles/store.js";
 import { ConfigApp, type PageId } from "../src/tui/app.js";
-import type { ConfigClient, ConfigDeps, McpServerInput, ModelSettings } from "../src/tui/deps.js";
-import type { McpServer, Skill } from "../src/extensions/types.js";
-import type { Keypair } from "../src/keeper/gateKeys.js";
+import type { ConfigClient, ConfigDeps } from "../src/tui/deps.js";
 
 const KEY = { up: "\u001B[A", down: "\u001B[B", right: "\u001B[C", left: "\u001B[D", enter: "\r", esc: "\u001B", tab: "\t" };
 
@@ -25,13 +23,7 @@ function world() {
     opencode: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
     pi: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
   };
-  const models: ModelSettings = { router: { model: "opencode/r1", options: ["opencode/r1", "opencode/r2"] }, default: { harness: "claude-code", model: "opus" },
-    harnesses: { "claude-code": { models: ["opus", "sonnet"], default_model: "opus" }, codex: { models: ["gpt-a", "gpt-b"], default_model: "gpt-b" } }, restartRequired: false };
-  let policy = { mode: "scoped", human: ["delete", "git_push"] };
   let settings: NodeSettings = { name: "box", lan: "10.0.0.9" };
-  let servers: McpServer[] = [{ name: "files", kind: "stdio", command: "npx", args: ["-y", "files-mcp"], env: {}, headers: {}, enabled: true, harnesses: ["claude-code", "codex", "opencode"], approval: "ask", note: "" }];
-  let skills: Skill[] = [{ name: "notes", description: "Write notes", path: "/h/skills/notes", files: 0, enabled: true, harnesses: ["claude-code", "codex", "opencode"] }];
-  let keypairs: Keypair[] = [{ name: "main", public: "PUBLICKEYMAIN0123456789", current: true, legacy: false }];
   const client = {
     profiles: vi.fn(async () => ({ agents })),
     createProfile: vi.fn(async (agent: ProfileAgent, name: string, kind: "subscription" | "api", api?: { key: string; baseUrl?: string; model?: string }) => {
@@ -50,47 +42,17 @@ function world() {
     setProfileTelemetry: vi.fn(async () => ({})),
     setProfileColor: vi.fn(async () => ({})),
     removeProfile: vi.fn(async () => ({})),
-    modelSettings: vi.fn(async () => models),
-    saveModelSettings: vi.fn(async () => ({ restartRequired: true })),
-    policy: vi.fn(async () => ({ policy, categories: [{ id: "delete", title: "删除" }, { id: "shell", title: "shell" }, { id: "new_kind", title: "Something new" }] })),
-    setPolicy: vi.fn(async (next: { mode: string; human?: string[] }) => { policy = { mode: next.mode, human: next.human ?? [] }; return {}; }),
     workdir: vi.fn(async () => ({ path: "/home/u/AgentSwitch", default: "/home/u/AgentSwitch", problem: null })),
     setWorkdir: vi.fn(async () => ({})),
     mesh: vi.fn(async () => ({ keyboard: true })),
     setMesh: vi.fn(async () => ({})),
     node: vi.fn(async () => ({ name: "studio", kind: "mac", version: "0.1.0", home: "/h", has: ["terminals", "browser"] })),
-    context: vi.fn(async () => ({ path: "/h/CONTEXT.md", text: "# Me\nI work on AgentSwitch.\n", warnings: [] as string[] })),
-    putContext: vi.fn(async () => ({ warnings: ["第 3 行像是一个密码，已删除。"], sealed: [{ label: "context/token" }] })),
-    memory: vi.fn(async () => ({ path: "/h/MEMORY.md", text: "", warnings: [] as string[] })),
-    putMemory: vi.fn(async () => ({ warnings: [] as string[] })),
-    platformMemory: vi.fn(async () => ({ records: [{ id: "f1", origin: "https://shop.example", text: "Checkout needs the address form first.", kind: "operation", status: "verified" }] })),
-    forgetPlatformMemory: vi.fn(async () => ({ ok: true })),
-    mcp: vi.fn(async () => servers),
-    putMcp: vi.fn(async (server: McpServerInput) => { servers = [...servers.filter((x) => x.name !== server.name), { args: [], env: {}, headers: {}, enabled: true, harnesses: ["claude-code", "codex", "opencode"], approval: "ask", note: "", ...server } as McpServer]; return {}; }),
-    removeMcp: vi.fn(async () => ({ ok: true })),
-    skills: vi.fn(async () => skills),
-    skill: vi.fn(async (name: string) => ({ ...skills.find((x) => x.name === name)!, content: "---\nname: notes\n---\nWrite notes.\n" })),
-    putSkill: vi.fn(async (name: string, body: { enabled?: boolean; harnesses?: string[] }) => {
-      const was = skills.find((x) => x.name === name);
-      skills = [...skills.filter((x) => x.name !== name), { name, description: was?.description ?? "", path: `/h/skills/${name}`, files: 0, enabled: body.enabled ?? was?.enabled ?? true, harnesses: (body.harnesses ?? was?.harnesses ?? ["claude-code", "codex", "opencode"]) as Skill["harnesses"] }];
-      return {};
-    }),
-    removeSkill: vi.fn(async () => ({ ok: true })),
-    discoverSkills: vi.fn(async () => [{ name: "pdf", description: "Read PDFs", path: "/home/u/.claude/skills/pdf", source: "~/.claude/skills", installed: false }, { name: "notes", description: "", path: "/x", source: "~/.claude/skills", installed: true }]),
-    importSkill: vi.fn(async () => ({})),
   } satisfies ConfigClient;
   const seal = vi.fn(async (label: string, host: string, value: string) => `enc:v1:${label}-${host}-${value.length}`);
   const node = { read: vi.fn(() => settings), write: vi.fn((next: NodeSettings) => { settings = next; }), restart: vi.fn(() => true) };
-  const edits: { text: string; name: string }[] = [];
-  let editTo: (text: string) => string = (text) => text;
-  const edit = vi.fn(async (text: string, name: string) => { edits.push({ text, name }); return editTo(text); });
-  const keys = {
-    list: vi.fn(async () => keypairs),
-    create: vi.fn(async () => { keypairs = [{ name: "main", public: "NEWPUBLIC0123456789", current: true, legacy: false }]; return keypairs; }),
-  };
   const doctor = vi.fn(async () => ["", "// runtime", "✓ node             v24.6.0", "✗ secret-gate      not at /x", "! installed        running from a checkout"]);
-  const deps: ConfigDeps = { client, remote: null, seal, node, edit, keys, doctor };
-  return { client, seal, node, deps, settings: () => settings, edits, edit, setEdit: (f: (text: string) => string) => { editTo = f; }, keys, setKeys: (next: Keypair[]) => { keypairs = next; }, doctor };
+  const deps: ConfigDeps = { client, remote: null, seal, node, doctor };
+  return { client, seal, node, deps, settings: () => settings, doctor };
 }
 
 const shown: { unmount(): void }[] = [];
@@ -267,36 +229,6 @@ describe("agentswitch config", { timeout: 30_000 }, () => {
     expect(ui.frame()).toContain("Claude Code › Relay");
   });
 
-  it("saves the models and restarts the service; the executor's own model comes with it", async () => {
-    const { deps, client, node } = world();
-    const ui = open(deps, "models");
-    await ui.until("Dispatch Model");
-    await ui.press(KEY.enter, KEY.down, KEY.enter);              // Default Executor
-    await ui.until("Codex");
-    await ui.press(KEY.down, KEY.enter);
-    await ui.until("gpt-b");
-    await ui.press(KEY.down, KEY.down, KEY.enter);               // Save & Restart
-    await ui.until("The service is restarting");
-    expect(client.saveModelSettings).toHaveBeenCalledWith({ default: { harness: "codex", model: "gpt-b" } });
-    expect(node.restart).toHaveBeenCalledTimes(1);
-  });
-
-  it("asks twice before Bypass; names the kinds in its own words, the service's for one it does not know", async () => {
-    const { deps, client } = world();
-    const ui = open(deps, "permissions");
-    await ui.until("You Answer");
-    expect(ui.frame()).toContain("Deleting files or data");
-    expect(ui.frame()).toContain("Something new");
-    await ui.press(KEY.enter, KEY.down, KEY.down, KEY.enter);    // the shell kind, kept from now on
-    await vi.waitFor(() => expect(client.setPolicy).toHaveBeenCalledWith({ mode: "scoped", human: ["delete", "git_push", "shell"] }));
-    await ui.press(KEY.up, KEY.up, KEY.enter);                   // Approvals
-    await ui.until("Every approval is allowed at once");
-    await ui.press(KEY.down, KEY.enter);                         // Bypass, after Scoped
-    await ui.until("with nobody asked");
-    await ui.press("n");
-    expect(client.setPolicy).toHaveBeenCalledTimes(1);
-  });
-
   it("writes node.json with what changed, keeps what it does not know, and restarts the service", async () => {
     const { deps, node, settings } = world();
     const ui = open(deps, "node");
@@ -336,114 +268,6 @@ describe("agentswitch config", { timeout: 30_000 }, () => {
     expect(agents.frame()).not.toContain("New Profile…");
   });
 
-  it("edits CONTEXT.md in the editor and says what the service sealed and dropped; unchanged is not sent", async () => {
-    const w = world();
-    const ui = open(w.deps, "context");
-    await ui.until("2 lines");
-    expect(ui.frame()).toContain("shop.example");
-    w.setEdit((text) => text);
-    await ui.press(KEY.enter, KEY.enter);                        // into the page, CONTEXT.md
-    await ui.until("Unchanged.");
-    expect(w.client.putContext).not.toHaveBeenCalled();
-    w.setEdit((text) => `${text}token: abc\n`);
-    await ui.press(KEY.enter);
-    await ui.until("1 credential was sealed");
-    expect(ui.frame()).toContain("第 3 行像是一个密码");
-    expect(w.client.putContext).toHaveBeenCalledWith("# Me\nI work on AgentSwitch.\ntoken: abc\n");
-    expect(w.edits[0]!.name).toBe("CONTEXT.md");
-    await ui.press(KEY.down, KEY.down, KEY.enter);               // the learned fact
-    await ui.until("Forget this?");
-    await ui.press("y");
-    await ui.until("Forgotten.");
-    expect(w.client.forgetPlatformMemory).toHaveBeenCalledWith("f1");
-  });
-
-  it("says an editor that failed and sends nothing", async () => {
-    const w = world();
-    w.edit.mockRejectedValueOnce(new Error("vi exited 1"));
-    const ui = open(w.deps, "context");
-    await ui.until("2 lines");
-    await ui.press(KEY.enter, KEY.down, KEY.enter);              // MEMORY.md
-    await ui.until("The editor did not save: vi exited 1");
-    expect(w.client.putMemory).not.toHaveBeenCalled();
-  });
-
-  it("adds an MCP server from JSON written in the editor, switches it, and refuses JSON that is not", async () => {
-    const w = world();
-    const ui = open(w.deps, "extensions");
-    await ui.until("files");
-    expect(ui.frame()).toContain("On · npx -y files-mcp");
-    await ui.press(KEY.enter, KEY.down, KEY.enter);              // + Add MCP Server…
-    await ui.until("Server Name");
-    await ui.press("files", KEY.enter);
-    await ui.until("That name is taken.");
-    w.setEdit(() => "{ not json");
-    await ui.press("\u0015", "search", KEY.enter);
-    await ui.until("Not valid JSON, nothing saved");
-    expect(w.client.putMcp).not.toHaveBeenCalled();
-    w.setEdit(() => JSON.stringify({ kind: "http", url: "https://mcp.example/sse" }));
-    await ui.press(KEY.enter);
-    await ui.until("Server Name");
-    await ui.press("search", KEY.enter);
-    await ui.until("MCP Servers › search");
-    expect(w.client.putMcp).toHaveBeenCalledWith({ kind: "http", url: "https://mcp.example/sse", name: "search" });
-    await ui.press(KEY.enter);                                   // Enabled: off
-    await vi.waitFor(() => expect(w.client.putMcp).toHaveBeenLastCalledWith(expect.objectContaining({ name: "search", enabled: false })));
-  });
-
-  it("imports a skill found in an agent's own folder, and turns a skill off for one agent", async () => {
-    const w = world();
-    const ui = open(w.deps, "extensions");
-    await ui.until("Write notes");
-    const rows = ui.frame().split("\n");
-    const at = rows.findIndex((l) => l.includes("Import…")) - rows.findIndex((l) => /files\s+On/.test(l));
-    await ui.press(KEY.enter, ...Array<string>(at).fill(KEY.down), KEY.enter);
-    await ui.until("Import a Skill");
-    expect(ui.frame()).not.toContain("/x");                      // one already installed is not offered
-    await ui.press(KEY.enter);
-    await ui.until("Imported pdf.");
-    expect(w.client.importSkill).toHaveBeenCalledWith("/home/u/.claude/skills/pdf");
-    await ui.press(KEY.up, KEY.up, KEY.enter);                   // notes
-    await ui.until("Skills › notes");
-    await ui.press(KEY.down, KEY.down, KEY.down, KEY.enter);     // Enabled, Edit SKILL.md…, Claude Code, Codex
-    await vi.waitFor(() => expect(w.client.putSkill).toHaveBeenCalledWith("notes", { harnesses: ["claude-code", "opencode"] }));
-  });
-
-  it("shows the one key pair's public key, with nothing to switch or delete", async () => {
-    const w = world();
-    const ui = open(w.deps, "keys");
-    await ui.until("PUBLICKEYMAIN0123456789");
-    expect(ui.frame()).toContain("Public Key");
-    expect(ui.frame()).not.toMatch(/Make Current|Delete|New Key Pair|Create Key Pair/);
-    expect(w.keys.create).not.toHaveBeenCalled();
-  });
-
-  it("makes the key pair when there is none yet", async () => {
-    const w = world();
-    w.setKeys([]);
-    const ui = open(w.deps, "keys");
-    await ui.until("There is no key pair yet.");
-    await ui.press(KEY.enter, KEY.enter);                        // into the page, Create Key Pair
-    await ui.until("Created the key pair.");
-    expect(w.keys.create).toHaveBeenCalledTimes(1);
-    await ui.until("NEWPUBLIC0123456789");
-  });
-
-  it("says plainly when the gate runs as this account, with the sudo command that gives it its own (gate-simple-v0 §5)", async () => {
-    const w = world();
-    const commands = { install: "sudo /rt/python/bin/secret-gate system install --owner-uid 1000 --port 8080 --runtime /rt", update: "u", rotateKey: "sudo /rt/python/bin/secret-gate system rotate-key", uninstall: "x" };
-    const user = { ...w.deps, gate: async () => ({ mode: { kind: "user" as const }, status: null, commands, platform: "linux" as const }) };
-    const zh = open(user, "keys", "zh-Hans");
-    await zh.until("此节点的网关以你的账户运行：只防误看，不防顺手读取");
-    expect(zh.frame()).toContain("system install --owner-uid 1000");
-    const service = { ...w.deps, gate: async () => ({ mode: { kind: "service" as const, publicDir: "/var/lib/agentswitch/gate-public", ca: "/c", proxyPort: 8080, ownerUid: 1000 }, status: { installed: true, running: true, updateAvailable: false, error: null }, commands, platform: "linux" as const }) };
-    w.setKeys([]);
-    const en = open(service, "keys");
-    await en.until("The gate runs as a system service under its own account");
-    expect(en.frame()).toContain("system rotate-key");
-    expect(en.frame()).not.toContain("Create Key Pair");                 // the service's key is made by the install
-  });
-
   it("shows doctor's lines marked, and asks again", async () => {
     const w = world();
     const ui = open(w.deps, "environment");
@@ -454,11 +278,12 @@ describe("agentswitch config", { timeout: 30_000 }, () => {
   });
 
   it("speaks Japanese whole and Chinese in sentences", async () => {
-    const ja = open(world().deps, "context", "ja");
-    await ja.until("コンテキスト");
-    expect(ja.frame()).toContain("ディスパッチ");
-    const zh = open(world().deps, "keys", "zh-Hans");
-    await zh.until("网关的密钥对");
-    expect(zh.frame()).toContain("Keys");
+    const ja = open(world().deps, "environment", "ja");
+    await ja.until("このノードにあるもの・足りないもの");
+    expect(ja.frame()).toContain("エージェント");
+    expect(ja.frame()).toContain("ノード");
+    const zh = open(world().deps, "environment", "zh-Hans");
+    await zh.until("此节点已有与缺少的项目");
+    expect(zh.frame()).toContain("Environment");
   });
 });

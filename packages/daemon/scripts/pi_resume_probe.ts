@@ -80,7 +80,7 @@ const first = { files: files(), stamp: stamp(seed.file) };
 say(`pi ${version}: a session made with its own code`, { id: seed.id, files: first.files.length });
 
 let port = 0;
-const cfg = { home, targetsPath: resolve(here, "..", "config", "targets.yaml"), port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "", watchSessions: true } as unknown as DaemonConfig;
+const cfg = { home, targetsPath: resolve(here, "..", "config", "targets.yaml"), port: 0, opencodeBinary: "", watchSessions: true } as unknown as DaemonConfig;
 const daemon = buildDaemon(cfg, {
   terminalLauncher: agentLauncher({ binaries: { pi: PI }, hookUrl: () => `http://127.0.0.1:${port}`, stateDir: join(home, "terminals"), env }),
   // Only the throw-away pi folder is read: not this Mac's Claude Code, Codex, OpenCode or pi sessions.

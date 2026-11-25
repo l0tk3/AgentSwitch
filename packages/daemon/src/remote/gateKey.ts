@@ -4,7 +4,7 @@
 import { execFile } from "node:child_process";
 import { z } from "zod";
 import { GATE_CLI_TIMEOUT_MS } from "../core/limits.js";
-import type { GateOptions } from "../executors/gate.js";
+import type { Gate } from "../core/gateBin.js";
 import type { GateKey } from "./pairing.js";
 
 const PUBLIC_KEY_BYTES = 32;
@@ -27,7 +27,7 @@ export type GateKeyReader = () => Promise<GateKey | null>;
 
 /** Runs `<bin> keys --json` with the gate's home; any failure (no gate, no keypair, bad output) is null, with the
  *  reason on stderr for the Mac app's log. */
-export function gateKeyReader(gate: () => Pick<GateOptions, "bin" | "home"> | null, opts: { readonly timeoutMs?: number; readonly warn?: (message: string) => void } = {}): GateKeyReader {
+export function gateKeyReader(gate: () => Gate | null, opts: { readonly timeoutMs?: number; readonly warn?: (message: string) => void } = {}): GateKeyReader {
   const warn = opts.warn ?? console.error;
   return () => new Promise((resolve) => {
     const g = gate();

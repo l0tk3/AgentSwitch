@@ -19,7 +19,7 @@ export const DEFAULT_SCOPE: FileScope = { mode: "home" };
 /** Folders one device's scope may name. */
 export const MAX_SCOPE_FOLDERS = 32;
 
-/** AgentSwitch's own credential places: the executors' read-denied table (executors/protected.ts `ProtectedPaths`). */
+/** AgentSwitch's own credential places: the read-denied table (core/protected.ts `ProtectedPaths`). */
 export type DeniedPlaces = { readonly readDenied?: readonly string[] };
 /** Who asks. `scope` null: this node's own screens (the local listener). */
 export type Viewer = { readonly denied: DeniedPlaces; readonly home: string; readonly scope: FileScope | null };

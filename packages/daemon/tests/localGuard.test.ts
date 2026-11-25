@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { localRefusal, type LocalRequest } from "../src/api/localGuard.js";
 import { Client } from "../src/client.js";
 import { buildDaemon, listenLocal, type Daemon, type DaemonConfig } from "../src/daemon.js";
-import { QuotaService } from "../src/quota/index.js";
 import { TARGETS_PATH } from "./helpers.js";
 
 const PORT = 4711;
@@ -42,7 +41,7 @@ describe("localRefusal", () => {
     expect(refusal({ ...post, path: "/uploads", contentType: "text/plain" })).toBe(415);
     expect(refusal({ method: "PUT", hasBody: true, contentType: "text/plain" })).toBe(415);
     expect(refusal({ method: "DELETE", hasBody: true, contentType: "application/x-www-form-urlencoded" })).toBe(415);
-    expect(refusal({ method: "POST", hasBody: false, contentType: "text/plain" })).toBeNull();   // POST /pairing, /tasks/:id/cancel
+    expect(refusal({ method: "POST", hasBody: false, contentType: "text/plain" })).toBeNull();   // POST /pairing, /terminals/:id/kill
     expect(refusal({ method: "GET", hasBody: true, contentType: "text/plain" })).toBeNull();
   });
 });
@@ -53,8 +52,8 @@ afterEach(async () => { for (const s of open.splice(0)) { await s.close(); s.d.c
 
 async function local(): Promise<{ d: Daemon; port: number; send: (method: string, path: string, opts?: { headers?: Record<string, string>; body?: string | Buffer }) => Promise<Reply> }> {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-guard-"));
-  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const d = buildDaemon(cfg, { quota: new QuotaService([]), oldDispatchOff: false });
+  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
+  const d = buildDaemon(cfg);
   const server = await new Promise<ReturnType<typeof listenLocal>>((ok) => { const s = listenLocal(d, 0, () => ok(s)); });
   const port = (server.address() as AddressInfo).port;
   open.push({ d, close: () => new Promise<void>((ok) => { server.close(() => ok()); (server as import("node:http").Server).closeAllConnections(); }) });
@@ -79,40 +78,38 @@ async function local(): Promise<{ d: Daemon; port: number; send: (method: string
 const MULTIPART = { type: "multipart/form-data; boundary=b", body: '--b\r\nContent-Disposition: form-data; name="files"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n' };
 
 describe("the 127.0.0.1 listener", () => {
-  it("refuses a cross-site task with an approval override, a text/plain body and a rebinding Host", async () => {
+  it("refuses a cross-site write, a text/plain body and a rebinding Host", async () => {
     const { d, port, send } = await local();
-    const attack = JSON.stringify({ task: "x", approval: { mode: "auto" } });
-    const crossSite = await send("POST", "/tasks", { headers: { origin: "https://evil.example", "content-type": "text/plain;charset=UTF-8" }, body: attack });
+    const attack = JSON.stringify({ name: "x" });
+    const crossSite = await send("POST", "/rooms", { headers: { origin: "https://evil.example", "content-type": "text/plain;charset=UTF-8" }, body: attack });
     expect(crossSite.status).toBe(403);
-    expect((await send("POST", "/tasks", { headers: { origin: "https://evil.example", "content-type": "application/json" }, body: attack })).status).toBe(403);
-    expect((await send("POST", "/tasks", { headers: { "content-type": "text/plain" }, body: attack })).status).toBe(415);
-    expect((await send("POST", "/tasks", { body: attack })).status).toBe(415);
+    expect((await send("POST", "/rooms", { headers: { origin: "https://evil.example", "content-type": "application/json" }, body: attack })).status).toBe(403);
+    expect((await send("POST", "/rooms", { headers: { "content-type": "text/plain" }, body: attack })).status).toBe(415);
+    expect((await send("POST", "/rooms", { body: attack })).status).toBe(415);
     expect((await send("POST", "/pairing", { headers: { host: `rebind.evil.example:${port}` } })).status).toBe(403);
-    expect((await send("GET", "/tasks", { headers: { host: `rebind.evil.example:${port}` } })).status).toBe(403);
+    expect((await send("GET", "/rooms", { headers: { host: `rebind.evil.example:${port}` } })).status).toBe(403);
     expect((await send("POST", "/uploads", { headers: { origin: "https://evil.example", "content-type": MULTIPART.type }, body: MULTIPART.body })).status).toBe(403);
-    expect((await send("POST", "/tasks", { headers: { "content-type": MULTIPART.type }, body: MULTIPART.body })).status).toBe(415);
-    expect(d.store.listTasks(10)).toEqual([]);
+    expect((await send("POST", "/rooms", { headers: { "content-type": MULTIPART.type }, body: MULTIPART.body })).status).toBe(415);
+    expect(((await (await d.api.request("/rooms")).json()) as { rooms: unknown[] }).rooms).toEqual([]);
   });
 
   it("serves the web UI's same-origin requests, uploads included", async () => {
     const { port, send } = await local();
     expect((await send("GET", "/ui", { headers: { host: `localhost:${port}` } })).status).toBe(200);
     const same = { origin: `http://127.0.0.1:${port}` };
-    const created = await send("POST", "/tasks", { headers: { ...same, "content-type": "application/json" }, body: JSON.stringify({ task: 'hi @echo {"result":"ok"}' }) });
+    const created = await send("POST", "/rooms", { headers: { ...same, "content-type": "application/json" }, body: JSON.stringify({ name: "hi" }) });
     expect(created.status).toBe(201);
     const upload = await send("POST", "/uploads", { headers: { ...same, "content-type": MULTIPART.type }, body: MULTIPART.body });
     expect(upload.status).toBe(200);
-    expect((await send("GET", `/tasks/${String(created.body.id)}`, { headers: { host: `localhost:${port}`, origin: `http://localhost:${port}` } })).status).toBe(200);
+    expect((await send("GET", `/rooms/${String((created.body.room as { id: string }).id)}`, { headers: { host: `localhost:${port}`, origin: `http://localhost:${port}` } })).status).toBe(200);
     expect((await send("POST", "/pairing", { headers: same })).status).toBe(409);   // reached the route: remote access is off here
   });
 
   it("serves the CLI (and the Mac app's URLSession): no Origin, JSON bodies", async () => {
-    const { d, port } = await local();
+    const { port } = await local();
     const client = new Client(`http://127.0.0.1:${port}`);
     expect((await client.health()).ok).toBe(true);
-    const t = await client.submit('cli @echo {"result":"ok"}', undefined);
-    await d.engine.idle();
-    expect((await client.task(t.id)).status).toBe("done");
-    expect((await client.cancel(t.id)).id).toBe(t.id);
+    expect((await client.setMesh({ keyboard: true })).keyboard).toBe(true);
+    expect((await client.mesh()).keyboard).toBe(true);
   });
 });

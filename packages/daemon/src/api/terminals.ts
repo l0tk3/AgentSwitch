@@ -33,7 +33,7 @@ import { GitStatus } from "../terminals/gitStatus.js";
 import { CODEX_KEY_PROVIDER } from "../terminals/launch.js";
 import type { SentReply, TerminalInfo } from "../terminals/host.js";
 import { subagentDoing } from "./live.js";
-import { modelSettings } from "../models/modelOverlay.js";
+import { selectableModels } from "../models/targets.js";
 import { modelName } from "../util/modelName.js";
 import { checkTerminalCwd } from "./cwdPolicy.js";
 import { parseBody, type ApiDeps } from "./shared.js";
@@ -307,11 +307,10 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   // uses unless told (`defaultEffort`), in the agent's own words (harness/efforts.ts). `efforts[agent]`: the levels
   // when no model is chosen (the agent's default model; pi's one list); absent: none without a model (OpenCode).
   const listing = () => {
-    const catalog = modelSettings(deps.targets).harnesses;
     const offers = t.offers?.() ?? {};
     const variants = t.variants?.() ?? {};
     const models = Object.fromEntries(agents.map((a) => [a, (offers[a as keyof Offers]?.models
-      ?? (catalog[a]?.models ?? []).map((id): ModelOffer => ({ id, name: modelName(id), ...(a === "opencode" && variants[id] ? { efforts: variants[id] } : {}) }))) as readonly ModelOffer[]]));
+      ?? selectableModels(deps.targets, a).map((id): ModelOffer => ({ id, name: modelName(id), ...(a === "opencode" && variants[id] ? { efforts: variants[id] } : {}) }))) as readonly ModelOffer[]]));
     const defaults = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.defaultName ? [[a, o.defaultName]] : [])));
     const efforts = Object.fromEntries(agents.flatMap((a): [string, readonly string[]][] => {
       const own = a === "pi" ? PI_THINKING : offers[a as keyof Offers]?.efforts;

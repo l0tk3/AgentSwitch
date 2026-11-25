@@ -3,7 +3,7 @@
   "version": "0.4.2",
   "private": true,
   "type": "module",
-  "description": "AgentSwitch daemon: task routing (v1: router only)",
+  "description": "AgentSwitch daemon: terminals, Chat Room, the shared browser, profiles and the nodes' mesh",
   "engines": {
     "node": ">=22.5"
   },
@@ -14,10 +14,8 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && sh native/build.sh",
     "build:native": "sh native/build.sh",
     "start": "node --no-warnings=ExperimentalWarning dist/cli.js serve",
-    "route": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts",
     "serve": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts serve",
-    "cli": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts",
-    "eval": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx scripts/router_eval.ts"
+    "cli": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.278",

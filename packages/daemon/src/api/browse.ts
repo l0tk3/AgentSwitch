@@ -27,7 +27,7 @@ const NODE_PLATFORMS = new Set(["macos", "linux"]);
 export type FileAccess = {
   /** The user's home folder: where a viewer starts, what `Home Folder` scopes and `~` mean. */
   readonly home: string;
-  /** AgentSwitch's own credential places: the executors' read-denied table (executors/protected.ts). */
+  /** AgentSwitch's own credential places: the read-denied table (core/protected.ts). */
   readonly denied: ProtectedPaths;
   /** Whether paired devices may read files here now, may change them (absent: may), each one's scope, and what kind
    *  of device each is (its platform as it paired; absent or unknown: taken for a phone). */

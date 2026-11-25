@@ -1,5 +1,5 @@
 /** The 127.0.0.1 listener's token (2026-09-25): every local caller shows it, the web console gets a session through a
- *  one-time link, and executors cannot read the file that holds it. Over real HTTP on a random port. */
+ *  one-time link, and agents cannot read the file that holds it. Over real HTTP on a random port. */
 
 import { mkdtempSync, statSync } from "node:fs";
 import type { AddressInfo } from "node:net";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ensureLocalToken, LOCAL_TOKEN_FILE, LocalAuth, readLocalToken } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
-import { decideTool } from "../src/executors/claude.js";
+import { decideTool } from "../src/core/toolGuard.js";
 import { defaultProtected } from "../src/core/protected.js";
 import { TARGETS_PATH } from "./helpers.js";
 
@@ -17,7 +17,7 @@ afterEach(() => { for (const c of closers.splice(0)) c(); });
 
 async function start(now?: () => number) {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-localauth-"));
-  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
   const daemon = buildDaemon(cfg);
   const token = ensureLocalToken(home);
   const port = await new Promise<number>((resolve) => {
@@ -41,16 +41,16 @@ describe("local API token", () => {
 
   it("without it the API is closed; the liveness probe and the console's pages are not", async () => {
     const f = await start();
-    for (const path of ["/tasks", "/approvals/policy", "/devices", "/settings/models"]) expect((await f.call(path)).status, path).toBe(401);
-    expect((await f.call("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "x" }) })).status).toBe(401);
-    expect((await f.call("/tasks", { headers: { authorization: "Bearer wrong-token-of-some-length-1234567890" } })).status).toBe(401);
+    for (const path of ["/settings/workdir", "/profiles", "/devices", "/live"]) expect((await f.call(path)).status, path).toBe(401);
+    expect((await f.call("/settings/workdir", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/x" }) })).status).toBe(401);
+    expect((await f.call("/settings/workdir", { headers: { authorization: "Bearer wrong-token-of-some-length-1234567890" } })).status).toBe(401);
     expect((await f.call("/healthz")).status).toBe(200);
     expect((await f.call("/ui")).status).toBe(200);
   });
 
   it("with it the API answers", async () => {
     const f = await start();
-    const res = await f.call("/tasks", { headers: { authorization: `Bearer ${f.token}` } });
+    const res = await f.call("/settings/workdir", { headers: { authorization: `Bearer ${f.token}` } });
     expect(res.status).toBe(200);
   });
 
@@ -66,9 +66,9 @@ describe("local API token", () => {
     expect(cookie).toMatch(/HttpOnly/);
     expect(cookie).toMatch(/SameSite=Strict/);
     const session = cookie.split(";")[0]!;
-    expect((await f.call("/tasks", { headers: { cookie: session } })).status).toBe(200);
+    expect((await f.call("/settings/workdir", { headers: { cookie: session } })).status).toBe(200);
     expect((await f.call(link.path)).status).toBe(403);
-    expect((await f.call("/tasks", { headers: { cookie: "agentswitch_console=made-up" } })).status).toBe(401);
+    expect((await f.call("/settings/workdir", { headers: { cookie: "agentswitch_console=made-up" } })).status).toBe(401);
   });
 
   it("a console link can land on another console page (the Mac app's terminal window), never off the console", async () => {
@@ -95,7 +95,7 @@ describe("local API token", () => {
     expect((await f.call(link.path)).status).toBe(403);
   });
 
-  it("executors may not read the token file", () => {
+  it("agents may not read the token file", () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-localauth-"));
     const prot = defaultProtected({ HOME: tmpdir(), AGENTSWITCH_HOME: home, SECRET_GATE_HOME: join(home, "gate") });
     expect(decideTool("Read", { file_path: join(home, LOCAL_TOKEN_FILE) }, tmpdir(), new Set(), prot)).toMatchObject({ kind: "deny" });

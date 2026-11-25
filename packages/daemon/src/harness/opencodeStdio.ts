@@ -1,5 +1,5 @@
-/** One resident `opencode serve --stdio` process, as both OpenCode servers run it: the router's
- *  (router/routers/opencodeServe.ts) and the executors' (executors/opencodeServer.ts). Verified with 2.0.8: `--stdio`
+/** One `opencode serve --stdio` process, as the daemon runs it: a terminal's companion (terminals/opencodeTerminal.ts)
+ *  and the one asked what OpenCode's models offer (models/opencodeVariants.ts). Verified with 2.0.8: `--stdio`
  *  takes the password from OPENCODE_PASSWORD and deletes it from the server's own environment before starting, so the
  *  shells and MCP servers it spawns never see it (plain `serve` keeps OPENCODE_SERVER_PASSWORD in every child's env);
  *  it binds the given loopback port (0 = any free one, a fixed port is honoured) and reports the address as one JSON
@@ -32,7 +32,7 @@ export type StdioServeOptions = {
   readonly startTimeoutMs?: number | undefined;
 };
 
-/** The ports of the servers running now, of either kind and the terminals' (docs/browser-v0.md §2 安全: AgentSwitch's
+/** The ports of the servers running now (docs/browser-v0.md §2 安全: AgentSwitch's
  *  own ports, never opened in the shared browser). */
 const livePorts = new Set<number>();
 

@@ -24,9 +24,6 @@ export function word(text, look) {
   return text;
 }
 
-/** A line of short words joined by ` · `, each as `look` writes it. */
-export const phrase = (text, look) => (look === "classic" ? text.split(" · ").map((w) => word(w, look)).join(" · ") : text);
-
 /** An age (`3h`) as `look` says it: `3h ago`; `Now` and a date stay. */
 export const age = (text, look) => (look === "classic" && /^\d+[mhd]$/.test(text) ? `${text} ago` : text);
 
@@ -49,25 +46,6 @@ export const label = (text, look) => (look === "classic" ? text.replace(/^\/\/\s
 
 /** A button's word: `[ Take Over ]` in the pixel look, the word alone in the classic one (its `+` is an icon's job). */
 export const bracket = (text, look) => (look === "classic" ? text.replace(/^\+\s*/, "") : `[ ${text} ]`);
-
-// ---------- a page built from strings (the web console): its labels and status words as the look writes them ----------
-/** `// ` at the start of a label: an element of class `lbl`, a `<label>`, a `<summary>`, a box's head. Nothing else: text
- *  a model or you wrote may start with the same two slashes (a comment in code). */
-const LABEL = /(<(?:div|span)\s+class="(?:[^"]*\s)?lbl(?:\s[^"]*)?"[^>]*>(?:<span>)?|<label(?:\s[^>]*)?>(?:<span>)?|<summary>|<div class="hd"><span>)\/\/ /g;
-const WORD = /(<span class="(?:word|badge)[^"]*">)([^<]+)(<\/span>)/g;
-const COUNT = /(<\/span>)(\d+ Waiting)(<\/span>)/g;
-
-/** A view's markup as the look has it: in the classic look the labels lose their slashes and the status words in
- *  `word` and `badge` spans (and the band's `2 Waiting`) are the classic ones. The pixel look's markup is untouched. */
-export function dress(html, look) {
-  if (look !== "classic") return html;
-  return html.replace(LABEL, "$1")
-    .replace(WORD, (_, open, text, close) => open + word(text, look) + close)
-    .replace(COUNT, (_, before, text, close) => before + word(text, look) + close);
-}
-
-/** The look this page is drawn in (the root's class; a page without a document — a test — is the pixel look). */
-export const pageLook = () => (globalThis.document?.documentElement.classList.contains("classic") ? "classic" : "pixel");
 
 // ---------- line icons: an 18 pt board, 1.5 pt strokes on half pixels (docs/design/concepts/classic.html) ----------
 const BOX = '<rect x="1.75" y="3.25" width="14.5" height="11.5" rx="2.75"/>';

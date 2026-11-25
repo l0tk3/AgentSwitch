@@ -1,16 +1,8 @@
-/** Composition root: config → store, bus, engine, executors, quota, API. `serve()` listens on 127.0.0.1 and, with
+/** Composition root: config → terminals, rooms, browser, profiles, vault, API. `serve()` listens on 127.0.0.1 and, with
  *  AGENTSWITCH_REMOTE=1, on the remote HTTPS port for paired phones (app-v0 §2). */
 
-import { openCodeVariants } from "./harness/efforts.js";
-import { Assistant } from "./assistant/assistant.js";
-import { AssistantLog } from "./assistant/log.js";
-import { announceUpdate, Reporter, type ReporterOptions } from "./assistant/reports.js";
-import { updateState } from "./files/appUpdate.js";
-import { admitTask, type TaskBody } from "./api/tasks.js";
 import type { ApiDeps } from "./api/shared.js";
-import { BrowserSlots } from "./core/browserSlots.js";
 import { cloneRoot, CloneSweeper } from "./core/chromeClones.js";
-import { BROWSER_PROFILES_DIR } from "./core/protected.js";
 import { serve as listen, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
@@ -47,47 +39,14 @@ import { ShownFoldersStore } from "./sessions/shownFolders.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
 import { guardLocal } from "./api/localGuard.js";
 import { ensureLocalToken, LocalAuth } from "./api/localAuth.js";
-import { Bus } from "./engine/bus.js";
-import { defaultCleanupPaths } from "./engine/cleanup.js";
-import { DEFAULT_MAX_TASKS, Engine } from "./engine/engine.js";
-import { Store } from "./engine/store.js";
-import { claudeExecutor } from "./executors/claude.js";
 import { canonical, decideTool } from "./core/toolGuard.js";
-import { probeRateLimits } from "./quota/claudeProbe.js";
-import { codexExecutor } from "./executors/codex.js";
-import { echoExecutor } from "./executors/echo.js";
-import { defaultGate, gateHealth, gateNotFound, proxyEndpoint, warmBrowserMcp, type GateOptions } from "./executors/gate.js";
-import { gateBin } from "./core/gateBin.js";
-import { gateRefsExecutor } from "./executors/gateRefs.js";
-import { gateRefs } from "./secrets/refs.js";
-import { platformExperience } from "./engine/platformContext.js";
-import { type Extensions, extensionsAt } from "./extensions/index.js";
-import { opencodeExecutor } from "./executors/opencode.js";
-import { OpenCodeExecServer, opencodeServeConfig } from "./executors/opencodeServer.js";
-import { defaultProtected, terminalProtected, type ProtectedPaths } from "./core/protected.js";
-import { routerSummarizer } from "./threads/summary.js";
-import { routerSupervisor } from "./router/supervisor.js";
-import { loadMemory } from "./threads/memory.js";
-import { RECORD_WINDOW_MS } from "./router/record.js";
-import type { ExtensionsSummary } from "./router/prompt.js";
-import type { Executor } from "./executors/types.js";
-import { claudeQuota } from "./quota/claude.js";
-import { codexQuota } from "./quota/codex.js";
-import { deepseekQuota, findDeepSeekKey } from "./quota/deepseek.js";
-import { QuotaService } from "./quota/index.js";
-import { RateLimitCache } from "./quota/windows.js";
-import { loadContext } from "./core/contextDoc.js";
+import { defaultGate, gateBin } from "./core/gateBin.js";
+import { defaultProtected, terminalProtected } from "./core/protected.js";
 import { sweepDir } from "./files/artifacts.js";
 import { resolveCommand } from "./util/which.js";
 import { ARTIFACT_TTL_MS, UPLOAD_TTL_MS } from "./files/names.js";
 import { Uploads } from "./files/uploads.js";
-import { RoutingLog } from "./router/log.js";
-import { echoRouter } from "./router/routers/echo.js";
-import { opencodeRouter } from "./router/routers/opencode.js";
-import { OLD_DISPATCH_OFF } from "./core/oldDispatch.js";
-import type { Router } from "./core/modelCall.js";
-import { loadTargets, type Targets, modelKey } from "./models/targets.js";
-import { withModelOverlay } from "./models/modelOverlay.js";
+import { loadTargets, type Targets } from "./models/targets.js";
 import { mountRemoteAdmin } from "./remote/admin.js";
 import { mountNodes } from "./api/nodes.js";
 import { NodeBook, NODES_DIR } from "./nodes/book.js";
@@ -105,21 +64,17 @@ import type { PhoneReach } from "./clash/integration.js";
 import { forgetClaudeLogin } from "./profiles/claudeLogin.js";
 import { isAllowedSource } from "./remote/address.js";
 import { listenRemote, type RemoteListener } from "./remote/server.js";
-import type { TargetRef } from "./core/target.js";
 import { mergeLogged } from "./models/discovery.js";
 import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
 import { ModelOffers } from "./models/modelOffers.js";
-import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
-import type { PlannerFactory } from "./engine/engine.js";
-import { claudeTextRouter, type ClaudeRouterOptions } from "./router/routers/claude.js";
-import { codexTextRouter } from "./router/routers/codex.js";
-import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
+import { readOpenCodeVariants } from "./models/opencodeVariants.js";
+import { DeviceStore } from "./remote/deviceStore.js";
+import { DatabaseSync } from "node:sqlite";
 import { loadWorkdir } from "./files/workdir.js";
 import { defaultSessionSources, SessionMonitor, type SessionSources } from "./sessions/monitor.js";
 import type { SessionHarness } from "./sessions/types.js";
 import { KeptPictures } from "./sessions/pictures.js";
 import { openCodeDeleter, type OpenCodeDelete } from "./sessions/opencode.js";
-import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type KeptTerminal, type Launcher, type TerminalHarness } from "./terminals/host.js";
 import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S, restoreCompanion } from "./terminals/launch.js";
@@ -151,8 +106,6 @@ import { stdioServePorts } from "./harness/opencodeStdio.js";
 
 export const VERSION = "0.4.2";
 export const DEFAULT_PORT = 4711;
-/** Expired archived threads are deleted at start-up and then this often. */
-const THREAD_SWEEP_INTERVAL_MS = 3600_000;
 /** How often Clash Integration looks whether its subscription is due to be fetched again. */
 /** This Mac's addresses are looked up again this often for the phones' Clash address (§12). */
 const PHONE_ADDRESSES_MS = 60_000;
@@ -168,18 +121,8 @@ export type DaemonConfig = {
   readonly home: string;                 // ~/.agentswitch
   readonly targetsPath: string;
   readonly port: number;
-  readonly router: "opencode" | "echo";
-  readonly executors: "echo" | "real";   // real = claude-code (Agent SDK), codex (app-server), opencode (run)
-  readonly browser: boolean;             // give real executors the gated Playwright browser
-  readonly quotaTtlMs: number;
-  /** Tasks in flight at once (AGENTSWITCH_MAX_TASKS, default 4); see docs/background-v0.md. */
-  readonly maxTasks: number;
-  /** Port of the resident `opencode serve` (AGENTSWITCH_OPENCODE_PORT); router-type calls go there. */
-  readonly opencodePort: number;
+  /** The user's `opencode` (OPENCODE_BIN), for OpenCode terminals and what its models offer. */
   readonly opencodeBinary: string;
-  /** OpenCode executors (AGENTSWITCH_OPENCODE_EXECUTOR): `serve` (default) = sessions on a resident executor server of
-   *  their own, `run` = `opencode run --standalone` per step (also the automatic fallback). */
-  readonly opencodeExecutor?: "serve" | "run";
   /** app-v0 §2: HTTPS for paired phones on all interfaces (AGENTSWITCH_REMOTE=1, AGENTSWITCH_REMOTE_PORT, default 4713;
    *  AGENTSWITCH_REMOTE_NAME overrides the Mac name in the pairing payload). Absent = off. */
   readonly remote?: { readonly port: number; readonly name?: string };
@@ -188,8 +131,8 @@ export type DaemonConfig = {
   readonly clashPhonePort?: number;
   /** The AgentSwitch.app this daemon runs from (AGENTSWITCH_APP_BUNDLE, set by the Mac app): staged updates sit next to it. */
   readonly appBundle?: string;
-  /** Tasks with no folder of their own work in a dated subfolder of the user's default work folder (docs/control-v0.md
-   *  §2; `workdir.json`, default ~/AgentSwitch) instead of a throw-away one in the data directory. On unless
+  /** The old Dispatch's tasks worked in dated subfolders of the user's default work folder (docs/control-v0.md §2;
+   *  `workdir.json`, default ~/AgentSwitch): the sessions they left there stay off the list of sessions. On unless
    *  AGENTSWITCH_TASK_FOLDERS=0; tests build configs without it. */
   readonly taskFolders?: boolean;
   /** A deleted Claude profile's sign-in, and Default's when its identity is reset, is taken out of the keychain
@@ -199,9 +142,14 @@ export type DaemonConfig = {
   /** Watch the Mac's own Claude Code / Codex / OpenCode sessions (docs/control-v0.md §3). On unless
    *  AGENTSWITCH_SESSIONS=0; tests build configs without it. */
   readonly watchSessions?: boolean;
-  /** AgentSwitch's own terminals, the manual entry (docs/terminal-v0.md). On unless AGENTSWITCH_TERMINALS=0; tests build
-   *  configs without it. */
+  /** AgentSwitch's own terminals (docs/terminal-v0.md). On unless AGENTSWITCH_TERMINALS=0; tests build configs without
+   *  it. */
   readonly terminals?: boolean;
+  /** Ask this machine's agents what they offer, for the terminals' model menus (models/modelOffers.ts): it starts the
+   *  user's own Claude Code, Codex and OpenCode. On with the terminals unless AGENTSWITCH_EXECUTORS=echo — what the Mac
+   *  app's throw-away services and a node's `"executors": "echo"` say, from when the same word also chose the old
+   *  Dispatch's executors; tests build configs without it. */
+  readonly modelOffers?: boolean;
   /** The shared browser (docs/browser-v0.md): one Chrome the daemon holds, for the screens and later the agents. On
    *  unless AGENTSWITCH_BROWSER_HOST=0; tests build configs without it. */
   readonly browserHost?: boolean;
@@ -246,14 +194,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     home,
     targetsPath: env.AGENTSWITCH_TARGETS ?? resolve(HERE, "..", "config", "targets.yaml"),
     port: Number(env.AGENTSWITCH_PORT ?? DEFAULT_PORT),
-    router: env.AGENTSWITCH_ROUTER === "echo" ? "echo" : "opencode",
-    executors: env.AGENTSWITCH_EXECUTORS === "real" ? "real" : "echo",
-    browser: env.AGENTSWITCH_BROWSER !== "0",   // gated Playwright MCP attached to browser tasks when the gate exists
-    quotaTtlMs: QUOTA_TTL_MS,
-    maxTasks: Math.max(1, Number(env.AGENTSWITCH_MAX_TASKS ?? DEFAULT_MAX_TASKS) || DEFAULT_MAX_TASKS),
-    opencodePort: Number(env.AGENTSWITCH_OPENCODE_PORT ?? DEFAULT_OPENCODE_PORT) || DEFAULT_OPENCODE_PORT,
     opencodeBinary: env.OPENCODE_BIN ?? join(env.HOME ?? "", ".opencode", "bin", "opencode"),
-    opencodeExecutor: env.AGENTSWITCH_OPENCODE_EXECUTOR === "run" ? "run" : "serve",
     ...(env.AGENTSWITCH_REMOTE === "1" || env.AGENTSWITCH_REMOTE === "true"
       ? { remote: { port: remotePort(env.AGENTSWITCH_REMOTE_PORT), ...(env.AGENTSWITCH_REMOTE_NAME?.trim() ? { name: env.AGENTSWITCH_REMOTE_NAME.trim() } : {}) } }
       : {}),
@@ -264,6 +205,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     forgetLogins: !env.VITEST && env.NODE_ENV !== "test",
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
     terminals: env.AGENTSWITCH_TERMINALS !== "0",
+    modelOffers: env.AGENTSWITCH_TERMINALS !== "0" && env.AGENTSWITCH_EXECUTORS !== "echo",
     // docs/terminal-v0.md §10: each terminal's program on a pty its own holder holds, so that it outlives the service
     // (the Linux node's keeper turns it on; node.json `"holdTerminals": false` turns it off).
     holdTerminals: env.AGENTSWITCH_HOLD_TERMINALS === "1",
@@ -284,9 +226,8 @@ export type Daemon = {
   readonly remote: RemoteRuntime | null;
   /** The other nodes this one uses, and what it says of itself to them (docs/mesh-v0.md). */
   readonly nodes: Nodes;
-  readonly engine: Engine;
-  readonly store: Store;
-  readonly quota: QuotaService;
+  /** The devices paired with this node (remote/deviceStore.ts). */
+  readonly devices: DeviceStore;
   readonly targets: Targets;
   /** AgentSwitch's own terminals (docs/terminal-v0.md), or null when off. */
   readonly terminals: TerminalHost | null;
@@ -310,27 +251,14 @@ export type Daemon = {
 };
 
 export type BuildOverrides = {
-  readonly router?: Router;
-  readonly executors?: readonly Executor[];
-  readonly quota?: QuotaService;
   /** Catalog after discovery (serve() passes it); default: the yaml as is. */
   readonly targets?: Targets;
-  /** What the agents offer today, kept fresh (serve() passes it with real executors): the terminals' model menus. */
+  /** What the agents offer today, kept fresh (serve() passes it with real terminals): the terminals' model menus. */
   readonly modelOffers?: ModelOffers;
-  /** The resident OpenCode server; when absent, router-type calls fall back to `opencode run --standalone`. */
-  readonly opencode?: OpenCodeServer;
-  /** The OpenCode executors' own resident server (real executors only); when absent they run `opencode run --standalone`. */
-  readonly opencodeExec?: OpenCodeExecServer;
-  /** Tests: the planner for multi-step tasks (loop-v0 §6). */
-  readonly planner?: PlannerFactory;
   /** Tests: remote state without openssl or the network (null = off whatever cfg.remote says). */
   readonly remote?: RemoteRuntime | null;
   /** Tests: a short SSE heartbeat period. */
   readonly sseHeartbeatMs?: number;
-  /** Tests: the reporter's waits (summary, needs-you grace, watch tick) and clock. */
-  readonly reports?: Omit<ReporterOptions, "log" | "store" | "bus">;
-  /** Tests: the assistant's model (assistant-v0 §1.1) without OpenCode. */
-  readonly assistant?: Router;
   /** Tests: how terminals start (a fake agent); also turns terminals on whatever cfg.terminals says. */
   readonly terminalLauncher?: Launcher;
   /** Tests: whether a session is open in another program (default: this Mac's agents; none with a fake launcher). */
@@ -343,8 +271,6 @@ export type BuildOverrides = {
   readonly browserDriver?: BrowserDriver;
   /** Tests: the agents' MCP engine in the shared browser (default: Playwright MCP in this process). */
   readonly browserEngine?: AgentEngine;
-  /** Tests of the engine: false turns the old dispatch back on whatever OLD_DISPATCH_OFF says (core/oldDispatch.ts). */
-  readonly oldDispatchOff?: boolean;
 };
 
 /** The agent CLIs a terminal can start, as absolute paths; a missing one is left out (docs/terminal-v0.md §2). The user's
@@ -374,7 +300,6 @@ export function claudeBinary(env: NodeJS.ProcessEnv = process.env): string | und
 }
 
 const withClaude = (bin: string | undefined): { claudeExecutable?: string } => (bin ? { claudeExecutable: bin } : {});
-const executableOf = (bin: string | undefined): { executable?: string } => (bin ? { executable: bin } : {});
 
 /** The codex CLI of this Mac: the one chosen in the Mac app's 设置 › Agents when it is there (`CODEX_BIN`,
  *  docs/agents-v0.md §3: the vendor's own install, a beta, a pinned version, or ChatGPT.app's copy), else the catalog's
@@ -386,61 +311,29 @@ export function codexBinary(targets: Pick<Targets, "harnesses">, env: NodeJS.Pro
 }
 
 export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
-  // app-v0 §2: $AGENTSWITCH_HOME/models.json (the Mac app's model settings) over targets.yaml; bad parts are ignored.
-  const baseTargets = overrides.targets ?? loadTargets(cfg.targetsPath);
-  const modelsPath = join(cfg.home, "models.json");
-  const targets = withModelOverlay(baseTargets, modelsPath);
-  const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks"), threadsDir: join(cfg.home, "threads"), artifactsDir: join(cfg.home, "artifacts") });
-  const bus = new Bus();
-  const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
-  const contextPath = join(cfg.home, "CONTEXT.md");
-  const memoryPath = join(cfg.home, "MEMORY.md");
-  const platformMemoryPath = join(cfg.home, "platform-memory.json");
-  const policyPath = join(cfg.home, "approvals.json");
-  const resident = overrides.opencode;
-  const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : resident ? serveRouter(resident, "dispatcher", targets.router.model, targets.router.effort) : opencodeRouter({ model: targets.router.model }));
-  const rateLimits = new RateLimitCache();
-  const extensions = extensionsAt(cfg.home);
+  const targets = overrides.targets ?? loadTargets(cfg.targetsPath);
+  const devices = new DeviceStore({ dbPath: join(cfg.home, "agentswitch.db") });
   const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
-  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser, rateLimits, extensions, prot, overrides.opencodeExec) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
-  const quota = overrides.quota ?? new QuotaService([
-    codexQuota({ binary: codexBinary(targets) }),
-    deepseekQuota({ key: findDeepSeekKey() }),
-    claudeQuota({ cache: rateLimits, ...(cfg.executors === "real" ? { probe: (signal?: AbortSignal) => probeRateLimits(undefined, claudeBinary(), signal) } : {}) }),
-  ], cfg.quotaTtlMs);
-  const workRoot = join(cfg.home, "work");
   const uploads = new Uploads(join(cfg.home, "uploads"));
+  // The files the old Dispatch's tasks kept still go when their time is up; nothing new is written there.
   const artifactsDir = join(cfg.home, "artifacts");
   sweepDir(uploads.dir, UPLOAD_TTL_MS);
   sweepDir(artifactsDir, ARTIFACT_TTL_MS);
   // And every few hours while the service runs (2026-11-11, user: 然后定期清理缓存): it may stay up for weeks.
   setInterval(() => { try { sweepDir(uploads.dir, UPLOAD_TTL_MS); sweepDir(artifactsDir, ARTIFACT_TTL_MS); } catch { /* the next round */ } }, 6 * 3600_000).unref();
-  // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
-  // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
-  mkdirSync(join(cfg.home, "router-scratch"), { recursive: true });
-  const oracle = (agentName: string): Router => resident ? serveRouter(resident, "oracle", targets.router.model, targets.router.effort) : opencodeRouter({ model: targets.router.model, agentName, tools: "none", runIn: join(cfg.home, "router-scratch") });
-  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(oracle("summarizer"), targets.router.timeout_ms);
-  // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
-  const supervisor = summarizer ? routerSupervisor(oracle("supervisor"), targets.router.supervisor, targets.router.timeout_ms) : undefined;
-  const questionRouter = summarizer ? oracle("question-translator") : router;
-  const extensionsSummary = () => summarizeExtensions(extensions);
-  // loop-v0 §6: the planner runs multi-step tasks; only with a real router, and only while its harness has quota.
-  const planner = overrides.planner ?? (cfg.router === "echo" || overrides.router ? undefined : plannerFor(targets, resident, () => quota.map()));
-  // Real executors require the gate. (The automatic sealer that also ran on it, router-v0 §9, was removed on 2026-11-23.)
-  const gate = cfg.executors === "real" ? defaultGate() : null;
-  // gate-next-v0 §1/§3: per-execution enc:ref: scope and proxy health.
-  const wiredExecutors = gate ? executors.map((executor) => gateRefsExecutor(executor, { refs: gateRefs(gate), health: () => gateHealth(gate) })) : executors;
-  // Kept browser logins (threads-v0 §4b): real executors only; the directory is read-denied to them (prot.readDenied).
-  const browserSlots = cfg.executors === "real" ? new BrowserSlots(join(cfg.home, BROWSER_PROFILES_DIR)) : undefined;
-  // The shared browser's Chrome is the user's own too, so its clones are swept the same way.
+  // The agents and the browser as they really are; a test gives a fake launcher or a fake driver instead.
+  const realTerminals = Boolean(cfg.terminals) && !overrides.terminalLauncher;
   const realBrowser = Boolean(cfg.browserHost) && !overrides.browserDriver;
-  const cloneDir = cfg.executors === "real" || realBrowser ? cloneRoot() : null;
+  // The gate, while this machine has one: it opens the ciphertexts kept from before (sealedMove.ts, vault/seal.ts).
+  const gate = realTerminals || realBrowser ? defaultGate() : null;
+  // The shared browser's Chrome is the user's own, so the clones macOS leaves of it are swept.
+  const cloneDir = realBrowser ? cloneRoot() : null;
   const clones = cloneDir ? new CloneSweeper({ root: cloneDir }) : undefined;
   clones?.schedule();   // what earlier runs left behind
   const taskFolderRoot = cfg.taskFolders ? () => loadWorkdir(cfg.home) : undefined;
-  // docs/terminal-v0.md: the manual entry's terminals, with the gate like the executors when the gate is there.
+  // docs/terminal-v0.md: the terminals.
   let localPort = cfg.port;
-  const agentBinaries = cfg.terminals && !overrides.terminalLauncher ? terminalBinaries(targets, cfg.opencodeBinary) : {};
+  const agentBinaries = realTerminals ? terminalBinaries(targets, cfg.opencodeBinary) : {};
   // Codex terminals get AgentSwitch's hooks once the user's Codex trusts them (docs/terminal-v0.md §3): checked now and
   // again before a Codex terminal starts. In each folder Codex runs in: the Mac's own, and an account profile's
   // (docs/profiles-v0.md §6.2), where the trust is the Mac's own while its config.toml is linked in.
@@ -456,7 +349,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   };
   void codexTrust()?.ensure();
   // docs/browser-v0.md: the shared browser; AgentSwitch's own ports are never opened in it nor listed as local servers.
-  const vaultKeys = cfg.terminals && !overrides.terminalLauncher ? ((): Buffer[] => {
+  const vaultKeys = realTerminals ? ((): Buffer[] => {
     const k = vaultKey(cfg.home);
     const old = k.where === "keychain" ? fileKey(cfg.home) : null;
     return old ? [k.key, old] : [k.key];
@@ -464,10 +357,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // What a profile and the browser keep sealed (API key, proxy password, session key) is opened by the vault's own
   // key; a gate's ciphertext from before by the gate while there is one (vault/seal.ts; user #369).
   const opener: Opener | null = vaultKeys ? vaultOpener(vaultKeys, gate ? gateFill(gate) : null) : gate ? gateFill(gate) : null;
-  // People fill ciphertexts in through the gate; agents get it through the agent bridge (terminals below).
-  const gateProxyPort = proxyEndpoint(gate?.proxy ?? process.env.SECRET_GATE_PROXY ?? "http://127.0.0.1:8080")?.port;
-  // With every OpenCode server the daemon runs now: the executors' resident one and the terminals' companions (port 0).
-  const ownPorts = (): number[] => [localPort, cfg.port, cfg.remote?.port, cfg.opencodePort, gateProxyPort, ...stdioServePorts()].filter((p): p is number => typeof p === "number" && p > 0);
+  // The gate's proxy, where one still runs (the keeper's on a Linux node), is AgentSwitch's own port too.
+  const gateProxyPort = portOf(process.env.SECRET_GATE_PROXY ?? "http://127.0.0.1:8080");
+  // With every OpenCode server the daemon runs now: the terminals' companions (port 0).
+  const ownPorts = (): number[] => [localPort, cfg.port, cfg.remote?.port, gateProxyPort, ...stdioServePorts()].filter((p): p is number => typeof p === "number" && p > 0);
   // docs/browser-v0.md §7: Camoufox and its Playwright on disk, and their updates. What an update that never finished
   // left is cleared now; nothing is downloaded until asked.
   const engineKit = cfg.browserHost ? newEngineKit(cfg.home) : undefined;
@@ -579,7 +472,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's
         // desktop app no longer lists it under its project. `AGENTSWITCH_CODEX_TERMINAL=server` starts it that way.
         codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL === "server",
-        // Its Daybreak switch, where this Codex and this account have one (router/modelOffers.ts; simple-view-v0 §5.8).
+        // Its Daybreak switch, where this Codex and this account have one (models/modelOffers.ts; simple-view-v0 §5.8).
         // Codex's MCP servers switched off under a profile, by the folder it runs in (profiles/addons.ts).
         codexMcpOff: (configHome) => {
           const dir = configHome ? dirname(configHome) : join(cfg.home, "profiles", "codex", DEFAULT_PROFILE);
@@ -660,26 +553,19 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ...(agentBinaries.codex ? { prepare: async (harness: string, home?: string) => { if (harness === "codex") await withTimeout(codexTrust(home)!.ensure({ fresh: true }), 8000); } } : {}),
     ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current(), variants: () => overrides.modelOffers!.variants(), daybreakTurned: (on: boolean) => overrides.modelOffers!.noteCodexDaybreak(on) } : {}),
   } : undefined;
-  // Deleting an OpenCode session goes through the user's own opencode (docs/terminal-v0.md §5, threads-v0 删除): the
-  // user's from the session list, the executors' with their tasks. None with a fake launcher, nor when no opencode is
-  // configured (tests): a test never reaches the user's OpenCode.
+  // Deleting an OpenCode session from the session list goes through the user's own opencode (docs/terminal-v0.md §5).
+  // None with a fake launcher, nor when no opencode is configured (tests): a test never reaches the user's OpenCode.
   const sessionSources = overrides.sessionSources ?? defaultSessionSources(cfg.home);
   const opencodeBin = overrides.terminalLauncher || !cfg.opencodeBinary ? undefined : agentBinaries.opencode ?? terminalBinaries(targets, cfg.opencodeBinary).opencode;
   const openCodeDelete = overrides.openCodeDelete ?? (opencodeBin ? openCodeDeleter(opencodeBin, sessionSources.opencodeDb) : undefined);
+  // The sessions the old Dispatch's executors made in the user's own stores stay off the list, as they always were.
+  const oldSessions = cfg.watchSessions ? oldDispatchSessionIds(join(cfg.home, "agentswitch.db")) : new Set<string>();
   const sessions = cfg.watchSessions ? new SessionMonitor({
     ...sessionSources, claudeProfileProjects: () => profiles.claudeProjectRoots(), codexProfileSessions: () => profiles.codexSessionRoots(), ...(openCodeDelete ? { openCodeDelete } : {}),
-    ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
+    ownIds: () => oldSessions, ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
     agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id) || profiles.sessionProfile(harness, id) !== null, folders: () => sessionFolders.get(),
   }) : undefined;
   if (sessions) saidTitle = (harness, id) => sessions.find(harness as SessionHarness, id)?.title || null;
-  const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
-  const conversation = new AssistantLog(join(cfg.home, "assistant.db"));
-  const engine = new Engine({ conversation, ...(openCodeDelete ? { deleteSessions: executorSessionsDeleter(openCodeDelete) } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
-  // Tasks the last run left unfinished cannot be confirmed either way (docs/control-v0.md §4).
-  engine.interruptLeftovers();
-  sweepThreads(store, Date.now(), engine);
-  forgetDeletedTasks(conversation, store);
-  const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const clashStore = new ClashStore(cfg.home);
   const clashPhone: Daemon["clashPhone"] = { reach: { port: null, lan: [], tailnet: [], problem: null }, changed: null };
   const clash = new ClashIntegration({ store: clashStore, reach: () => clashPhone.reach, phoneChanged: (on) => clashPhone.changed?.(on), source: new ClashSources(cfg.home, undefined, undefined, undefined, () => clashStore.settings().autoUpdateHours), base: () => `http://127.0.0.1:${localPort}`,
@@ -691,7 +577,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const thumbnails = new Thumbnails();
   const fileAccess: FileAccess = {
     home: process.env.HOME ?? homedir(), denied: prot, thumbnails, audit: new FileAudit(join(cfg.home, "files", "audit.jsonl")),
-    remote: () => { const m = loadMesh(cfg.home); return { on: m.files, changes: m.changes, scopeOf: (id: string) => m.scopes[id] ?? DEFAULT_SCOPE, platformOf: (id: string) => store.getDevice(id)?.platform }; },
+    remote: () => { const m = loadMesh(cfg.home); return { on: m.files, changes: m.changes, scopeOf: (id: string) => m.scopes[id] ?? DEFAULT_SCOPE, platformOf: (id: string) => devices.getDevice(id)?.platform }; },
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
@@ -701,17 +587,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     noteProfile: (session, profile, agent = "claude-code") => { const a = PROFILE_AGENTS.find((x) => x === agent); if (a) profiles.noteSession(a, session, profile); },
     sessionOf: seatSessionOf, wasOf: seatWasOf, changed: () => roomDelivery.look(),
   });
-  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), ...(passwords ? { passwords } : {}), ...(vaultKeys ? { seal: (value: string) => sealValue(vaultKeys[0]!, value) } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}), ...(overrides.oldDispatchOff !== undefined ? { oldDispatchOff: overrides.oldDispatchOff } : {}) };
-  // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
-  // and every message becomes a task. Task creation is POST /tasks's (admitTask).
-  const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
-  // Ends, questions for the user and watched tasks' progress, told in the conversation (assistant-v0 step 3).
-  const reporter = new Reporter({ log: conversation, store, bus, home: cfg.home, ...overrides.reports });
-  reporter.start();
-  announceUpdate(cfg.home, conversation);
-  const assistant = new Assistant({ log: conversation, store, engine, ...(assistantRouter ? { router: assistantRouter } : {}),
-    admit: (body) => admitTask(apiDeps, body as TaskBody), workRoot: apiDeps.workRoot, ...(sessions ? { sessions } : {}), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
-  const api = createApp({ ...apiDeps, assistant });
+  const apiDeps: ApiDeps = { seatRewind, rooms, roomKit, dispatchDesk, roomDelivery, roomPolicy, roomsChanged: () => { roomDelivery.look(); modelGate?.changed(); }, ...(vault && modelGate ? { redaction: { store: vault, gate: modelGate } } : {}), ...(passwords ? { passwords } : {}), ...(vaultKeys ? { seal: (value: string) => sealValue(vaultKeys[0]!, value) } : {}), callLocal: (method, path, body) => roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } }), ...(cfg.forgetLogins ? { forgetClaudeLogin: (dir: string | null) => forgetClaudeLogin(dir, join(process.env.HOME ?? homedir(), ".claude")) } : {}), addons: new Addons({ binaries: agentBinaries }), profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), targets, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, version: VERSION, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const api = createApp(apiDeps);
   // The Kit's organizing tools ask this API itself, as this Mac's own screens would.
   roomAsk = async (method, path, body) => {
     const res = await api.request(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
@@ -722,127 +599,40 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   // docs/mesh-v0.md: this node among the others. What it has is what its screens would show of it.
   const nodes = new Nodes({
-    book: new NodeBook(join(cfg.home, NODES_DIR)), dialer: new Dialer(), store, remote,
+    book: new NodeBook(join(cfg.home, NODES_DIR)), dialer: new Dialer(), store: devices, remote,
     info: () => ({
       name: remote?.name ?? macName(), kind: process.platform === "darwin" ? "mac" : "linux", version: VERSION, home: process.env.HOME ?? homedir(),
-      has: ["dispatch", ...(terminalHost ? ["terminals", "profiles"] : []), ...(browser ? ["browser"] : []), ...(process.platform === "darwin" && existsSync(vergeDir()) ? ["clash"] : []),
+      // `dispatch`: the dispatch desk (api/dispatchDesk.ts), a session in a terminal here.
+      has: [...(terminalHost ? ["dispatch", "terminals", "profiles"] : []), ...(browser ? ["browser"] : []), ...(process.platform === "darwin" && existsSync(vergeDir()) ? ["clash"] : []),
         ...(cfg.appBundle ? ["update"] : []), ...(loadMesh(cfg.home).keyboard ? ["keyboard"] : []), "files"],
     }),
   });
   nodesMade = nodes;
   const fileScopes = { get: (id: string) => scopeOf(cfg.home, id), set: (id: string, scope: Parameters<typeof setScope>[2]) => setScope(cfg.home, id, scope) };
-  const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
-  return { app, api, remote, nodes, engine, store, quota, targets, clash, clashPhone, terminals: terminalHost, modelGate, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
+  const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store: devices, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
+  return { app, api, remote, nodes, devices, targets, clash, clashPhone, terminals: terminalHost, modelGate, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { clearInterval(roomLooks); modelGate?.stop(); dispatchDesk.close(); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    close: () => { clearInterval(roomLooks); modelGate?.stop(); dispatchDesk.close(); sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); devices.close(); } };
 }
 
-/** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
- *  `router.planner`, else none (the router runs the loop itself). claude-code goes through the Agent SDK, codex through
- *  app-server, opencode through the resident server; a harness out of quota is not used. */
-export function plannerFor(targets: Targets, resident: OpenCodeServer | undefined, quota: () => Record<string, number>): PlannerFactory {
-  const usable = (t: TargetRef | null): boolean => !!t && !!targets.harnesses[t.harness] && !!modelKey(targets.harnesses[t.harness]!, t.model) && (quota()[t.harness] ?? 1) >= targets.router.quota_threshold;
-  const build = (t: TargetRef): Router | null => {
-    if (t.harness === "claude-code") return claudeTextRouter(claudePlannerOptions(t.model));
-    if (t.harness === "codex") return codexTextRouter({ model: t.model, binary: codexBinary(targets) });
-    if (t.harness === "opencode" && resident) return serveRouter(resident, "oracle", t.model);
-    return null;
-  };
-  return (pick) => {
-    for (const t of [pick, targets.router.planner]) {
-      if (!usable(t)) continue;
-      const router = build(t!);
-      if (router) return { router, target: t! };
-    }
-    return null;
-  };
+/** The port a proxy's address names, or undefined. */
+function portOf(address: string): number | undefined {
+  try { const url = new URL(address); return url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80; } catch { return undefined; }
 }
 
-/** A claude-code planner: the user's own CLI like the executor and the model discovery (the SDK's bundled copy has no
- *  Keychain grant when started from the Mac app, so every planner call failed), from tmpdir like the discovery. */
-export function claudePlannerOptions(model: string, env: NodeJS.ProcessEnv = process.env): ClaudeRouterOptions {
-  return { model, cwd: tmpdir(), ...executableOf(claudeBinary(env)) };
-}
-
-/** Real executors need the gate (design §3.9: no harness starts without it; decided again 2026-09-22). */
-export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache, extensions?: Extensions, prot: ProtectedPaths = defaultProtected(), opencodeServer?: OpenCodeExecServer): Executor[] {
-  const gate = defaultGate();
-  if (!gate) throw new Error(`${gateNotFound()}: refusing to start real executors without the gate`);
-  const ext = extensions ? { extensions } : {};
-  const timeout = (h: string) => targets.harnesses[h]?.timeout_ms ?? DEFAULT_EXECUTOR_TIMEOUT_MS;
-  return [
-    claudeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("claude-code"), ...(rateLimits ? { rateLimits } : {}), ...executableOf(claudeBinary()) }),
-    codexExecutor({ binary: codexBinary(targets), gate, browser, ...ext, protected: prot, maxMs: timeout("codex") }),
-    opencodeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("opencode"), ...(opencodeServer ? { server: opencodeServer } : {}) }),
-  ];
-}
-
-/** Names and one-liners only (progressive disclosure): the router mentions an extension, the executor loads it. */
-export function summarizeExtensions(ext: Extensions): ExtensionsSummary {
-  return {
-    mcp: ext.mcp.list().filter((m) => m.enabled).map((m) => ({ name: m.name, note: m.note, harnesses: m.harnesses })),
-    skills: ext.skills.list().filter((s) => s.enabled).map((s) => ({ name: s.name, description: s.description, harnesses: s.harnesses })),
-  };
-}
-
-/** Conversation lines about tasks deleted while the conversation was not told (before it was, or by an older version). */
-export function forgetDeletedTasks(conversation: AssistantLog, store: Pick<Store, "getTask">): number {
-  const gone = [...conversation.taskIds()].filter((id) => !store.getTask(id));
-  const lines = conversation.forgetTasks(gone);
-  if (lines) console.error(`conversation: ${lines} lines about ${gone.length} deleted tasks removed`);
-  return lines;
-}
-
-/** The executors' sessions of deleted tasks (threads-v0 删除): OpenCode's live in the user's own database and are deleted
- *  there, one after another in the background (each a short opencode run); Claude Code's and Codex's live in the
- *  thread's home, already gone with it. A failure is logged and does not hold the deletion up. */
-export function executorSessionsDeleter(openCodeDelete: OpenCodeDelete, log: (line: string) => void = console.error): (sessions: readonly { harness: string; sessionId: string }[]) => void {
-  let queue: Promise<unknown> = Promise.resolve();
-  return (sessions) => {
-    for (const s of sessions) {
-      if (s.harness !== "opencode") continue;
-      queue = queue.then(() => openCodeDelete(s.sessionId)).then(
-        (deleted) => { if (deleted) log(`executor session deleted with its task: opencode ${s.sessionId}`); },
-        (err: unknown) => log(`executor session opencode ${s.sessionId} could not be deleted: ${(err as Error).message}`));
-    }
-  };
-}
-
-/** Archived threads past their expiry lose their row, log and private home. Runs at start and hourly. */
-export function sweepThreads(store: Store, now = Date.now(), engine?: Pick<Engine, "deleteThread">): string[] {
-  const gone: string[] = [];
-  for (const t of store.expiredThreads(now)) {
+/** The sessions the old Dispatch's executors made (its `thread_events`, kept in `agentswitch.db` since before it was
+ *  removed on 2026-11-25): OpenCode's are in the user's own store, and are not the user's. None where it never ran. */
+export function oldDispatchSessionIds(dbPath: string): Set<string> {
+  const ids = new Set<string>();
+  try {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
-      if (engine ? engine.deleteThread(t.id).ok : store.deleteThread(t.id)) gone.push(t.id);
-    } catch (err) {
-      console.error(`thread ${t.id} could not be deleted: ${(err as Error).message}`);
-    }
-  }
-  if (gone.length) console.error(`threads expired and deleted: ${gone.join(", ")}`);
-  return gone;
-}
-
-function defaultEchoRouter(targets: Targets): Router {
-  return echoRouter((input) => JSON.stringify({ harness: targets.router.default.harness, model: null, brief: input.task.split("\n\nTask:\n")[1] ?? input.task, confidence: 0.9 }));
-}
-
-/** §3 start-up check: real executors refuse every run while the gate proxy is down, so say so loudly now. */
-export async function checkGateProxy(gate: GateOptions | null, log: (message: string) => void = console.error): Promise<boolean> {
-  if (!gate) return false;
-  const health = await gateHealth(gate);
-  if (!health.ok) log(`ERROR secret-gate proxy ${gate.proxy} is not reachable (${health.error}): every task will stop before its executor starts. Start it with \`secret-gate service install\` (launchd) or \`secret-gate proxy\`.`);
-  return health.ok;
-}
-
-/** The OpenCode executors' resident server (`opencode serve --stdio`, own config and password, proxy-free env). Kept
- *  even when the first start fails: executors retry it after a cooldown and run standalone meanwhile. */
-export async function startOpenCodeExecServer(cfg: DaemonConfig): Promise<OpenCodeExecServer> {
-  const home = join(cfg.home, "opencode-exec");
-  const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
-  const server = new OpenCodeExecServer({ binary: cfg.opencodeBinary, home, config: opencodeServeConfig(defaultGate(), prot, join(home, "skills")) });
-  try { await server.start(); }
-  catch (err) { console.error(`${(err as Error).message}; OpenCode executors run opencode run --standalone until it starts`); }
-  return server;
+      for (const row of db.prepare("SELECT payload FROM thread_events WHERE type = 'session'").all() as { payload: string }[]) {
+        try { const id = (JSON.parse(row.payload) as { sessionId?: unknown }).sessionId; if (typeof id === "string" && id) ids.add(id); } catch { /* not a session's */ }
+      }
+    } finally { db.close(); }
+  } catch { /* no such table: the old Dispatch never ran here */ }
+  return ids;
 }
 
 /** A promise's result, or undefined once `ms` passed. */
@@ -850,38 +640,26 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
   return Promise.race([p, new Promise<undefined>((r) => { setTimeout(() => r(undefined), ms).unref(); })]);
 }
 
-/** Start-up: discover models (real executors only: the catalog takes new ids, the terminals' model menus what each
- *  agent offers, kept fresh from then on), bring up the resident OpenCode servers (router: real router only; executors:
- *  real executors in serve mode), then listen. */
+/** Start-up: ask what the agents offer where that is on (the catalog takes new ids, the terminals' model menus
+ *  what each agent offers, kept fresh from then on), then listen. */
 export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void; stop: () => Promise<void> }> {
-  if (cfg.executors === "real") await checkGateProxy(defaultGate());
-  if (cfg.executors === "real") warmBrowserMcp(defaultGate());
   const yaml = loadTargets(cfg.targetsPath);
-  const modelOffers = cfg.executors === "real" ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : undefined;
+  const modelOffers = cfg.modelOffers ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : undefined;
   const targets = modelOffers ? mergeLogged(yaml, await modelOffers.refresh()) : yaml;
   const stopOffers = modelOffers?.start();
-  let opencode: OpenCodeServer | undefined;
-  // The resident router server serves only the old dispatch (router, summarizer, supervisor, planner, assistant); while
-  // that is off (core/oldDispatch.ts) it is not started, and anything that still asks falls back to `opencode run`.
-  if (cfg.router === "opencode" && !OLD_DISPATCH_OFF) {
-    const gate = defaultGate();
-    const server = new OpenCodeServer({ binary: cfg.opencodeBinary, port: cfg.opencodePort, home: join(cfg.home, "opencode"), gateHome: gate?.home ?? join(process.env.HOME ?? "", ".secret-gate") });
-    try { await server.start(); opencode = server; }
-    catch (err) { console.error(`${(err as Error).message}; router-type calls fall back to opencode run --standalone`); }
-  }
-  const opencodeExec = cfg.executors === "real" && (cfg.opencodeExecutor ?? "serve") === "serve" ? await startOpenCodeExecServer(cfg) : undefined;
-  // OpenCode's variants (its models' thinking levels) for the terminals' menus, from the executors' server.
-  if (modelOffers && opencodeExec) modelOffers.watchOpenCode(() => openCodeVariants((method, path) => opencodeExec.call(method, path), join(cfg.home, "opencode-exec")));
+  // OpenCode's variants (its models' thinking levels) for the terminals' menus, asked of a server of its own each time.
+  const opencode = modelOffers ? terminalBinaries(yaml, cfg.opencodeBinary).opencode : undefined;
+  if (modelOffers && opencode) modelOffers.watchOpenCode(() => readOpenCodeVariants({ binary: opencode, home: join(cfg.home, "opencode-exec") }));
   // Codex names a picture by where its file was: the running service keeps copies, which outlive the file
-  // (docs/simple-view-v0.md §4). Under the home, where no managed executor writes; nothing from a folder no agent may
-  // read. Here and not in buildDaemon: a daemon built by a test copies no one's pictures.
+  // (docs/simple-view-v0.md §4). Under the home; nothing from a folder no agent may read. Here and not in buildDaemon:
+  // a daemon built by a test copies no one's pictures.
   const pictures = cfg.watchSessions
     ? new KeptPictures(join(cfg.home, "sessions", "pictures"), { closed: defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home }).readDenied ?? [] })
     : undefined;
-  const daemon = buildDaemon(cfg, { targets, ...(modelOffers ? { modelOffers } : {}), ...(opencode ? { opencode } : {}), ...(opencodeExec ? { opencodeExec } : {}),
+  const daemon = buildDaemon(cfg, { targets, ...(modelOffers ? { modelOffers } : {}),
     ...(pictures ? { sessionSources: { ...defaultSessionSources(cfg.home), pictures } } : {}) });
   const remote: RemoteListener | undefined = daemon.remote
-    ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); throw err; })
+    ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); throw err; })
     : undefined;
   // docs/clash-v0.md §12: phones' Clash and Stash take the subscription here. A port that is taken is said on the
   // page, not a reason not to start.
@@ -931,11 +709,8 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
         sweepAttachments(join(tmpdir(), "agentswitch-attach"), live, (folder) => daemon.sessions?.keepPicturesIn(folder));
       }
     });
-    console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
+    console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  home=${cfg.home}`);
   }, auth);
-  void daemon.quota.refresh();
-  const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), THREAD_SWEEP_INTERVAL_MS);
-  sweeper.unref();
   // Clash Integration's subscription, fetched again when its interval has passed (docs/clash-v0.md §7.1).
   const clashTimer = setInterval(() => { void daemon.clash.tick(); }, CLASH_TICK_MS);
   clashTimer.unref();
@@ -945,7 +720,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   picturesFirst.unref();
   const picturesTimer = setInterval(keepPictures, PICTURES_EVERY_MS);
   picturesTimer.unref();
-  const close = () => { if (addressTimer) clearInterval(addressTimer); void phone?.close(); clearInterval(sweeper); clearInterval(clashTimer); clearTimeout(picturesFirst); clearInterval(picturesTimer); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); };
+  const close = () => { if (addressTimer) clearInterval(addressTimer); void phone?.close(); clearInterval(clashTimer); clearTimeout(picturesFirst); clearInterval(picturesTimer); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); };
   // A signal: Chrome is let quit on its own first (a killed one leaves its code-sign clone behind), then the rest.
   return { daemon, close, stop: async () => { await daemon.stopBrowser().catch(() => undefined); close(); } };
 }
@@ -958,8 +733,8 @@ export function listenLocal(daemon: Pick<Daemon, "app">, port: number, onListeni
 }
 
 /** app-v0 §2: the HTTPS listener for paired phones, before the local one, so a taken port fails start-up cleanly. */
-export async function startRemote(daemon: Pick<Daemon, "api" | "store"> & { readonly nodes?: Nodes }, remote: RemoteRuntime, host?: string): Promise<RemoteListener> {
-  const app = createRemoteApp({ store: daemon.store, pairing: remote.pairing, presence: remote.presence, gateKey: remote.gateKey, addresses: remote.addresses, local: daemon.api, ...(daemon.nodes ? { nodes: daemon.nodes } : {}) });
+export async function startRemote(daemon: Pick<Daemon, "api" | "devices"> & { readonly nodes?: Nodes }, remote: RemoteRuntime, host?: string): Promise<RemoteListener> {
+  const app = createRemoteApp({ store: daemon.devices, pairing: remote.pairing, presence: remote.presence, gateKey: remote.gateKey, addresses: remote.addresses, local: daemon.api, ...(daemon.nodes ? { nodes: daemon.nodes } : {}) });
   try {
     const listener = await listenRemote({ fetch: app.fetch, tls: remote.tls, port: remote.port, ...(host ? { host } : {}) });
     console.error(`agentswitchd remote listening on https://*:${listener.port}  fingerprint=${remote.tls.fingerprint} name="${remote.name}"`);

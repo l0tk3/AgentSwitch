@@ -1,6 +1,6 @@
 /** The other nodes this one uses (docs/mesh-v0.md §2.4): for each, where it is, the certificate it is pinned to, this
  *  node's device there and that device's token. In `$AGENTSWITCH_HOME/nodes/` (0700, files 0600), which agents may not
- *  read — in the terminals too (executors/protected.ts): a token here runs commands on another machine.
+ *  read — in the terminals too (core/protected.ts): a token here runs commands on another machine.
  *
  *  Beside it, the nodes key. The routes that act on another node ask for it as well as the local token (api/nodes.ts):
  *  a terminal's agent can read the local token (a terminal is used like any terminal), and that alone must not reach
@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { NODES_DIR } from "../core/protected.js";
 import type { GateKey } from "../remote/pairing.js";
 
-/** Under `$AGENTSWITCH_HOME`; executors/protected.ts keeps the name, with the other places no agent reads. */
+/** Under `$AGENTSWITCH_HOME`; core/protected.ts keeps the name, with the other places no agent reads. */
 export { NODES_DIR };
 const PEERS_FILE = "peers.json";
 const KEY_FILE = "key";

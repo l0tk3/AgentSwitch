@@ -63,7 +63,7 @@ export type LauncherOptions = {
    *  model and reasoning effort. Without it, or when that server does not start, Codex runs on its own as before. */
   readonly codexServer?: boolean;
   /** Codex has its Daybreak switch here (its program knows the feature, the account has the program;
-   *  router/modelOffers.ts): a terminal is started with the feature enabled, for that terminal alone
+   *  models/modelOffers.ts): a terminal is started with the feature enabled, for that terminal alone
    *  (docs/simple-view-v0.md §5.8). */
   readonly codexDaybreak?: () => boolean;
   /** Codex's MCP servers switched off under the profile whose folder this is (absent: the Mac's own), by name
@@ -126,7 +126,7 @@ export function codexHasOwnInstructions(env: NodeJS.ProcessEnv): boolean {
 const BROWSER_TOOL_TIMEOUT_S = 300;
 
 /** The browser tool as an MCP server: the agent bridge itself (browser/agents.ts), which carries MCP to the service.
- *  Until 2026-10-08 the gate stood in front (`secret-gate browser -- <the bridge>`); Dispatch's tasks still have it. */
+ *  Until 2026-10-08 the gate stood in front (`secret-gate browser -- <the bridge>`). */
 export type BrowserServer = { readonly command: string; readonly args: readonly string[]; readonly env: Record<string, string> };
 
 export function browserServer(bridge: readonly string[]): BrowserServer | null {
@@ -317,7 +317,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     // A terminal is a terminal: the agent and what it runs have the service's own environment and this terminal's
     // three variables — no proxy and no certificate of the credential gate, none of its tools (docs/profiles-v0.md §8,
-    // 2026-10-08: the gate stays in Dispatch). What stays closed is the credentials at rest (`protected`).
+    // 2026-10-08). What stays closed is the credentials at rest (`protected`).
     const env: Record<string, string> = {
       ...profileEnvironment(withoutParentSession(opts.env ?? process.env), req),
       TERM: "xterm-256color",

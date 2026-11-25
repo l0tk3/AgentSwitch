@@ -7,23 +7,16 @@ import { useMemo, useState, type ReactNode } from "react";
 import { LOCALE_NAMES, LOCALES, messages, type Locale } from "../i18n/index.js";
 import type { ConfigDeps } from "./deps.js";
 import { AgentsPage } from "./pages/agents.js";
-import { ContextPage } from "./pages/context.js";
 import { EnvironmentPage } from "./pages/environment.js";
-import { ExtensionsPage } from "./pages/extensions.js";
-import { KeysPage } from "./pages/keys.js";
-import { ModelsPage } from "./pages/models.js";
 import { NodePage } from "./pages/node.js";
-import { PermissionsPage } from "./pages/permissions.js";
 import { COLOR, UiProvider, useUi, useWords, WordsContext } from "./ui.js";
 
-/** In the Mac's order: the app's own pages, then Dispatch's (under a heading of their own). */
-export const PAGES = ["agents", "models", "permissions", "keys", "node", "environment", "context", "extensions"] as const;
+/** In the Mac's order. */
+export const PAGES = ["agents", "node", "environment"] as const;
 export type PageId = (typeof PAGES)[number];
-const DISPATCH_FROM: PageId = "context";
 
 const VIEWS: Readonly<Record<PageId, (p: PageProps) => ReactNode>> = {
-  agents: AgentsPage, models: ModelsPage, permissions: PermissionsPage, keys: KeysPage, node: NodePage,
-  environment: EnvironmentPage, context: ContextPage, extensions: ExtensionsPage,
+  agents: AgentsPage, node: NodePage, environment: EnvironmentPage,
 };
 
 export type PageProps = {
@@ -97,7 +90,6 @@ function Shell({ deps, question, status, first, setLocale, fixedRows }: { deps: 
             const here = p === page;
             return (
               <Box key={p} flexDirection="column">
-                {p === DISPATCH_FROM ? <Box marginTop={1}><Text color={COLOR.dim}>{t.pages.dispatch}</Text></Box> : null}
                 <Text {...(here ? (inPage ? { bold: true } : { color: COLOR.accent, bold: true }) : {})} wrap="truncate-end">{here ? "▸ " : "  "}{t.pages[p]}</Text>
               </Box>
             );

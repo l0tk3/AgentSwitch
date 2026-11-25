@@ -1,4 +1,5 @@
-/** The development console: one static page under ui/ that only uses the API. */
+/** The web console: the terminals page under ui/ (docs/terminal-v0.md §1), which only uses the API. `/ui` is that
+ *  page; `/ui/terminal.html`, the name the Mac app opens it by, is the same file. */
 
 import type { Hono } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -9,11 +10,11 @@ import { fileURLToPath } from "node:url";
 const UI_DIR = resolve(fileURLToPath(new URL("../../ui/", import.meta.url)));
 const UI_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
 
-/** A file under ui/ by its URL path, or null when it does not exist or escapes the directory. */
+/** A file under ui/ by its URL path (none: the terminals page), or null when it does not exist or escapes the directory. */
 export function uiFile(urlPath: string): { body: string; type: string } | null {
   let rel: string;
   try { rel = decodeURIComponent(urlPath); } catch { return null; }
-  const file = resolve(UI_DIR, "." + (rel === "" || rel === "/" ? "/index.html" : rel));
+  const file = resolve(UI_DIR, "." + (rel === "" || rel === "/" ? "/terminal.html" : rel));
   if (file !== UI_DIR && !file.startsWith(UI_DIR + sep)) return null;
   const type = UI_TYPES[extname(file)];
   if (!type || !existsSync(file) || !statSync(file).isFile()) return null;
@@ -50,7 +51,7 @@ export function mountUi(app: Hono): void {
     const f = vendorFile(c.req.param("name"));
     return f ? c.body(f.body, 200, { "content-type": f.type, "cache-control": "max-age=3600" }) : c.notFound();
   });
-  app.get("/ui", (c) => c.body(uiFile("/index.html")!.body, 200, page("text/html; charset=utf-8")));
+  app.get("/ui", (c) => c.body(uiFile("/")!.body, 200, page("text/html; charset=utf-8")));
   app.get("/ui/*", (c) => {
     const f = uiFile(c.req.path.slice("/ui".length));
     return f ? c.body(f.body, 200, page(f.type)) : c.notFound();

@@ -1,21 +1,11 @@
 /** Shared by every route module: dependencies, body parsing, error text. */
 
 import type { ShownFoldersStore } from "../sessions/shownFolders.js";
-import type { Assistant } from "../assistant/assistant.js";
-import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { EngineKit } from "../browser/engine/kit.js";
 import type { Context } from "hono";
 import type { z } from "zod";
-import type { Bus } from "../engine/bus.js";
-import type { Engine } from "../engine/engine.js";
-import type { Store } from "../engine/store.js";
-import type { Extensions } from "../extensions/index.js";
 import type { Uploads } from "../files/uploads.js";
-import type { QuotaService } from "../quota/index.js";
-import type { RoutingLog } from "../router/log.js";
-import type { RouteDeps } from "../router/route.js";
 import type { Targets } from "../models/targets.js";
 import { zodIssues } from "../util/zod.js";
 import type { CwdRules } from "./cwdPolicy.js";
@@ -75,20 +65,9 @@ export type ApiDeps = {
    *  done — a daemon built by a test must never reach this Mac's keychain. */
   readonly forgetClaudeLogin?: (configDir: string | null) => Promise<void>;
   readonly profileHealth?: import("../profiles/health.js").ProfileHealthChecks;
-  readonly store: Store;
-  readonly bus: Bus;
-  readonly engine: Engine;
+  /** The catalog of models (models/targets.ts): what the terminals' model menus list of an agent that has not said
+   *  what it offers. */
   readonly targets: Targets;
-  readonly quota: QuotaService;
-  readonly routingLog: RoutingLog;
-  readonly routeDeps: () => RouteDeps;
-  readonly contextPath: string;
-  readonly memoryPath: string;
-  readonly platformMemoryPath?: string;
-  readonly policyPath: string;
-  readonly workRoot: string;
-  /** The default work folder in force (docs/control-v0.md §2); absent = throw-away folders under `workRoot`. */
-  readonly taskFolderRoot?: () => string;
   /** The Mac's coding sessions (docs/control-v0.md §3); absent = not watched. */
   readonly sessions?: SessionMonitor;
   /** The folders the user shows or hides in the list of sessions (sessions/shownFolders.ts). */
@@ -100,25 +79,16 @@ export type ApiDeps = {
   /** The browser engine — Camoufox and its Playwright — on disk and its updates (docs/browser-v0.md §7); absent = off. */
   readonly engineKit?: EngineKit;
   readonly uploads: Uploads;
-  readonly artifactsDir: string;
-  readonly extensions: Extensions;
   readonly version: string;
   readonly cwdRules: CwdRules;
-  /** `$AGENTSWITCH_HOME`: where the update request and result files are (assistant-v0 §5). */
+  /** `$AGENTSWITCH_HOME`: where the settings and the update request and result files are. */
   readonly home?: string;
   /** The AgentSwitch.app this daemon runs from (the Mac app passes it); absent outside the app: no updates. */
   readonly appBundle?: string;
-  /** Model settings (app-v0 §2): the overlay file and the catalog it applies to (targets.yaml after discovery). */
-  readonly models?: { readonly path: string; readonly base: Targets };
   /** Tests: the SSE heartbeat period (default SSE_HEARTBEAT_MS). */
   readonly sseHeartbeatMs?: number;
   /** How often a record's stream looks at the session's file (tests: sooner). */
   readonly recordWatchMs?: number;
-  /** The router as the user's assistant (assistant-v0 §1.1). */
-  readonly assistant?: Assistant;
-  /** The old dispatch is off (core/oldDispatch.ts): its submitting routes refuse. Default OLD_DISPATCH_OFF; tests of the
-   *  engine set false. */
-  readonly oldDispatchOff?: boolean;
   /** Whether a paired node may send keystrokes as they are (docs/mesh-v0.md §10); absent = no. */
   readonly remoteKeyboard?: () => boolean;
   /** The Files column's reads of this node's disk (docs/files-v0.md §7); absent = no `/files…`, and a reply's `{path}`
@@ -153,10 +123,4 @@ export function versionedJson(c: Context, value: unknown): Response {
   const version = `"${createHash("sha256").update(body).digest("base64url").slice(0, VERSION_CHARS)}"`;
   if (c.req.header("if-none-match") === version) return c.body(null, 304, { ETag: version });
   return c.body(body, 200, { "Content-Type": "application/json", ETag: version });
-}
-
-export function newWorkDir(root: string): string {
-  const dir = join(root, randomUUID().slice(0, 8));
-  mkdirSync(dir, { recursive: true });
-  return dir;
 }

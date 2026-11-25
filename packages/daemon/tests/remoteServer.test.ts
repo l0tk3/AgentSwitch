@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VERSION, buildDaemon, startRemote, type Daemon, type DaemonConfig } from "../src/daemon.js";
-import { QuotaService } from "../src/quota/index.js";
 import { createRemoteApp, PAIR_FAILED, UNAUTHORIZED } from "../src/remote/app.js";
 import { Presence, registerDevice } from "../src/remote/devices.js";
 import { PAIR_LINK_PREFIX, PAIR_RATE_LIMIT, PairingDesk, PAIRING_TTL_MS, type PairPayload } from "../src/remote/pairing.js";
@@ -17,7 +16,8 @@ import { RemoteRequestLog, STREAMED_WINDOW_MS } from "../src/remote/requestLog.j
 import { remoteRuntime, type RemoteRuntime } from "../src/remote/runtime.js";
 import { listenRemote, type RemoteListener } from "../src/remote/server.js";
 import { ensureTls, SYSTEM_OPENSSL, type TlsMaterial } from "../src/remote/tls.js";
-import { TARGETS_PATH } from "./helpers.js";
+import type { Launcher } from "../src/terminals/host.js";
+import { TARGETS_PATH, workDir } from "./helpers.js";
 
 const KEY = Buffer.alloc(32, 9).toString("base64url");
 type Json = Record<string, unknown>;
@@ -76,17 +76,19 @@ const sharedTls = () => (tlsCache ??= ensureTls(join(mkdtempSync(join(tmpdir(), 
 type Setup = { d: Daemon; runtime: RemoteRuntime; port: number; listener: RemoteListener; local: (method: string, path: string, json?: unknown) => Promise<{ status: number; body: Json }> };
 const open: Setup[] = [];
 
-async function remoteDaemon(opts: { now?: () => number; gateKey?: RemoteRuntime["gateKey"] } = {}): Promise<Setup> {
+/** A terminal's program that prints a line and waits (no agent). */
+const fakeLauncher: Launcher = () => ({ file: process.execPath, args: ["-e", "console.log('ready'); setInterval(() => {}, 1000)"], env: process.env as Record<string, string>, hooks: false });
+
+async function remoteDaemon(opts: { now?: () => number; gateKey?: RemoteRuntime["gateKey"]; terminals?: boolean } = {}): Promise<Setup> {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-remote-"));
-  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-  const quota = new QuotaService([{ harness: "codex", read: async () => ({ remaining: 0.5, detail: {}, source: "fake", error: null }) }]);
+  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
   const runtime = remoteRuntime({
     home, port: 0, name: "Test Mac", gate: () => null, tls: sharedTls(),
     pairing: new PairingDesk(opts.now ? { now: opts.now } : {}),
     addresses: async () => ({ lan: ["192.168.1.5"], tailnet: ["100.101.102.103", "mac.tail1234.ts.net"] }),
     gateKey: opts.gateKey ?? (async () => ({ publicKey: KEY, keypair: "default" })),
   });
-  const d = buildDaemon(cfg, { quota, remote: runtime, oldDispatchOff: false });
+  const d = buildDaemon(cfg, { remote: runtime, ...(opts.terminals ? { terminalLauncher: fakeLauncher } : {}) });
   const listener = await startRemote(d, runtime, "127.0.0.1");
   const local = async (method: string, path: string, json?: unknown) => {
     const res = await d.app.request(path, { method, ...(json !== undefined ? { body: JSON.stringify(json), headers: { "content-type": "application/json" } } : {}) });
@@ -122,14 +124,14 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
   it("401 without a token, with a wrong one and after revocation, always the same body", async () => {
     const s = await remoteDaemon();
     for (const token of [undefined, "wrong-token-wrong-token-wrong-token-wrong-t", "x"]) {
-      const r = await call(s.port, "GET", "/tasks", token ? { token } : {});
+      const r = await call(s.port, "GET", "/rooms", token ? { token } : {});
       expect(r.status).toBe(401);
       expect(r.body).toEqual(UNAUTHORIZED);
     }
     const { token, deviceId } = await pair(s);
-    expect((await call(s.port, "GET", "/tasks", { token })).status).toBe(200);
+    expect((await call(s.port, "GET", "/rooms", { token })).status).toBe(200);
     expect((await s.local("DELETE", `/devices/${deviceId}`)).body).toMatchObject({ ok: true, device: { id: deviceId } });
-    const revoked = await call(s.port, "GET", "/tasks", { token });
+    const revoked = await call(s.port, "GET", "/rooms", { token });
     expect(revoked.status).toBe(401);
     expect(revoked.body).toEqual(UNAUTHORIZED);
     expect((await s.local("DELETE", "/devices/nope")).status).toBe(404);
@@ -201,14 +203,15 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
     const s = await remoteDaemon();
     const { token } = await pair(s);
     for (const [method, path] of [["GET", "/mcp"], ["GET", "/skills"], ["PUT", "/memory"], ["GET", "/memory"], ["GET", "/records"], ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"],
-      ["POST", "/pairing"], ["GET", "/devices"], ["GET", "/remote/info"], ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/ui/app.js"], ["GET", "/"], ["POST", "/route/preview"],
-      ["DELETE", "/mcp/x"], ["DELETE", "/platform-memory/x"], ["GET", "/platform-memory"], ["GET", "/tasks/%2e%2e/mcp"]] as const) {
+      ["POST", "/pairing"], ["GET", "/devices"], ["GET", "/remote/info"], ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/ui/terminal.js"], ["GET", "/"], ["POST", "/route/preview"],
+      ["DELETE", "/mcp/x"], ["DELETE", "/platform-memory/x"], ["GET", "/platform-memory"], ["GET", "/rooms/%2e%2e/devices"],
+      // The old Dispatch's routes went with it (2026-11-25).
+      ["GET", "/tasks"], ["POST", "/tasks"], ["GET", "/approvals"], ["GET", "/threads"], ["GET", "/quota"], ["POST", "/quota/refresh"], ["GET", "/targets"], ["GET", "/context"], ["GET", "/assistant"]] as const) {
       const withToken = await call(s.port, method, path, { token });
       expect(withToken.status, `${method} ${path}`).toBe(404);
       expect((await call(s.port, method, path)).status, `${method} ${path} without token`).toBe(404);
     }
-    for (const path of ["/tasks", "/approvals", "/threads", "/quota", "/targets", "/context"]) expect((await call(s.port, "GET", path, { token })).status, path).toBe(200);
-    expect((await call(s.port, "POST", "/quota/refresh", { token })).status).toBe(200);
+    for (const path of ["/rooms", "/profiles", "/live", "/settings/workdir", "/clash"]) expect((await call(s.port, "GET", path, { token })).status, path).toBe(200);
     const upload = await call(s.port, "POST", "/uploads", { token, raw: { type: "multipart/form-data; boundary=b", body: Buffer.from('--b\r\nContent-Disposition: form-data; name="files"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n') } });
     expect(upload.status).toBe(200);
     expect((upload.body.files as unknown[]).length).toBe(1);
@@ -216,122 +219,38 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
     for (const [method, path] of [["POST", "/pair"], ["GET", "/me"], ["GET", "/addresses"], ["GET", "/gate/pubkey"]] as const) expect((await s.local(method, path)).status, `local ${method} ${path}`).toBe(404);
   });
 
-  it("tasks over TLS: create, follow the SSE stream with the bearer header, read, rate, threads", async () => {
-    const s = await remoteDaemon();
+  it("a terminal over TLS: started, its SSE stream followed with the bearer header to its end, read, removed", async () => {
+    const s = await remoteDaemon({ terminals: true });
     const { token } = await pair(s);
-    const created = await call(s.port, "POST", "/tasks", { token, json: { task: 'hello @echo {"delayMs":100,"result":"hi"}' } });
+    const created = await call(s.port, "POST", "/terminals", { token, json: { harness: "claude-code", cwd: workDir() } });
     expect(created.status).toBe(201);
-    const id = String(created.body.id);
-    const stream = await events(s.port, `/tasks/${id}/events`, token);
+    const id = String((created.body.terminal as { id: string }).id);
+    expect((await call(s.port, "GET", `/terminals/${id}`, { token })).body).toMatchObject({ terminal: { id, harness: "claude-code" } });
+    // The stream ends when the terminal is removed, here once its first event has come.
+    let removed = false;
+    const stream = await events(s.port, `/terminals/${id}/stream`, token, () => { if (!removed) { removed = true; void call(s.port, "DELETE", `/terminals/${id}`, { token }); } });
     expect(stream.status).toBe(200);
-    expect(stream.types[0]).toBe("queued");
-    expect(stream.types).toContain("done");
-    const task = await call(s.port, "GET", `/tasks/${id}`, { token });
-    expect(task.body).toMatchObject({ id, status: "done", result: "hi" });
-    expect((await call(s.port, "POST", `/tasks/${id}/rate`, { token, json: { rating: 1 } })).body).toEqual({ ok: true });
-    const threadId = String(task.body.threadId);
-    expect((await call(s.port, "GET", `/threads/${threadId}`, { token })).status).toBe(200);
-    expect((await call(s.port, "PATCH", `/threads/${threadId}`, { token, json: { title: "from the phone" } })).body).toMatchObject({ title: "from the phone" });
-    expect((await call(s.port, "GET", `/tasks/${id}/files`, { token })).status).toBe(200);
-    const replay = await events(s.port, `/tasks/${id}/events?after=2`, token);
-    expect(replay.types).not.toContain("queued");
-    expect((await events(s.port, `/tasks/${id}/events`, "bad-token-bad-token-bad")).status).toBe(401);
-  });
-
-  it("the phone edits CONTEXT.md under the same lint as the Mac", async () => {
-    const s = await remoteDaemon();
-    const { token } = await pair(s);
-    const example = await call(s.port, "GET", "/context/example", { token });
-    expect(example.status).toBe(200);
-    expect(String(example.body.text).length).toBeGreaterThan(0);
-    const text = "# 站点\n- 财务系统 https://fin.example.test\n  - 密码: FICTIONAL-plain-pass\n  - token: enc:v1:AAAAAAAAAAAAAAAAAAAAAAAA\n";
-    const saved = await call(s.port, "PUT", "/context", { token, json: { text } });
-    expect(saved.status).toBe(200);
-    expect((saved.body.warnings as string[]).join("\n")).toMatch(/line 3: "密码" value is not an enc:v1: token/);
-    const read = await call(s.port, "GET", "/context", { token });
-    expect(String(read.body.text)).toContain("https://fin.example.test");
-    expect(String(read.body.text)).toContain("enc:v1:AAAAAAAAAAAAAAAAAAAAAAAA");
-    expect(read.text).not.toContain("FICTIONAL-plain-pass");
-    expect((await call(s.port, "PUT", "/context", { token, json: {} })).status).toBe(400);
-    expect((await call(s.port, "PUT", "/context", { json: { text: "x" } })).status).toBe(401);
-  });
-
-  it("the phone deletes tasks and threads with the Mac's semantics: finished only, gone afterwards", async () => {
-    const s = await remoteDaemon();
-    const { token } = await pair(s);
-    const slow = await call(s.port, "POST", "/tasks", { token, json: { task: 'slow @echo {"delayMs":20000}' } });
-    const slowId = String(slow.body.id);
-    expect((await call(s.port, "DELETE", `/tasks/${slowId}`, { token })).status).toBe(409);   // still running
-    await call(s.port, "POST", `/tasks/${slowId}/cancel`, { token });
-
-    const first = await call(s.port, "POST", "/tasks", { token, json: { task: 'one @echo {"result":"a"}' } });
-    await s.d.engine.idle();
-    const firstId = String(first.body.id);
-    const threadId = String((await call(s.port, "GET", `/tasks/${firstId}`, { token })).body.threadId);
-    expect((await call(s.port, "DELETE", `/tasks/${firstId}`, { token })).body).toEqual({ ok: true });
-    expect((await call(s.port, "GET", `/tasks/${firstId}`, { token })).status).toBe(404);
-    expect((await call(s.port, "DELETE", `/tasks/${firstId}`, { token })).status).toBe(404);
-
-    const second = await call(s.port, "POST", "/tasks", { token, json: { task: 'two @echo {"result":"b"}' } });
-    await s.d.engine.idle();
-    const secondThread = String((await call(s.port, "GET", `/tasks/${String(second.body.id)}`, { token })).body.threadId);
-    expect((await call(s.port, "DELETE", `/threads/${secondThread}`, { token })).body).toEqual({ ok: true });
-    expect((await call(s.port, "GET", `/threads/${secondThread}`, { token })).status).toBe(404);
-    expect((await call(s.port, "GET", `/tasks/${String(second.body.id)}`, { token })).status).toBe(404);
-    expect((await call(s.port, "DELETE", "/threads/nope", { token })).status).toBe(404);
-    expect((await call(s.port, "DELETE", `/threads/${threadId}`)).status).toBe(401);
-  });
-
-  it("a phone cannot weaken the Mac's decisions: no approval override or ephemeral; a cwd only where the rules allow; PATCH /threads only renames", async () => {
-    const s = await remoteDaemon();
-    const { token } = await pair(s);
-    const project = mkdtempSync(join(tmpdir(), "agentswitch-remote-proj-"));
-    const refused = await call(s.port, "POST", "/tasks", { token, json: { task: "x", approval: { mode: "auto" } } });
-    expect(refused.status).toBe(400);
-    expect(String(refused.body.error)).toMatch(/approval cannot be set from a paired device/);
-    expect((await call(s.port, "POST", "/tasks", { token, json: { task: "x", approval: {} } })).status).toBe(400);
-    // A folder the cwd rules allow may be named (2026-09-25, user decision); one they refuse may not.
-    const inProject = await call(s.port, "POST", "/tasks", { token, json: { task: 'x @echo {"result":"ok"}', cwd: project } });
-    expect(inProject.status).toBe(201);
-    expect(inProject.body).toMatchObject({ cwd: project, ephemeral: false });
-    expect((await call(s.port, "POST", "/tasks", { token, json: { task: "x", cwd: process.env.HOME } })).status).toBe(400);
-    expect((await call(s.port, "POST", "/tasks", { token, json: { task: "x", ephemeral: true } })).status).toBe(400);
-    expect(s.d.store.listTasks(10)).toHaveLength(1);
-    await s.d.engine.idle();
-
-    const created = await call(s.port, "POST", "/tasks", { token, json: { task: 'hi @echo {"result":"hi"}' } });
-    expect(created.status).toBe(201);
-    await s.d.engine.idle();
-    const threadId = String((await call(s.port, "GET", `/tasks/${String(created.body.id)}`, { token })).body.threadId);
-    for (const patch of [{ expires_at: 0 }, { expires_at: null }, { title: "t", expires_at: Date.now() - 1 }]) {
-      const res = await call(s.port, "PATCH", `/threads/${threadId}`, { token, json: patch });
-      expect(res.status, JSON.stringify(patch)).toBe(400);
-      expect(String(res.body.error)).toMatch(/expires_at cannot be set from a paired device/);
-    }
-    expect(s.d.store.getThread(threadId)).toMatchObject({ title: null, expiresAt: null });
-    expect((await call(s.port, "PATCH", `/threads/${threadId}`, { token, json: { title: "renamed" } })).body).toMatchObject({ title: "renamed" });
-
-    // The Mac itself is unchanged: its own requests may override approvals, pick a cwd and set an expiry.
-    expect((await s.local("POST", "/tasks", { task: 'local @echo {"result":"ok"}', cwd: project, approval: { mode: "auto" } })).status).toBe(201);
-    expect((await s.local("PATCH", `/threads/${threadId}`, { expires_at: 5 })).body).toMatchObject({ expiresAt: 5 });
-    await s.d.engine.idle();
+    expect(stream.types[0]).toBe("snapshot");
+    expect(stream.types.at(-1)).toBe("removed");
+    expect((await call(s.port, "GET", `/terminals/${id}`, { token })).status).toBe(404);
+    expect((await events(s.port, `/terminals/${id}/stream`, "bad-token-bad-token-bad")).status).toBe(401);
   });
 
   it("revoking a device cuts its open event stream at once", async () => {
-    const s = await remoteDaemon();
+    const s = await remoteDaemon({ terminals: true });
     const { token, deviceId } = await pair(s);
-    const created = await call(s.port, "POST", "/tasks", { token, json: { task: 'slow @echo {"delayMs":20000}' } });
-    const id = String(created.body.id);
+    const created = await call(s.port, "POST", "/terminals", { token, json: { harness: "claude-code", cwd: workDir() } });
+    const id = String((created.body.terminal as { id: string }).id);
     let revokedAt = 0;
     const started = Date.now();
-    const stream = events(s.port, `/tasks/${id}/events`, token, (type) => {
-      if (type === "dispatched" && !revokedAt) { revokedAt = Date.now(); void s.local("DELETE", `/devices/${deviceId}`); }
+    const stream = events(s.port, `/terminals/${id}/stream`, token, (type) => {
+      if (type === "snapshot" && !revokedAt) { revokedAt = Date.now(); void s.local("DELETE", `/devices/${deviceId}`); }
     });
     const result = await stream;
     expect(revokedAt).toBeGreaterThan(0);
-    expect(result.types).not.toContain("done");
+    expect(result.types).not.toContain("removed");
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect((await s.local("POST", `/tasks/${id}/cancel`)).status).toBe(200);
+    expect((await s.local("DELETE", `/terminals/${id}`)).status).toBe(200);
   });
 
   it("GET /gate/pubkey is 503 and the payload's gate is null when the gate key cannot be read", async () => {
@@ -362,9 +281,9 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
 describe("remote app, in process", () => {
   it("re-checks the source per request: a peer outside the allowed networks gets 403 even past the socket hook", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-rapp-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg, { remote: null, oldDispatchOff: false });
-    const app = createRemoteApp({ store: d.store, pairing: new PairingDesk(), presence: new Presence(), gateKey: async () => null, local: d.api, log: () => undefined });
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
+    const d = buildDaemon(cfg, { remote: null });
+    const app = createRemoteApp({ store: d.devices, pairing: new PairingDesk(), presence: new Presence(), gateKey: async () => null, local: d.api, log: () => undefined });
     const env = (remoteAddress: string | undefined) => ({ incoming: { socket: { remoteAddress } }, outgoing: undefined }) as never;
     expect((await app.request("/healthz", {}, env("203.0.113.7"))).status).toBe(403);
     expect((await app.request("/healthz", {}, env(undefined))).status).toBe(403);
@@ -375,17 +294,17 @@ describe("remote app, in process", () => {
 
   it("every write from a phone leaves a log line with the device; reads do not", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-rlog-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg, { remote: null, oldDispatchOff: false });
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
+    const d = buildDaemon(cfg, { remote: null });
     const lines: string[] = [];
-    const app = createRemoteApp({ store: d.store, pairing: new PairingDesk(), presence: new Presence(), gateKey: async () => null, local: d.api, log: (l) => lines.push(l) });
-    const { device, token } = registerDevice(d.store, { name: "iPhone", platform: "ios" });
+    const app = createRemoteApp({ store: d.devices, pairing: new PairingDesk(), presence: new Presence(), gateKey: async () => null, local: d.api, log: (l) => lines.push(l) });
+    const { device, token } = registerDevice(d.devices, { name: "iPhone", platform: "ios" });
     const env = { incoming: { socket: { remoteAddress: "192.168.1.9" } }, outgoing: undefined } as never;
     const auth = { authorization: `Bearer ${token}` };
-    expect((await app.request("/context", { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ text: "# x\n" }) }, env)).status).toBe(200);
-    expect((await app.request("/tasks/nope", { method: "DELETE", headers: auth }, env)).status).toBe(404);
-    expect((await app.request("/tasks", { headers: auth }, env)).status).toBe(200);
-    expect(lines).toEqual([`remote: device ${device.id} PUT /context → 200`, `remote: device ${device.id} DELETE /tasks/nope → 404 (not found)`]);
+    expect((await app.request("/rooms", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name: "x" }) }, env)).status).toBe(201);
+    expect((await app.request("/rooms/nope", { method: "DELETE", headers: auth }, env)).status).toBe(404);
+    expect((await app.request("/rooms", { headers: auth }, env)).status).toBe(200);
+    expect(lines).toEqual([`remote: device ${device.id} POST /rooms → 201`, `remote: device ${device.id} DELETE /rooms/nope → 404 (没有这个房间)`]);
     d.close();
   });
 
@@ -433,8 +352,8 @@ describe("remote app, in process", () => {
 
   it("with remote access off the local routes say so and nothing can pair", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-roff-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const d = buildDaemon(cfg, { oldDispatchOff: false });
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, opencodeBinary: "" };
+    const d = buildDaemon(cfg);
     expect(d.remote).toBeNull();
     expect(await (await d.app.request("/remote/info")).json()).toEqual({ enabled: false, port: null, fingerprint: null, name: null, bonjour: null, lan: [], tailnet: [], onlineDevices: 0 });
     const pairing = await d.app.request("/pairing", { method: "POST" });
