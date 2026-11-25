@@ -776,13 +776,15 @@ describe("a session with no gate in front (a terminal's agent, 2026-10-08)", () 
     expect(withoutFileLinks(same, "/as/agents/c1")).toBe(same);
   });
 
-  it("runs no code and no page script for it, not even the gate's own checks", async () => {
+  // An agent's own `secret-gate browser` in front of the bridge (user #315): the gate's checks run, nothing else does.
+  it("runs no code and no page script for it but the gate's own checks", async () => {
     const { agents } = setup();
     const c = await connect(agents, agents.mint(CODEX));
     const run = await c.call("browser_run_code_unsafe", { code: "async (page) => 1" });
     expect(run.result).toMatchObject({ isError: true });
     expect(JSON.stringify(run.result)).toContain("runs no code");
-    const evaluated = await c.call("browser_evaluate", { function: "() => location.href" });
-    expect(JSON.stringify(evaluated.result)).toContain("no page scripts");
+    expect(JSON.stringify((await c.call("browser_evaluate", { function: "() => document.title" })).result)).toContain("no page scripts");
+    expect(isError(await c.call("browser_evaluate", { function: "() => location.href" }))).toBe(false);
+    expect(isError(await c.call("browser_run_code_unsafe", { code: GATE_PROBE }))).toBe(false);
   });
 });

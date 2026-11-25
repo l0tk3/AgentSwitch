@@ -129,14 +129,17 @@ type Args = Record<string, unknown>;
  *  front (`gate`): the templates are the gate's to call, never a model's (the masked screenshot's writes a file where
  *  its caller says). */
 export function codeRefusal(tool: string, args: Args, gate = true): string | null {
-  if (!gate) return tool === RUN_CODE_TOOL ? CODE_UNAVAILABLE : tool === EVALUATE_TOOL ? EVALUATE_UNAVAILABLE : null;
   if (tool === RUN_CODE_TOOL) {
+    // No gate minted in front, yet one there all the same (an agent's own `secret-gate browser` around the bridge, user
+    // #315): its own checks, read-only, are let through; anything else is no code at all.
+    if (!gate) return typeof args.code === "string" && Object.keys(args).length === 1 && probeTemplate(args.code) !== null ? null : CODE_UNAVAILABLE;
     const keys = Object.keys(args);
     const ok = keys.length === 1 && keys[0] === "code" && typeof args.code === "string" && probeTemplate(args.code) !== null;
     return ok ? null : CODE_REFUSED;
   }
   if (tool === EVALUATE_TOOL) {
     const keys = Object.keys(args);
+    if (!gate) return keys.length === 1 && keys[0] === "function" && args.function === HREF_PROBE ? null : EVALUATE_UNAVAILABLE;
     return keys.length === 1 && keys[0] === "function" && args.function === HREF_PROBE ? null : EVALUATE_REFUSED;
   }
   return null;
