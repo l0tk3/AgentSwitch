@@ -240,41 +240,28 @@ struct MainBar: View {
                     }
                     switch state.page {
                     case .terminals:
-                        if look.isClassic {
-                            // Classic (user #486: seven icons in a row were a clutter): the side pane, one menu for what
-                            // is done now and then — the editor, the other view, the two splits — and New Terminal.
-                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: head.split ? "Side Pane" : recordSide ? "Hide Side Pane" : "Show Side Pane", enabled: !head.split, lit: recordSide && !head.split) { recordSide.toggle() } }
-                            Menu {
-                                if !head.name.isEmpty {
-                                    Button(head.simple ? "Terminal View  ⌘⇧E" : "Simple View  ⌘⇧E", action: actions.toggleView)
-                                    Button("Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
-                                    Divider()
-                                }
-                                Button("Split Right  ⌘D") { actions.split("right") }
-                                Button("Split Down  ⌘⇧D") { actions.split("down") }
-                            } label: {
-                                Image(systemName: "ellipsis").font(.system(size: 13, weight: .regular)).foregroundStyle(Color.secondary).frame(width: 26, height: 22).contentShape(Rectangle())
-                            }
-                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                            .help("More").accessibilityLabel("More")
-                            ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
-                        } else {
-                            // The other view of the terminal in focus (docs/simple-view-v0.md §1): its record, or its screen.
+                        // Both looks (user #486: seven icons in a row were a clutter; #565: the pixel look's the same
+                        // way, in the same places): the side pane, one menu for what is done now and then — the editor,
+                        // the other view, the two splits — and New Terminal.
+                        if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: head.split ? "Side Pane" : recordSide ? "Hide Side Pane" : "Show Side Pane", enabled: !head.split, lit: recordSide && !head.split) { recordSide.toggle() } }
+                        Menu {
                             if !head.name.isEmpty {
-                                // Its folder in the code editor (terminal-v0 §1 Mac "在编辑器中打开"): on the bar, which is there
-                                // with one pane too (the panes' own headers are not).
-                                ToolbarPixelButton(rows: PixelArt.toolbarCode, help: "Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
-                                ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
-                                                   help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
+                                Button(head.simple ? "Terminal View  ⌘⇧E" : "Simple View  ⌘⇧E", action: actions.toggleView)
+                                Button("Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
+                                Divider()
                             }
-                            // The simple view's side pane (tasks, changed files), shown or hidden from the bar (user #477: no
-                            // handy way to open and close it).
-                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: head.split ? "Side Pane" : recordSide ? "Hide Side Pane" : "Show Side Pane", enabled: !head.split, lit: recordSide && !head.split) { recordSide.toggle() } }
-                            // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
-                            ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
-                            ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }
-                            ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
+                            Button("Split Right  ⌘D") { actions.split("right") }
+                            Button("Split Down  ⌘⇧D") { actions.split("down") }
+                        } label: {
+                            if look.isClassic {
+                                Image(systemName: "ellipsis").font(.system(size: 13, weight: .regular)).foregroundStyle(Color.secondary).frame(width: 26, height: 22).contentShape(Rectangle())
+                            } else {
+                                PixelMenuLabel(sprite: .more)
+                            }
                         }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .help("More").accessibilityLabel("More")
+                        ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
                     case .browser:
                         ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Tab ⌘T", action: actions.newTab)
                     case .rooms:
@@ -599,7 +586,9 @@ struct ToolbarPixelButton: View {
                 PixelSprite(rows: rows, pixel: 1, color: !enabled ? Look.line : lit || hovering ? .primary : .secondary,
                             strength: !enabled ? 0.28 : lit || hovering ? 1 : 0.85, cell: 1)
                     .frame(width: 28, height: 24)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.5).opacity(lit ? 0.26 : enabled && hovering ? 0.16 : 0)))
+                    // Square, as everything of the pixel look's is; on, the key is pressed in: its seat's dark edge
+                    // above and left (§9's empty seat).
+                    .background(PixelKeySeat(on: lit, hovering: enabled && hovering))
                     .contentShape(Rectangle())
             }
         }
@@ -608,6 +597,44 @@ struct ToolbarPixelButton: View {
         .onHover { hovering = $0 }
         .help(ClassicWords.help(help, in: look))
         .accessibilityLabel(help)
+    }
+}
+
+/// A shaded picture as a menu's label in the pixel look: a menu draws its label as an image, so a Canvas would come
+/// out blank; the same cells (1 pt, the hard shadow a cell down and right) drawn into an image, in a bar button's frame.
+struct PixelMenuLabel: View {
+    let sprite: ShadedSprite
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let dark = scheme == .dark
+        let cells = sprite.cells(dark: dark)
+        let size = NSSize(width: 28, height: 24)
+        let x0 = ((size.width - CGFloat(sprite.width + 1)) / 2).rounded(.down), y0 = ((size.height - CGFloat(sprite.height + 1)) / 2).rounded(.down)
+        let image = NSImage(size: size, flipped: true) { _ in
+            NSColor.rgb(dark ? 0x2C2A28 : 0xCFC9BC).withAlphaComponent(0.85).setFill()
+            for c in cells { NSRect(x: x0 + CGFloat(c.x + 1), y: y0 + CGFloat(c.y + 1), width: 1, height: 1).fill() }
+            for c in cells { NSColor.rgb(c.rgb).withAlphaComponent(0.85).setFill(); NSRect(x: x0 + CGFloat(c.x), y: y0 + CGFloat(c.y), width: 1, height: 1).fill() }
+            return true
+        }
+        Image(nsImage: image).frame(width: size.width, height: size.height).contentShape(Rectangle())
+    }
+}
+
+/// A bar button's ground in the pixel look: nothing; a faint square under the pointer; while on, a pressed key — a
+/// square a step darker with a 1 pt shade along its top and left.
+struct PixelKeySeat: View {
+    let on: Bool
+    let hovering: Bool
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle().fill(Color(white: 0.5).opacity(on ? 0.24 : hovering ? 0.14 : 0))
+            if on {
+                Rectangle().fill(Color.black.opacity(0.22)).frame(height: 1)
+                Rectangle().fill(Color.black.opacity(0.22)).frame(width: 1)
+            }
+        }
     }
 }
 

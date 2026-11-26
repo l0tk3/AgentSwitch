@@ -116,6 +116,35 @@ public struct ShadedSprite: Equatable, Sendable {
         "W####kk####m", "W###kkkk###m", "W####kk####m", "W####kk####m", "W##########m", "#mmmmmmmmmmd",
     ])
 
+    // The Mac's bar and rail alone (so not in `all`, which the phone and the web share), drawn to the same standard as
+    // the rest (docs/ui-v0.md §9.1, 2026-11-26, user #565: 这一坨图标不符合规范……文件夹图标也太破了……锁的图标也太单调了):
+    // a window is a 16 × 11 ink frame with cut corners around a dark ground, its lit part the lighter panel; an object
+    // is a raised block — a highlight along its top and left, a tone darker along its bottom and right.
+
+    /// The Files column: a folder, its back and tab a tone behind, its front a raised block.
+    public static let files = ShadedSprite([
+        ".WWWW#..........", "W#mmmm#mmmmmmmd.", "W#dddddddddddddk", "W#ddddddddddddk.", "WWWWWWWWWWWWWWW#", "W##############m",
+        "W##############m", "W##############m", "W##############m", "W##############m", "#mmmmmmmmmmmmmmd",
+    ])
+    /// The simple view's side pane: `list` turned round, the lighter panel on the right.
+    public static let side = ShadedSprite([
+        ".##############.", "#ssssssss#mmmmm#", "#ssssssss#mkkkm#", "#ssssssss#mmmmm#", "#ssssssss#mkkkm#", "#ssssssss#mmmmm#",
+        "#ssssssss#mkkkm#", "#ssssssss#mmmmm#", "#ssssssss#ddddd#", "#ssssssss#ddddd#", ".##############.",
+    ])
+    /// A room's members: two people, the nearer one lit, the one behind a tone darker.
+    public static let people = ShadedSprite([
+        "....WW#.........", "...W###m..mmd...", "...W###m.mddk...", "...W###m.mddk...", "....#mm...dk....", "................",
+        "..WWWWW#m.mmmd..", ".W######mmdddk..", ".W#######mddddk.", ".W#######mddddk.", ".#mmmmmmmdkkkkk.",
+    ])
+    /// The password book: a padlock in the rail's family — its shackle lit on the left and in shade on the right, a
+    /// raised frame round a dark face with a rivet in each corner, and a lit keyhole (a round top, a slot).
+    public static let passwords = ShadedSprite([
+        "....W####m....", "...W#mmmm#d...", "...W#....#d...", "...W#....#d...", "WWWWWWWWWWWWW#", "W#mkkkkkkkkm#d",
+        "W#kkkW##mkkk#d", "W#kkkW##mkkk#d", "W#kkkkW#kkkk#d", "W#kkkkW#kkkk#d", "W#mkkkkkkkkm#d", "#mmmmmmmmmmmmd",
+    ])
+    /// The bar's menu of what is done now and then (`⋯`): three raised keys.
+    public static let more = ShadedSprite(["WW#..WW#..WW#", "W#m..W#m..W#m", "#md..#md..#md"])
+
     /// The lock where there is room for 10 pt only (an address's HTTPS, a field that seals): the same lock, smaller.
     public static let lockSmall = ShadedSprite([
         "..mmm..", ".m...d.", ".m...d.", "WWWWWW#", "W##k##m", "W##k##m", "W#####m", "#mmmmmd",
@@ -172,6 +201,7 @@ public struct ShadedSprite: Equatable, Sendable {
         (PixelArt.railDispatch, dispatch), (PixelArt.railTerminals, terminals), (PixelArt.railBrowser, browser), (PixelArt.railClash, clash), (PixelArt.railRooms, rooms),
         (PixelArt.toolbarSettings, settings), (PixelArt.toolbarList, list), (PixelArt.toolbarSplitRight, splitRight),
         (PixelArt.toolbarSplitDown, splitDown), (PixelArt.toolbarNew, new), (PixelArt.lock, lock),
+        (PixelArt.toolbarFiles, files), (PixelArt.toolbarSide, side), (PixelArt.toolbarPeople, people), (PixelArt.railPasswords, passwords),
     ] + PixelArt.agents.keys.sorted().compactMap { harness in agents[harness].map { (PixelArt.agents[harness]!, $0) } }
 }
 

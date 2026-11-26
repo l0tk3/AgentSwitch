@@ -73,6 +73,24 @@ final class ShadedSpritesTests: XCTestCase {
         XCTAssertEqual(Set(ShadedSprite.stands.map(\.rows)).count, ShadedSprite.stands.count, "each 1-bit sprite stands once")
     }
 
+    /// Every picture of the Mac's bar and rail is a shaded one (user #565: the flat outlines beside the shaded ones did
+    /// not belong to the set); those only the Mac has are not among the pictures the phone and the web share.
+    func testEveryBarAndRailPictureIsShaded() {
+        let bar = [PixelArt.toolbarList, PixelArt.toolbarNew, PixelArt.toolbarFiles, PixelArt.toolbarSide, PixelArt.toolbarPeople, PixelArt.toolbarSettings]
+        let rail = [PixelArt.railDispatch, PixelArt.railTerminals, PixelArt.railRooms, PixelArt.railBrowser, PixelArt.railClash, PixelArt.railPasswords]
+        for rows in bar + rail { XCTAssertNotNil(ShadedSprite.standing(for: rows), rows.joined(separator: "/")) }
+        for sprite in [ShadedSprite.files, .side, .people, .passwords, .more] {
+            XCTAssertFalse(ShadedSprite.all.contains { $0.sprite == sprite })
+            XCTAssertTrue(sprite.rows.allSatisfy { $0.count == sprite.width })
+            XCTAssertLessThanOrEqual(sprite.width, 16)
+            XCTAssertLessThanOrEqual(sprite.height, 12, "no taller than the rail's other pictures")
+            XCTAssertTrue(Set(sprite.rows.joined()).subtracting(["."]).allSatisfy { ShadedSprite.color($0, dark: true) != nil })
+        }
+        // A window is the bar's 16 × 11 frame, as `list` and the splits are.
+        XCTAssertEqual([ShadedSprite.side.width, ShadedSprite.side.height], [ShadedSprite.list.width, ShadedSprite.list.height])
+        XCTAssertEqual([ShadedSprite.files.width, ShadedSprite.files.height], [16, 11])
+    }
+
     func testACellIsAWholeNumberOfPixels() {
         XCTAssertEqual(ShadedSprite.cell(scale: 2), 1.5)
         XCTAssertEqual(ShadedSprite.cell(scale: 1), 1)
