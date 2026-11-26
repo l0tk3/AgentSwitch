@@ -49,8 +49,25 @@ struct FilesPreview: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(name).font(.system(size: look.isClassic ? 13 : 12.5, weight: .semibold, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.ink)
                 .lineLimit(1).truncationMode(.middle)
-            Text(line).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint).lineLimit(1)
+            // One line when the column has room; narrow, the date goes on a line of its own rather than being cut
+            // off (`Today…`, 2026-11-26).
+            ViewThatFits(in: .horizontal) {
+                infoLine(line)
+                if let date = line.range(of: " · ", options: .backwards) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        infoLine(String(line[..<date.lowerBound]))
+                        infoLine(String(line[date.upperBound...]))
+                    }
+                } else {
+                    infoLine(line)
+                }
+            }
         }
+    }
+
+    private func infoLine(_ text: String) -> some View {
+        Text(text).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
+            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
     }
 
     private func info(_ path: String, _ entry: FileEntry) -> String {
