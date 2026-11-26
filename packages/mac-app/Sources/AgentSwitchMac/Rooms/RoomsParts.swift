@@ -360,8 +360,11 @@ struct RoomMessageRow: View {
                 } else {
                     Button { if let open = actions.open { open(path) } else { actions.preview?(path) } } label: {
                         if let image = actions.picture?(path) ?? RoomPictures.thumb(path) {
-                            Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
-                                .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
+                            // At the picture's own shape, so the round corners are the picture's: in a box 320 wide a
+                            // narrow picture had them on its left only, the right ones out on the empty part (user #497).
+                            let fit = min(320 / max(image.size.width, 1), 200 / max(image.size.height, 1), 1)
+                            Image(nsImage: image).resizable().interpolation(.medium)
+                                .frame(width: max(image.size.width * fit, 24), height: max(image.size.height * fit, 24))
                                 .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0))
                                 .framed(Look.line, radius: look.isClassic ? 8 : 0)
                         } else {
