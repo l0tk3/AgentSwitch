@@ -810,7 +810,7 @@ enum TerminalProbe {
                 click(col: 21)
                 try? await Task.sleep(for: .milliseconds(300))
                 // Plain paths as agents print them (2026-10-01): absolute, and relative to where the agent works.
-                screen.view.feed(text: "\r\n  /Users/l0tk3/Desktop/WorkSpace/Projects/AgentSwitch/docs/design/icon-explorations-2026-10-01/crt.html\r\n\r\n  see docs/ui-v0.md:12 for it")
+                screen.view.feed(text: "\r\n  /Users/l0tk3/Desktop/Code/Projects/AgentSwitch/docs/design/icon-explorations-2026-10-01/crt.html\r\n\r\n  see docs/ui-v0.md:12 for it")
                 try? await Task.sleep(for: .milliseconds(200))
                 let pathRow = lt.getCursorLocation().y - 2
                 @MainActor func clickAt(col: Int, row r: Int) {

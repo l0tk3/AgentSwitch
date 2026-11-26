@@ -8,7 +8,7 @@ final class ProfileProxyTests: XCTestCase {
         let agents = try JSONDecoder().decode([String: AgentProfiles].self, from: Data(#"""
         {"claude-code":{"current":"abc123def0","creatable":true,"profiles":[
           {"id":"default","name":"Default","kind":"subscription","createdAt":0,"account":"me@example.com"},
-          {"id":"abc123def0","name":"cwork1","kind":"subscription","createdAt":1,"proxy":{"server":"http://proxy.example:8080","username":"me","sealed":true},
+          {"id":"abc123def0","name":"work","kind":"subscription","createdAt":1,"proxy":{"server":"http://proxy.example:8080","username":"me","sealed":true},
            "exit":{"ip":"203.0.113.9","place":"Tokyo","timezone":"Asia/Tokyo","checkedAt":2}},
           {"id":"0fed321cba","name":"cwork2","kind":"subscription","createdAt":3,"proxy":{"server":"socks5://10.0.0.2:1080","sealed":false}}]}}
         """#.utf8))
@@ -52,11 +52,11 @@ final class ProfileProxyTests: XCTestCase {
         let terminal = { (profile: String) throws -> TerminalInfo in
             try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"n","status":"working","model":"claude-opus-5-5","mode":"manual","cols":120,"rows":36,"profile":\#(profile)}"#.utf8))
         }
-        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":"Tokyo"}}"#).profileName, "cwork1 · Tokyo 203.0.113.9")
-        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1"}"#).profileName, "cwork1")
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"work","exit":{"ip":"203.0.113.9","place":"Tokyo"}}"#).profileName, "work · Tokyo 203.0.113.9")
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"work"}"#).profileName, "work")
         XCTAssertNil(try terminal("null").profileName)
         // The status bar says it between the agent and the model.
-        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":null}}"#).context.profile, "cwork1 · 203.0.113.9")
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"work","exit":{"ip":"203.0.113.9","place":null}}"#).context.profile, "work · 203.0.113.9")
     }
 
     // MARK: a profile's colour (docs/profiles-v0.md §3.2)
@@ -74,7 +74,7 @@ final class ProfileProxyTests: XCTestCase {
         let list = try JSONDecoder().decode(AgentProfiles.self, from: Data(#"""
         {"current":"abc123def0","creatable":true,"profiles":[
           {"id":"default","name":"Default","kind":"subscription","account":"me@example.com"},
-          {"id":"abc123def0","name":"cwork1","kind":"subscription","color":"mint"},
+          {"id":"abc123def0","name":"work","kind":"subscription","color":"mint"},
           {"id":"abc123def1","name":"later","kind":"subscription","color":"a-colour-of-a-newer-service"}]}
         """#.utf8))
         XCTAssertEqual(list.profiles.map(\.tint), [nil, .mint, nil])
@@ -83,16 +83,16 @@ final class ProfileProxyTests: XCTestCase {
         let terminal = { (profile: String, status: String) throws -> TerminalInfo in
             try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"n","status":"\#(status)","profile":\#(profile)}"#.utf8))
         }
-        let under = try terminal(#"{"id":"abc123def0","name":"cwork1","color":"mint"}"#, "idle")
+        let under = try terminal(#"{"id":"abc123def0","name":"work","color":"mint"}"#, "idle")
         XCTAssertEqual(under.profileColor, .mint)
         XCTAssertEqual(under.context.profileColor, .mint)
         // What its stream says of it later does not drop the colour.
         XCTAssertEqual(under.with(status: "working").profileColor, .mint)
-        XCTAssertNil(try terminal(#"{"id":"abc123def0","name":"cwork1"}"#, "idle").profileColor)
-        XCTAssertNil(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"plaid"}"#, "idle").profileColor)
+        XCTAssertNil(try terminal(#"{"id":"abc123def0","name":"work"}"#, "idle").profileColor)
+        XCTAssertNil(try terminal(#"{"id":"abc123def0","name":"work","color":"plaid"}"#, "idle").profileColor)
         XCTAssertNil(try terminal("null", "idle").profileColor)
         // A terminal that ended still knows whose it was; the screens draw the dot only while it runs.
-        XCTAssertFalse(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"mint"}"#, "exited").running)
+        XCTAssertFalse(try terminal(#"{"id":"abc123def0","name":"work","color":"mint"}"#, "exited").running)
         XCTAssertEqual(TerminalInfo(id: "t9", harness: "claude-code", cwd: "/w", name: "n", status: "idle", createdAt: 1).under(profile: "side", color: .sand).profileColor, .sand)
     }
 
@@ -120,14 +120,14 @@ final class ProfileProxyTests: XCTestCase {
         XCTAssertEqual(listed.map(\.profile), ["abc123def0", nil, nil])
 
         // What the panel offers: only where there is something to choose between; first the one last chosen, while it is there.
-        let own = AgentProfile(id: "default", name: "Default", account: "me@example.com"), work = AgentProfile(id: "abc123def0", name: "cwork1", color: "violet")
+        let own = AgentProfile(id: "default", name: "Default", account: "me@example.com"), work = AgentProfile(id: "abc123def0", name: "work", color: "violet")
         XCTAssertFalse(AgentProfiles(current: "default", profiles: [own], creatable: true).several)
         let two = AgentProfiles(current: "abc123def0", profiles: [own, work], creatable: true)
         XCTAssertTrue(two.several)
         XCTAssertEqual(two.offered, work)
         XCTAssertEqual(AgentProfiles(current: "gone000000", profiles: [own, work], creatable: true).offered, own)
         XCTAssertEqual(ProfileWords.line(own), "Default — me@example.com")
-        XCTAssertEqual(ProfileWords.line(work), "cwork1 — Not Signed In")
+        XCTAssertEqual(ProfileWords.line(work), "work — Not Signed In")
         XCTAssertEqual(ProfileWords.who(AgentProfile(id: "default", name: "Default")), "This Mac’s own")
     }
 }
@@ -194,13 +194,13 @@ final class ProfileBrowserTests: XCTestCase {
     func testTheBrowserRoutesAreAskedOfTheBrowserChosen() async throws {
         let transport = StubTransport { request in
             request.url?.path == "/browsers"
-                ? (200, #"{"browsers":[{"key":null,"name":"Shared","running":true},{"key":"claude-code.abc123def0","name":"cwork1","agent":"claude-code","exit":{"ip":"203.0.113.9","place":"Tokyo"},"running":false}]}"#)
+                ? (200, #"{"browsers":[{"key":null,"name":"Shared","running":true},{"key":"claude-code.abc123def0","name":"work","agent":"claude-code","exit":{"ip":"203.0.113.9","place":"Tokyo"},"running":false}]}"#)
                 : (200, #"{"running":false,"groups":[],"engine":"camoufox","windows":true}"#)
         }
         let client = DaemonClient(port: 4711, transport: transport)
         let browsers = try await client.browsers()
         XCTAssertEqual(browsers, [BrowserChoice(key: nil, name: "Shared", running: true),
-                                  BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", agent: "claude-code", exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"))])
+                                  BrowserChoice(key: "claude-code.abc123def0", name: "work", agent: "claude-code", exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"))])
         XCTAssertEqual(browsers.map(\.id), ["", "claude-code.abc123def0"])
         // The shared browser's routes as they are; a profile's own under its address; the engine is one for all.
         _ = try await client.browserTabs()

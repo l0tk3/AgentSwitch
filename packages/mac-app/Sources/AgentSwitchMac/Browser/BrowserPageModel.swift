@@ -180,7 +180,7 @@ final class BrowserPageModel {
     private(set) var browserKey: String?
 
     /// The profile's own browser on the page, for the status bar: its profile's name and where it leaves this Mac
-    /// from (`cwork1 · Tokyo 203.0.113.9`); nil for the shared one.
+    /// from (`work · Tokyo 203.0.113.9`); nil for the shared one.
     var ownBrowser: String? {
         guard let browserKey, let choice = browsers.first(where: { $0.key == browserKey }) else { return nil }
         return [choice.name, choice.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")

@@ -36,7 +36,7 @@ enum RoomPreview {
 
     private static func draw(_ room: Room, from data: URL, simple: [Bool], light: Bool, to file: URL) async throws {
         let size = NSSize(width: 1440, height: 900)
-        let cwd = "\(NSHomeDirectory())/Desktop/WorkSpace/Projects/AgentSwitch"
+        let cwd = "\(NSHomeDirectory())/Desktop/Code/Projects/AgentSwitch"
         let model = TerminalsModel(client: { DaemonClient(port: 1) }, defaults: nil)
         let ids = ["t1", "t2"]
         let infos = room.terminals.enumerated().map { n, m in

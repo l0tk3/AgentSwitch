@@ -7,17 +7,17 @@ import Foundation
 /// opened, then its sessions newest-begun first, then the folders under it. Work going on moves nothing; something new
 /// only comes in at its place.
 ///
-/// Which folders show and where (2026-10-03, user: 怎么分别显示了两个worktop；有共同的祖父节点时并没能正确显示，比如“靶场”
-/// 就在 /WorkSpace/Worktop/培训/靶场 下，但是显示起来是独立的): every folder with terminals or sessions of its own, and every
+/// Which folders show and where (2026-10-03, user: 怎么分别显示了两个workbench；有共同的祖父节点时并没能正确显示，比如“lab”
+/// 就在 /Code/Workbench/courses/lab 下，但是显示起来是独立的): every folder with terminals or sessions of its own, and every
 /// folder two or more of those sit directly in. Each sits in the nearest of these above it, named by the path from
-/// there ("培训/靶场"); a folder with sessions of its own that also holds others is one line. Folders near the top hold
+/// there ("courses/lab"); a folder with sessions of its own that also holds others is one line. Folders near the top hold
 /// only what sits directly in them: two levels from the top of the disk (`/`, `/Users`, your home, `/private/tmp`) and the
 /// places in your home (`~/Desktop`).
 public enum TerminalTree {
     public struct Folder: Sendable, Equatable, Identifiable {
         public let cwd: String
         /// At the top its own name ("AgentSwitch"; a repeated one carries its parent's, "Work/api"; your home is "~");
-        /// under another folder the path from there ("培训/靶场").
+        /// under another folder the path from there ("courses/lab").
         public let name: String
         /// Its own: none for a folder that only gathers others.
         public let terminals: [TerminalInfo]
@@ -96,7 +96,7 @@ public enum TerminalTree {
     }
 
     /// Every folder, depth first, with its name as a search shows it: under the names of the folders it sits in
-    /// ("Worktop/培训/靶场").
+    /// ("Workbench/courses/lab").
     public static func flatten(_ folders: [Folder], above: String? = nil) -> [(folder: Folder, name: String)] {
         folders.flatMap { f -> [(folder: Folder, name: String)] in
             let name = above.map { "\($0)/\(f.name)" } ?? f.name

@@ -4,7 +4,7 @@ import Foundation
 /// ⌘-点不开). Claude Code and Codex hard-wrap a long path at their own width and indent what follows, so the terminal
 /// sees two words and neither is a file:
 ///
-///     ⏺ Wrote /private/tmp/claude-501/-Users-me-Desktop-WorkSpace-Projects-AgentSwitch/0e3e5e94-d0e2-4f5b-b869-85d
+///     ⏺ Wrote /private/tmp/claude-501/-Users-me-Desktop-Code-Projects-AgentSwitch/0e3e5e94-d0e2-4f5b-b869-85d
 ///            7a3bb725b/scratchpad/standalone/out/agentswitch-browser.html
 ///
 /// From the word clicked, the candidates are it joined with the words it may continue: down, the next line's first word

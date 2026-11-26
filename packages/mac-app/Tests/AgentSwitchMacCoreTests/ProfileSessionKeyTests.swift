@@ -30,7 +30,7 @@ final class ProfileSessionKeyTests: XCTestCase {
         let agents = try JSONDecoder().decode([String: AgentProfiles].self, from: Data(#"""
         {"claude-code":{"current":"default","creatable":true,"profiles":[
           {"id":"default","name":"Default","kind":"subscription","createdAt":0,"device":"\#(device)"},
-          {"id":"abc123def0","name":"cwork1","kind":"subscription","createdAt":1,"sessionKey":true}]}}
+          {"id":"abc123def0","name":"work","kind":"subscription","createdAt":1,"sessionKey":true}]}}
         """#.utf8))
         let list = try XCTUnwrap(agents["claude-code"]).profiles
         XCTAssertEqual(list.map(\.hasSessionKey), [false, true])

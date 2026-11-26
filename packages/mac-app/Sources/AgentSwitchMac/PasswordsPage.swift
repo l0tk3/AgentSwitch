@@ -549,15 +549,15 @@ enum PasswordsDemo {
     static func make(showing: Bool = false, editing: Bool = false) -> Data? {
         func decode<T: Decodable>(_ t: T.Type, _ json: String) -> T? { try? JSONDecoder().decode(t, from: Foundation.Data(json.utf8)) }
         guard let items = decode([PasswordItem].self, """
-            [{"id":"p1","name":"GitHub（工作）","sites":["github.com"],"account":"lkz-work","tags":[],"updatedAt":0,"hasTotp":true,"hasNote":true,"length":20},
+            [{"id":"p1","name":"GitHub（工作）","sites":["github.com"],"account":"alex-work","tags":[],"updatedAt":0,"hasTotp":true,"hasNote":true,"length":20},
              {"id":"p2","name":"阿里云","sites":["aliyun.com","signin.aliyun.com"],"account":"ops@example.com","tags":[],"updatedAt":0,"hasTotp":false,"hasNote":false,"length":16},
              {"id":"p3","name":"Google Cloud","sites":["console.cloud.google.com"],"account":"me@example.com","tags":[],"updatedAt":0,"hasTotp":true,"hasNote":false,"length":18},
-             {"id":"p4","name":"Vercel","sites":["vercel.com"],"account":"lkz","tags":[],"updatedAt":0,"hasTotp":false,"hasNote":false,"length":24}]
+             {"id":"p4","name":"Vercel","sites":["vercel.com"],"account":"alex","tags":[],"updatedAt":0,"hasTotp":false,"hasNote":false,"length":24}]
             """),
               let secret = decode(PasswordSecret.self, #"{"password":"x7#Kq2-Vn9!pLm4@Ws8e","note":"恢复码：4F2K-9QX1","totp":{"code":"482193","left":17}}"#)
         else { return nil }
         var draft: PasswordDraft?
-        if editing { var d = PasswordDraft(); d.name = "Vercel"; d.sites = "vercel.com"; d.account = "lkz"; draft = d }
+        if editing { var d = PasswordDraft(); d.name = "Vercel"; d.sites = "vercel.com"; d.account = "alex"; draft = d }
         return Data(items: items, selected: editing ? "p4" : "p1", secret: showing ? secret : nil, showing: showing, editing: editing, draft: draft)
     }
 }

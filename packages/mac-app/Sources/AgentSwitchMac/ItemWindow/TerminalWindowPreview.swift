@@ -39,7 +39,7 @@ enum TerminalWindowPreview {
         try await shot(status: "exited", to: file("item-notice")) { $0.stage(grid: [104, 33], git: git, notice: "terminal t1 has ended") }
     }
 
-    private static let folder = "\(NSHomeDirectory())/Desktop/WorkSpace/Projects/AgentSwitch"
+    private static let folder = "\(NSHomeDirectory())/Desktop/Code/Projects/AgentSwitch"
 
     private static func shot(status: String = "working", to file: URL, stage: (TerminalWindowModel) -> Void) async throws {
         let info = TerminalInfo(id: "t1", harness: "claude-code", cwd: folder, model: "claude-opus-5-5", mode: "auto",
@@ -61,7 +61,7 @@ private struct ScreenStandIn: View {
 
     private static let lines: [(String, Color)] = [
         ("✻ Welcome back", .signal),
-        ("  ~/Desktop/WorkSpace/Projects/AgentSwitch", Color(white: 0.45)),
+        ("  ~/Desktop/Code/Projects/AgentSwitch", Color(white: 0.45)),
         ("", .clear),
         ("❯ 登录后跳回原来的页面，别总回首页", Color(white: 0.82)),
         ("", .clear),

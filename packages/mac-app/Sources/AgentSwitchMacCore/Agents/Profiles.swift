@@ -305,7 +305,7 @@ public enum ProfileWords {
         return profile.account ?? (profile.isDefault ? "This Mac’s own" : "Not Signed In")
     }
 
-    /// `cwork1 — work@example.com`.
+    /// `work — work@example.com`.
     public static func line(_ profile: AgentProfile) -> String { "\(profile.name) — \(who(profile))" }
 }
 

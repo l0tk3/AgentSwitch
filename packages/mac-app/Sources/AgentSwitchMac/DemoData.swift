@@ -4,7 +4,7 @@ import Foundation
 
 /// Sample state for `-designPreview` (docs/ui-v0.md §5). Made-up names, addresses and keys; nothing here is real.
 enum DemoData {
-    static let computerName = "小林的 MacBook Pro"
+    static let computerName = "Alex的 MacBook Pro"
     static let bonjourName = "AgentSwitch on \(computerName)"
     static let fingerprint = "3f9a2c7d41be58e06a1d9c2f7b3e4a5d6c7b8a9e0f1d2c3b4a5968778695a4b3"
     static let lan = ["192.168.1.20"]
@@ -26,7 +26,7 @@ enum DemoData {
                                                   backendState: "Stopped", dnsName: nil, ipv4: [])
 
     static func devices(now: Date) -> [Device] {
-        [Device(id: "dev-1", name: "小林的 iPhone", platform: "ios", createdAt: now.addingTimeInterval(-5 * 86_400),
+        [Device(id: "dev-1", name: "Alex的 iPhone", platform: "ios", createdAt: now.addingTimeInterval(-5 * 86_400),
                 lastSeenAt: now.addingTimeInterval(-120), revokedAt: nil, online: true,
                 files: FileScope(mode: .folders, folders: ["\(NSHomeDirectory())/Projects/lumen", "\(NSHomeDirectory())/Documents"])),
          Device(id: "dev-2", name: "旧 iPhone 13", platform: "ios", createdAt: now.addingTimeInterval(-40 * 86_400),

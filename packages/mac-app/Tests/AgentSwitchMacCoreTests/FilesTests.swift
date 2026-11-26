@@ -61,16 +61,16 @@ final class FilesTests: XCTestCase {
     }
 
     func testThePathRowFoldsItsMiddleKeepingTheDiskAndTheLastTwo() {
-        let levels = FilesPath.levels(of: "/Users/you/Desktop/WorkSpace/Projects/lumen")
-        XCTAssertEqual(levels.map(\.name), ["/", "Users", "you", "Desktop", "WorkSpace", "Projects", "lumen"])
-        XCTAssertEqual(levels.last?.path, "/Users/you/Desktop/WorkSpace/Projects/lumen")
+        let levels = FilesPath.levels(of: "/Users/you/Desktop/Code/Projects/lumen")
+        XCTAssertEqual(levels.map(\.name), ["/", "Users", "you", "Desktop", "Code", "Projects", "lumen"])
+        XCTAssertEqual(levels.last?.path, "/Users/you/Desktop/Code/Projects/lumen")
         let width: (FilesPath.Level) -> Double = { Double($0.name.count + 3) * 7 }
         XCTAssertEqual(FilesPath.fitted(levels, budget: 1000, width: width, fold: 21).folded, [])
         let tight = FilesPath.fitted(levels, budget: 160, width: width, fold: 21)
         XCTAssertEqual(tight.shown.map(\.name), ["/", "Projects", "lumen"])
-        XCTAssertEqual(tight.folded.map(\.name), ["Users", "you", "Desktop", "WorkSpace"])
+        XCTAssertEqual(tight.folded.map(\.name), ["Users", "you", "Desktop", "Code"])
         let some = FilesPath.fitted(levels, budget: 270, width: width, fold: 21)
-        XCTAssertEqual(some.shown.map(\.name), ["/", "WorkSpace", "Projects", "lumen"])
+        XCTAssertEqual(some.shown.map(\.name), ["/", "Code", "Projects", "lumen"])
         XCTAssertEqual(FilesPath.levels(of: "/").map(\.name), ["/"])
         XCTAssertEqual(FilesPath.parent(of: "/Users"), "/")
         XCTAssertNil(FilesPath.parent(of: "/"))

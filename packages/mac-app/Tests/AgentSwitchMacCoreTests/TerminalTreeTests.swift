@@ -21,7 +21,7 @@ final class TerminalTreeTests: XCTestCase {
                 + lines(f.children, depth: depth + 1)
         }
     }
-    private let w = "/Users/u/Desktop/WorkSpace"
+    private let w = "/Users/u/Desktop/Code"
 
     // 2026-09-30, user: 目录树顺序应该是固定的，现在会根据活跃状态顺序乱跳.
     func testTheOrderIsFixedFoldersByPathTerminalsAsOpenedSessionsAsBegun() {
@@ -46,15 +46,15 @@ final class TerminalTreeTests: XCTestCase {
         let sessions = [session("s1", "\(w)/A"), SessionSummary(harness: "codex", id: "s2", cwd: "\(w)/B", title: "s2", updatedAt: 1),
                         SessionSummary(harness: "opencode", id: "s3", cwd: "\(w)/C", title: "s3", updatedAt: 1, active: true)]
         let tree = TerminalTree.build(terminals: terminals, sessions: sessions)
-        XCTAssertEqual(lines(tree), ["WorkSpace/", "  A/", "    · t1", "    · t2", "    · s1", "  B/", "    · s2", "    deep/", "      · t3", "  C/", "    · s3"])
+        XCTAssertEqual(lines(tree), ["Code/", "  A/", "    · t1", "    · t2", "    · s1", "  B/", "    · s2", "    deep/", "      · t3", "  C/", "    · s3"])
         XCTAssertEqual(TerminalTree.filtered(tree, by: TerminalListFilter()), tree, "no filter: the tree as it is")
         // One agent's: its terminals and its sessions; a folder with nothing of its goes, the folder that gathers the
         // others stays while one of them does.
         XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(agent: "codex"))),
-                       ["WorkSpace/", "  A/", "    · t2", "  B/", "    · s2", "    deep/", "      · t3"])
+                       ["Code/", "  A/", "    · t2", "  B/", "    · s2", "    deep/", "      · t3"])
         // What is active: the terminals that run, the sessions being written now.
-        XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(active: true))), ["WorkSpace/", "  A/", "    · t1", "    · t2", "  C/", "    · s3"])
-        XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(agent: "codex", active: true))), ["WorkSpace/", "  A/", "    · t2"])
+        XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(active: true))), ["Code/", "  A/", "    · t1", "    · t2", "  C/", "    · s3"])
+        XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(agent: "codex", active: true))), ["Code/", "  A/", "    · t2"])
         XCTAssertEqual(TerminalTree.filtered(tree, by: TerminalListFilter(agent: "pi")), [])
         // What is recent (2026-11-11): every terminal listed, the sessions written within the last days, and one being
         // written now whatever its time says.
@@ -66,10 +66,10 @@ final class TerminalTreeTests: XCTestCase {
             SessionSummary(harness: "opencode", id: "busy", cwd: "\(w)/C", title: "busy", updatedAt: 1, active: true),
             SessionSummary(harness: "opencode", id: "gone", cwd: "\(w)/D", title: "gone", updatedAt: 1)])
         XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(recent: true), now: now)),
-                       ["WorkSpace/", "  A/", "    · t1", "    · t2", "    · new", "  B/", "    · edge", "    deep/", "      · t3", "  C/", "    · busy"])
+                       ["Code/", "  A/", "    · t1", "    · t2", "    · new", "  B/", "    · edge", "    deep/", "      · t3", "  C/", "    · busy"])
         XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(agent: "codex", recent: true), now: now)),
-                       ["WorkSpace/", "  A/", "    · t2", "  B/", "    · edge", "    deep/", "      · t3"])
-        XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(active: true, recent: true), now: now)), ["WorkSpace/", "  A/", "    · t1", "    · t2", "  C/", "    · busy"])
+                       ["Code/", "  A/", "    · t2", "  B/", "    · edge", "    deep/", "      · t3"])
+        XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(active: true, recent: true), now: now)), ["Code/", "  A/", "    · t1", "    · t2", "  C/", "    · busy"])
         XCTAssertTrue(TerminalListFilter(recent: true).isOn)
         XCTAssertEqual(TerminalListFilter(recent: true).choosing("codex"), TerminalListFilter(agent: "codex", recent: true))
         // The folders that stay keep their names and their places.
@@ -87,37 +87,37 @@ final class TerminalTreeTests: XCTestCase {
         XCTAssertFalse(TerminalListFilter().isOn)
     }
 
-    // 2026-10-03, user: 怎么分别显示了两个worktop.
+    // 2026-10-03, user: 怎么分别显示了两个workbench.
     func testAFolderWithSessionsOfItsOwnThatHoldsOthersIsOneLine() {
-        let folders = TerminalTree.build(terminals: [], sessions: [session("own", "\(w)/Worktop"), session("c1", "\(w)/Worktop/Codex"),
-                                                                   session("c2", "\(w)/Worktop/Claude")])
-        XCTAssertEqual(lines(folders), ["Worktop/", "  · own", "  Claude/", "    · c2", "  Codex/", "    · c1"])
+        let folders = TerminalTree.build(terminals: [], sessions: [session("own", "\(w)/Workbench"), session("c1", "\(w)/Workbench/Codex"),
+                                                                   session("c2", "\(w)/Workbench/Claude")])
+        XCTAssertEqual(lines(folders), ["Workbench/", "  · own", "  Claude/", "    · c2", "  Codex/", "    · c1"])
         XCTAssertTrue(folders[0].holdsOwn)
     }
 
-    // 2026-10-03, user: 有共同的祖父节点时并没能正确显示，比如“靶场”就在 /WorkSpace/Worktop/培训/靶场 下，但是显示起来是独立的.
+    // 2026-10-03, user: 有共同的祖父节点时并没能正确显示，比如“lab”就在 /Code/Workbench/courses/lab 下，但是显示起来是独立的.
     func testAFolderSitsInTheNearestFolderAboveItThatTheListShows() {
         let sessions = [session("a1", "\(w)/Projects/AgentSwitch"), session("a2", "\(w)/Projects/AgentSwitch/packages/secret-gate"),
-                        session("m1", "\(w)/Projects/MailLab"), session("w1", "\(w)/Worktop"), session("c1", "\(w)/Worktop/Claude"),
-                        session("v1", "\(w)/Worktop/Claude/CVP_bypass"), session("x1", "\(w)/Worktop/Codex"), session("r1", "\(w)/Worktop/培训/靶场"),
-                        session("d1", "/Users/u/Documents/工作文章/CBwork")]
+                        session("m1", "\(w)/Projects/demo-app"), session("w1", "\(w)/Workbench"), session("c1", "\(w)/Workbench/Claude"),
+                        session("v1", "\(w)/Workbench/Claude/scratch"), session("x1", "\(w)/Workbench/Codex"), session("r1", "\(w)/Workbench/courses/lab"),
+                        session("d1", "/Users/u/Documents/工作文章/Draft")]
         XCTAssertEqual(lines(TerminalTree.build(terminals: [], sessions: sessions)), [
-            "Projects/", "  AgentSwitch/", "    · a1", "    packages/secret-gate/", "      · a2", "  MailLab/", "    · m1",
-            "Worktop/", "  · w1", "  Claude/", "    · c1", "    CVP_bypass/", "      · v1", "  Codex/", "    · x1", "  培训/靶场/", "    · r1",
-            "CBwork/", "  · d1",
+            "Projects/", "  AgentSwitch/", "    · a1", "    packages/secret-gate/", "      · a2", "  demo-app/", "    · m1",
+            "Workbench/", "  · w1", "  Claude/", "    · c1", "    scratch/", "      · v1", "  Codex/", "    · x1", "  courses/lab/", "    · r1",
+            "Draft/", "  · d1",
         ])
     }
 
     func testAFolderThatOnlyGathersOthersHoldsTheDeeperOnesToo() {
-        let folders = TerminalTree.build(terminals: [], sessions: [session("c1", "\(w)/Worktop/Codex"), session("c2", "\(w)/Worktop/Claude"),
-                                                                   session("r1", "\(w)/Worktop/培训/靶场")])
-        XCTAssertEqual(lines(folders), ["Worktop/", "  Claude/", "    · c2", "  Codex/", "    · c1", "  培训/靶场/", "    · r1"])
-        XCTAssertEqual(TerminalTree.flatten(folders).map(\.name), ["Worktop", "Worktop/Claude", "Worktop/Codex", "Worktop/培训/靶场"])
+        let folders = TerminalTree.build(terminals: [], sessions: [session("c1", "\(w)/Workbench/Codex"), session("c2", "\(w)/Workbench/Claude"),
+                                                                   session("r1", "\(w)/Workbench/courses/lab")])
+        XCTAssertEqual(lines(folders), ["Workbench/", "  Claude/", "    · c2", "  Codex/", "    · c1", "  courses/lab/", "    · r1"])
+        XCTAssertEqual(TerminalTree.flatten(folders).map(\.name), ["Workbench", "Workbench/Claude", "Workbench/Codex", "Workbench/courses/lab"])
         XCTAssertEqual(folders[0].allSessions.map(\.sessionId), ["c2", "c1", "r1"])
         // Projects that only share a grandparent get no folder over them.
         let apart = TerminalTree.build(terminals: [], sessions: [session("a", "\(w)/Projects/A"), session("b", "\(w)/Projects/B"),
-                                                                 session("c", "\(w)/Worktop/C"), session("d", "\(w)/Worktop/D")])
-        XCTAssertEqual(apart.map(\.name), ["Projects", "Worktop"])
+                                                                 session("c", "\(w)/Workbench/C"), session("d", "\(w)/Workbench/D")])
+        XCTAssertEqual(apart.map(\.name), ["Projects", "Workbench"])
     }
 
     func testYourHomeFolderHoldsOnlyWhatSitsDirectlyInIt() {
@@ -214,11 +214,11 @@ final class TerminalSearchTests: XCTestCase {
     /// A folder in another goes by the names of the folders it sits in, and a match on those keeps it.
     func testNestedFoldersAreNamedByTheFoldersTheySitIn() {
         let tree = TerminalTree.build(terminals: [], sessions: [
-            session("w", "/Users/u/Worktop", "整理"), session("r", "/Users/u/Worktop/培训/靶场", "靶机"), session("c", "/Users/u/Worktop/Codex", "其他"),
+            session("w", "/Users/u/Workbench", "整理"), session("r", "/Users/u/Workbench/courses/lab", "靶机"), session("c", "/Users/u/Workbench/Codex", "其他"),
         ])
-        let result = TerminalSearch.run(tree, query: "worktop")
-        XCTAssertEqual(result.folders.map(\.name), ["Worktop", "Worktop/Codex", "Worktop/培训/靶场"])
-        XCTAssertEqual(TerminalSearch.run(tree, query: "靶场").folders.map(\.rows.count), [1])
+        let result = TerminalSearch.run(tree, query: "workbench")
+        XCTAssertEqual(result.folders.map(\.name), ["Workbench", "Workbench/Codex", "Workbench/courses/lab"])
+        XCTAssertEqual(TerminalSearch.run(tree, query: "lab").folders.map(\.rows.count), [1])
     }
 
     func testTheMatchShowsInANarrowRow() {

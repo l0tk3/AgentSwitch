@@ -5,7 +5,7 @@ import XCTest
 /// ⌘-点不开): the clicked word joined back with its neighbours, longest first, and the first that exists opened.
 final class WrappedPathTests: XCTestCase {
     /// As Claude Code printed it in the user's terminal: the path broken after `-85d`, the rest indented 7.
-    private let head = "/private/tmp/claude-501/-Users-me-Desktop-WorkSpace-Projects-AgentSwitch/0e3e5e94-d0e2-4f5b-b869-85d"
+    private let head = "/private/tmp/claude-501/-Users-me-Desktop-Code-Projects-AgentSwitch/0e3e5e94-d0e2-4f5b-b869-85d"
     private let tail = "7a3bb725b/scratchpad/standalone/out/agentswitch-browser.html"
     private var whole: String { head + tail }
     private var screen: [String] {
@@ -33,7 +33,7 @@ final class WrappedPathTests: XCTestCase {
         // The same shape on disk: a folder that exists, a file whose name runs over the break.
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-wrap-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        let folder = root.appendingPathComponent("-Users-me-Desktop-WorkSpace-Projects-AgentSwitch/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b/scratchpad/standalone/out")
+        let folder = root.appendingPathComponent("-Users-me-Desktop-Code-Projects-AgentSwitch/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b/scratchpad/standalone/out")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let file = folder.appendingPathComponent("agentswitch-browser.html")
         FileManager.default.createFile(atPath: file.path, contents: Data("<p>x</p>".utf8))
