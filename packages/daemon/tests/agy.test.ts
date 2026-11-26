@@ -168,7 +168,9 @@ describe("an Antigravity terminal", () => {
     const said = {
       cwd: "/w", session_id: A, conversation_id: A, conversation_title: "Run Shell Command Rm", transcript_path: "/x/transcript.jsonl",
       model: { id: "Gemini 4 Hydrogen (High)", display_name: "Gemini 4 Hydrogen (High)", effort: "high" }, workspace: { current_dir: "/w/sub", project_dir: "/w" }, version: "1.5.17",
-      agent_state: "tool_use", tool_confirmation_pending: true, cycle_mode: "auto", email: "someone@example.com", plan_tier: "Starter", quota: { used: 1 }, context_window: { used_percentage: 3 },
+      agent_state: "tool_use", tool_confirmation_pending: true, cycle_mode: "auto", email: "someone@example.com", plan_tier: "Starter",
+      quota: { "gemini-weekly": { remaining_fraction: 0.75, reset_time: "2026-12-03T09:40:25Z", reset_in_seconds: 604799 }, "3p-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } },
+      context_window: { total_input_tokens: 31_457, context_window_size: 1_048_576, used_percentage: 3, remaining_percentage: 97, current_usage: null },
     };
     const run = (env: Record<string, string>) => new Promise<string>((done, fail) => {
       // Not spawnSync: the stand-in server answers on this process's own loop.
@@ -187,8 +189,11 @@ describe("an Antigravity terminal", () => {
     expect(got[0]!.event).toBe("AgyStatus");
     const { at, ...payload } = got[0]!.payload as { at: number };
     expect(typeof at).toBe("number");
-    expect(payload).toEqual({ agent_state: "tool_use", tool_confirmation_pending: true, session_id: A, conversation_title: "Run Shell Command Rm", cwd: "/w/sub", model: "Gemini 4 Hydrogen (High)", cycle_mode: "auto" });
-    expect(JSON.stringify(got[0])).not.toMatch(/example\.com|Starter|quota/);
+    expect(payload).toEqual({ agent_state: "tool_use", tool_confirmation_pending: true, session_id: A, conversation_title: "Run Shell Command Rm", cwd: "/w/sub", model: "Gemini 4 Hydrogen (High)", cycle_mode: "auto",
+      // How full the context and the allowances are: the numbers only (meter.ts).
+      context: { used_percentage: 3, size: 1_048_576, used: 31_457 },
+      quota: { "gemini-weekly": { remaining_fraction: 0.75, reset_time: "2026-12-03T09:40:25Z" }, "3p-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } } });
+    expect(JSON.stringify(got[0])).not.toMatch(/example\.com|Starter/);
     // Outside a terminal of ours it only prints the line.
     expect(await run({})).toBe("Gemini 4 Hydrogen (High)");
     expect(got).toHaveLength(1);
@@ -236,6 +241,10 @@ describe("an Antigravity terminal", () => {
     // A model the list does not have goes by the name it gave.
     await says({ agent_state: "idle", session_id: A, model: "Something New" });
     expect(now().modelNow).toBe("Something New");
+    // How full its context and the allowances of its model's family are (meter.ts): Gemini's week, not the others'.
+    await says({ agent_state: "idle", session_id: A, model: "Gemini 4 Hydrogen (High)", context: { used_percentage: 3, size: 1_048_576, used: 31_457 },
+      quota: { "gemini-weekly": { remaining_fraction: 0.75, reset_time: "2026-12-03T09:40:25Z" }, "3p-5h": { remaining_fraction: 0.5, reset_time: "2026-11-26T20:00:00Z" } } });
+    expect(now().meter).toMatchObject({ context: { percent: 3, used: 31_457, window: 1_048_576 }, limits: [{ label: "7d", percent: 25, resetsAt: Date.parse("2026-12-03T09:40:25Z") }] });
     // `/clear`: another conversation, followed.
     await says({ agent_state: "working", session_id: B });
     expect(now().agentSessionId).toBe(B);

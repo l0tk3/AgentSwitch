@@ -2014,7 +2014,9 @@ describe("terminal pieces", () => {
     expect(claude.env).toMatchObject({ AGENTSWITCH_TERMINAL_ID: "t1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "tok", AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:4711", TERM: "xterm-256color" });
     const settings = JSON.parse(readFileSync(join(stateDir, "t1", "settings.json"), "utf8"));
     // Its hooks, and no update notice of its own (user #460).
-    expect(settings).toEqual({ ...claudeHookSettings('"/n/node" "/h/hook.js"'), env: { DISABLE_AUTOUPDATER: "1" } });
+    // Its status line is AgentSwitch's (meter.ts), which runs the user's own beside it.
+    expect(settings).toEqual({ ...claudeHookSettings('"/n/node" "/h/hook.js"'), env: { DISABLE_AUTOUPDATER: "1" },
+      statusLine: expect.objectContaining({ type: "command", command: `"/n/node" "/h/hook.js" status "${join(stateDir, "t1", "statusline.json")}"` }) });
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);
     // Left waiting when it comes to rest, for a Chat Room message to wake it with (docs/chatroom-v0.md §12).
     for (const event of ["Stop", "SessionStart"]) expect(settings.hooks[event][0].hooks).toEqual([{ type: "command", command: '"/n/node" "/h/hook.js"', timeout: settings.hooks.Stop[0].hooks[0].timeout }, { type: "command", command: '"/n/node" "/h/hook.js" wait', asyncRewake: true, timeout: 12 * 3600 }]);

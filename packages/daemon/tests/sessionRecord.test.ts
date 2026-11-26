@@ -295,7 +295,9 @@ const rollout = [
   x.item(32, { type: "Extension", id: "e2", kind: "clock.sleep", durationMs: 2000 }),
   x.item(33, { type: "SubAgentActivity", id: "s1", kind: "started", agent_thread_id: "th", agent_path: "root/reviewer" }),
   line({ timestamp: at(34), type: "response_item", payload: { type: "function_call", name: "update_plan", arguments: JSON.stringify({ plan: [{ step: "改重试次数", status: "completed" }, { step: "跑测试", status: "in_progress" }] }) } }),
-  line({ timestamp: at(35), type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 51_000 }, model_context_window: 272_000 } } }),
+  line({ timestamp: at(35), type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 51_000 }, model_context_window: 272_000 },
+    // The account's allowances as Codex 0.163 writes them: the week first here, the five hours second.
+    rate_limits: { limit_id: "codex", primary: { used_percent: 40, window_minutes: 10080, resets_at: 1_796_116_500 }, secondary: { used_percent: 12.5, window_minutes: 300, resets_at: 1_795_600_000 }, credits: null, plan_type: "pro" } } }),
   x.item(36, { type: "AgentMessage", id: "a2", phase: "final_answer", content: [{ type: "Text",
     // With the file it made, as Codex 0.163 writes it into the text (its app draws a card of it).
     text: `改成 3 了，但有一个测试没过。\n\n:codex-file-citation{path="${API}/out/retries.xlsx" purpose="output" artifact_kind="workbook"}\n` }] }),
@@ -338,7 +340,8 @@ describe("a Codex session's record", () => {
     expect(record.items[5]).toMatchObject({ type: "answer", text: "改成 3 了，但有一个测试没过。", files: [{ path: `${API}/out/retries.xlsx`, kind: "workbook" }] });
     expect(record.items[6]).toMatchObject({ type: "note", text: "Interrupted" });
     expect(record.plan).toEqual([{ text: "改重试次数", state: "done" }, { text: "跑测试", state: "doing" }]);
-    expect(record.usage).toEqual({ model: "gpt-6-luna", effort: "high", used: 51_000, window: 272_000 });
+    expect(record.usage).toEqual({ model: "gpt-6-luna", effort: "high", used: 51_000, window: 272_000,
+      limits: [{ label: "5h", percent: 12.5, resetsAt: 1_795_600_000_000 }, { label: "7d", percent: 40, resetsAt: 1_796_116_500_000 }] });
     expect(record.mode).toBe("on-request");
     expect(readChanges("codex", path, { cwd: API })).toEqual([
       { path: "src/retry.ts", added: 1, removed: 1, hunks: [{ header: "@@ -3,1 +3,1 @@", lines: ["-const RETRIES = 5;", "+const RETRIES = 3;"] }] },

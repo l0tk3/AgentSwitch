@@ -554,6 +554,19 @@ Gemini 3.8 Flash (High)
 - 选一行：方向键移到那一行再回车，和别的列表一样。
 - **验证**：`tests/agy.test.ts` 里一条（两种真实屏幕的原样行、带状态栏的、补全、空闲时、别的 agent 的屏幕）；真的 agy：`scripts/agy_terminal_probe.ts` 经服务各选了一行。
 
+### 5.25 回复框下面：上下文占比与 5h / 7d 用量（2026-11-26，用户 #599）
+
+用户的图：回复框下面那行是 `Bypass · Opus 5.5 · Medium ▾ · Context 280k`。要的是上下文的**占比**（`Context 28%`），和订阅的 **5 小时、7 天用量**（有的话，`5h 12% · 7d 40%`）。
+
+- **哪来的**：都是 agent 自己干活时顺带说的，不另外探测、不花额度（`src/terminals/meter.ts`）。
+  - **Claude Code**：它每次重画状态栏都把一份 JSON 交给状态栏命令，里面有 `context_window`（`context_window_size`、`used_percentage`、`current_usage`）和订阅账号的 `rate_limits.five_hour` / `seven_day`（`used_percentage`、`resets_at`，Unix 秒）。AgentSwitch 的终端经 `--settings` 给它一个自己的状态栏命令（`hookClient.js status <文件>`）：只把这几个数交给服务（事件 `ClaudeMeter`），**再用同一份输入跑用户原来的状态栏命令、原样打印它的输出**——claude-hud 之类照常显示。用户原来的那条按 Claude Code 自己的先后找：文件夹的 `.claude/settings.local.json`、`.claude/settings.json`、用户的 `settings.json`（`CLAUDE_CONFIG_DIR`，否则 `~/.claude`；`--setting-sources user` 启动时只看最后这个），带着它的 `padding` 等；没有就什么都不打印，和没配状态栏一样。启动时找一次，记在终端自己的目录里（`statusline.json`）。
+  - **Codex**：记录里 `token_count` 事件本来就有 `model_context_window`；同一事件的 `rate_limits.primary` / `secondary`（`used_percent`、`window_minutes`、`resets_at`）按窗口长短起名（300 分钟 = `5h`，10080 = `7d`），短的在前，进记录的 `usage.limits`（`sessions/usageLimits.ts`）。有的账号只有一个（实测一个 Pro Lite 账号只有 7 天的）。
+  - **Antigravity**：它的状态栏本来就是我们的（§5.24、terminal-v0 §3）。同一份 JSON 里有一样的 `context_window`，和它自己的 `quota`：`<家族>-<窗口>`（`gemini-weekly`，别家模型的 `3p-5h`、`3p-weekly`），给的是剩下的比例和重置时间。现在显示正在用的模型那一家的。
+  - **Grok、OpenCode、pi**：没找到它们被动给出的这些数，照旧（有窗口大小就是百分比，否则 token 数）。
+- **服务**：终端多一个 `meter`（上下文的占比、已用、窗口；各个额度的名字、占比、重置时刻），变了才告诉屏幕（记录视图的事件流 `meter`，连上时先给一次现在的）；同时出来的几次读数，晚到的旧读数不算。
+- **样子**：回复框下面（像素外观在框里那一行）原来的 `Context …` 换成 `Context 28%`，不知道窗口大小时照旧 `Context 280k`；有额度时接着 `· 5h 12% · 7d 40%`；到 80% 及以上的那一项用“等你处理”的琥珀色。鼠标停在上面：上下文是 `280k / 1M`，额度是 `Resets in 2h 1m`。侧栏打开且侧栏里有上下文那条线时，这里不再写上下文（原来的规则），额度照样写。
+- **验证**：daemon `tests/meter.test.ts`（状态栏的输入只交出这几个数、原样跑用户的命令并透传它的输出、没有原命令时什么都不打印、服务不在时也照样打印、找用户原来那条的先后、写进设置的样子、服务按读数先后与只报变化、Codex 的额度），`sessionRecord`、`agy`、`terminals` 的相应几项；Mac `UsageLineTests`。**真的 Claude Code 2.1.332**（`scripts/claude_statusline_probe.ts`，Haiku 一小轮，会话记录跑完删掉）：服务收到 `context 5% / 1M`、`5h 26%`、`7d 40%`；屏幕底下是替身命令的 `OWN-LINE`；`OWN=hud` 再跑一次，用户自己的 claude-hud 两行照常（`Context █░░ 5% │ Usage … 26% (resets in 2h 1m) | … 40% (resets in 5d 8h)`）。Antigravity 1.5.17 的那份 JSON 在伪终端里取过一次（没有跑一轮）。出图：`-designPreviewOnly terminals` 的 `terminals-record-usage` / `-light`，像素与经典各看过。**没验证**：装好的应用里连着真终端看这一行；Codex 带 5 小时额度的账号；Antigravity 跑完一轮后的数。
+
 ## 6. 安全
 
 - 记录是 agent 自己写下的会话，原来就经 `/sessions/:harness/:id` 给到已配对的手机；新接口是同一份内容的更细的读法，同一道门（远程只给已配对的设备，路由表里登记）。

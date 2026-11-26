@@ -558,7 +558,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       let wake: (() => void) | null = null;
       let open = true;
       const unsubscribe = host.subscribe(id, record ? null : after, (ev) => {
-        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent" || ev.type === "choices" || ev.type === "notices" || ev.type === "writing") return;
+        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent" || ev.type === "choices" || ev.type === "notices" || ev.type === "writing" || ev.type === "meter") return;
         queue.push(ev);
         if (queue.length > MAX_QUEUED) open = false;
         wake?.();
@@ -574,6 +574,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
           if (now.sent.length) queue.push({ type: "sent", replies: now.sent });
           if (now.choices) queue.push({ type: "choices", choices: now.choices });
           if (now.notices.length) queue.push({ type: "notices", notices: now.notices });
+          if (now.meter) queue.push({ type: "meter", meter: now.meter });
           const writing = host.writingOf(id);
           if (writing) queue.push({ type: "writing", writing });
         }

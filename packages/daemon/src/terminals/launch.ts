@@ -7,6 +7,7 @@ import { profileEnvironment } from "./profileEnvironment.js";
 import { EFFORT, effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { GROK_HOOK_NODE, GROK_HOOK_SCRIPT } from "./grokHooks.js";
+import { claudeStatusLine, ownStatusLine } from "./meter.js";
 import { AGY_HOME_VAR, agyDenyRules, agySettings } from "./agy.js";
 import { CodexCompanion } from "./codexTerminal.js";
 import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
@@ -372,7 +373,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const quiet = { DISABLE_AUTOUPDATER: "1", ...(req.telemetryOff ? { DISABLE_TELEMETRY: "1" } : {}), ...(req.configHome ? { DISABLE_ERROR_REPORTING: "1" } : {}) };
         Object.assign(env, quiet);
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}), ...vendorAliases(req.api) };
-        writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected, opts.roomFiles), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
+        // A status line of ours, which tells the service how full the context and the allowances are and draws the
+        // user's own as before (meter.ts).
+        const statusLine = claudeStatusLine(hookCommand, join(dir, "statusline.json"), ownStatusLine(req.cwd, env.CLAUDE_CONFIG_DIR, req.isolated));
+        writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected, opts.roomFiles), statusLine, ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
         const args = ["--settings", settings, ...(req.isolated ? ["--setting-sources", "user"] : [])];
         {
           // The Chatroom Kit (docs/chatroom-v0.md §6): its tools are there only while this session sits in a room.

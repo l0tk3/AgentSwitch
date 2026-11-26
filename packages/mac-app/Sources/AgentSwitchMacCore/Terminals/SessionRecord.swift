@@ -160,13 +160,69 @@ public struct RecordUsage: Decodable, Sendable, Hashable {
     public let used: Int?
     public let window: Int?
     public let effort: String?
+    /// The account's allowances as the record said last (Codex's rate limits), the shorter window first.
+    public let limits: [UsageLimit]?
 
-    public init(model: String? = nil, used: Int? = nil, window: Int? = nil, effort: String? = nil) {
+    public init(model: String? = nil, used: Int? = nil, window: Int? = nil, effort: String? = nil, limits: [UsageLimit]? = nil) {
         self.model = model
         self.used = used
         self.window = window
         self.effort = effort
+        self.limits = limits
     }
+}
+
+/// One of the account's allowances (docs/simple-view-v0.md §5.25): its window's name (`5h`, `7d`), how much of it is
+/// used, and when it starts afresh (ms since 1970; nil: not said).
+public struct UsageLimit: Decodable, Sendable, Hashable {
+    public let label: String
+    public let percent: Double
+    public let resetsAt: Int64?
+
+    public init(label: String, percent: Double, resetsAt: Int64? = nil) {
+        self.label = label
+        self.percent = percent
+        self.resetsAt = resetsAt
+    }
+}
+
+/// How full a terminal's context and the account's allowances are, as the agent's status line said last (Claude Code,
+/// Antigravity; `TerminalInfo.meter`, the record stream's `meter`).
+public struct TerminalMeter: Decodable, Sendable, Hashable {
+    public struct Context: Decodable, Sendable, Hashable {
+        public let percent: Double
+        public let used: Int?
+        public let window: Int?
+        public init(percent: Double, used: Int? = nil, window: Int? = nil) { self.percent = percent; self.used = used; self.window = window }
+    }
+    public let context: Context?
+    public let limits: [UsageLimit]
+
+    public init(context: Context?, limits: [UsageLimit] = []) { self.context = context; self.limits = limits }
+
+    private enum CodingKeys: String, CodingKey { case context, limits }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        context = (try? c.decodeIfPresent(Context.self, forKey: .context)) ?? nil
+        limits = (try? c.decodeIfPresent([UsageLimit].self, forKey: .limits)) ?? []
+    }
+}
+
+/// The line under the reply box (docs/simple-view-v0.md §5.25): how full the context is and the allowances.
+public struct UsageLine: Equatable, Sendable {
+    public struct Limit: Equatable, Sendable {
+        public let text: String
+        /// Near its end (80% and over): drawn in the colour of what needs you.
+        public let near: Bool
+        /// When it starts afresh, in words (`Resets in 2h 1m`); nil: not said.
+        public let help: String?
+    }
+    /// `Context 28%` (or the tokens in it where its size is not known); nil: not said, or shown beside.
+    public let context: String?
+    /// How full in tokens (`280k / 1M`), for the pointer; nil where not known.
+    public let contextHelp: String?
+    public let limits: [Limit]
+    public var isEmpty: Bool { context == nil && limits.isEmpty }
 }
 
 /// `GET /sessions/:harness/:id/record`.
@@ -549,6 +605,8 @@ public enum TerminalRecordEvent: Equatable, Sendable {
     case mode(String)
     /// What it offers as your next message changed (nil: it offers none now).
     case suggestion(String?)
+    /// How full its context and the allowances are, as its status line said.
+    case meter(TerminalMeter)
     /// Codex's Daybreak switch stands otherwise now.
     case daybreak(Bool)
     /// What it is writing now (nil: nothing is).
@@ -574,6 +632,9 @@ public enum TerminalRecordEvent: Equatable, Sendable {
         case "suggestion":
             struct Body: Decodable { let text: String? }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .suggestion($0.text.flatMap { $0.isEmpty ? nil : $0 }) }
+        case "meter":
+            struct Body: Decodable { let meter: TerminalMeter }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .meter($0.meter) }
         case "daybreak":
             struct Body: Decodable { let on: Bool }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .daybreak($0.on) }
@@ -809,6 +870,35 @@ public enum RecordDisplay {
         guard let used = usage?.used, used > 0 else { return nil }
         if let window = usage?.window, window > 0 { return "\(min(100, Int((Double(used) / Double(window) * 100).rounded())))%" }
         return used >= 1_000_000 ? String(format: "%.1fM", Double(used) / 1_000_000) : "\(max(1, Int((Double(used) / 1000).rounded())))k"
+    }
+
+    /// The line under the reply box (§5.25): the context's fill as its status line said it (`meter`), else as the
+    /// record says; the allowances from the status line, else from the record (Codex). `beside`: the side pane shows
+    /// the record's fill, so it is not said again here. `now`: ms since 1970, for when an allowance starts afresh.
+    public static func usageLine(_ usage: RecordUsage?, meter: TerminalMeter?, beside: Bool = false, now: Int64) -> UsageLine {
+        var context: String? = nil, help: String? = nil
+        if !(beside && contextMeter(usage) != nil) {
+            if let c = meter?.context {
+                context = "Context \(Int(min(100, max(0, c.percent)).rounded()))%"
+                if let used = c.used, let window = c.window, used > 0, window > 0 { help = "\(tokens(used)) / \(tokens(window))" }
+            } else if let words = Self.context(usage) {
+                context = "Context \(words)"
+                help = contextMeter(usage)?.words
+            }
+        }
+        let limits = (meter.map(\.limits).flatMap { $0.isEmpty ? nil : $0 } ?? usage?.limits ?? []).map { l in
+            UsageLine.Limit(text: "\(l.label) \(Int(min(100, max(0, l.percent)).rounded()))%", near: l.percent >= 80,
+                            help: l.resetsAt.flatMap { $0 > now ? "Resets in \(span(($0 - now) / 1000))" : nil })
+        }
+        return UsageLine(context: context, contextHelp: help, limits: limits)
+    }
+
+    /// `2h 1m`, `5d 8h`, `12m`, `40s`.
+    static func span(_ seconds: Int64) -> String {
+        let d = seconds / 86_400, h = seconds % 86_400 / 3600, m = seconds % 3600 / 60
+        if d > 0 { return h > 0 ? "\(d)d \(h)h" : "\(d)d" }
+        if h > 0 { return m > 0 ? "\(h)h \(m)m" : "\(h)h" }
+        return m > 0 ? "\(m)m" : "\(max(0, seconds))s"
     }
 
     /// How full its context is, as a part and in words (`124k / 200k`); nil when the agent does not say how large it is.

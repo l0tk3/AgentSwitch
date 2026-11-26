@@ -179,6 +179,21 @@ enum TerminalsPagePreview {
             model.focused?.record.stageDraft("", files: [])
             model.focused?.record.stageSuggestion("跑一遍测试确认")
         }
+        // How full the context is and the allowances, under the box (docs/simple-view-v0.md §5.25; user #599): one of
+        // them near its end.
+        for (name, light) in [("terminals-record-usage", false), ("terminals-record-usage-light", true)] {
+            try await shot(to: file(name), light: light) { model in
+                model.sideClosed = true
+                stageRecord(model, working: false)
+                PaneRecord.previewOpenStep = nil
+                model.focused?.record.stageDraft("", files: [])
+                let now = Int64(Date().timeIntervalSince1970 * 1000)
+                model.focused?.record.stageMeter(TerminalMeter(context: .init(percent: 28, used: 280_000, window: 1_000_000),
+                                                               limits: [UsageLimit(label: "5h", percent: 12, resetsAt: now + 7_260_000), UsageLimit(label: "7d", percent: 84, resetsAt: now + 460_800_000)]),
+                                                               // As Claude Code's record says it: no size of its context.
+                                                               usage: RecordUsage(model: "claude-opus-5-5", used: 280_000, effort: "medium"))
+            }
+        }
         // At work with no tool in use: the word alone, no picture before it.
         try await shot(to: file("terminals-record-working-light"), light: true) { model in
             stageRecord(model, working: true, bare: true)

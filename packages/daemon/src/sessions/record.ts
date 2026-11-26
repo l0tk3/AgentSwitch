@@ -8,6 +8,7 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isTypedText, obj, str, time, unwrapPastes, type Json } from "./jsonl.js";
+import { codexLimits, type UsageLimit } from "./usageLimits.js";
 import type { SessionMessage } from "./types.js";
 
 export type StepKind = "read" | "search" | "list" | "run" | "edit" | "write" | "web" | "agent" | "todo" | "think" | "tool";
@@ -50,7 +51,8 @@ export type RecordQuestion = { readonly title: string; readonly options: readonl
 export type RecordFile = { readonly path: string; readonly kind?: string };
 export type PlanEntry = { readonly text: string; readonly state: "todo" | "doing" | "done" };
 /** `used`: tokens in the context at the last turn; `window`: how many it holds, when the record says. */
-export type RecordUsage = { readonly model?: string; readonly used?: number; readonly window?: number; /** How hard it thought at the last turn, in the agent's word. */ readonly effort?: string };
+export type RecordUsage = { readonly model?: string; readonly used?: number; readonly window?: number; /** How hard it thought at the last turn, in the agent's word. */ readonly effort?: string;
+  /** The account's allowances as the record said last (Codex's `rate_limits`, terminals/meter.ts), the shorter first. */ readonly limits?: readonly UsageLimit[] };
 
 export type DiffHunk = { readonly header: string; readonly lines: readonly string[] };
 export type FileDiff = { readonly path: string; readonly added: number; readonly removed: number; readonly hunks: readonly DiffHunk[]; readonly clipped?: boolean };
@@ -584,6 +586,8 @@ function codexBuild(lines: readonly Line[], cwd: string): Builder {
       const used = Number(obj(info.last_token_usage).total_tokens) || 0;
       const window = Number(info.model_context_window) || 0;
       if (used || window) b.usage = { ...(b.usage ?? {}), ...(used ? { used } : {}), ...(window ? { window } : {}) };
+      const limits = codexLimits(payload.rate_limits);
+      if (limits.length) b.usage = { ...(b.usage ?? {}), limits };
     }
   }
   return b;

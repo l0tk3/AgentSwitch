@@ -20,6 +20,7 @@ import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
 import { troubleOnScreen } from "./screenTrouble.js";
 import { screenView } from "./screenView.js";
+import { agyMeter, CLAUDE_METER_EVENT, claudeMeter, type TerminalMeter } from "./meter.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi", "grok", "agy"] as const;
 export type TerminalHarness = (typeof TERMINAL_HARNESSES)[number];
@@ -65,6 +66,9 @@ export type TerminalInfo = {
   /** What Claude Code offers as your next message (its prompt suggestion: dim words in its empty input), while it
    *  rests and shows one; null otherwise. It is on its screen and nowhere else (docs/simple-view-v0.md §5.6). */
   readonly suggestion: string | null;
+  /** How full its context is and how much of the account's 5-hour and 7-day allowances is used, as its status line
+   *  said last (Claude Code, meter.ts); null where it has not said. Codex's are in its record. */
+  readonly meter: TerminalMeter | null;
   /** A screen can set its model and its level (`POST …/model`, `…/effort`): its agent takes a command for them, or a
    *  companion of this terminal sets them on the agent's own server. False for one that can only say what it is on (a
    *  Codex or an OpenCode started without its server). */
@@ -158,6 +162,8 @@ export type TerminalEvent =
   /** It asks in another way now (its permission mode). */
   | { readonly type: "mode"; readonly mode: string }
   | { readonly type: "suggestion"; readonly text: string | null }
+  /** Its status line said how full the context and the allowances are (meter.ts). */
+  | { readonly type: "meter"; readonly meter: TerminalMeter }
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
@@ -909,6 +915,7 @@ class Session {
   modelAsked: { readonly model: string; readonly at: number } | null = null;
   /** Antigravity: when its status line was last read (`at`), and the model's name it gave then. */
   agyAt = 0;
+  meter: TerminalMeter | null = null;
   agyModel = "";
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
   readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string; note?: string } | null; since: number }>();
@@ -1503,6 +1510,15 @@ export class TerminalHost {
     s.suggestTimer.unref();
   }
 
+  /** How full its context and allowances are, as its status line said (meter.ts); an earlier reading that arrives
+   *  later says nothing new, and screens are told only of a change. */
+  private meterIs(s: Session, now: TerminalMeter): void {
+    if (s.meter && now.at < s.meter.at) return;
+    const before = s.meter;
+    s.meter = now;
+    if (!before || JSON.stringify({ ...before, at: 0 }) !== JSON.stringify({ ...now, at: 0 })) s.emit({ type: "meter", meter: now });
+  }
+
   private suggestionIs(s: Session, text: string | null): void {
     if (s.suggestTimer && text === null) { clearTimeout(s.suggestTimer); s.suggestTimer = null; }
     if (text === s.suggestion) return;
@@ -1758,6 +1774,13 @@ export class TerminalHost {
       case "PiWaiting": this.setStatus(s, "waiting"); return null;
       // Antigravity's status line (agy.ts): what it is doing, whether it waits for an answer on its screen, how it
       // asks, the conversation's title and the model it is on. (Which conversation it writes: read above.)
+      // Claude Code's status line (meter.ts): how full the context and the allowances are. Several runs may leave the
+      // program at once: an earlier reading that arrives later says nothing new.
+      case CLAUDE_METER_EVENT: {
+        if (s.harness !== "claude-code") return null;
+        this.meterIs(s, claudeMeter(p));
+        return null;
+      }
       case AGY_STATUS_EVENT: {
         if (s.harness !== "agy") return null;
         const now = agyStatus(p, s.mode);
@@ -1765,6 +1788,7 @@ export class TerminalHost {
         // after a later one says nothing new.
         if (now.at && now.at < s.agyAt) return null;
         if (now.at) s.agyAt = now.at;
+        if (p.context || p.quota) this.meterIs(s, agyMeter(p, now.model || s.agyModel));
         if (now.mode) this.modeIs(s, now.mode);
         if (now.title && now.title.slice(0, MAX_TITLE) !== s.title) {
           const before = this.nameOf(s);
@@ -2526,7 +2550,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, sets: DIRECT.has(s.harness) || !!s.companion?.setModel, daybreak: s.daybreak, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, meter: s.meter, sets: DIRECT.has(s.harness) || !!s.companion?.setModel, daybreak: s.daybreak, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

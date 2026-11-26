@@ -20,6 +20,9 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let modeNow: String?
     /// What Claude Code offers as your next message, while it rests and shows one on its screen.
     public let suggestion: String?
+    /// How full its context and the allowances are, as its status line said last; nil: not said (docs/simple-view-v0.md
+    /// §5.25).
+    public private(set) var meter: TerminalMeter?
     /// A screen can set its model and level; nil from a service that does not say (then by the agent's kind).
     public let sets: Bool?
     /// Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8); nil: this terminal has none.
@@ -64,7 +67,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public private(set) var device: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
+        case id, harness, cwd, workdir, model, effort, modeNow, suggestion, meter, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
              permissions, subagents, profile, device
     }
 
@@ -131,6 +134,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
         profileName = profile.map { [$0.name, $0.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") }
         profileColor = profile?.color.flatMap(ProfileColor.init(rawValue:))
         device = ((try? c.decodeIfPresent(String.self, forKey: .device)) ?? nil).flatMap { DeviceID.valid($0) ? $0 : nil }
+        meter = (try? c.decodeIfPresent(TerminalMeter.self, forKey: .meter)) ?? nil
     }
 
     public var running: Bool { status != "exited" }

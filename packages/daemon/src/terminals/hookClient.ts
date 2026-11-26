@@ -18,6 +18,10 @@
  *    node hookClient.js agy             Antigravity CLI's status line (terminals/agy.ts): its state on stdin; what the
  *                                       service follows of it is handed on (never the account's e-mail, plan or
  *                                       quota), and the model's name is printed for the line under its input
+ *    node hookClient.js status <file>   Claude Code's status line (terminals/meter.ts): its state on stdin; how full
+ *                                       the context is and the 5-hour and 7-day allowances are handed on (nothing
+ *                                       else of it), and the user's own status line (`command` in <file>) is run with
+ *                                       the same input, what it prints printed; with none, nothing
  *    node hookClient.js key             the key this terminal's profile pays by (docs/profiles-v0.md §3.6): Claude
  *                                       Code's `apiKeyHelper`, Codex's provider `auth` command. Printed alone on one
  *                                       line; without one it says why on stderr and fails, so the agent says it has
@@ -26,6 +30,8 @@
  *                                       §12): waits until a Chat Room message is for this terminal's session, then
  *                                       says it on stderr and exits 2 — which wakes the agent with it. */
 
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 
 const url = process.env.AGENTSWITCH_TERMINAL_URL;
@@ -130,7 +136,7 @@ async function mail(): Promise<string> {
 
 /** Antigravity's status line: the line to show is printed at once (it waits for it), then the service is told. Of
  *  what the program says only this is passed on: its state, whether it waits for an answer, the conversation's id and
- *  title, the folder, how it asks, the model's name. */
+ *  title, the folder, how it asks, the model's name, and how full its context and its allowances are. */
 const AGY_WAIT_MS = 4000;
 async function agy(): Promise<string> {
   const said = JSON.parse((await readStdin()) || "{}") as Record<string, unknown>;
@@ -138,12 +144,21 @@ async function agy(): Promise<string> {
   const model = said.model && typeof said.model === "object" ? said.model as Record<string, unknown> : {};
   const workspace = said.workspace && typeof said.workspace === "object" ? said.workspace as Record<string, unknown> : {};
   const name = text(model.display_name) || text(model.id);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const cw = said.context_window && typeof said.context_window === "object" ? said.context_window as Record<string, unknown> : {};
+  const quota = said.quota && typeof said.quota === "object" ? said.quota as Record<string, unknown> : {};
   const line = name.slice(0, 80);
   if (!url || !id || !token) return line;
   const payload: Record<string, unknown> = {
     at: Date.now(), agent_state: text(said.agent_state), tool_confirmation_pending: said.tool_confirmation_pending === true,
     session_id: text(said.conversation_id) || text(said.session_id), conversation_title: text(said.conversation_title).slice(0, 300),
     cwd: text(workspace.current_dir) || text(said.cwd), model: name.slice(0, 200),
+    // How full its context and its allowances are (meter.ts `agyMeter`): the numbers only.
+    context: { used_percentage: num(cw.used_percentage), size: num(cw.context_window_size), used: num(cw.total_input_tokens) },
+    quota: Object.fromEntries(Object.entries(quota).slice(0, 12).map(([k, v]) => {
+      const q = v && typeof v === "object" ? v as Record<string, unknown> : {};
+      return [k.slice(0, 40), { remaining_fraction: num(q.remaining_fraction), reset_time: text(q.reset_time).slice(0, 40) }];
+    })),
     // Said only while it is in a mode other than asking each time.
     ...(typeof said.cycle_mode === "string" ? { cycle_mode: said.cycle_mode.slice(0, 40) } : {}),
   };
@@ -154,7 +169,62 @@ async function agy(): Promise<string> {
   return line;
 }
 
-if (process.argv[2] === "agy") {
+/** Claude Code's status line: the user's own runs with the same input while the service is told the numbers. The
+ *  line is printed as the user's printed it (colours, several lines); the service is waited for a moment at most. */
+const OWN_LINE_MS = 10_000;
+const METER_WAIT_MS = 2000;
+async function status(file: string): Promise<string> {
+  const input = await readStdin();
+  let said: Record<string, unknown> = {};
+  try { said = JSON.parse(input || "{}") as Record<string, unknown>; } catch { /* the user's own line still gets it */ }
+  let command = "";
+  try { const own = JSON.parse(readFileSync(file, "utf8")) as { command?: unknown }; if (typeof own.command === "string") command = own.command; } catch { /* none */ }
+  const told = url && id && token
+    ? Promise.race([
+      post(`${url}/terminals/hook`, { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, JSON.stringify({ event: "ClaudeMeter", payload: meterOf(said) })).catch(() => null),
+      new Promise((r) => setTimeout(r, METER_WAIT_MS).unref()),
+    ])
+    : null;
+  const [line] = await Promise.all([command ? ownLine(command, input) : "", told]);
+  return line;
+}
+
+/** Of the status line's input only these cross: the context's size and fill, the two allowances' fill and reset. */
+function meterOf(said: Record<string, unknown>): Record<string, unknown> {
+  const o = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {});
+  const n = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const cw = o(said.context_window), cu = o(cw.current_usage), rl = o(said.rate_limits);
+  const used = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"].reduce((a, k) => a + (n(cu[k]) ?? 0), 0);
+  const limit = (v: unknown) => { const l = o(v); return { used_percentage: n(l.used_percentage), resets_at: n(l.resets_at) ?? (typeof l.resets_at === "string" ? l.resets_at.slice(0, 40) : null) }; };
+  return {
+    at: Date.now(),
+    context: { used_percentage: n(cw.used_percentage), size: n(cw.context_window_size), used: used || null },
+    ...(said.rate_limits !== undefined ? { five_hour: limit(rl.five_hour), seven_day: limit(rl.seven_day) } : {}),
+  };
+}
+
+/** The user's own status line, run as Claude Code runs it (a shell, the same folder and environment, the input on
+ *  stdin); what it printed in its time. */
+function ownLine(command: string, input: string): Promise<string> {
+  return new Promise((resolve) => {
+    const child = spawn("/bin/sh", ["-c", command], { stdio: ["pipe", "pipe", "ignore"] });
+    const parts: Buffer[] = [];
+    const timer = setTimeout(() => child.kill("SIGKILL"), OWN_LINE_MS);
+    child.stdout.on("data", (c: Buffer) => parts.push(c));
+    child.on("error", () => { clearTimeout(timer); resolve(""); });
+    child.on("close", () => { clearTimeout(timer); resolve(Buffer.concat(parts).toString("utf8")); });
+    child.stdin.on("error", () => { /* it did not read its input */ });
+    child.stdin.end(input);
+  });
+}
+
+if (process.argv[2] === "status") {
+  status(process.argv[3] ?? "").catch(() => "").then((out) => {
+    if (out) process.stdout.write(out, () => process.exit(0));
+    else process.exit(0);
+  });
+}
+else if (process.argv[2] === "agy") {
   agy().catch(() => "").then((out) => {
     if (out) process.stdout.write(out, () => process.exit(0));
     else process.exit(0);

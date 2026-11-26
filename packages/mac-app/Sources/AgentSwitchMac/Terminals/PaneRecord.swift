@@ -46,6 +46,9 @@ final class PaneRecord {
     /// What Claude Code offers as your next message (its prompt suggestion), while it shows one; said in the empty
     /// reply box, taken with tab.
     private(set) var suggestion: String?
+    /// How full its context and the allowances are, as its status line said last (docs/simple-view-v0.md §5.25); nil:
+    /// not said on this stream yet — the terminal's own word stands.
+    private(set) var meter: TerminalMeter?
     /// The thinking level just asked for here, until the record says one of its own.
     private(set) var effortAsked: String?
     /// What it is writing now (docs/simple-view-v0.md §5.14), drawn at the record's end. Once the service says the part
@@ -176,7 +179,7 @@ final class PaneRecord {
         session = nil
         toldSession = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil; start = nil
-        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil; daybreakNow = nil
+        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil; meter = nil; daybreakNow = nil
         progress = nil; sent = []; choices = nil; notices = []
         writingTimer?.cancel(); writingTimer = nil; writing = nil; writingDone = false
         draft = ""
@@ -216,6 +219,8 @@ final class PaneRecord {
             modeNow = mode
         case .suggestion(let text):
             suggestion = text
+        case .meter(let now):
+            if meter != now { meter = now }
         case .daybreak(let on):
             daybreakNow = on
         case .writing(let now):
@@ -713,6 +718,8 @@ final class PaneRecord {
 
     /// The design preview's: what it offers as the next message.
     func stageSuggestion(_ text: String?) { suggestion = text }
+    /// The design preview's: what its status line said (docs/simple-view-v0.md §5.25), and the record's usage beside it.
+    func stageMeter(_ now: TerminalMeter?, usage: RecordUsage? = nil) { meter = now; if let usage { self.usage = usage } }
 
     /// The design preview's: what it is writing now.
     func stageWriting(_ now: AgentWriting?) { writing = now }

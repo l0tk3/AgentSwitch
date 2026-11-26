@@ -581,6 +581,32 @@ private struct RecordPromptNote: View {
 /// on a line (while the pane has no side for it), the reply's files, the reply, and a foot with `+`, how it asks, its
 /// model, how full its context is and the send key. ↩ sends, ⇧↩ starts a new line; while it works and nothing is
 /// typed, the key stops it.
+/// Under the reply box (docs/simple-view-v0.md §5.25; user #599): how full the context is (`Context 28%`) and the
+/// account's allowances (`5h 12% · 7d 40%`), one near its end in the colour of what needs you; the pointer on one says
+/// how full in tokens, or when it starts afresh.
+private struct UsageFoot: View {
+    let line: UsageLine
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        if !line.isEmpty {
+            HStack(spacing: 0) {
+                if let context = line.context { part(context, near: false, help: line.contextHelp) }
+                ForEach(Array(line.limits.enumerated()), id: \.offset) { i, limit in
+                    if i > 0 || line.context != nil { Text(" · ").mono(Look.size(10.5, look)).foregroundStyle(Look.faint) }
+                    part(limit.text, near: limit.near, help: limit.help)
+                }
+            }
+            .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder private func part(_ text: String, near: Bool, help: String?) -> some View {
+        let label = Text(text).mono(Look.size(10.5, look)).foregroundStyle(near ? Color.waiting : Look.faint)
+        if let help { label.help(help) } else { label }
+    }
+}
+
 private struct RecordDock: View {
     let state: TerminalPaneState
     let model: TerminalsModel
@@ -598,6 +624,12 @@ private struct RecordDock: View {
 
     /// The ground fades in over this much above the box.
     static let fade: CGFloat = 22
+
+    /// What the line under the box says: the status line's numbers (this stream's, else the terminal's), else the
+    /// record's.
+    private func usageLine(_ info: TerminalInfo?, _ record: PaneRecord) -> UsageLine {
+        RecordDisplay.usageLine(record.usage, meter: record.meter ?? info?.meter, beside: beside, now: Int64(Date().timeIntervalSince1970 * 1000))
+    }
 
     var body: some View {
         @Bindable var record = state.record
@@ -694,9 +726,7 @@ private struct RecordDock: View {
                         .disabled(info?.status == "exited")
                         session(info, record)
                         Spacer(minLength: 8)
-                        if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
-                            Text("Context \(context)").mono(Look.size(10.5, look)).foregroundStyle(Look.faint).lineLimit(1)
-                        }
+                        UsageFoot(line: usageLine(info, record))
                         Button { if stops { record.interrupt() } else { record.send() } } label: {
                             Group {
                                 if record.sending { BrailleSpinner() }
@@ -724,9 +754,7 @@ private struct RecordDock: View {
                 HStack(spacing: 8) {
                     Spacer(minLength: 8)
                     session(info, record)
-                    if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
-                        Text("Context \(context)").mono(Look.size(10.5, look)).foregroundStyle(Look.faint).lineLimit(1)
-                    }
+                    UsageFoot(line: usageLine(info, record))
                 }
                 .padding(.horizontal, 12).padding(.top, 2)
             }
