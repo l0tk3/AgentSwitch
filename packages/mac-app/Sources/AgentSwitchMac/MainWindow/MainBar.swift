@@ -240,21 +240,41 @@ struct MainBar: View {
                     }
                     switch state.page {
                     case .terminals:
-                        // The other view of the terminal in focus (docs/simple-view-v0.md §1): its record, or its screen.
-                        if !head.name.isEmpty {
-                            // Its folder in the code editor (terminal-v0 §1 Mac "在编辑器中打开"): on the bar, which is there
-                            // with one pane too (the panes' own headers are not).
-                            ToolbarPixelButton(rows: PixelArt.toolbarCode, help: "Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
-                            ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
-                                               help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
+                        if look.isClassic {
+                            // Classic (user #486: seven icons in a row were a clutter): the side pane, one menu for what
+                            // is done now and then — the editor, the other view, the two splits — and New Terminal.
+                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: recordSide ? "Hide Side Pane" : "Show Side Pane", lit: recordSide) { recordSide.toggle() } }
+                            Menu {
+                                if !head.name.isEmpty {
+                                    Button(head.simple ? "Terminal View  ⌘⇧E" : "Simple View  ⌘⇧E", action: actions.toggleView)
+                                    Button("Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
+                                    Divider()
+                                }
+                                Button("Split Right  ⌘D") { actions.split("right") }
+                                Button("Split Down  ⌘⇧D") { actions.split("down") }
+                            } label: {
+                                Image(systemName: "ellipsis").font(.system(size: 13, weight: .regular)).foregroundStyle(Color.secondary).frame(width: 26, height: 22).contentShape(Rectangle())
+                            }
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                            .help("More").accessibilityLabel("More")
+                            ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
+                        } else {
+                            // The other view of the terminal in focus (docs/simple-view-v0.md §1): its record, or its screen.
+                            if !head.name.isEmpty {
+                                // Its folder in the code editor (terminal-v0 §1 Mac "在编辑器中打开"): on the bar, which is there
+                                // with one pane too (the panes' own headers are not).
+                                ToolbarPixelButton(rows: PixelArt.toolbarCode, help: "Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
+                                ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
+                                                   help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
+                            }
+                            // The simple view's side pane (tasks, changed files), shown or hidden from the bar (user #477: no
+                            // handy way to open and close it).
+                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: recordSide ? "Hide Side Pane" : "Show Side Pane", lit: recordSide) { recordSide.toggle() } }
+                            // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
+                            ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
+                            ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }
+                            ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
                         }
-                        // The simple view's side pane (tasks, changed files), shown or hidden from the bar (user #477: no
-                        // handy way to open and close it).
-                        if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: recordSide ? "Hide Side Pane" : "Show Side Pane", lit: recordSide) { recordSide.toggle() } }
-                        // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
-                        ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
-                        ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }
-                        ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
                     case .browser:
                         ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Tab ⌘T", action: actions.newTab)
                     case .rooms:
