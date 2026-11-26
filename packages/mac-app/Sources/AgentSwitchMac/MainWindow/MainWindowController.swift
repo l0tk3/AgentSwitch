@@ -317,6 +317,11 @@ final class MainWindowController: NSObject {
             browser.screenID = TerminalSizeHolder.screen(onNodeAs: model.client(on: node).screenOwner, unique: "main")
         }
         browser.onTitle = { [weak self] in self?.updateTitle() }
+        // A tab from a terminal's side pane: the Browser page, on that browser, that tab.
+        terminals.onShowTab = { [weak self, weak browser] key, id in
+            self?.show(.browser)
+            browser?.open(tab: id, in: key)
+        }
         browser.activateBrowser = { [model] in
             guard node == nil else { return }
             model.browserFront.asked()

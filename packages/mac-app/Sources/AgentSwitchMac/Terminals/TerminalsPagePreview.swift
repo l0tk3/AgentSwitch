@@ -21,7 +21,7 @@ import SwiftUI
 /// - `terminals-closed`: the list put away;
 /// - `terminals-record`, `terminals-record-light`, `terminals-record-split-light`, `terminals-record-side-light` (its
 ///   side asked for: context, tasks, the changed files with one open on its diff): the simple view (docs/simple-view-v0.md
-///   §5.2) — a terminal's record in its pane, dark and in the system's light with the list following it, and beside a
+///   §5.2; `terminals-record-side-browser-light` / `-side-browser`: the side with the agent's browser tabs, user #600) — a terminal's record in its pane, dark and in the system's light with the list following it, and beside a
 ///   terminal that stays dark, a request's card at the record's end; the pictures sent with a message small under it,
 ///   a thought of the agent's said quietly, a command with what it is for opened whole and in colour, and a reply
 ///   being written with a picture and a file in its floating box.
@@ -222,6 +222,27 @@ enum TerminalsPagePreview {
             model.focused?.record.stageChanges(["500": [FileDiff(path: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 3, removed: 3, hunks: [
                 FileDiff.Hunk(header: "@@ -212,7 +212,7 @@", lines: ["     HStack(spacing: 8) {", "-        Button(\"Delete\") { remove(version) }", "+        SettingsDeleteButton { remove(version) }", "             .disabled(version.inUse)", "     }"]),
             ])]], open: ["packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"])
+        }
+        // The side with the agent's browser tabs (user #600): the one it is busy in first, with its picture; one
+        // waiting for the user; one idle.
+        RecordBrowserWatch.previewTabs = TerminalBrowserTabs(browser: nil, tabs: [
+            BrowserTab(id: "b1", owner: BrowserOwner(kind: .terminal, id: "t1", label: "claude · AgentSwitch"), title: "Pull requests · agentswitch", url: "https://github.com/agentswitch/agentswitch/pulls", site: "github.com", status: .busy,
+                       action: BrowserAction(tool: "browser_click", description: "click \"Merge\""), viewport: BrowserViewport(width: 1280, height: 800)),
+            BrowserTab(id: "b2", owner: BrowserOwner(kind: .terminal, id: "t1", label: "claude · AgentSwitch"), title: "Sign in", url: "https://accounts.example.com/login", site: "accounts.example.com", status: .waiting,
+                       action: BrowserAction(tool: "browser_wait_for", description: "Waiting for the code")),
+            BrowserTab(id: "b3", owner: BrowserOwner(kind: .terminal, id: "t1", label: "claude · AgentSwitch"), title: "AgentSwitch", url: "http://localhost:5173/", site: "localhost:5173", kind: .local),
+        ])
+        RecordBrowserWatch.previewPicture = picture(wide: true)
+        defer { RecordBrowserWatch.previewTabs = nil; RecordBrowserWatch.previewPicture = nil }
+        try await shot(to: file("terminals-record-side-browser-light"), light: true) { model in
+            model.sideClosed = true
+            stageRecord(model, working: true)
+            PaneRecord.previewOpenStep = nil
+        }
+        try await shot(to: file("terminals-record-side-browser")) { model in
+            model.sideClosed = true
+            stageRecord(model, working: true)
+            PaneRecord.previewOpenStep = nil
         }
     }
 

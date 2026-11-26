@@ -21,6 +21,7 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
     var onDetach: (String) -> Void = { _ in } { didSet { model.onDetach = onDetach } }
     var onAttach: (String) -> Void = { _ in } { didSet { model.onAttach = onAttach } }
     var onRaise: (String) -> Void = { _ in } { didSet { model.onRaise = onRaise } }
+    var onShowTab: (String?, String) -> Void = { _, _ in } { didSet { model.onShowTab = onShowTab } }
     /// The Terminals page is the one on screen: it has the keyboard and is read from the service; under another page it
     /// keeps its screens' streams but takes nothing.
     var onScreen = false { didSet { if onScreen != oldValue { seenChanged() } } }

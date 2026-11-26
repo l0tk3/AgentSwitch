@@ -69,6 +69,8 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate, TerminalsPa
     var onDetach: (String) -> Void = { _ in }
     var onAttach: (String) -> Void = { _ in }
     var onRaise: (String) -> Void = { _ in }
+    /// The web page has no side pane.
+    var onShowTab: (String?, String) -> Void = { _, _ in }
     /// The Terminals page is the one on screen: it has the keyboard, the page hears it is in use, and the terminal it
     /// shows takes its size from it. Hidden under Dispatch, it keeps its stream but takes nothing.
     var onScreen = false {

@@ -24,6 +24,9 @@ struct TerminalRecordPane: View {
     /// unless the user hid it (the reply box's menu, `Hide Side Pane`). Out by default since 2026-11-26 (user #475:
     /// it was there, and nobody found it).
     @AppStorage("terminals.recordSide") private var sideShown = true
+    /// The browser tabs of this terminal's agent, for the side (read only while there is room for one and it is seen).
+    @State private var browser = RecordBrowserWatch()
+    @Environment(\.onScreen) private var onScreen
 
     /// The reading column at its widest (a pane with room to spare puts a side beside it, `RecordLayout`).
     static let column = CGFloat(RecordLayout.column)
@@ -49,7 +52,8 @@ struct TerminalRecordPane: View {
         GeometryReader { geo in
             // With room for both, the task list and the changed files stand beside the record (nothing to put there:
             // no side, the column alone).
-            let side = sideShown && (!record.plan.isEmpty || !files.isEmpty) ? RecordLayout.side(pane: geo.size.width) : nil
+            let room = sideShown ? RecordLayout.side(pane: geo.size.width) : nil
+            let side = !record.plan.isEmpty || !files.isEmpty || !browser.tabs.tabs.isEmpty ? room : nil
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ScrollViewReader { scroller in
@@ -205,14 +209,17 @@ struct TerminalRecordPane: View {
                 if let side {
                     // The classic look: the side pane is a card as the page's own columns are (§8.1).
                     HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
-                    RecordSidePane(record: record, files: files)
+                    RecordSidePane(record: record, files: files, browser: browser, openTab: { key, tab in model.onShowTab(key, tab) })
                         .sideCard(leading: 0, trailing: Look.panelGap, bottom: Look.panelGap)
                         .padding(.top, look.isClassic ? Look.panelGap : 0)
                         .frame(width: side)
                         .contextMenu { Button("Hide Side Pane") { sideShown = false } }
                 }
             }
+            // The agent's tabs are asked for while a side could stand here and the pane is seen.
+            .task(id: "\(info?.id ?? "")|\(room != nil && onScreen)") { browser.follow(terminal: info?.id, client: model.client, on: room != nil && onScreen) }
         }
+        .onDisappear { browser.stop() }
         .background(Look.ground)
         // Files dropped anywhere on the record are the reply's (on a terminal's screen they are typed at once).
         .onDrop(of: [.fileURL], isTargeted: $dropping) { providers in

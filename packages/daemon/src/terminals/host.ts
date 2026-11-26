@@ -1584,6 +1584,13 @@ export class TerminalHost {
     return { harness: s.harness, profile: s.profile?.id ?? null };
   }
 
+  /** Which browser terminal `id`'s agent uses, for the screens: a profile's own by its key, null the shared one;
+   *  undefined when there is no such terminal. */
+  browserKeyOf(id: string): string | null | undefined {
+    const s = this.sessions.get(id);
+    return s ? s.browserKey : undefined;
+  }
+
   browserOf(id: string, token: string): string | null {
     const s = this.sessions.get(id);
     if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");

@@ -3,11 +3,15 @@ import SwiftUI
 
 // Beside the record in a pane's simple view (docs/simple-view-v0.md §5.2 “宽的时候”): where the pane has the room, what
 // the phone folds away is laid out next to the record instead of leaving the window's sides empty — how full the
-// agent's context is, its task list, and the files its work changed, each opening into its diff.
+// agent's context is, its task list, the browser tabs it uses (RecordBrowserBlock), and the files its work changed,
+// each opening into its diff.
 
 struct RecordSidePane: View {
     let record: PaneRecord
     let files: [RecordChangedFile]
+    let browser: RecordBrowserWatch
+    /// Opens one of the agent's tabs on the Browser page: its browser (nil the shared one) and its id.
+    let openTab: (String?, String) -> Void
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -21,6 +25,7 @@ struct RecordSidePane: View {
                         RecordPlanRows(plan: record.plan, size: 12.5)
                     }
                 }
+                if !browser.tabs.tabs.isEmpty { RecordBrowserBlock(watch: browser, open: openTab) }
                 if !files.isEmpty { changes }
             }
             .padding(.horizontal, 16).padding(.vertical, 18)

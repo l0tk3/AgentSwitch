@@ -139,7 +139,7 @@
 - **本地服务**：`lsof` 列出当前用户在 127.0.0.1、::1 与所有接口（`*`，如 `next dev`）上监听的端口，只保留在用户自己文件夹中运行的程序（与 §2 的差异：聊天、代理等应用的回环端口在 `/`、`~/Library` 容器或应用包内运行，列出无用），并去掉 AgentSwitch 自己的（上述端口、daemon 及其子进程、打包的应用、网关代理、`opencode serve --stdio`）。只返回程序的短名，不返回完整命令行（可能含令牌）：可执行文件的名字；解释器（node、python 等）另取它运行的脚本名（带脚本扩展名的文件或 `bin` 目录下的文件，取文件名）或 Python 的 `-m 模块名`；命令行里的其他词一概不取（2026-10-02 审查：原先会把选项的值当成名字）。
 - **审计**：`$AGENTSWITCH_HOME/browser/audit.jsonl`，记录打开、导航（网址去掉查询与片段；路径；端口）、关闭、接手、交还（含 2 分钟到期，`via: daemon`）、拒绝及原因。输入的文字不记录。
 - **接口**（本地与远程白名单相同；`screen` 均可省略）：
-  - `GET /browser/tabs` → `{running, groups: [{owner, tabs: [Tab]}]}`，组的顺序为终端、任务、你。`Tab` = `{id, owner, title, url, site, kind: web|file|local|blank, status, loading, heldBy, action, viewport: {width, height, scale, mobile, by}, openedAt}`。`GET /browser/tabs/:id` → `{tab}`。
+  - `GET /browser/tabs` → `{running, groups: [{owner, tabs: [Tab]}]}`，组的顺序为终端、任务、你。`Tab` = `{id, owner, title, url, site, kind: web|file|local|blank, status, loading, heldBy, action, viewport: {width, height, scale, mobile, by}, openedAt, usedAt}`（`usedAt`：agent 最近一次在它上面动——开它、置为忙或等人、做了一步——的时间，之前等于 `openedAt`；§9）。`GET /browser/tabs/:id` → `{tab}`。
   - `POST /browser/tabs` `{url}`（地址栏原文：网址、裸域名、`localhost:5173`、`/路径`、`~/路径`）| `{path}` | `{port}` → 201 `{tab}`；拒绝 403、文件不存在 404、无法识别 400，均为 `{error}`。`DELETE /browser/tabs/:id` → `{ok}`。
   - `GET /browser/tabs/:id/stream?quality=1..100&fps=1..30&maxWidth=&maxHeight=&scale=1..8`（默认 70、15、1；`scale` 为 2026-10-03 加入，见本节末；上限同日随页面缩放由 3 提到 8，§1）→ SSE，事件名即 `type`，`data` 为 JSON：先 `tab {tab}`；之后 `frame {seq, data (JPEG base64), format, width, height, scale, viewport: {width, height}, pageScale, scrollX, scrollY}`（SSE `id` 为 `seq`）、`url {url, site, kind}`、`title {title}`、`loading {loading}`、`status {status}`、`held {heldBy, reason: take|hand-back|idle}`、`action {action}`、`viewport {viewport}`；`closed {reason: closed|browser-exited|shutdown}` 后流结束；每 10 秒一行注释 `: ping`。
   - `POST /browser/tabs/:id/input` `{screen?, events: [...]}`（最多 50 个），或单个事件加 `screen`：`{type: "mouse", action: move|down|up|click, x, y, button?: left|right|middle, clickCount?: 1..3, modifiers?, seq?}`、`{type: "wheel", x, y, deltaX?, deltaY?, modifiers?, seq?}`、`{type: "text", text}`（`Input.insertText`）、`{type: "key", key, modifiers?}`（`Escape` `Tab` `Enter` `Backspace` `Delete` 方向键 `Home` `End` `PageUp` `PageDown`，以及 `a`–`z` 用于组合键）。坐标为帧像素（`seq` 指定哪一帧，默认最新），除以 `scale` 得视口像素；`modifiers` ⊆ `Alt` `Control` `Meta` `Shift`。Mac 上的编辑命令随键发送（复制、剪切、粘贴除外）。
@@ -337,3 +337,11 @@
 - 服务的测试：`browserCamoufox.test.ts`（截图的节奏：等回执、静止不发、越看越稀、操作后立刻看、出错后继续、关掉后停）、`browserHost.test.ts`（框跟着帧的滚动走、出视口去掉、回来又有、换文档去掉）、`browserAgentContext.test.ts`（先滚进视口再量、带滚动位置）、`browserAgents.test.ts`（滚动位置经桥到宿主）。
 - 真的 Camoufox（`scripts/browser_scroll_probe.ts <程序> window|headless`，用服务自己的宿主和驱动，一次性的目录）：十条 400 像素高的色带、一条固定在窗口底边的黑条、1700 处一个白按钮。滚到 0、1600、2500 再回 0，画面顶上的颜色都是该处的文档，底边的黑条都在，帧报的滚动位置与页面一致；按钮的框在页面另外滚了 +120、−90 之后仍落在白按钮上，滚回顶部后不带框。带窗口和无窗口各跑过，全部通过。
 - **没验证的**：没有从另一台 Mac 或手机上实际看（要装新版）；Chrome 作引擎时的画面没有重新量（它的帧一直是视口的，这次没改它）；配置自己的浏览器走的是同一个驱动，没有单独试。
+
+## 9. 简略视图的侧边栏里看终端在用的标签（2026-11-26，用户 #600）
+
+用户：侧边栏想办法把他们正在操作的浏览器也展示出来。
+
+- **服务端**：标签本来就记着是谁开的（`owner: {kind: "terminal", id: 终端 id}`，配置自己的浏览器里也一样，`agents.ts` 的 `terminalOwner`），不用补。补的是两样：每个标签多一个 `usedAt`（见 §5 的 `Tab`）；新接口 `GET /terminals/:id/browser` → `{browser, tabs}`——`browser` 是这个终端的 agent 用的浏览器（null 为共用的，否则是配置的 key，路由在 `/profile-browser/<key>` 下），`tabs` 是它在那里的标签，忙或等人的在前，其余按 `usedAt` 从新到旧（`terminalTabs`，`api/browser.ts`）。只给本机，配对的设备 403；没有这个终端 404。测试 `terminalBrowserTabs.test.ts`。
+- **Mac**：见 simple-view-v0 §5.2「右侧栏」。画面用现有的画面流（`/browser/tabs/:id/stream`，每秒 2 帧、宽不过侧栏的像素、质量 55，不带倍数，所以不会把标签改画成更高的倍数）；侧栏看不见时停流。
+- **没做的**：别的节点的终端（经本机转过去的请求算配对设备，403），手机上没有这一块。

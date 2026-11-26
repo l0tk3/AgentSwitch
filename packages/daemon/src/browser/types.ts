@@ -42,6 +42,9 @@ export type TabInfo = {
   /** The size in force; `by` is the holding screen that set it, null for the default. */
   readonly viewport: Viewport & { readonly by: string | null };
   readonly openedAt: number;
+  /** When its agent last acted on it (opened it, set it busy or waiting, did something on it); `openedAt` until then.
+   *  The simple view's side pane puts the terminal's tab it acted on last first (docs/simple-view-v0.md §5.2 右侧栏). */
+  readonly usedAt: number;
 };
 
 export type TabGroup = { readonly owner: TabOwner; readonly tabs: readonly TabInfo[] };

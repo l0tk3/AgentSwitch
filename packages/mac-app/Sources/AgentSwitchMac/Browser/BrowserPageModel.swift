@@ -347,6 +347,13 @@ final class BrowserPageModel {
         publish()
     }
 
+    /// A tab asked for from elsewhere (a terminal's side pane): its browser on the page, then the tab on screen.
+    func open(tab id: String, in key: String?) {
+        show(browser: key)
+        select(id)
+        Task { await refresh() }
+    }
+
     /// Every tab this Mac holds but `keeping`, given back: its agent goes on, its size goes back to the default.
     private func handBackHeld(keeping: String?) {
         let held = list.tabs.filter { $0.heldBy == screenID && $0.id != keeping }.map(\.id)

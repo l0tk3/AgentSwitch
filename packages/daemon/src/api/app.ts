@@ -1,7 +1,7 @@
 /** HTTP API. The phone is just another client of these routes; the CLI uses the same ones. */
 
 import { Hono } from "hono";
-import { mountBrowser, mountProfileBrowsers } from "./browser.js";
+import { mountBrowser, mountProfileBrowsers, mountTerminalBrowser } from "./browser.js";
 import { mountBrowserEngine } from "./browserEngine.js";
 import { mountBrowserIdentity } from "./browserIdentity.js";
 import { mountUpdate } from "./update.js";
@@ -45,6 +45,7 @@ export function createApp(deps: ApiDeps): Hono {
   mountDispatchDesk(app, deps);
   mountBrowser(app, deps);
   mountProfileBrowsers(app, deps);
+  mountTerminalBrowser(app, deps);
   mountBrowserEngine(app, deps);
   mountBrowserIdentity(app, deps);
   mountLive(app, deps);

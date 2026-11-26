@@ -161,6 +161,8 @@ final class TerminalsModel {
     @ObservationIgnored var onDetach: (String) -> Void = { _ in }
     @ObservationIgnored var onAttach: (String) -> Void = { _ in }
     @ObservationIgnored var onRaise: (String) -> Void = { _ in }
+    /// A tab of a terminal's agent to the Browser page (the side pane's `Browser`): its browser (nil the shared one), its id.
+    @ObservationIgnored var onShowTab: (String?, String) -> Void = { _, _ in }
     /// The window's Files column (docs/files-v0.md): the list's `Show in Files`, the panes' icons.
     @ObservationIgnored weak var files: FilesColumn?
 

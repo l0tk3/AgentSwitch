@@ -107,6 +107,7 @@ type TabState = {
   readonly id: string;
   readonly owner: TabOwner;
   readonly openedAt: number;
+  readonly usedAt: number;
   readonly url: string;
   readonly title: string;
   readonly loading: boolean;
@@ -397,7 +398,7 @@ export class BrowserHost {
   /** The agent bridge: busy, waiting for the user, idle. */
   setStatus(id: string, status: TabStatus): void {
     if (this.must(id).status === status) return;
-    this.update(id, { status });
+    this.update(id, { status, ...(status !== "idle" ? { usedAt: this.now() } : {}) });
     this.emit(id, { type: "status", status });
   }
 
@@ -414,7 +415,7 @@ export class BrowserHost {
     const { box: _measured, ...said } = action ?? { tool: "", description: "" };
     const box = placed && rt?.shown ? boxNow(placed.box, placed.scroll, rt.shown.scroll, rt.shown.view) : action?.box ?? null;
     const next = action ? { ...said, ...(box ? { box } : {}), at: this.now() } : null;
-    this.update(id, { action: next });
+    this.update(id, { action: next, ...(next ? { usedAt: this.now() } : {}) });
     this.emit(id, { type: "action", action: next });
   }
 
@@ -702,7 +703,7 @@ export class BrowserHost {
     let id = randomBytes(4).toString("hex");
     while (this.states.has(id)) id = randomBytes(4).toString("hex");
     this.states.set(id, {
-      id, owner, openedAt: this.now(), url: page.url() || "about:blank", title: page.title(), loading: false,
+      id, owner, openedAt: this.now(), usedAt: this.now(), url: page.url() || "about:blank", title: page.title(), loading: false,
       status: "idle", heldBy: null, action: null, viewport: this.defaultViewport, viewportBy: null,
     });
     const screencast = new Screencast(page, this.now, this.log, () => this.redraw(id), () => this.strayed(id), (frame) => this.scrolled(id, frame));
@@ -813,7 +814,7 @@ export class BrowserHost {
   private info(s: TabState): TabInfo {
     return {
       id: s.id, owner: s.owner, title: s.title, url: s.url, ...placeOf(s.url, this.opts.files.home), status: s.status, loading: s.loading,
-      heldBy: s.heldBy, action: s.action, viewport: { ...s.viewport, by: s.viewportBy }, openedAt: s.openedAt,
+      heldBy: s.heldBy, action: s.action, viewport: { ...s.viewport, by: s.viewportBy }, openedAt: s.openedAt, usedAt: s.usedAt,
     };
   }
 

@@ -13,7 +13,7 @@ import { KEY_NAMES, MODIFIERS, MOUSE_BUTTONS, type InputEvent } from "../browser
 import { auditUrl, targetUrl, type OpenTarget } from "../browser/rules.js";
 import { DEFAULT_STREAM, MAX_FPS, MAX_SCALE, MAX_VIEW_PIXELS, type StreamOptions } from "../browser/screencast.js";
 import { speedBody, speedSize } from "../browser/speed.js";
-import { BrowserError, YOU, type BrowserEvent } from "../browser/types.js";
+import { BrowserError, YOU, type BrowserEvent, type TabInfo } from "../browser/types.js";
 import { mountBrowserAgents } from "./browserAgents.js";
 import { mountBrowserIdentity } from "./browserIdentity.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
@@ -142,6 +142,24 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
     const url = new URL(c.req.url);
     url.pathname = at[2]!;
     return sub.fetch(new Request(url, c.req.raw), c.env);
+  });
+}
+
+/** The tabs of one terminal's agent (docs/simple-view-v0.md §5.2 右侧栏, browser-v0 §2): which browser it uses (`browser`:
+ *  null the shared one, else a profile's own by its key, whose routes are under `/profile-browser/<key>`) and its tabs
+ *  there, the one it is busy in or acted on last first. Local only, as the Mac's list of previews. */
+export function terminalTabs(tabs: readonly TabInfo[], terminal: string): TabInfo[] {
+  const rank = (t: TabInfo) => (t.status === "idle" ? 0 : 1);
+  return tabs.filter((t) => t.owner.kind === "terminal" && t.owner.id === terminal).sort((a, b) => rank(b) - rank(a) || b.usedAt - a.usedAt);
+}
+
+export function mountTerminalBrowser(app: Hono, deps: ApiDeps): void {
+  app.get("/terminals/:id/browser", (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
+    const key = deps.terminals?.host.browserKeyOf(c.req.param("id"));
+    if (key === undefined) return c.json({ error: "not found" }, 404);
+    const browser = key ? deps.profileBrowsers?.get(key) ?? null : deps.browser ?? null;
+    return c.json({ browser: key, tabs: browser ? terminalTabs(browser.host.list(), c.req.param("id")) : [] });
   });
 }
 

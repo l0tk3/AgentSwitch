@@ -20,6 +20,8 @@ protocol TerminalsPage: AnyObject {
     var onDetach: (String) -> Void { get set }
     var onAttach: (String) -> Void { get set }
     var onRaise: (String) -> Void { get set }
+    /// A terminal's tab opened on the Browser page (the simple view's side pane): its browser (nil the shared one), its id.
+    var onShowTab: (String?, String) -> Void { get set }
 
     func load(terminal id: String?)
     func show(terminal id: String)
