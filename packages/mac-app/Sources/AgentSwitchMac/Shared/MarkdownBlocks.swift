@@ -53,6 +53,7 @@ private struct MarkdownBlockView: View {
     let block: DispatchMarkdownBlock
     let size: CGFloat
     let lineSpacing: CGFloat
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         switch block {
@@ -77,25 +78,51 @@ private struct MarkdownBlockView: View {
         case .code(let language, let text):
             CodeBlockView(code: text, language: language, size: size - 2)
         case .table(let header, let rows):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
-                    GridRow {
-                        ForEach(header.indices, id: \.self) { c in Text(inline(header[c])).bold() }
-                    }
-                    Rectangle().fill(Look.line).frame(height: 1).gridCellUnsizedAxes(.horizontal)
-                    ForEach(rows.indices, id: \.self) { r in
-                        GridRow {
-                            ForEach(rows[r].indices, id: \.self) { c in Text(inline(rows[r][c])) }
-                        }
-                    }
-                }
-                .font(.system(size: size - 1))
-                .padding(10)
-            }
-            .background(Look.raised)
-            .framed(Look.line, radius: 8)
+            if look.isClassic { classicTable(header, rows) } else { boxedTable(header, rows) }
         case .rule:
             HairRule(color: Look.line)
+        }
+    }
+
+    private func boxedTable(_ header: [String], _ rows: [[String]]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                GridRow {
+                    ForEach(header.indices, id: \.self) { c in Text(inline(header[c])).bold() }
+                }
+                Rectangle().fill(Look.line).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                ForEach(rows.indices, id: \.self) { r in
+                    GridRow {
+                        ForEach(rows[r].indices, id: \.self) { c in Text(inline(rows[r][c])) }
+                    }
+                }
+            }
+            .font(.system(size: size - 1))
+            .padding(10)
+        }
+        .background(Look.raised)
+        .framed(Look.line, radius: 8)
+    }
+
+    /// Classic (user #469): no box around it — the head's words quieter, a hairline under each row, as wide as it is.
+    private func classicTable(_ header: [String], _ rows: [[String]]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(header.indices, id: \.self) { c in
+                        Text(inline(header[c])).font(.system(size: size - 1.5, weight: .semibold)).foregroundStyle(Look.ink2).padding(.vertical, 7)
+                    }
+                }
+                Rectangle().fill(Look.ring).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                ForEach(rows.indices, id: \.self) { r in
+                    GridRow {
+                        ForEach(rows[r].indices, id: \.self) { c in Text(inline(rows[r][c])).padding(.vertical, 7) }
+                    }
+                    if r < rows.count - 1 { Rectangle().fill(Look.ring.opacity(0.6)).frame(height: 0.5).gridCellUnsizedAxes(.horizontal) }
+                }
+            }
+            .font(.system(size: size - 0.5))
+            .padding(.vertical, 2)
         }
     }
 
