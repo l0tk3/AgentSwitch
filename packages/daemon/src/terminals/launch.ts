@@ -7,7 +7,7 @@ import { profileEnvironment } from "./profileEnvironment.js";
 import { EFFORT, effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { GROK_HOOK_NODE, GROK_HOOK_SCRIPT } from "./grokHooks.js";
-import { AGY_HOME_VAR, agySettings } from "./agy.js";
+import { AGY_HOME_VAR, agyDenyRules, agySettings } from "./agy.js";
 import { CodexCompanion } from "./codexTerminal.js";
 import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
@@ -552,7 +552,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         opts.agyMcp?.();
         // Settings of this one start, never saved: its status line is the hook program (status, the conversation it
         // writes, its title, its model), and asking each time is stated — it starts in `auto` unless told.
-        const args = ["--settings", JSON.stringify(agySettings(req.mode, `${hookCommand} agy`))];
+        const args = ["--settings", JSON.stringify(agySettings(req.mode, `${hookCommand} agy`, agyDenyRules(opts.protected, env.HOME ?? "")))];
         // A home other than `~/.gemini` (AgentSwitch's own variable: tests, probes): the program's own flag for it.
         if (env[AGY_HOME_VAR]?.trim()) args.unshift(`--gemini_dir=${env[AGY_HOME_VAR]!.trim()}`);
         // The level is part of the model's id; without a model, `--effort` (harness/efforts.ts). Neither is saved.

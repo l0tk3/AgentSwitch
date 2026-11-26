@@ -30,6 +30,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { rootSpellings, type ProtectedPaths } from "../core/protected.js";
 import type { PermissionMode, ScreenRow } from "./host.js";
 
 export { AGY_HOME_VAR, agyGeminiDir, agyHome } from "../sessions/agy.js";
@@ -38,13 +39,51 @@ export { AGY_HOME_VAR, agyGeminiDir, agyHome } from "../sessions/agy.js";
 export const AGY_STATUS_EVENT = "AgyStatus";
 
 /** `--settings` for one terminal: the status line that reports to the service (`statusCommand`; none: its status is
- *  guessed from its output), and asking each time where that is how the terminal was started. */
-export function agySettings(mode: PermissionMode, statusCommand: string | null): Record<string, unknown> {
+ *  guessed from its output), asking each time where that is how the terminal was started, and (`deny`) the protected
+ *  paths refused by its own rules. */
+export function agySettings(mode: PermissionMode, statusCommand: string | null, deny: readonly string[] = []): Record<string, unknown> {
   return {
     ...(mode === "manual" ? { agentMode: "", toolPermission: "request-review" } : {}),
     ...(statusCommand ? { statusLine: { type: "command", command: statusCommand, enabled: true } } : {}),
+    ...(deny.length ? { permissions: { deny } } : {}),
   };
 }
+
+/** How many words deep a command is looked through for a protected path (a floor: `sudo -u x sh -c "cat …"` is five). */
+const AGY_COMMAND_WORDS = 10;
+
+/** The protected paths as Antigravity's own `permissions.deny` rules (docs/terminal-v0.md §3 Antigravity): no reading
+ *  the read-denied ones, no writing the protected ones, and no command one of whose words names one.
+ *
+ *  Its file rules take a directory and cover everything under it. Its command rules are a word-by-word prefix; with
+ *  `regex:` each word is an anchored regular expression, and the rule is one `regex:` for the whole argument — so a path
+ *  found in the n-th word is `command(regex:.* … .*<path>.*)` with n-1 `.*` before it (measured 2026-11-26: a path in
+ *  the second word is refused by `command(regex:.* .*<path>.*)`). `AGY_COMMAND_WORDS` such rules are made for each path.
+ *  A word is matched as it is found in a command: under the home from the home on (`.agentswitch/vault`, in the absolute
+ *  word, the `~`/`$HOME` ones and the data volume's alike), and a path with a space by the word after its last space. */
+export function agyDenyRules(prot: ProtectedPaths | undefined, home: string = ""): string[] {
+  if (!prot) return [];
+  const rules = new Set<string>();
+  const roots = [...new Set([...prot.roots, ...(prot.readDenied ?? [])])];
+  for (const root of roots) {
+    for (const p of rootSpellings(root)) rules.add(`read_file(${p})`);
+    const needle = regexEscape(commandNeedle(root, home));
+    for (let words = 1; words <= AGY_COMMAND_WORDS; words++) {
+      rules.add(`command(regex:${[...Array(words - 1).fill(".*"), `.*${needle}.*`].join(" ")})`);
+    }
+  }
+  for (const p of prot.roots.flatMap(rootSpellings)) rules.add(`write_file(${p})`);
+  return [...rules];
+}
+
+/** The word of a command that names `root`: under the home from the home on, else the part after its last space. */
+function commandNeedle(root: string, home: string): string {
+  const under = home && (root === home || root.startsWith(`${home}/`)) ? root.slice(home.length + 1) : root;
+  const at = under.lastIndexOf(" ");
+  return at >= 0 ? under.slice(at + 1) : under;
+}
+
+const regexEscape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export type AgyState = "working" | "waiting" | "idle" | "error";
 

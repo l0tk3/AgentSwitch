@@ -17,7 +17,7 @@ import { agyOffer, ModelOffers } from "../src/models/modelOffers.js";
 import { agyGeminiDir, agyHome, agyMessages, agyToolCalls, agyTranscript } from "../src/sessions/agy.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
 import { SessionSearch } from "../src/sessions/search.js";
-import { AGY_MCP_SERVER, agyInputEmpty, agyMcpEntry, agySettings, agyStatus, ensureAgyMcp } from "../src/terminals/agy.js";
+import { AGY_MCP_SERVER, agyDenyRules, agyInputEmpty, agyMcpEntry, agySettings, agyStatus, ensureAgyMcp } from "../src/terminals/agy.js";
 import { slashCommands } from "../src/terminals/commands.js";
 import { elsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
 import { choicesOnScreen, TerminalHost, type Launcher } from "../src/terminals/host.js";
@@ -98,6 +98,27 @@ describe("an Antigravity terminal", () => {
     expect(effortArgs("agy", "minimal", "gemini-3.8-flash-low")).toEqual({ args: [], model: "gemini-3.8-flash-low" });
     expect(effortsFor({ any: {}, models: {} }, "agy", undefined)).toEqual(AGY_EFFORTS);
     expect(effortsFor({ any: {}, models: { agy: { "claude-sonnet-4-6": [] } } }, "agy", "claude-sonnet-4-6")).toBeNull();
+  });
+
+  it("refuses the protected paths by its own rules: no reading, no writing, no command naming them", () => {
+    const stateDir = tmp("deny");
+    const prot = { roots: ["/Users/u/.agentswitch/vault", "/Library/Application Support/AgentSwitch/gate-public/gate.sock"], exempt: [], readDenied: ["/Users/u/.secret-gate"] };
+    const launch = agentLauncher({ binaries: { agy: "/bin/agy" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", HOME: "/Users/u" }, protected: prot });
+    const deny: string[] = JSON.parse(launch({ id: "d1", harness: "agy", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args[1]!).permissions.deny;
+    expect(deny).toContain("read_file(/Users/u/.agentswitch/vault)");
+    expect(deny).toContain("write_file(/Users/u/.agentswitch/vault)");
+    // Read-denied but not protected: no reading; write is refused with the read (its own rule says so).
+    expect(deny).toContain("read_file(/Users/u/.secret-gate)");
+    // A command that names it: its own word, at any of the first ten (`regex:` words are tried position by position;
+    // `.agentswitch/vault` is also in the ~, $HOME and data-volume spellings of the word).
+    expect(deny).toContain("command(regex:.*\\.agentswitch/vault.*)");
+    expect(deny).toContain("command(regex:.* .*\\.agentswitch/vault.*)");
+    // A path with a space: the file rule as written, and the word after its last space for a command.
+    expect(deny).toContain("read_file(/Library/Application Support/AgentSwitch/gate-public/gate.sock)");
+    expect(deny).toContain("command(regex:.* .*Support/AgentSwitch/gate-public/gate\\.sock.*)");
+    // Nothing to refuse, nothing sent.
+    expect(agyDenyRules(undefined)).toEqual([]);
+    expect(agySettings("auto", null)).toEqual({});
   });
 
   it("its status line is read: what it does, whether it waits, how it asks, its title and model", () => {
