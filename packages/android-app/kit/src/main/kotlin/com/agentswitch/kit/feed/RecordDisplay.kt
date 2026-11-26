@@ -1,5 +1,6 @@
 package com.agentswitch.kit.feed
 
+import com.agentswitch.kit.api.TerminalMeter
 import com.agentswitch.kit.api.PlanEntry
 import com.agentswitch.kit.api.RecordItem
 import com.agentswitch.kit.api.RecordStep
@@ -174,6 +175,48 @@ object RecordDisplay {
         return if (used >= 1_000_000) "${(used.toDouble() / 1_000_000).cFixed(1)}M" else "${maxOf(1, roundAway(used.toDouble() / 1000).toInt())}k"
     }
 
+    /**
+     * The line under the reply box (docs/simple-view-v0.md §5.25; the Mac's `usageLine`): the context's fill as its status
+     * line said it (`meter`), else as the record says; the allowances from the status line, else from the record
+     * (Codex). `now`: milliseconds since 1970, for when an allowance starts afresh.
+     */
+    fun usageLine(usage: RecordUsage?, meter: TerminalMeter?, now: Long): UsageLine {
+        var context: String? = null
+        var help: String? = null
+        val c = meter?.context
+        if (c != null) {
+            context = "Context ${roundAway(c.percent.coerceIn(0.0, 100.0)).toInt()}%"
+            if (c.used != null && c.window != null && c.used > 0 && c.window > 0) help = "${tokens(c.used)} / ${tokens(c.window)}"
+        } else context(usage)?.let { words ->
+            context = "Context $words"
+            val used = usage?.used
+            val window = usage?.window
+            if (used != null && window != null && used > 0 && window > 0) help = "${tokens(used)} / ${tokens(window)}"
+        }
+        val limits = (meter?.limits?.takeIf { it.isNotEmpty() } ?: usage?.limits ?: emptyList()).map { l ->
+            UsageLine.Limit(
+                "${l.label} ${roundAway(l.percent.coerceIn(0.0, 100.0)).toInt()}%", near = l.percent >= 80,
+                help = l.resetsAt?.takeIf { it > now }?.let { "Resets in ${span((it - now) / 1000)}" },
+            )
+        }
+        return UsageLine(context, help, limits)
+    }
+
+    /** `2h 1m`, `5d 8h`, `12m`, `40s`. */
+    fun span(seconds: Long): String {
+        val d = seconds / 86_400
+        val h = seconds % 86_400 / 3600
+        val m = seconds % 3600 / 60
+        if (d > 0) return if (h > 0) "${d}d ${h}h" else "${d}d"
+        if (h > 0) return if (m > 0) "${h}h ${m}m" else "${h}h"
+        return if (m > 0) "${m}m" else "${maxOf(0, seconds)}s"
+    }
+
+    /** `280k`, `1M`, `1.5M`. */
+    private fun tokens(n: Int): String =
+        if (n >= 1_000_000) (if (n % 1_000_000 == 0) "${n / 1_000_000}M" else "${(n.toDouble() / 1_000_000).cFixed(1)}M")
+        else "${maxOf(1, roundAway(n.toDouble() / 1000).toInt())}k"
+
     /** The agent's own word for how it asks, as the screens say it; null for one this app does not know. */
     fun mode(raw: String?): String? = when (raw) {
         "default", "manual", "untrusted" -> "Ask"
@@ -266,4 +309,18 @@ object RecordDisplay {
         if (model == null) return false
         return option.id == model || option.name == ModelName.display(model)
     }
+}
+
+/** The line under the reply box (docs/simple-view-v0.md §5.25): how full the context is, and the allowances. */
+data class UsageLine(
+    /** `Context 28%` (or the tokens in it where its size is not known); null: not said. */
+    val context: String?,
+    /** How full in tokens (`280k / 1M`), for a long press; null where not known. */
+    val contextHelp: String?,
+    val limits: List<Limit>,
+) {
+    /** One allowance: `5h 12%`; `near` (80% and over) in the colour of what needs you; when it starts afresh. */
+    data class Limit(val text: String, val near: Boolean, val help: String?)
+
+    val isEmpty: Boolean get() = context == null && limits.isEmpty()
 }

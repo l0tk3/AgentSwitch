@@ -162,6 +162,11 @@ object DemoData {
             model = if (clash) "gpt-6.1-sol" else if (daybreak) "gpt-6-sol" else "claude-opus-5-5", mode = if (daybreak) "manual" else "auto", name = "iPhone 终端标签页",
             status = if (busy) TerminalStatus.Working else if (idle) TerminalStatus.Idle else TerminalStatus.Waiting, cols = 52, rows = 30,
             createdAt = ago(1800), lastOutputAt = ago(20), agentSessionId = "c9",
+            // The line under the reply box (docs/simple-view-v0.md §5.25): `Context 28% · 5h 12% · 7d 84%`.
+            meter = if (daybreak) null else com.agentswitch.kit.api.TerminalMeter(
+                com.agentswitch.kit.api.TerminalMeter.Context(28.0, used = 280_000, window = 1_000_000),
+                listOf(com.agentswitch.kit.api.UsageLimit("5h", 12.0, ago(-7260)), com.agentswitch.kit.api.UsageLimit("7d", 84.0, ago(-460_800))),
+            ),
             permissions = if (screen == "terminallink" || busy || prompt || idle) emptyList()
             else listOf(
                 if (screen == "terminalquestion" || screen == "simplequestion") question

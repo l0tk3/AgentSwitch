@@ -361,6 +361,8 @@ data class RecordUsage(
     val window: Int? = null,
     /** How hard it thought at the last turn, in the agent's word (Claude Code, Codex). */
     val effort: String? = null,
+    /** The account's allowances as the record said last (Codex's rate limits), the shorter window first. */
+    val limits: List<UsageLimit>? = null,
 )
 
 /** `GET /sessions/:harness/:id/record`. */

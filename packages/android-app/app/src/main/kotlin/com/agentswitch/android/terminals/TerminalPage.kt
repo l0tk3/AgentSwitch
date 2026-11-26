@@ -1,5 +1,6 @@
 package com.agentswitch.android.terminals
 
+import androidx.compose.ui.text.withStyle
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -721,7 +722,7 @@ private fun PageContent(opened: TerminalInfo, page: TerminalPageModel, record: S
             daybreakLabel = if (daybreak != null && page.status != TerminalStatus.Exited) TerminalDaybreak.word(daybreak) else null,
             onDaybreakMenu = { openDaybreakMenu(it) },
             daybreakClash = if (simple) daybreakClash else null,
-            context = RecordDisplay.context(record.usage), hasDaybreak = daybreak != null,
+            usage = RecordDisplay.usageLine(record.usage, page.meter, System.currentTimeMillis()), hasDaybreak = daybreak != null,
             suggestion = page.suggestion?.takeIf { !sealing && reply.text.isEmpty() && page.status == TerminalStatus.Idle && it.isNotEmpty() },
         )
     }
@@ -851,7 +852,7 @@ private fun Controls(
     showKeys: Boolean, prompting: Boolean, onHideKeyboard: () -> Unit, onKey: (TerminalKey) -> Unit,
     onSend: () -> Unit, onSendSealed: () -> Unit, onPlus: (Rect) -> Unit, onImages: ((List<UploadFile>) -> Unit)?,
     onSuggest: (String) -> Unit, modelLabel: String, mode: String, onModelMenu: (Rect) -> Unit, effort: EffortLine?,
-    daybreakLabel: String?, onDaybreakMenu: (Rect) -> Unit, daybreakClash: String?, context: String?, hasDaybreak: Boolean, suggestion: String?,
+    daybreakLabel: String?, onDaybreakMenu: (Rect) -> Unit, daybreakClash: String?, usage: com.agentswitch.kit.feed.UsageLine, hasDaybreak: Boolean, suggestion: String?,
 ) {
     val suggestions = if (sealing) emptyList() else SlashCommand.matching(reply.text, page.commands)
     val commandsMissing = !sealing && page.commandsUnavailable && reply.text.startsWith("/") && reply.text.none { it.isWhitespace() }
@@ -889,7 +890,7 @@ private fun Controls(
         if (daybreakClash != null) {
             Text(daybreakClash, Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l).padding(bottom = 6.dp), color = Theme.waiting, style = plain(13))
         }
-        if (simple) SessionLine(page, mode, modelLabel, onModelMenu, effort, daybreakLabel, onDaybreakMenu, context, hasDaybreak)
+        if (simple) SessionLine(page, mode, modelLabel, onModelMenu, effort, daybreakLabel, onDaybreakMenu, usage, hasDaybreak)
     }
 }
 
@@ -1069,7 +1070,7 @@ private fun OfferedRow(text: String, use: () -> Unit) {
 @Composable
 private fun SessionLine(
     page: TerminalPageModel, mode: String, modelLabel: String, onModelMenu: (Rect) -> Unit, effort: EffortLine?,
-    daybreakLabel: String?, onDaybreakMenu: (Rect) -> Unit, context: String?, hasDaybreak: Boolean,
+    daybreakLabel: String?, onDaybreakMenu: (Rect) -> Unit, usage: com.agentswitch.kit.feed.UsageLine, hasDaybreak: Boolean,
 ) {
     val tertiary = Theme.inkDim
     Row(Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l).padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1086,9 +1087,32 @@ private fun SessionLine(
             MenuWord(daybreakLabel, false, onDaybreakMenu)
         }
         Spacer(Modifier.weight(1f))
-        // With Codex's Daybreak switch in the row there is no room for the word: the figure alone.
-        if (context != null) Text(if (!hasDaybreak) "Context $context" else context, color = tertiary, style = mono(11), maxLines = 1)
+        // With Codex's Daybreak switch in the row there is no room for the word: the figure alone. With the account's
+        // allowances the whole line has one of its own, below.
+        val context = usage.context
+        if (context != null && usage.limits.isEmpty()) Text(if (!hasDaybreak) context else context.removePrefix("Context "), color = tertiary, style = mono(11), maxLines = 1)
     }
+    if (usage.limits.isNotEmpty()) UsageFoot(usage)
+}
+
+/**
+ * How full the context is and the account's allowances (docs/simple-view-v0.md §5.25; the Mac's `UsageFoot`):
+ * `Context 28% · 5h 12% · 7d 84%`, one near its end in the colour of what needs you.
+ */
+@Composable
+private fun UsageFoot(usage: com.agentswitch.kit.feed.UsageLine) {
+    val tertiary = Theme.inkDim
+    val parts = listOfNotNull(usage.context?.let { it to false }) + usage.limits.map { it.text to it.near }
+    Text(
+        androidx.compose.ui.text.buildAnnotatedString {
+            parts.forEachIndexed { i, (text, near) ->
+                if (i > 0) append(" · ")
+                if (near) withStyle(androidx.compose.ui.text.SpanStyle(color = Theme.waiting)) { append(text) } else append(text)
+            }
+        },
+        Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l).padding(bottom = 6.dp),
+        color = tertiary, style = mono(11), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.End,
+    )
 }
 
 /** A word that opens a menu, with its ▾. A line of small words is hard to hit: it takes the room around its own. */

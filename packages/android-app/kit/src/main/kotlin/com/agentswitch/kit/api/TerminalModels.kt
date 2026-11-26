@@ -324,6 +324,9 @@ data class TerminalInfo(
     val notices: List<ScreenNotice> = emptyList(),
     /** The profile it runs under; null: the Mac's own (and from a Mac that does not say). */
     val profile: TerminalProfile? = null,
+    /** How full its context and the allowances are, as its status line said last (docs/simple-view-v0.md §5.25);
+     *  null: not said (and from a Mac that does not say). */
+    val meter: TerminalMeter? = null,
 ) {
     /** [createdAt], milliseconds since 1970. */
     val created: Long get() = createdAt
@@ -343,13 +346,14 @@ data class TerminalInfo(
             subagents: List<TerminalSubagent> = emptyList(), modelNow: String? = null, effort: String? = null, suggestion: String? = null,
             daybreak: Boolean? = null, sets: Boolean? = null, progress: TurnProgress? = null, sent: List<SentReply> = emptyList(),
             choices: ScreenChoices? = null, notices: List<ScreenNotice> = emptyList(), profile: TerminalProfile? = null,
+            meter: TerminalMeter? = null,
         ): TerminalInfo = TerminalInfo(
             id = id, harness = harness, cwd = cwd, workdir = workdir ?: cwd, model = model, modelNow = modelNow, suggestion = suggestion,
             daybreak = daybreak, sets = sets, effort = effort, mode = mode, name = name, customName = customName, status = status,
             cols = cols, rows = rows, createdAt = createdAt, lastOutputAt = lastOutputAt, exitCode = exitCode,
             agentSessionId = agentSessionId, resumedFrom = resumedFrom, forked = forked, permissions = permissions,
             activity = activity, statusSince = statusSince, subagents = subagents, progress = progress, sent = sent,
-            choices = choices, notices = notices, profile = profile,
+            choices = choices, notices = notices, profile = profile, meter = meter,
         )
     }
 }
@@ -391,6 +395,7 @@ internal object TerminalInfoSerializer : ObjectReader<TerminalInfo>("TerminalInf
             choices = o.lenient("choices", ScreenChoices.serializer()),
             notices = o.lenient("notices", ListSerializer(ScreenNotice.serializer())) ?: emptyList(),
             profile = o.lenient("profile", TerminalProfile.serializer()),
+            meter = o.lenient("meter", TerminalMeter.serializer()),
         )
     }
 }
@@ -755,6 +760,9 @@ sealed class TerminalEvent {
     /** Codex's Daybreak switch stands otherwise now. */
     data class Daybreak(val on: Boolean) : TerminalEvent()
 
+    /** How full its context and the allowances are, as its status line said (docs/simple-view-v0.md §5.25). */
+    data class Meter(val meter: TerminalMeter) : TerminalEvent()
+
     /** What it is writing now (docs/simple-view-v0.md §5.14; null: nothing is). */
     data class Writing(val writing: AgentWriting?) : TerminalEvent()
 
@@ -866,6 +874,7 @@ sealed class TerminalEvent {
                 "record" -> obj["rev"].stringValue()?.let { Record(rev = it, session = obj["session"].stringValue()) }
                 "model" -> obj["model"].stringValue()?.let { Model(it) }
                 "suggestion" -> Suggestion(obj["text"].stringValue()?.takeIf { it.isNotEmpty() })
+                "meter" -> decodeOrNull(obj["meter"], TerminalMeter.serializer())?.let { Meter(it) }
                 "daybreak" -> obj["on"].let { v ->
                     val p = v as? JsonPrimitive
                     when {
@@ -924,4 +933,21 @@ internal object TerminalSubagentSerializer : ObjectReader<TerminalSubagent>("Ter
             doing = o.lenientString("doing") ?: "",
         )
     }
+}
+
+/**
+ * One of the account's allowances (docs/simple-view-v0.md §5.25; the Mac's `UsageLimit`): its window's name (`5h`,
+ * `7d`), how much of it is used, and when it starts afresh (milliseconds since 1970; null: not said).
+ */
+@Serializable
+data class UsageLimit(val label: String, val percent: Double, val resetsAt: Long? = null)
+
+/**
+ * How full a terminal's context and the account's allowances are, as the agent's status line said last (Claude Code,
+ * Antigravity; `TerminalInfo.meter`, the stream's `meter`).
+ */
+@Serializable
+data class TerminalMeter(val context: Context? = null, val limits: List<UsageLimit> = emptyList()) {
+    @Serializable
+    data class Context(val percent: Double, val used: Int? = null, val window: Int? = null)
 }

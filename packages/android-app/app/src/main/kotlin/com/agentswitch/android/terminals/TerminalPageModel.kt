@@ -236,6 +236,10 @@ class TerminalPageModel(
     var suggestion: String? by mutableStateOf(terminal.suggestion)
         private set
 
+    /** How full its context and the allowances are, as its status line said last (docs/simple-view-v0.md §5.25). */
+    var meter: com.agentswitch.kit.api.TerminalMeter? by mutableStateOf(terminal.meter)
+        private set
+
     /** A change of model is on its way to the agent. */
     var changingModel: Boolean by mutableStateOf(false)
         private set
@@ -435,6 +439,7 @@ class TerminalPageModel(
             is TerminalEvent.Model -> modelNow = event.model
             is TerminalEvent.Daybreak -> daybreakNow = event.on
             is TerminalEvent.Suggestion -> suggestion = event.text
+            is TerminalEvent.Meter -> if (meter != event.meter) meter = event.meter
             is TerminalEvent.Name -> name = event.name
             is TerminalEvent.Resize -> resized(event.by)
             is TerminalEvent.Permission -> {

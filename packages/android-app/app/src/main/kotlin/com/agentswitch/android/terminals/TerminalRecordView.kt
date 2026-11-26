@@ -231,7 +231,10 @@ private suspend fun LazyListState.scrollToEnd(animate: Boolean) {
 
 @Composable
 private fun Header(page: TerminalPageModel, record: SessionRecordModel, terminal: TerminalInfo, git: String?) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Theme.Space.s)) {
+    // The agent's logo as its own program draws it, beside its name (the Mac's, user #590).
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    com.agentswitch.android.design.AgentLogo(terminal.harness, Modifier.padding(top = 2.dp), size = 40.dp)
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Theme.Space.s)) {
         SelectionContainer { Text(MessageDisplay.readable(page.name), color = Theme.ink, style = plain(20, FontWeight.SemiBold)) }
         Text(
             listOfNotNull(
@@ -242,6 +245,7 @@ private fun Header(page: TerminalPageModel, record: SessionRecordModel, terminal
             color = Theme.secondaryInk, style = mono(12), maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Text(PathDisplay.short(terminal.workdir), color = Theme.secondaryInk, style = mono(12), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+    }
     }
 }
 
