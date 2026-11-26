@@ -366,7 +366,7 @@ describe("remote route allowlist", () => {
       ["PUT", "/files/content"], ["GET", "/files/content"], ["DELETE", "/terminals/abc"], ["DELETE", "/rooms/r1"], ["POST", "/uploads"], ["GET", "/gate/pubkey"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
     for (const [m, p] of [["PUT", "/memory"], ["DELETE", "/platform-memory/x"], ["DELETE", "/mcp/x"], ["DELETE", "/skills/x"], ["DELETE", "/terminals/a/b"], ["DELETE", "/rooms/"],
       ["POST", "/settings/workdir"], ["DELETE", "/files/content"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
-      ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["GET", "/settings/trusted-folders"], ["PUT", "/settings/trusted-folders"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
+      ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["GET", "/settings/trusted-folders"], ["PUT", "/settings/trusted-folders"], ["GET", "/settings/trusted-folders/check"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
       ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/terminals/"], ["GET", "/terminals/a/b"], ["GET", "/terminals/a/files/x"], ["POST", "/route/preview"],
       ["GET", "/platform-memory"], ["POST", "/terminals/a/delete"], ["PUT", "/projects"], ["POST", "/update"],
       // The old Dispatch's routes are gone from the list with it (2026-11-25).

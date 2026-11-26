@@ -78,7 +78,7 @@ import { openCodeDeleter, type OpenCodeDelete } from "./sessions/opencode.js";
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type KeptTerminal, type Launcher, type TerminalHarness } from "./terminals/host.js";
 import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S, restoreCompanion } from "./terminals/launch.js";
-import { loadTrustedFolders } from "./terminals/trustedFolders.js";
+import { loadTrustList } from "./terminals/trustedFolders.js";
 import { holding } from "./terminals/held.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
@@ -470,7 +470,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
         codexHooks: (home) => codexTrust(home)?.trusted ?? false, opencodeServer: true,
         // Folders trusted once in AgentSwitch: read at each start, so a change on the Mac counts from the next one.
-        trustedFolders: () => loadTrustedFolders(cfg.home),
+        trustedFolders: () => loadTrustList(cfg.home),
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's

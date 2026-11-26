@@ -7,10 +7,10 @@ import { z } from "zod";
 import { checkCwd } from "./cwdPolicy.js";
 import { issues, type ApiDeps } from "./shared.js";
 import { defaultWorkdir, expandWorkdir, loadWorkdir, saveWorkdir } from "../files/workdir.js";
-import { loadTrustedFolders, saveTrustedFolders } from "../terminals/trustedFolders.js";
+import { loadTrustList, saveTrustList, trustState } from "../terminals/trustedFolders.js";
 
 const WorkdirBody = z.object({ path: z.string().min(1).max(1024) });
-const TrustedFoldersBody = z.object({ folders: z.array(z.string().min(1).max(4096)).max(500) });
+const TrustedFoldersBody = z.object({ folders: z.array(z.string().min(1).max(4096)).max(500), only: z.array(z.string().min(1).max(4096)).max(500).optional() });
 
 export function mountSettings(app: Hono, deps: ApiDeps): void {
   // `pendingApprovals`: the old Dispatch's count, always 0 since it was removed (2026-11-25), for the apps that read it.
@@ -43,18 +43,33 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
     // Folders trusted once in AgentSwitch (terminals/trustedFolders.ts): an agent started in one, or below one, does
     // not ask whether to trust it. Read and set on the Mac only (not in the remote list): a phone's say over which
     // folders an agent runs in unasked stays a step it takes on the Mac. The whole list is sent; `~/x` is the home's.
-    app.get("/settings/trusted-folders", (c) => c.json({ folders: loadTrustedFolders(home) }));
+    // `only`: folders trusted by themselves, not what is below them; left out of a PUT, they stay as they are.
+    app.get("/settings/trusted-folders", (c) => c.json(loadTrustList(home)));
     app.put("/settings/trusted-folders", async (c) => {
       const body = TrustedFoldersBody.safeParse(await c.req.json().catch(() => ({})));
       if (!body.success) return c.json({ error: issues(body.error) }, 400);
-      const folders: string[] = [];
-      for (const raw of body.data.folders) {
-        const path = expandWorkdir(raw.trim());
-        if (!path) return c.json({ error: `${raw}: a trusted folder must be an absolute path` }, 400);
-        folders.push(path);
-      }
-      try { return c.json({ folders: saveTrustedFolders(home, folders) }); }
+      const expand = (list: readonly string[]): string[] | string => {
+        const out: string[] = [];
+        for (const raw of list) {
+          const path = expandWorkdir(raw.trim());
+          if (!path) return `${raw}: a trusted folder must be an absolute path`;
+          out.push(path);
+        }
+        return out;
+      };
+      const folders = expand(body.data.folders);
+      if (typeof folders === "string") return c.json({ error: folders }, 400);
+      const only = body.data.only ? expand(body.data.only) : undefined;
+      if (typeof only === "string") return c.json({ error: only }, 400);
+      try { return c.json(saveTrustList(home, folders, only)); }
       catch (err) { return c.json({ error: (err as Error).message }, 400); }
+    });
+    // Before a new session (the Mac asks once per folder): is `cwd` trusted already, and may it be trusted at all
+    // (not the home folder, one above it, or /).
+    app.get("/settings/trusted-folders/check", (c) => {
+      const path = expandWorkdir((c.req.query("cwd") ?? "").trim());
+      if (!path) return c.json({ error: "cwd must be an absolute path" }, 400);
+      return c.json(trustState(path, loadTrustList(home)));
     });
   }
 }

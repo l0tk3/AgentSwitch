@@ -44,37 +44,73 @@ function safeReal(path: string): string {
   try { return realpathSync(path); } catch { return resolve(path); }
 }
 
-/** The list, normalized; a missing or broken file is an empty list. */
-export function loadTrustedFolders(home: string): string[] {
+/** What is trusted: `folders` with everything below them, `only` each by itself (2026-11-26, user #463: asked at a
+ *  new session — no, this folder, or this folder and all below it). */
+export type TrustList = { readonly folders: readonly string[]; readonly only: readonly string[] };
+
+const paths = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string" && isAbsolute(f)).map((f) => resolve(f)) : [];
+
+/** Both lists, normalized; a missing or broken file is two empty lists. */
+export function loadTrustList(home: string): { folders: string[]; only: string[] } {
   try {
-    const raw = JSON.parse(readFileSync(join(home, TRUSTED_FOLDERS_FILE), "utf8")) as { folders?: unknown };
-    return Array.isArray(raw.folders) ? raw.folders.filter((f): f is string => typeof f === "string" && isAbsolute(f)).map((f) => resolve(f)) : [];
-  } catch { return []; }
+    const raw = JSON.parse(readFileSync(join(home, TRUSTED_FOLDERS_FILE), "utf8")) as { folders?: unknown; only?: unknown };
+    return { folders: paths(raw.folders), only: paths(raw.only) };
+  } catch { return { folders: [], only: [] }; }
 }
 
-/** Saves the list (0600, replaced whole). Throws with the reason when one of them may not be on it. */
-export function saveTrustedFolders(home: string, folders: readonly string[], userHome: string = homedir()): string[] {
-  const clean: string[] = [];
-  for (const f of folders) {
-    const why = trustRefusal(f, userHome);
-    if (why) throw new Error(`${f}: ${why}`);
-    const p = resolve(f);
-    if (!clean.includes(p)) clean.push(p);
-  }
-  mkdirSync(home, { recursive: true });
-  replaceFile(join(home, TRUSTED_FOLDERS_FILE), `${JSON.stringify({ folders: clean }, null, 2)}\n`);
-  return clean;
+/** The folders trusted with everything below them. */
+export function loadTrustedFolders(home: string): string[] {
+  return loadTrustList(home).folders;
 }
+
+/** Saves the lists (0600, replaced whole); `only` left out is kept as it was. A folder trusted by itself that one of
+ *  `folders` covers is dropped. Throws with the reason when a folder may not be on a list. */
+export function saveTrustList(home: string, folders: readonly string[], only?: readonly string[], userHome: string = homedir()): { folders: string[]; only: string[] } {
+  const clean = (list: readonly string[]): string[] => {
+    const out: string[] = [];
+    for (const f of list) {
+      const why = trustRefusal(f, userHome);
+      if (why) throw new Error(`${f}: ${why}`);
+      const p = resolve(f);
+      if (!out.includes(p)) out.push(p);
+    }
+    return out;
+  };
+  const whole = clean(folders);
+  const single = clean(only ?? loadTrustList(home).only).filter((f) => !whole.some((w) => within(f, w)));
+  mkdirSync(home, { recursive: true });
+  replaceFile(join(home, TRUSTED_FOLDERS_FILE), `${JSON.stringify({ folders: whole, only: single }, null, 2)}\n`);
+  return { folders: whole, only: single };
+}
+
+export function saveTrustedFolders(home: string, folders: readonly string[], userHome: string = homedir()): string[] {
+  return saveTrustList(home, folders, undefined, userHome).folders;
+}
+
+const formsOf = (path: string): string[] => [...new Set([resolve(path), safeReal(path)])];
 
 /** The trusted folder `cwd` is in (itself or one above it), as given or as the system resolves it; null: none. */
 export function trustedRootOf(cwd: string, folders: readonly string[]): string | null {
   if (!isAbsolute(cwd)) return null;
-  const forms = [...new Set([resolve(cwd), safeReal(cwd)])];
+  const forms = formsOf(cwd);
   for (const root of folders) {
-    const roots = [...new Set([resolve(root), safeReal(root)])];
+    const roots = formsOf(root);
     if (forms.some((f) => roots.some((r) => within(f, r)))) return root;
   }
   return null;
+}
+
+/** `cwd` is one of the folders trusted by themselves. */
+export function trustedAlone(cwd: string, only: readonly string[]): boolean {
+  if (!isAbsolute(cwd)) return false;
+  const forms = formsOf(cwd);
+  return only.some((o) => formsOf(o).some((r) => forms.includes(r)));
+}
+
+/** Whether an agent started in `cwd` finds it trusted, and whether it may be put on a list at all. */
+export function trustState(cwd: string, list: TrustList, userHome: string = homedir()): { trusted: boolean; allowed: boolean } {
+  return { trusted: trustedRootOf(cwd, list.folders) !== null || trustedAlone(cwd, list.only), allowed: trustRefusal(cwd, userHome) === null };
 }
 
 /** The names the folder goes by in an agent's own list: as given and resolved (macOS: /tmp is /private/tmp), and its
@@ -101,10 +137,12 @@ export type TrustOutcome = "written" | "already" | "skipped";
 
 /** Before an agent starts in `cwd` with `env` (its config folder variables set): marks it trusted where the folder
  *  is on the list. Never throws. */
-export function pretrust(harness: TerminalHarness, cwd: string, env: Readonly<Record<string, string | undefined>>, folders: readonly string[], log: (line: string) => void = (l) => console.error(l)): TrustOutcome | null {
+export function pretrust(harness: TerminalHarness, cwd: string, env: Readonly<Record<string, string | undefined>>, trusted: readonly string[] | TrustList, log: (line: string) => void = (l) => console.error(l)): TrustOutcome | null {
   try {
     if (harness !== "claude-code" && harness !== "codex") return null;
-    const root = trustedRootOf(cwd, folders);
+    const list: TrustList = "folders" in trusted ? trusted : { folders: trusted, only: [] };
+    // A folder trusted by itself is its own root: nothing above it (its repository's root) is marked with it.
+    const root = trustedRootOf(cwd, list.folders) ?? (trustedAlone(cwd, list.only) ? cwd : null);
     if (!root) return null;
     const keys = trustKeys(cwd, root);
     const out = harness === "claude-code" ? trustInClaude(claudeConfigFile(env), keys) : trustInCodex(codexConfigFile(env), keys);

@@ -76,6 +76,11 @@ enum TerminalsPagePreview {
         // A page that is light (a record in the pane in focus): the question box, the new-terminal panel with a folder
         // typed and a name being changed are on the light page's own ground, in its own ink (2026-10-13: they were
         // drawn for a page that was always dark).
+        // Before a new session in a folder not yet trusted (user #463): three answers, a row each.
+        try await shot(to: file("terminals-trust")) { model in
+            model.showCreate(folder: project)
+            Task { _ = await model.ask(TerminalSheet(title: "信任这个文件夹？", body: project, confirm: "", choices: TrustChoice.allCases.map(\.title))) }
+        }
         try await shot(to: file("terminals-sheet-light"), light: true) { model in
             stageRecord(model, working: false)
             Task { _ = await model.ask(TerminalSheet(title: "关闭「修登录页的跳转」？", body: "将结束 Claude Code 进程。会话记录保留，可稍后继续。", confirm: "Close", destructive: true, check: "同时删除会话记录（无法恢复）")) }

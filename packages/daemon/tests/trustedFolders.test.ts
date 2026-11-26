@@ -143,10 +143,31 @@ describe("trusted folders", () => {
       const res = await d.app.request(path, { method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, remote ? markRemote({}, { deviceId: "phone" }) : undefined);
       return { status: res.status, body: await res.json().catch(() => ({})) as Record<string, any> };
     };
-    expect((await call("GET", "/settings/trusted-folders")).body).toEqual({ folders: [] });
+    expect((await call("GET", "/settings/trusted-folders")).body).toEqual({ folders: [], only: [] });
     const work = join(base, "work");
     expect(await call("PUT", "/settings/trusted-folders", { folders: [work] })).toMatchObject({ status: 200, body: { folders: [work] } });
     for (const bad of ["/", process.env.HOME!, "relative"]) expect((await call("PUT", "/settings/trusted-folders", { folders: [work, bad] })).status, bad).toBe(400);
-    expect((await call("GET", "/settings/trusted-folders")).body).toEqual({ folders: [work] });
+    expect((await call("GET", "/settings/trusted-folders")).body).toEqual({ folders: [work], only: [] });
+    // A folder trusted by itself: it is trusted, what is below it is not; a PUT without `only` keeps it; one that
+    // `folders` covers is dropped.
+    const lone = join(base, "lone");
+    expect((await call("PUT", "/settings/trusted-folders", { folders: [work], only: [lone, join(work, "x")] })).body).toEqual({ folders: [work], only: [lone] });
+    expect((await call("PUT", "/settings/trusted-folders", { folders: [work] })).body).toEqual({ folders: [work], only: [lone] });
+    const check = async (cwd: string) => (await call("GET", `/settings/trusted-folders/check?cwd=${encodeURIComponent(cwd)}`)).body;
+    expect(await check(lone)).toEqual({ trusted: true, allowed: true });
+    expect(await check(join(lone, "sub"))).toEqual({ trusted: false, allowed: true });
+    expect(await check(join(work, "sub"))).toEqual({ trusted: true, allowed: true });
+    expect(await check(process.env.HOME!)).toEqual({ trusted: false, allowed: false });
+    expect((await call("GET", "/settings/trusted-folders/check")).status).toBe(400);
+  });
+
+  it("a folder trusted by itself is marked for the agent; one below it is not", () => {
+    const root = temp(), config = join(root, "profile");
+    mkdirSync(join(root, "lone/sub"), { recursive: true });
+    mkdirSync(config);
+    const list = { folders: [], only: [join(root, "lone")] };
+    expect(pretrust("claude-code", join(root, "lone/sub"), { CLAUDE_CONFIG_DIR: config }, list, () => undefined)).toBeNull();
+    expect(pretrust("claude-code", join(root, "lone"), { CLAUDE_CONFIG_DIR: config }, list, () => undefined)).toBe("written");
+    expect(Object.keys(JSON.parse(readFileSync(join(config, ".claude.json"), "utf8")).projects)).toEqual([join(root, "lone")]);
   });
 });

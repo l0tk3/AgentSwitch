@@ -382,6 +382,23 @@ private struct Wordmark: View {
 // MARK: - the page's question
 
 /// The question box over the page (the page dimmed under it): ↩ answers yes, esc no.
+/// A sheet's own answers, one a row; the last is the one offered first.
+private struct SheetChoices: View {
+    let choices: [String]
+    let model: TerminalsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(choices.enumerated()), id: \.offset) { index, word in
+                Button { model.answerSheet(ok: true, choice: index) } label: {
+                    BracketLabel(word: word).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(BracketButtonStyle(role: index == choices.count - 1 ? .primary : .normal, size: 12.5))
+            }
+        }
+    }
+}
+
 struct TerminalSheetView: View {
     let sheet: TerminalSheet
     let model: TerminalsModel
@@ -439,13 +456,14 @@ struct TerminalSheetView: View {
                     .buttonStyle(.plain)
                     .padding(.bottom, 12)
                 }
+                if let choices = sheet.choices { SheetChoices(choices: choices, model: model).padding(.bottom, 12) }
                 HStack(spacing: 12) {
                     Spacer()
                     Button { model.answerSheet(ok: false) } label: { BracketLabel(word: "Cancel", key: "esc") }
                         .buttonStyle(BracketButtonStyle(size: 12.5))
-                    Button { model.answerSheet(ok: true) } label: { BracketLabel(word: sheet.confirm, key: "↩") }
+                    if sheet.choices == nil { Button { model.answerSheet(ok: true) } label: { BracketLabel(word: sheet.confirm, key: "↩") }
                         .buttonStyle(BracketButtonStyle(role: sheet.destructive ? .destructive : .primary, size: 12.5))
-                        .disabled(sheet.offers != nil && model.sheetFolder.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(sheet.offers != nil && model.sheetFolder.trimmingCharacters(in: .whitespaces).isEmpty) }
                 }
             }
             .padding(EdgeInsets(top: 16, leading: 18, bottom: 14, trailing: 18))

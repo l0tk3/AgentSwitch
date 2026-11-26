@@ -230,6 +230,15 @@ extension TerminalsModel {
         let c = client()
         Task {
             defer { starting = false }
+            // A folder not yet trusted is asked about here once, before the agent asks in its own words (user #463).
+            // This Mac's own list: not asked for another node's folder, nor for an agent that has no such question.
+            if !c.isRemote, TrustChoice.asks(agent), let state = try? await c.trustCheck(cwd), !state.trusted, state.allowed {
+                let answer = await ask(TerminalSheet(title: "信任这个文件夹？", body: cwd, confirm: "", choices: TrustChoice.allCases.map(\.title)))
+                guard answer.ok, let choice = answer.choice.flatMap(TrustChoice.init(rawValue:)), creating else { return }
+                if choice != .no {
+                    do { try await c.trustFolder(cwd, alone: choice == .folder) } catch { createError = Self.reason(error); return }
+                }
+            }
             do {
                 let made = try await c.createTerminal(body)
                 defaults?.set(cwd, forKey: Keys.folder)

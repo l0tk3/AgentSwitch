@@ -482,3 +482,11 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - 开关：环境变量 `AGENTSWITCH_LEFTOVERS=0` 关；Linux 节点 `node.json` 写 `"cleanLeftovers": false`。默认开。测试建的 daemon 不带这项（它会读机器的进程表）。
 - 边界：`env -i` 起的、交给 launchd 的进程找不到；Linux 节点上更干净的是停掉终端自己的 systemd scope（§10），cgroup 里的一切都结束，不依赖环境变量——下一步。Dispatch 的执行器不在这一节里。
 - 测试 `tests/leftovers.test.ts`：`ps -E` 一行的解析、Linux 的 environ 解析；宽限到了只结束那个终端的、还在跑的终端和别的服务的不碰、`SIGTERM` 后还在的补 `SIGKILL`；接口对配对设备 403。
+
+## 受信任的文件夹（2026-11-24；2026-11-26 用户 #463 加上新会话前的提问）
+
+- 名单在 `<home>/trusted-folders.json`：`folders`（连同所有子文件夹）和 `only`（只这一个文件夹）。主目录、主目录之上、`/` 不能加入。
+- AgentSwitch 在名单内的文件夹里启动 Claude Code 或 Codex 之前，先在该 agent 自己的配置（按 profile）里把这个文件夹记为已信任，agent 就不再问（`terminals/trustedFolders.ts`）。OpenCode、pi 没有这个问题。
+- Mac 上新建终端时，文件夹不在名单里（且可以加入），先问一次：`Don't Trust`（照常启动，agent 自己再问）、`Trust This Folder`（进 `only`）、`Trust This Folder and All Subfolders`（进 `folders`）。只对本机、只对会问这个问题的 agent。Claude Code 自己会沿父文件夹向上找信任记录，所以「只这一个」在 Claude Code 里对子文件夹同样生效；AgentSwitch 自己的提问仍按 `only` 算。
+- 接口（仅本机）：`GET|PUT /settings/trusted-folders` → `{folders, only}`（PUT 不带 `only` 则保留原值）；`GET /settings/trusted-folders/check?cwd=` → `{trusted, allowed}`。
+- 设置 › General › `Trusted Folders`：每行可改 `With Subfolders` / `This Folder Only`，可移除。

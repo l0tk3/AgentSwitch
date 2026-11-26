@@ -37,9 +37,12 @@ struct TerminalSheet: Identifiable, Equatable {
     var destructive = false
     var check: String?
     var offers: [String]?
+    /// Answers of its own, one a row, in place of the confirm button; esc still cancels.
+    var choices: [String]?
 
     struct Answer {
         let ok: Bool
+        var choice: Int?
         let checked: Bool
         let folder: String
     }
@@ -547,11 +550,11 @@ final class TerminalsModel {
     /// The level picked, while the model picked takes it.
     var pickedEffort: String? { TerminalEffort.kept(pickedEfforts[pickedAgent], in: effortLevels) }
 
-    func answerSheet(ok: Bool) {
+    func answerSheet(ok: Bool, choice: Int? = nil) {
         guard let done = sheetDone else { return }
         sheetDone = nil
         sheet = nil
-        done.resume(returning: .init(ok: ok, checked: sheetChecked, folder: sheetFolder.trimmingCharacters(in: .whitespacesAndNewlines)))
+        done.resume(returning: .init(ok: ok, choice: choice, checked: sheetChecked, folder: sheetFolder.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
     #if DEBUG

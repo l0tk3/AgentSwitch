@@ -10,7 +10,7 @@ import { CodexCompanion } from "./codexTerminal.js";
 import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
-import { pretrust } from "./trustedFolders.js";
+import { pretrust, type TrustList } from "./trustedFolders.js";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { which } from "../util/which.js";
@@ -86,7 +86,7 @@ export type LauncherOptions = {
   readonly holding?: Holding | null;
   /** The folders trusted in AgentSwitch (trustedFolders.ts): an agent started in one, or below one, finds it already
    *  trusted in its own configuration (its profile's), and does not ask. Absent: none. */
-  readonly trustedFolders?: () => readonly string[];
+  readonly trustedFolders?: () => readonly string[] | TrustList;
 };
 
 /** The bridge's command line; with the session it was made for, which a held terminal keeps for the next daemon. */

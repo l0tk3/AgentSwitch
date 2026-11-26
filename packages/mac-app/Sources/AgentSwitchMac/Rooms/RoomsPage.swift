@@ -631,7 +631,9 @@ private struct RoomWriter: View {
                 HStack(spacing: 8) {
                     LookGlyph(glyph: "↩", symbol: "arrowshape.turn.up.left", size: 13)
                     Text("Reply to \(quoted.from == Room.you ? "You" : quoted.from)").mono(12)
-                    Text(RoomText.quote(quoted.text, handles: Set(room.seats.map(\.handle)))).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
+                    // Its Markdown drawn, as in the line above a reply: the marks themselves were shown here (user #463).
+                    let handles = Set(room.seats.map(\.handle))
+                    Text(RoomRich.text(RoomText.quoteHead(quoted.text, handles: handles, limit: 120), handles: handles, look: look, size: 12)).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
                     Button { model.replyTo = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 13) }.buttonStyle(.plain).help("Close")
                 }

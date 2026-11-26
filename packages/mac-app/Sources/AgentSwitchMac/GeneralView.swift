@@ -272,11 +272,17 @@ private struct TrustedFoldersSection: View {
     var body: some View {
         Section {
             if let list {
-                if list.folders.isEmpty {
+                if list.folders.isEmpty, list.only.isEmpty {
                     Text("None").foregroundStyle(.secondary)
                 }
-                ForEach(list.folders, id: \.self) { folder in
+                ForEach(list.folders + list.only, id: \.self) { folder in
                     LabeledContent {
+                        // Trusted by itself or with all below it: said on the row, changed there.
+                        Picker("", selection: Binding(get: { list.only.contains(folder) }, set: { save($0 ? list.removing(folder).addingOnly(folder) : list.adding(folder)) })) {
+                            Text("With Subfolders").tag(false)
+                            Text("This Folder Only").tag(true)
+                        }
+                        .labelsHidden().fixedSize().disabled(saving)
                         Button("Remove") { save(list.removing(folder)) }.disabled(saving)
                     } label: {
                         Text(model.shortPath(folder)).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(folder)
@@ -292,9 +298,9 @@ private struct TrustedFoldersSection: View {
             SectionLabel("Trusted Folders")
         } footer: {
             HStack(alignment: .top, spacing: 8) {
-                Footer("在这些文件夹及其子文件夹中启动的 Claude Code 与 Codex 不再询问是否信任该文件夹。不能添加主目录或根目录。")
+                Spacer()
                 Button("Add…") {
-                    guard let list, let url = FolderPanel.choose(message: "在此文件夹及其子文件夹中启动的 agent 不再询问是否信任它。", startingAt: list.folders.last) else { return }
+                    guard let list, let url = FolderPanel.choose(message: "信任此文件夹及其所有子文件夹。", startingAt: list.folders.last) else { return }
                     save(list.adding(url.path))
                 }
                 .disabled(list == nil || saving)
