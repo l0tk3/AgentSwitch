@@ -129,7 +129,13 @@ private fun WindowInsets.excludeTop(): WindowInsets = object : WindowInsets {
 fun FormSection(label: String? = null, footer: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.fillMaxWidth().padding(top = 14.dp)) {
         if (label != null) SectionLabel(label, Modifier.padding(start = 16.dp, bottom = 7.dp))
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Theme.raised), content = content)
+        // The classic look: a grouped list's round card. The pixel look: square rows on a deck a step off the page,
+        // with a frame and a hard shadow (docs/ui-v0.md §9.2, user #644).
+        Column(
+            if (LocalLook.current.isClassic) Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Theme.raised)
+            else Modifier.fillMaxWidth().deck(),
+            content = content,
+        )
         if (footer != null) Text(footer, Modifier.padding(start = 16.dp, end = 16.dp, top = 7.dp), color = Theme.secondaryInk, style = plain(13))
     }
 }

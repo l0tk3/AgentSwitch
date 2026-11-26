@@ -1,5 +1,8 @@
 package com.agentswitch.android.design
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -97,4 +100,48 @@ fun Modifier.card(): Modifier = composed {
 @Composable
 fun Label(text: String, style: TextStyle, color: Color = Theme.ink, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE) {
     Text(text, modifier = modifier, color = color, style = style, maxLines = maxLines, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+}
+
+/**
+ * A group of rows floating on the page (docs/ui-v0.md §9.2, user #644; the iPhone's `deck()`): in the pixel look its own
+ * ground a step off the page's, a 1 dp frame, a solid hard shadow 3 dp down and right, square; in the classic look a
+ * grouped list's card, round.
+ */
+fun Modifier.deck(): Modifier = composed {
+    if (LocalLook.current.isClassic) {
+        clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(Theme.panel)
+    } else {
+        val shadow = Theme.pixelShadow
+        padding(end = 3.dp, bottom = 3.dp)
+            .drawBehind { drawRect(shadow, androidx.compose.ui.geometry.Offset(3.dp.toPx(), 3.dp.toPx()), size) }
+            .background(Theme.deck).border(1.dp, Theme.line)
+    }
+}
+
+/**
+ * One row of a deck drawn row by row (a lazy list's items): the frame's top on the first, its bottom and the shadow's
+ * foot on the last, its sides and the shadow's right edge on every one — together the same deck as [deck].
+ */
+fun Modifier.deckPart(first: Boolean, last: Boolean): Modifier = composed {
+    if (LocalLook.current.isClassic) {
+        val r = 12.dp
+        clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = if (first) r else 0.dp, topEnd = if (first) r else 0.dp, bottomStart = if (last) r else 0.dp, bottomEnd = if (last) r else 0.dp))
+            .background(Theme.panel)
+    } else {
+        val shadow = Theme.pixelShadow
+        val ground = Theme.deck
+        val line = Theme.line
+        (if (last) padding(end = 3.dp, bottom = 3.dp) else padding(end = 3.dp)).drawBehind {
+            val s = 3.dp.toPx()
+            val w = 1.dp.toPx()
+            val top = if (first) s else 0f
+            drawRect(shadow, androidx.compose.ui.geometry.Offset(size.width, top), androidx.compose.ui.geometry.Size(s, size.height - top + (if (last) s else 0f)))
+            if (last) drawRect(shadow, androidx.compose.ui.geometry.Offset(s, size.height), androidx.compose.ui.geometry.Size(size.width - s, s))
+            drawRect(ground)
+            drawRect(line, androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Size(w, size.height))
+            drawRect(line, androidx.compose.ui.geometry.Offset(size.width - w, 0f), androidx.compose.ui.geometry.Size(w, size.height))
+            if (first) drawRect(line, androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Size(size.width, w))
+            if (last) drawRect(line, androidx.compose.ui.geometry.Offset(0f, size.height - w), androidx.compose.ui.geometry.Size(size.width, w))
+        }
+    }
 }

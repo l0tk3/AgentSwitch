@@ -1,5 +1,6 @@
 package com.agentswitch.android.rooms
 
+import com.agentswitch.android.design.deckPart
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
@@ -135,7 +136,7 @@ fun RoomsTab() {
                     if (mentions.isNotEmpty()) {
                         item("g:mentions") { RoomGroupHead("Mentions", mentions.size, hot = true, folded = folds.mentions) { folds.mentions = !folds.mentions } }
                         if (!folds.mentions) itemsIndexed(mentions, key = { _, m -> "m:${m.id}" }) { index, m ->
-                            MentionRow(m, groupCard(index, mentions.size)) {
+                            MentionRow(m, index == mentions.size - 1, groupCard(index, mentions.size)) {
                                 val item = m.item
                                 if (item != null) open(item.room, RoomOpening(task = item.task, seq = item.seq, card = item.card))
                                 else open(m.room)
@@ -185,18 +186,13 @@ private fun mentionsOf(attention: List<com.agentswitch.kit.api.RoomAttentionItem
     return waiting + said
 }
 
-/** The classic look: each group a standard grouped list's card, round at its two ends. */
+/** Each group on a card that floats on the page: a grouped list's round card in the classic look, a deck with a frame
+ *  and a hard shadow in the pixel look (docs/ui-v0.md §9.2, user #644) — drawn row by row, as the list lays them out. */
 @Composable
 private fun groupCard(index: Int, count: Int): Modifier {
-    if (!LocalLook.current.isClassic) return Modifier
-    val first = index == 0
-    val last = index == count - 1
-    return Modifier.padding(horizontal = Theme.Space.l).clip(
-        RoundedCornerShape(
-            topStart = if (first) 12.dp else 0.dp, topEnd = if (first) 12.dp else 0.dp,
-            bottomStart = if (last) 12.dp else 0.dp, bottomEnd = if (last) 12.dp else 0.dp,
-        ),
-    ).background(Theme.panel)
+    val classic = LocalLook.current.isClassic
+    return Modifier.padding(start = Theme.Space.l, end = if (classic) Theme.Space.l else Theme.Space.l - 3.dp)
+        .then(Modifier.deckPart(index == 0, index == count - 1))
 }
 
 /** A group's head: the mark that folds it, its name, how much is new in it — amber when some of it is for the user. */
@@ -223,7 +219,7 @@ private fun RoomGroupHead(title: String, count: Int, hot: Boolean, folded: Boole
 
 /** A row of `Mentions`: `@`, the channel, and under it who waits and for what. */
 @Composable
-private fun MentionRow(m: Mention, modifier: Modifier, open: () -> Unit) {
+private fun MentionRow(m: Mention, last: Boolean, modifier: Modifier, open: () -> Unit) {
     val classic = LocalLook.current.isClassic
     Column(modifier.fillMaxWidth().clickable(role = Role.Button, onClick = open)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l, vertical = 11.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -233,7 +229,7 @@ private fun MentionRow(m: Mention, modifier: Modifier, open: () -> Unit) {
                 Text(m.line, color = if (m.urgent) Theme.waiting else Theme.secondaryInk, style = plain(13), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
-        HairRule(Modifier.padding(start = if (classic) 42.dp else 0.dp))
+        if (!last) HairRule(Modifier.padding(start = 42.dp))
     }
 }
 
@@ -257,7 +253,7 @@ private fun RoomListRow(room: RoomSummary, index: Int, last: Boolean, modifier: 
             }
             Text(room.lastLine, color = Theme.secondaryInk, style = plain(13), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (!(classic && last)) HairRule(Modifier.padding(start = if (classic) Theme.Space.l else 0.dp))
+        if (!last) HairRule(Modifier.padding(start = Theme.Space.l))
     }
 }
 

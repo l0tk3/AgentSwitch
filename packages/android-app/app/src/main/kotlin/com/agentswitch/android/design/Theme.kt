@@ -49,6 +49,9 @@ class Palette(
     /** A card's or a floating layer's own ground in the classic look (the pixel look frames them on the page's). */
     val panel: Color,
     val pixelShadow: Color,
+    /** A group of rows that floats on the page (docs/ui-v0.md §9.2): the pixel look's deck — a step off the page, with a
+     *  1 dp frame and a hard shadow (`deck()`); the classic look's card. */
+    val deck: Color,
     /** The highest thinking level's own colour (docs/terminal-v0.md §1 “滑块”): violet, and the deeper blue its line begins in. */
     val top: Color,
     val topDeep: Color,
@@ -67,25 +70,26 @@ class Palette(
         val pixelDark = Palette(
             dark = true, signal = rgb(0xFF2E88), busy = rgb(0x2EE6FF), waiting = rgb(0xFFB000), done = rgb(0x9BE22D), failed = rgb(0xFF4A3D),
             base = rgb(0x000000), ink = rgb(0xE9E6DF), inkDim = rgb(0x4D4B48), secondaryInk = rgb(0x8D8A84), line = rgb(0x262524),
-            raised = rgb(0x161514), panel = rgb(0x000000), pixelShadow = rgb(0x2C2A28), top = rgb(0xA98BFF), topDeep = rgb(0x4B4FE0),
+            // The grounds a step apart, as the Mac's (§9.2, user #621, #644): page #000, card #121212, deck #141414, raised #1F1F1F.
+            raised = rgb(0x1F1F1F), panel = rgb(0x121212), pixelShadow = rgb(0x2C2A28), deck = rgb(0x141414), top = rgb(0xA98BFF), topDeep = rgb(0x4B4FE0),
             fill = rgb(0xE9E6DF), onFill = rgb(0x000000),
         )
         val pixelLight = Palette(
             dark = false, signal = rgb(0xE0106E), busy = rgb(0x0086A8), waiting = rgb(0xC27400), done = rgb(0x3F8F00), failed = rgb(0xD7261B),
             base = rgb(0xF3F1EA), ink = rgb(0x151413), inkDim = rgb(0xA29D93), secondaryInk = rgb(0x5F5B54), line = rgb(0xD3CEC3),
-            raised = rgb(0xE6E2D8), panel = rgb(0xF3F1EA), pixelShadow = rgb(0xCFC9BC), top = rgb(0x7A3CF0), topDeep = rgb(0x3B3FD8),
+            raised = rgb(0xDCD6C9), panel = rgb(0xEBE7DD), pixelShadow = rgb(0xCFC9BC), deck = rgb(0xE6E1D6), top = rgb(0x7A3CF0), topDeep = rgb(0x3B3FD8),
             fill = rgb(0x151413), onFill = rgb(0xF3F1EA),
         )
         val classicDark = Palette(
             dark = true, signal = rgb(0x0A84FF), busy = rgb(0x0A84FF), waiting = rgb(0xFF9F0A), done = rgb(0x30D158), failed = rgb(0xFF453A),
             base = rgb(0x000000), ink = rgb(0xF2F2F7), inkDim = rgb(0x6C6C72), secondaryInk = rgb(0xA2A2A8), line = rgb(0x38383A),
-            raised = rgb(0x2C2C2E), panel = rgb(0x1C1C1E), pixelShadow = rgb(0x2C2A28), top = rgb(0xA58BFF), topDeep = rgb(0x3D4BE0),
+            raised = rgb(0x2C2C2E), panel = rgb(0x1C1C1E), pixelShadow = rgb(0x2C2A28), deck = rgb(0x1C1C1E), top = rgb(0xA58BFF), topDeep = rgb(0x3D4BE0),
             fill = rgb(0x0A84FF), onFill = rgb(0xFFFFFF),
         )
         val classicLight = Palette(
             dark = false, signal = rgb(0x007AFF), busy = rgb(0x007AFF), waiting = rgb(0xFF9500), done = rgb(0x34C759), failed = rgb(0xFF3B30),
             base = rgb(0xF2F2F7), ink = rgb(0x1D1D1F), inkDim = rgb(0xA6A6AB), secondaryInk = rgb(0x6E6E73), line = rgb(0xDCDCE0),
-            raised = rgb(0xE9E9EB), panel = rgb(0xFFFFFF), pixelShadow = rgb(0xCFC9BC), top = rgb(0x8E5CF7), topDeep = rgb(0x2F3DC8),
+            raised = rgb(0xE9E9EB), panel = rgb(0xFFFFFF), pixelShadow = rgb(0xCFC9BC), deck = rgb(0xFFFFFF), top = rgb(0x8E5CF7), topDeep = rgb(0x2F3DC8),
             fill = rgb(0x007AFF), onFill = rgb(0xFFFFFF),
         )
 
@@ -133,6 +137,7 @@ object Theme {
     val panel: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.panel
     val code: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.code
     val pixelShadow: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.pixelShadow
+    val deck: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.deck
     val top: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.top
     val topDeep: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.topDeep
     val fill: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.fill

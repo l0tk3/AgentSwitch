@@ -660,10 +660,14 @@ private fun MessageRow(
                         }
                         // Classic (the Mac's, user #487: 每个人的消息分界区分度太低): what a message says, with its files, on a
                         // round block of its own — the user's own on the accent's light tint (#498).
+                        // Pixel (the Mac's §9.2, user #644): square, a step off the page, the user's own a step further.
                         Column(
                             if (classic) Modifier.padding(top = if (row.continues) 0.dp else 2.dp)
                                 .background(if (m.from == RoomSeat.you) Theme.signal.copy(alpha = 0.07f) else Theme.panel, RoundedCornerShape(Theme.Radius.card))
-                                .padding(horizontal = 11.dp, vertical = 7.dp) else Modifier,
+                                .padding(horizontal = 11.dp, vertical = 7.dp)
+                            else Modifier.padding(top = if (row.continues) 0.dp else 2.dp)
+                                .background(if (m.from == RoomSeat.you) Theme.raised else Theme.panel)
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                         if (m.deleted) {
@@ -671,7 +675,7 @@ private fun MessageRow(
                         } else {
                             Text(
                                 RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code, LocalOpenLink.current),
-                                if (classic) Modifier else Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
+                                Modifier, color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
                                 maxLines = if (long && !expanded) RoomText.foldLines else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis,
                             )
                             if (long) Text(
