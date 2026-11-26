@@ -517,6 +517,8 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 
 - 名单在 `<home>/trusted-folders.json`：`folders`（连同所有子文件夹）和 `only`（只这一个文件夹）。主目录、主目录之上、`/` 不能加入。
 - AgentSwitch 在名单内的文件夹里启动 Claude Code 或 Codex 之前，先在该 agent 自己的配置（按 profile）里把这个文件夹记为已信任，agent 就不再问（`terminals/trustedFolders.ts`）。OpenCode、pi 没有这个问题。
+- Grok（2026-11-26）：名单内的文件夹在启动前写进 `<GROK_HOME 或 ~/.grok>/trusted_folders.toml`（`[folders."<路径>"]`、`trusted = true`、`decided_at`），用户在 Grok 里明确拒绝过的（`trusted = false`）不动。Grok 自己的更新检查关掉（`GROK_DISABLE_AUTOUPDATER=1`，同其它 agent，用户 #460）。
+- Antigravity：名单内的文件夹写进它 `settings.json` 的 `trustedWorkspaces`；它的自更新用 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 关掉。
 - Mac 上新建终端时，文件夹不在名单里（且可以加入），先问一次：`Don't Trust`（照常启动，agent 自己再问）、`Trust This Folder`（进 `only`）、`Trust This Folder and All Subfolders`（进 `folders`）。只对本机、只对会问这个问题的 agent。Claude Code 自己会沿父文件夹向上找信任记录，所以「只这一个」在 Claude Code 里对子文件夹同样生效；AgentSwitch 自己的提问仍按 `only` 算。
 - 接口（仅本机）：`GET|PUT /settings/trusted-folders` → `{folders, only}`（PUT 不带 `only` 则保留原值）；`GET /settings/trusted-folders/check?cwd=` → `{trusted, allowed}`。
 - 设置 › General › `Trusted Folders`：每行可改 `With Subfolders` / `This Folder Only`，可移除。
