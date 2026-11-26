@@ -21,8 +21,9 @@ struct TerminalRecordPane: View {
     @State private var place = RecordPlace()
     @State private var dropping = false
     /// The side beside the record (its task list, the files it changed), where the pane is wide enough for one: out
-    /// when the user asks for it (the reply box's menu, `Show Side Pane`).
-    @AppStorage("terminals.recordSide") private var sideShown = false
+    /// unless the user hid it (the reply box's menu, `Hide Side Pane`). Out by default since 2026-11-26 (user #475:
+    /// it was there, and nobody found it).
+    @AppStorage("terminals.recordSide") private var sideShown = true
 
     /// The reading column at its widest (a pane with room to spare puts a side beside it, `RecordLayout`).
     static let column = CGFloat(RecordLayout.column)
