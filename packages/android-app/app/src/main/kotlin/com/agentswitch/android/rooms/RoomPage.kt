@@ -443,7 +443,7 @@ private fun DrawerTaskRow(t: RoomTask, detail: RoomDetail, model: RoomPageModel,
         if (unread > 0 && model.taskFilter != t.n) {
             if (classic) {
                 Box(Modifier.size(18.dp).background(Theme.signal, CircleShape), contentAlignment = Alignment.Center) {
-                    Text(if (unread > 99) "99" else unread.toString(), color = Color.White, style = plain(10, FontWeight.Bold), maxLines = 1)
+                    Text(if (unread > 99) "99" else unread.toString(), color = Color.White, style = plain(11, FontWeight.Bold), maxLines = 1)
                 }
             } else Text("● $unread", color = Theme.ink, style = mono(11), maxLines = 1)
         }
@@ -835,7 +835,7 @@ internal fun AsideTag() {
         "Aside",
         Modifier.grounded(if (classic) Theme.panel else Color.Transparent, 4.dp).framed(Theme.line, if (classic) 4.dp else 0.dp)
             .padding(horizontal = 4.dp, vertical = 0.dp),
-        color = Theme.secondaryInk, style = mono(10), maxLines = 1, textAlign = TextAlign.Center,
+        color = Theme.secondaryInk, style = mono(11), maxLines = 1, textAlign = TextAlign.Center,
     )
 }
 
@@ -848,6 +848,6 @@ internal fun TaskTag(n: Int, tap: (() -> Unit)? = null) {
         Modifier.grounded(if (classic) Theme.panel else Color.Transparent, 4.dp).framed(Theme.line, if (classic) 4.dp else 0.dp)
             .then(if (tap != null) Modifier.clickable(role = Role.Button, onClickLabel = "只看这个任务") { tap() } else Modifier)
             .padding(horizontal = 4.dp, vertical = 0.dp),
-        color = Theme.secondaryInk, style = mono(10), maxLines = 1, textAlign = TextAlign.Center,
+        color = Theme.secondaryInk, style = mono(11), maxLines = 1, textAlign = TextAlign.Center,
     )
 }

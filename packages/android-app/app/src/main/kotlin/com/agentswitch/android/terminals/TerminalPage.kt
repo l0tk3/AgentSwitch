@@ -1016,10 +1016,10 @@ private fun DraftStrip(page: TerminalPageModel, remove: (TerminalPageModel.Draft
                         }
                         // A file of the Mac's: `on Mac` (not sent, its path goes); one that may hold a password, the amber mark (docs/files-v0.md §4).
                         Row(Modifier.widthIn(max = 96.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            if (d.sensitive) Text("!", color = Theme.waiting, style = mono(10, FontWeight.Bold))
-                            Text(if (d.isImage) "#${d.number}" else "#${d.number} ${d.name}", color = Theme.secondaryInk, style = mono(10), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (d.sensitive) Text("!", color = Theme.waiting, style = mono(11, FontWeight.Bold))
+                            Text(if (d.isImage) "#${d.number}" else "#${d.number} ${d.name}", color = Theme.secondaryInk, style = mono(11), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        if (d.macPath != null) Text("on Mac", color = Theme.inkDim, style = mono(9))
+                        if (d.macPath != null) Text("on Mac", color = Theme.inkDim, style = mono(11))
                     }
                     Box(
                         Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(18.dp).background(Theme.ink, CircleShape).clickable(role = Role.Button, onClickLabel = "remove ${d.token}") { remove(d) },
@@ -1043,7 +1043,7 @@ private fun SuggestionList(suggestions: List<SlashCommand>, pick: (SlashCommand)
             ) {
                 Text("/${c.name}", color = Theme.ink, style = mono(13, FontWeight.Medium), maxLines = 1)
                 Text(c.description, Modifier.weight(1f), color = Theme.secondaryInk, style = plain(12), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (c.source != "builtin") Text(c.source, color = Theme.inkDim, style = mono(10))
+                if (c.source != "builtin") Text(c.source, color = Theme.inkDim, style = mono(11))
             }
         }
     }
@@ -1261,7 +1261,7 @@ private fun DownGlyph(color: Color) {
             drawLine(color, Offset(size.width, 0f), Offset(size.width / 2, size.height), w, StrokeCap.Round)
         }
     } else {
-        Text("▾", color = color, style = com.agentswitch.android.design.code(10), maxLines = 1)
+        Text("▾", color = color, style = com.agentswitch.android.design.code(11), maxLines = 1)
     }
 }
 

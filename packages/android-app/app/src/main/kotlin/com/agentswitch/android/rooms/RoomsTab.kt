@@ -287,7 +287,7 @@ private fun UnreadCount(count: Int, forYou: Boolean) {
         Box(
             Modifier.defaultMinSize(minWidth = 17.dp, minHeight = 17.dp).background(if (forYou) Theme.waiting else Theme.inkDim, CircleShape).padding(horizontal = 5.dp),
             contentAlignment = Alignment.Center,
-        ) { Text(count.toString(), color = Color.White, style = plain(10, FontWeight.Bold), maxLines = 1) }
+        ) { Text(count.toString(), color = Color.White, style = plain(11, FontWeight.Bold), maxLines = 1) }
     } else {
         Text("[$count]", color = if (forYou) Theme.waiting else Theme.secondaryInk, style = mono(11), maxLines = 1)
     }

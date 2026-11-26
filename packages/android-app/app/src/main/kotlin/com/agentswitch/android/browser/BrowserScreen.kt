@@ -201,7 +201,7 @@ fun BrowserScreen(
                         val y = if (top - p.height >= 0) top - p.height else top + h
                         layout(p.width, p.height) { p.place(x.roundToInt(), y) }
                     }.background(Theme.busy).padding(horizontal = 6.dp, vertical = 1.dp),
-                    color = androidx.compose.ui.graphics.Color.Black, style = mono(10, FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color.Black, style = mono(11, FontWeight.SemiBold),
                 )
             }
         }

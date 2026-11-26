@@ -401,7 +401,7 @@ private fun AgentTile(id: String, name: String, on: Boolean, installed: Boolean,
             // a little fainter for the others, faint where it is not installed; the tile's frame says which is chosen.
             com.agentswitch.android.design.AgentLogo(id, Modifier.alpha(if (on) 1f else if (installed) 0.85f else 0.4f), size = 24.dp, bare = true)
             Text(name, color = if (installed) Theme.ink else Theme.inkDim, style = mono(13), maxLines = 1)
-            if (!installed) Text("Not Installed", color = Theme.inkDim, style = mono(10))
+            if (!installed) Text("Not Installed", color = Theme.inkDim, style = mono(11))
         }
     }
 }

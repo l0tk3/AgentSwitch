@@ -189,7 +189,7 @@ private fun TabBar(current: MainTab, badges: Map<MainTab, Int>, onSelect: (MainT
                     Text(
                         item.word, Modifier.padding(top = 3.dp),
                         color = if (on) (if (classic) Theme.signal else Theme.ink) else Theme.secondaryInk,
-                        style = plain(10, if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1,
+                        style = plain(11, if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1,
                     )
                 }
             }

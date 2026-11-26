@@ -910,7 +910,7 @@ private fun SubagentRowView(agent: TerminalSubagent, underLast: Boolean, last: B
             },
             Modifier.weight(1f), style = plain(13), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
-        Text(agent.type, color = Theme.inkDim, style = mono(10), maxLines = 1)
+        Text(agent.type, color = Theme.inkDim, style = mono(11), maxLines = 1)
     }
 }
 
