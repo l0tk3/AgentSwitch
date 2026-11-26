@@ -131,8 +131,11 @@ try {
   await until("at work", (x) => x.status === "working", id, 20_000);
   t = await until("waiting for you, its question offered as a list", (x) => x.status === "waiting" && !!x.choices, id, 60_000);
   show(scr.lines());
-  check("the list before a tool: five rows, the selection on \"Yes, proceed\"", t.choices?.options?.length === 5 && t.choices.options[t.choices.selected]?.label === "Yes, proceed");
-  check("named by its session's title, not by what it is doing", typeof t.name === "string" && !/Action Required|[⠀-⣿]/u.test(t.name) && t.name !== "grok");
+  check("the list before a tool: five rows, the selection on \"Yes, proceed\"", t.choices?.options.length === 5 && t.choices.options[t.choices.selected]?.label === "Yes, proceed");
+  // 1.0.92: the always-approve row is last and has no number, so the screen's numbers skip one (1, 3, 4, 5).
+  check("its last row is the always-approve one, which carries no number", /^Yes, and don't ask again/u.test(t.choices?.options.at(-1)?.label ?? ""));
+  check("named by its session's title, not by what it is doing", typeof t.name === "string" && !/Action [Rr]equired|[⠀-⣿]/u.test(t.name) && t.name !== "grok");
+  if (!t.choices) throw new Error("no list read: the checks above say what its screen showed");
   const yes = await call("POST", `/terminals/${id}/choices`, { pick: t.choices.selected, label: "Yes, proceed" });
   check(`"Yes, proceed" taken through the service (${yes.status})`, yes.status === 200);
   await until("it goes on", (x) => x.status === "working" || x.status === "idle", id, 15_000);

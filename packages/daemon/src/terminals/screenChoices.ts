@@ -15,6 +15,9 @@
  *  (`3 (●) Yes, proceed`), in a block with a bar down its left side; the arrow keys move it and Enter takes it, as in
  *  the other lists. And its question whether to trust a folder: two rows with the key that takes each at their end
  *  (`Yes, proceed    y` / `No, quit    n`), nothing marked — Enter takes the first. Such a row carries its `key`.
+ *  Since 1.0.92 the first list changed (2026-11-26, seen in a pty): the always-approve row stands last and has no
+ *  number (`    (○) Yes, and don't ask again for anything (always-approve mode)`), and the numbered rows keep their
+ *  numbers around it, so the numbers skip one (`1 (○) Always allow: …`, then `3 (●) Yes, proceed`, 4, 5).
  *
  *  `title` is what is asked: the paragraph above the rows that asks something, else the nearest. `text` is everything
  *  the screen says above the rows, when that is more than the title — a folder's question is several paragraphs, and
@@ -68,29 +71,38 @@ export function choicesOnScreen(lines: readonly string[], cols?: number, harness
 /** `asked`: what stands above the rows, where the shape reads it itself. */
 type Found = { readonly first: number; readonly options: ScreenChoices["options"]; readonly selected: number; readonly asked?: { readonly title: string; readonly text: string } };
 
-/** A row of what Grok asks before a tool: the bar of its block, a number, a round mark, the words. */
-const RADIO_ROW = /^\s*(?:[┃│|]\s*)?(\d{1,2})\s+\(([○●◯◉])\)\s+(\S.*?)\s*$/u;
+/** A row of what Grok asks before a tool: the bar of its block, a number (not every row has one since 1.0.92), a round
+ *  mark, the words. */
+const RADIO_ROW = /^\s*(?:[┃│|]\s*)?(?:(\d{1,2})\s+)?\(([○●◯◉])\)\s+(\S.*?)\s*$/u;
 /** A row of the block above them. */
 const BLOCK_ROW = /^\s*┃/u;
 /** How far up from the screen's end such a list is looked for: it is what the screen waits on, with the line that
  *  names its keys under it. */
 const RADIO_FROM_END = 6;
 
-/** Grok's question before a tool: rows numbered 1, 2, 3… each with a round mark, exactly one filled. Above them in the
- *  same block, what it is about to do and on what (and a line naming more keys, which says nothing of it). */
+/** Grok's question before a tool: rows each with a round mark, exactly one filled, the numbered ones in growing order
+ *  (1.0.92 leaves a number out where the always-approve row would be, rather than renumbering, and that row has no
+ *  number at all — it is always the last). Above them in the same block, what it is about to do and on what (and a
+ *  line naming a key, which says nothing of it). */
 function radio(all: readonly string[]): Found | null {
   let end = all.length - 1, below = 0;
   while (end >= 0 && !RADIO_ROW.test(all[end]!)) { if (all[end]!.trim()) below += 1; end -= 1; }
   if (end < 0 || below > RADIO_FROM_END) return null;
-  const rows: { n: number; on: boolean; text: string }[] = [];
+  const rows: { n: number | null; on: boolean; text: string }[] = [];
   let first = end;
   for (let i = end; i >= 0 && rows.length <= MAX_CHOICES; i--) {
     const m = RADIO_ROW.exec(all[i]!);
     if (!m) break;
-    rows.unshift({ n: Number(m[1]), on: m[2] === "●" || m[2] === "◉", text: m[3]! });
+    rows.unshift({ n: m[1] === undefined ? null : Number(m[1]), on: m[2] === "●" || m[2] === "◉", text: m[3]! });
     first = i;
   }
-  if (rows.length < 2 || rows.length > MAX_CHOICES || rows.some((r, i) => r.n !== i + 1) || rows.filter((r) => r.on).length !== 1) return null;
+  if (rows.length < 2 || rows.length > MAX_CHOICES || rows.filter((r) => r.on).length !== 1) return null;
+  // The row without a number only as the last of them; the numbered rows in growing order, gaps allowed, at least two
+  // of them (a mark and a few words without them is some other card).
+  const last = rows.length - 1;
+  if (rows.some((r, i) => r.n === null && i !== last)) return null;
+  const numbers = rows.flatMap((r) => (r.n === null ? [] : [r.n]));
+  if (numbers.length < 2 || numbers.some((n, i) => i > 0 && n <= numbers[i - 1]!)) return null;
   const above: string[] = [];
   for (let i = first - 1; i >= 0 && first - i <= MAX_ABOVE && BLOCK_ROW.test(all[i]!); i--) {
     const said = all[i]!.replace(/^\s*┃\s*/u, "").replace(/^[›❯>│|]\s*/u, "").trim();

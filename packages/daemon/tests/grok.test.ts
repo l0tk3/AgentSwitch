@@ -157,6 +157,9 @@ describe("Grok's hooks", () => {
     expect(grokTitle("Run touch probe-file.txt shell command - grok")).toEqual({ title: "Run touch probe-file.txt shell command", working: false, attention: false });
     expect(grokTitle("⚠ Action Required - ⠦ - Remove probe-file.txt as requested… - Delete probe-file.txt with rm command - grok"))
       .toEqual({ title: "Delete probe-file.txt with rm command", working: true, attention: true });
+    // 1.0.92 writes it with a lower-case `required` (seen in a pty, 2026-11-26).
+    expect(grokTitle("⚠ Action required - ⠦ - Remove probe-file.txt… - Delete probe-file.txt via shell command - grok"))
+      .toEqual({ title: "Delete probe-file.txt via shell command", working: true, attention: true });
     // A title with a dash of its own stays whole; one that is not Grok's form is taken as it is.
     expect(grokTitle("⠙ - Thinking - Fix the build - again - grok").title).toBe("Fix the build - again");
     expect(grokTitle("fake agent")).toEqual({ title: "fake agent", working: false, attention: false });
@@ -435,6 +438,24 @@ describe("the lists Grok draws on its screen", () => {
     `${" ".repeat(91)}Grok Build  1.0.77 [stable]`,
   ];
 
+  /** The same question as 1.0.92 draws it (seen with 1.0.92 in a pty, 2026-11-26): the always-approve row has no number
+   *  and stands last; the numbered rows keep their numbers, so one is skipped. */
+  const PERMISSION_192 = [
+    "   ◆ Remove probe-file.txt… 0.0s                                                     17.3k ⇣17.3k [↓][stop]",
+    "  ┃",
+    "  ┃  ›  Remove probe-file.txt",
+    "  ┃  │ rm probe-file.txt",
+    "  ┃  e edit pattern",
+    "  ┃",
+    "  ┃  1 (○) Always allow: rm probe-file.txt",
+    "  ┃  3 (●) Yes, proceed",
+    "  ┃  4 (○) No, reject (type to add feedback)",
+    "  ┃  5 (○) Never allow: rm probe-file.txt",
+    "  ┃    (○) Yes, and don't ask again for anything (always-approve mode)",
+    "  ┃",
+    "  1/5:select  │ Tab:next option  │ e:edit pattern  │  Ctrl+c:cancel  │  Esc:scrollback",
+  ];
+
   it("what it asks before a tool: numbered rows with a round mark, the filled one selected; above them what it is about to do", () => {
     expect(choicesOnScreen(PERMISSION, 120, "grok")).toEqual({
       title: "Remove probe-file.txt as requested",
@@ -457,6 +478,29 @@ describe("the lists Grok draws on its screen", () => {
     // Only Grok draws it: on another agent's screen such rows are words.
     expect(choicesOnScreen(PERMISSION, 120, "claude-code")).toBeNull();
     expect(choicesOnScreen(PERMISSION, 120)).toBeNull();
+  });
+
+  it("1.0.92's list: the numbers skip one and the always-approve row stands last without a number", () => {
+    expect(choicesOnScreen(PERMISSION_192, 120, "grok")).toEqual({
+      title: "Remove probe-file.txt",
+      text: "Remove probe-file.txt\nrm probe-file.txt\ne edit pattern",
+      options: [
+        { label: "Always allow: rm probe-file.txt" }, { label: "Yes, proceed" }, { label: "No, reject (type to add feedback)" },
+        { label: "Never allow: rm probe-file.txt" }, { label: "Yes, and don't ask again for anything (always-approve mode)" },
+      ],
+      selected: 1,
+    });
+    // The selection on the row without a number: read where it stands, last.
+    const last = PERMISSION_192.map((l) => l.replace("3 (●)", "3 (○)").replace("(○) Yes, and", "(●) Yes, and"));
+    expect(choicesOnScreen(last, 120, "grok")?.selected).toBe(4);
+    // Not a list: an unnumbered row anywhere but last, two of them, numbers out of order or equal, none marked.
+    expect(choicesOnScreen(PERMISSION_192.map((l) => l.replace("  ┃  3 (●)", "  ┃  (●)")), 120, "grok")).toBeNull();
+    expect(choicesOnScreen(PERMISSION_192.map((l) => l.replace("  ┃  1 (○)", "  ┃    (○)")), 120, "grok")).toBeNull();
+    expect(choicesOnScreen(PERMISSION_192.map((l) => l.replace("5 (○)", "2 (○)")), 120, "grok")).toBeNull();
+    expect(choicesOnScreen(PERMISSION_192.map((l) => l.replace("3 (●)", "3 (○)")), 120, "grok")).toBeNull();
+    // Only Grok draws it, and only as the last thing on its screen.
+    expect(choicesOnScreen(PERMISSION_192, 120, "codex")).toBeNull();
+    expect(choicesOnScreen([...PERMISSION_192, ...Array.from({ length: 8 }, (_, i) => `   an answer's line ${i}`)], 120, "grok")).toBeNull();
   });
 
   it("its question about a folder it does not trust: two rows, each with the key that takes it; nothing marked, Enter takes the first", () => {

@@ -138,9 +138,10 @@ export function grokCall(call: HookCall): HookCall | null {
   return { event, payload: p };
 }
 
-/** Grok's window title, read (measured with 1.0.77): `grok` when fresh; `<spinner> - <what it does> - grok` while it
- *  works, with the session's title once it has one (`<spinner> - <what it does> - <title> - grok`); `<title> - grok`
- *  at rest; and `⚠ Action Required - ` in front while something on its screen waits for an answer. */
+/** Grok's window title, read (measured with 1.0.77 and 1.0.92): `grok` when fresh; `<spinner> - <what it does> -
+ *  grok` while it works, with the session's title once it has one (`<spinner> - <what it does> - <title> - grok`);
+ *  `<title> - grok` at rest; and `⚠ Action Required - ` in front while something on its screen waits for an answer
+ *  (lower-case `required` since 1.0.92, seen 2026-11-26). */
 export type GrokTitle = {
   /** The session's own title, "" while it has none: never the spinner, what it is doing, or the program's name. */
   readonly title: string;
@@ -149,7 +150,8 @@ export type GrokTitle = {
   readonly attention: boolean;
 };
 
-const GROK_ATTENTION = /^\s*⚠\s*Action Required\s*-\s*/u;
+/** `⚠ Action Required` up to 1.0.77, `⚠ Action required` since 1.0.92. */
+const GROK_ATTENTION = /^\s*⚠\s*Action Required\s*-\s*/iu;
 const GROK_SPINNER = /^[⠀-⣿]$/u;
 
 export function grokTitle(raw: string): GrokTitle {
