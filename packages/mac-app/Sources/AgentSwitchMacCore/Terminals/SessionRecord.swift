@@ -640,12 +640,16 @@ public struct RecordEnd: Equatable, Sendable {
 public enum RecordLayout {
     /// The reading column at its widest.
     public static let column: Double = 780
-    /// The narrowest pane that has a side: the column stays readable next to it.
-    public static let sideFrom: Double = 980
+    /// The narrowest pane that has a side. A split's pane (about 560 in the smallest window) has one too, narrower:
+    /// the bar's button did nothing there (user #557).
+    public static let sideFrom: Double = 520
+    /// From here the side has its full width.
+    public static let wideFrom: Double = 980
 
     /// The side's width in a pane this wide; nil for a pane too narrow to have one.
     public static func side(pane: Double) -> Double? {
-        pane >= sideFrom ? min(max((pane * 0.3).rounded(), 300), 440) : nil
+        guard pane >= sideFrom else { return nil }
+        return pane >= wideFrom ? min(max((pane * 0.3).rounded(), 300), 440) : min(max((pane * 0.34).rounded(), 220), 300)
     }
 }
 
