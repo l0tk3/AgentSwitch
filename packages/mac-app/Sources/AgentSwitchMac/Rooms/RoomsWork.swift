@@ -303,11 +303,15 @@ private struct RoomModelsRow: View {
         let isDefault = profile.model == one.id
         let tip = [one.description, one.id == one.name ? nil : one.id, isDefault ? "这个配置不指定模型时用它" : nil].compactMap { $0 }.joined(separator: "\n")
         return Button { model.setAdminModel(one.id, on: !on, agent: agent, profile: profile) } label: {
-            Text((look.isClassic ? "" : (on ? "[x] " : "[ ] ")) + one.name + (isDefault ? " · default" : "")).mono(11.5)
-                .foregroundStyle(on ? Look.ink : Look.faint).strikethrough(!on, color: Look.faint)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .grounded(on && look.isClassic ? Look.raised : Color.clear, radius: 6)
-                .framed(Look.line, radius: look.isClassic ? 6 : 0)
+            // The line through a model that is off goes through its name only: through `[ ]` it read as a broken box.
+            HStack(spacing: 0) {
+                if !look.isClassic { Text(on ? "[x] " : "[ ] ").mono(11.5) }
+                Text(one.name + (isDefault ? " · default" : "")).mono(11.5).strikethrough(!on, color: Look.faint)
+            }
+            .foregroundStyle(on ? Look.ink : Look.faint)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .grounded(on && look.isClassic ? Look.raised : Color.clear, radius: 6)
+            .framed(Look.line, radius: look.isClassic ? 6 : 0)
         }
         .buttonStyle(.plain)
         .help((tip.isEmpty ? "" : tip + "\n\n") + (on ? "管理员可以用。点一下关掉。" : "已关掉，管理员不能用。点一下打开。"))

@@ -98,7 +98,7 @@ private struct FilesHead: View {
             if look.isClassic {
                 Text("Files").font(.system(size: 13, weight: .semibold)).foregroundStyle(Look.ink)
             } else {
-                Text("// FILES").mono(11).tracking(0.7).foregroundStyle(Look.faint)
+                PartLabel("Files")
             }
             if files.node != nil {
                 Text("@ \(files.nodeName)").font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Color.signal).lineLimit(1)

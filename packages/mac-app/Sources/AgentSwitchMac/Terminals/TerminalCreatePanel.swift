@@ -85,9 +85,10 @@ struct TerminalCreatePanel: View {
         let installed = model.agents.contains(id)
         let on = model.pickedAgent == id
         return Button { model.pickedAgent = id } label: {
-            // Every tile is one size: `Not Installed` goes under the name within it (a line more made that tile taller
-            // than the rest; user: notinstalled框太大了 排版崩了 应该和其他的一样大).
-            VStack(alignment: .leading, spacing: installed ? 10 : 6) {
+            // Every tile is one size and every name on one line: `Not Installed` goes under the name within it, and
+            // the space above the name is the same whether or not it says so (a line more made that tile taller than
+            // the rest; user: notinstalled框太大了 排版崩了 应该和其他的一样大).
+            VStack(alignment: .leading, spacing: 10) {
                 PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.agents["pi"]!, pixel: 3, color: Look.ink, strength: on ? 1 : 0.75, shadow: !look.isClassic)
                     .frame(height: 16, alignment: .leading)
                 VStack(alignment: .leading, spacing: 1) {
@@ -99,7 +100,7 @@ struct TerminalCreatePanel: View {
                 }
             }
             .foregroundStyle(installed ? Look.ink : Look.faint)
-            .padding(EdgeInsets(top: 10, leading: inset, bottom: 8, trailing: inset))
+            .padding(EdgeInsets(top: 10, leading: inset, bottom: 4, trailing: inset))
             .frame(maxWidth: .infinity, minHeight: Self.tileHeight, maxHeight: Self.tileHeight, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0).fill(on && look.isClassic ? Color.signal.opacity(0.14) : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0)

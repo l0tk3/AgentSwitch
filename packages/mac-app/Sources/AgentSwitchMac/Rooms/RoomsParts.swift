@@ -593,7 +593,13 @@ struct RoomMemberRow: View {
                 }
                 Spacer(minLength: 4)
                 if let agent = seat.card?.agent { AgentSprite(harness: agent) }
-                if let color = seat.card?.profileColor { ProfileDot(color: color).help("配置 \(seat.card?.profile ?? "")") }
+                // The profile's dot has a column of its own, so every row's agent's mark stands at the same place
+                // whether or not that member has a profile (docs/design-rules.md §3.3; user #508).
+                ZStack(alignment: .trailing) {
+                    Color.clear
+                    if let color = seat.card?.profileColor { ProfileDot(color: color).help("配置 \(seat.card?.profile ?? "")") }
+                }
+                .frame(width: 12, height: 12, alignment: .trailing)
             }
             .padding(.horizontal, look.isClassic ? 6 : 12)
             .padding(.vertical, 6)
@@ -642,7 +648,11 @@ struct RoomMemberCard: View {
                 Text("@\(seat.handle)").font(.system(size: 14, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
                 Spacer(minLength: 4)
                 if let state = seat.state { SeatStateMark(state: state) }
-                if let color = seat.card?.profileColor { ProfileDot(color: color) }
+                ZStack(alignment: .trailing) {
+                    Color.clear
+                    if let color = seat.card?.profileColor { ProfileDot(color: color) }
+                }
+                .frame(width: 12, height: 12, alignment: .trailing)
             }
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {
                 if let card = seat.card {
