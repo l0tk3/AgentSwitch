@@ -144,15 +144,15 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     throw err;
   };
 
-  const seatsOf = (room: Room): SeatView[] => room.seats.map((seat) => {
-    const view = { ...seatView(seat, host(), hasKit, room.stats[seat.handle], seat.kind === "session" && seat.left === undefined ? rooms.unreadOf(room.id, seat.handle).length : 0), avatar: rooms.avatarOf(seat) };
+  const seatsOf = (room: Room): SeatView[] => { const unread = rooms.unreadCounts(room.id); return room.seats.map((seat) => {
+    const view = { ...seatView(seat, host(), hasKit, room.stats[seat.handle], seat.kind === "session" && seat.left === undefined ? unread.get(seat.handle) ?? 0 : 0), avatar: rooms.avatarOf(seat) };
     // What it is called now is kept for the day its terminal is gone.
     if (seat.terminal && view.card && seat.left === undefined && host()?.get(seat.terminal)) {
       const { mode: _mode, node: _node, ...was } = view.card;
       rooms.remember(room.id, seat.handle, was);
     }
     return view;
-  });
+  }); };
 
   // The rounds between sessions are no longer told (user #575, 2026-11-26: 这个提示完全没必要): always null, so no screen
   // shows the notice, the list's mark or the attention row; the field stays for the screens that read it.

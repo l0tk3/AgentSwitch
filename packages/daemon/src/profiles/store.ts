@@ -13,7 +13,7 @@
 import type { AddonPlace } from "./addons.js";
 import { changeClaudeCopies, claudeCopyOptions, claudeCopyState, prepareClaudeCopies, type ClaudeCopies, type ClaudeCopyList } from "./claudeCopies.js";
 import { randomBytes } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -568,6 +568,25 @@ export class ProfileStore {
    *  itself, Codex's from the ChatGPT sign-in it keeps (the address in its identity token), Grok's `email` in its
    *  `auth.json` (nothing else of it is read). */
   private account(agent: ProfileAgent, home: string | null): { account?: string; device?: string } {
+    // Read again only when the file changed: `.claude.json` runs to megabytes (every project's history) and the
+    // profiles are listed on most of the screens' calls (user #604: 性能; a profile of the service put a tenth of its
+    // busy time in parsing it).
+    const file = agent === "codex" ? join(home ?? join(this.userHome, ".codex"), "auth.json")
+      : agent === "grok" ? join(home ?? this.grokOwnFolder(), "auth.json")
+      : agent === "claude-code" ? (home ? join(home, ".claude.json") : join(this.userHome, ".claude.json")) : null;
+    if (!file) return {};
+    let mark = "";
+    try { const st = statSync(file); mark = `${st.mtimeMs}:${st.size}`; } catch { /* none: read as before */ }
+    const kept = this.accounts.get(file);
+    if (mark && kept?.mark === mark) return kept.value;
+    const value = this.readAccount(agent, home);
+    if (mark) this.accounts.set(file, { mark, value });
+    return value;
+  }
+
+  private readonly accounts = new Map<string, { mark: string; value: { account?: string; device?: string } }>();
+
+  private readAccount(agent: ProfileAgent, home: string | null): { account?: string; device?: string } {
     if (agent === "codex") return codexAccount(join(home ?? join(this.userHome, ".codex"), "auth.json"));
     if (agent === "grok") return grokAccount(join(home ?? this.grokOwnFolder(), "auth.json"));
     if (agent !== "claude-code") return {};

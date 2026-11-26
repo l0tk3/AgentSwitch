@@ -152,6 +152,9 @@ describe("rooms as kept", () => {
     expect(store.get(room.id).receipts).toEqual({ 1: { daemon: "delivered" }, 3: { daemon: "sent" } });
     // The user's own words are seen; the two after them are not, and one of those is not for the user.
     expect(store.unread(room.id)).toEqual({ count: 1, forYou: false });
+    // Each seat's count at once is what it is one seat at a time.
+    const counts = store.unreadCounts(room.id);
+    for (const seat of store.get(room.id).seats) expect(counts.get(seat.handle)).toBe(store.unreadOf(room.id, seat.handle).length);
     expect(store.read(room.id, 99).readSeq).toBe(4);
     // A seat that leaves takes what was on its way to it.
     store.unseat(room.id, "daemon");

@@ -578,6 +578,20 @@ export class RoomStore {
     return this.messages(id, { after: Math.max(floor, room.readsFrom, 0) }).filter((m) => m.seq > floor && m.seq > room.readsFrom && m.at >= seat.joinedAt && m.from !== handle && !(room.reads[String(m.seq)]?.includes(handle)));
   }
 
+  /** How many each seat has not read (`unreadOf`'s count for every seat at once): the messages are read from the
+   *  database and parsed once, not once a seat (user #604: a room's page asked this for each of its members on every
+   *  call). */
+  unreadCounts(id: string): Map<string, number> {
+    const room = this.get(id);
+    const floor = room.lastSeq - MAX_READS;
+    const recent = this.messages(id, { after: Math.max(floor, room.readsFrom, 0) }).filter((m) => m.seq > floor && m.seq > room.readsFrom);
+    const out = new Map<string, number>();
+    for (const seat of room.seats) {
+      out.set(seat.handle, recent.reduce((n, m) => n + (m.at >= seat.joinedAt && m.from !== seat.handle && !(room.reads[String(m.seq)]?.includes(seat.handle)) ? 1 : 0), 0));
+    }
+    return out;
+  }
+
   /** A seat has read these messages: given them whole, or read them itself. Kept in memory and written with the
    *  room's next change, like the counts. */
   markRead(id: string, handle: string, seqs: readonly number[]): void {
