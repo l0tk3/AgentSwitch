@@ -4,6 +4,8 @@
 
 随后定的两件事：已有的安装“AgentSwitch 管理，但是要求卸载了 AgentSwitch 也不影响原有的使用”；测试版“另起名字放到命令行”。
 
+**2026-11-11：Grok 不在这一页里。** 终端能开 Grok 了（terminal-v0 §3 “Grok”），但它的安装、更新和选版本还没有做：它照 xAI 的说明自己装、自己更新（`grok update`），服务自己找它——`GROK_BIN`，其次 PATH，其次 `~/.local/bin/grok`、`~/.grok/bin/grok`。新建面板里它没装时同样写 `Not Installed`。
+
 本文是草案；界面以演示页 `docs/design/concepts/agents.html` 为准。此前 app-v0 §4 的规定是“执行器需自行安装并登录，应用只检查、不代为运行安装命令”，本文取代其中“只检查”的部分；登录仍由用户自己在终端里完成。
 
 ## 0. 要点

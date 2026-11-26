@@ -8,11 +8,14 @@
  *  - OpenCode: a model's variants (DeepSeek V4.1 Flash: none, low, high, max), part of the model's name:
  *    `-m provider/model#variant`. In a running session `/variants`.
  *  - pi: thinking — one list for every model (its `--help`), `--thinking <level>`; it uses what the model can.
+ *  - Grok: reasoning effort — per model (its model list: `reasoning_efforts`, and which one a model uses unless told);
+ *    for one session it is configuration of that start (`GROK_CONFIG`, terminals/launch.ts — its `--reasoning-effort`
+ *    flag also rewrites the user's default); `/effort <level>` in a running one, which Grok keeps as the default.
  *
  *  A level is never passed on unless the agent (or its own help) lists it: an unknown one would fail the launch. */
 
-/** The four agents a terminal runs (the terminals' own list, which this layer does not reach up to). */
-type TerminalHarness = "claude-code" | "codex" | "opencode" | "pi";
+/** The agents a terminal runs (the terminals' own list, which this layer does not reach up to). */
+type TerminalHarness = "claude-code" | "codex" | "opencode" | "pi" | "grok";
 
 /** A level's name as the agents write them: a short lowercase word. */
 export const EFFORT = /^[a-z][a-z0-9_-]{0,23}$/;
@@ -23,6 +26,8 @@ export const PI_THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", 
 export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /** Codex's reasoning efforts, lowest first, for a model whose own list is not known. */
 export const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+/** Grok's reasoning efforts, lowest first (its `/effort`, Grok 1.0.77), for a model whose own list is not known. */
+export const GROK_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
 /** Lowest first, whatever order an agent lists them in; a level this does not know keeps its place after the known. */
 const ORDER = ["off", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -49,6 +54,7 @@ export function effortsFor(offers: EffortOffers, harness: TerminalHarness, model
   if (harness === "claude-code") return CLAUDE_EFFORTS;
   if (harness === "codex") return CODEX_EFFORTS;
   if (harness === "pi") return PI_THINKING;
+  if (harness === "grok") return GROK_EFFORTS;
   return null;
 }
 
@@ -60,6 +66,7 @@ export function effortArgs(harness: TerminalHarness, effort: string | undefined,
     case "codex": return { args: ["-c", `model_reasoning_effort=${JSON.stringify(effort)}`], model };
     case "opencode": return { args: [], model: model ? `${model}#${effort}` : model };
     case "pi": return { args: ["--thinking", effort], model };
+    case "grok": return { args: [], model };   // no argument: its level goes with the start's configuration (launch.ts)
   }
 }
 

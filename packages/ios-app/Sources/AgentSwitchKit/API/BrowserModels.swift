@@ -48,7 +48,7 @@ public struct BrowserTabOwner: Decodable, Sendable, Hashable {
     /// The agent named first in a label (`codex · AgentSwitch` → `codex`), when the label says one.
     public var namedHarness: String? {
         let first = label.components(separatedBy: " · ").first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
-        return ["claude code": "claude-code", "claude": "claude-code", "codex": "codex", "opencode": "opencode", "pi": "pi"][first]
+        return ["claude code": "claude-code", "claude": "claude-code", "codex": "codex", "opencode": "opencode", "pi": "pi", "grok": "grok"][first]
     }
 
     /// The agent as people call it (`Codex`, `Claude Code`), for the holder line and sentences: `harness` (the terminal's

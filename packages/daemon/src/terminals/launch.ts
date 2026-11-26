@@ -4,8 +4,9 @@
  *  touched, so agents they start in iTerm are unaffected. */
 
 import { profileEnvironment } from "./profileEnvironment.js";
-import { effortArgs } from "../harness/efforts.js";
+import { EFFORT, effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
+import { GROK_HOOK_NODE, GROK_HOOK_SCRIPT } from "./grokHooks.js";
 import { CodexCompanion } from "./codexTerminal.js";
 import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
@@ -55,6 +56,10 @@ export type LauncherOptions = {
    *  trusts them (codexHooks.ts) — in the folder it runs in: a profile's (`home`) or the Mac's own; until then it goes
    *  without and its status is guessed. */
   readonly codexHooks?: (home?: string) => boolean;
+  /** Grok gets AgentSwitch's hooks (status, the protected-path check, its sub-agents) where AgentSwitch's hook file
+   *  is in the folder Grok keeps its own in (grokHooks.ts `ensureGrokHooks`); else it goes without and its status is
+   *  read from its window title and its output. */
+  readonly grokHooks?: () => boolean;
   /** OpenCode's TUI attaches to a private server the service starts and watches (status, permission requests;
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
@@ -494,6 +499,33 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.resume) args.push(req.fork ? "--fork" : "--session", req.resume);
         return { file, args, env, hooks: true };
       }
+      case "grok": {
+        // Its hooks are a file in its own folder (grokHooks.ts), the same for every terminal and for none: what makes
+        // them this terminal's is its environment — the three variables above, and the program to run.
+        const hooked = opts.grokHooks?.() ?? false;
+        if (hooked) { env[GROK_HOOK_NODE] = node; env[GROK_HOOK_SCRIPT] = script; }
+        const args: string[] = [];
+        // The model and the level are configuration of this one start (`GROK_CONFIG`, which Grok lays over its
+        // config.toml for the process), not flags: started with `--model` or `--reasoning-effort`, Grok writes them
+        // into the user's config.toml as what every later session of theirs starts on (measured 2026-11-11 with
+        // 1.0.77: `--model grok-4.6` left `default = "grok-4.6"` there; the overlay left the file as it was).
+        const level = req.effort && EFFORT.test(req.effort) ? req.effort : undefined;
+        if (req.model || level) {
+          const had = inlineConfig(env.GROK_CONFIG);
+          const models = { ...(had.models && typeof had.models === "object" && !Array.isArray(had.models) ? had.models as Record<string, unknown> : {}),
+            ...(req.model ? { default: req.model } : {}), ...(level ? { default_reasoning_effort: level } : {}) };
+          env.GROK_CONFIG = JSON.stringify({ ...had, models });
+        }
+        // How it asks, in its own words: every time (`default`), its automatic mode, or not at all. Stated, not left
+        // to its config.toml (which may say never to ask).
+        args.push("--permission-mode", req.mode === "bypass" ? "bypassPermissions" : req.mode === "auto" ? "auto" : "default");
+        // The protected paths, refused by its own rules in every mode — also for the commands it runs that name them
+        // — whether or not the service answers its hook (which then lets the call through).
+        args.push(...grokDenyArgs(opts.protected));
+        // The same session goes on (docs/terminal-v0.md §5); a fork is a new session with the whole history.
+        if (req.resume) args.push("--resume", req.resume, ...(req.fork ? ["--fork-session"] : []));
+        return { file, args, env, hooks: hooked };
+      }
     }
   };
   return (req: LaunchRequest): LaunchPlan => {
@@ -535,7 +567,19 @@ export function codexPermissions(base: ":read-only" | ":workspace", prot?: Prote
   return ["-c", 'default_permissions="agentswitch"', "-c", `permissions.agentswitch=${profile}`];
 }
 
-/** OpenCode's inline configuration (OPENCODE_CONFIG_CONTENT) as an object; nothing where it is not one. */
+/** Grok's own deny rules for the protected paths, as flags of one start (`--deny 'Read(<path>/**)'`): what may not be
+ *  read, and what may not be changed. Its rules take an absolute path as it is written; a folder's rule covers the
+ *  folder and all under it. */
+export function grokDenyArgs(prot?: ProtectedPaths): string[] {
+  if (!prot) return [];
+  // (Claude Code writes such a path with `//` in front; Grok takes that for part of the name.)
+  const rule = (tool: string, path: string) => [`${tool}(${path})`, `${tool}(${path}/**)`];
+  const rules = [...new Set([...(prot.readDenied ?? []).flatMap(rootSpellings).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap(rootSpellings).flatMap((p) => rule("Edit", p))])];
+  return rules.flatMap((r) => ["--deny", r]);
+}
+
+/** An agent's inline configuration (OpenCode's OPENCODE_CONFIG_CONTENT, Grok's GROK_CONFIG) as an object; nothing
+ *  where it is not one. */
 function inlineConfig(text: string | undefined): Record<string, unknown> {
   if (!text) return {};
   try {

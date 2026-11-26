@@ -32,6 +32,7 @@ final class ModelNameTests: XCTestCase {
         XCTAssertEqual(HarnessName.display("claude-code"), "Claude Code")
         XCTAssertEqual(HarnessName.display("codex"), "Codex")
         XCTAssertEqual(HarnessName.display("opencode"), "OpenCode")
+        XCTAssertEqual(HarnessName.display("grok"), "Grok")
         XCTAssertEqual(HarnessName.display("echo"), "echo")
     }
 }

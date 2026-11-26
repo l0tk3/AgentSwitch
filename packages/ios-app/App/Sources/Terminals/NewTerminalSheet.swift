@@ -24,7 +24,7 @@ struct NewTerminalSheet: View {
     @FocusState private var typingFolder: Bool
     @Environment(\.interfaceLook) private var look
 
-    static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi")]
+    static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi"), ("grok", "Grok")]
     /// `< >` is one of several (§7.2.6).
     static let modes: [(id: String, name: String)] = [("manual", "Ask Each"), ("auto", "Auto"), ("bypass", "Bypass")]
 

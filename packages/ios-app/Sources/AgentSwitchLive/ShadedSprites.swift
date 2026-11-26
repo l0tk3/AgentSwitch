@@ -109,7 +109,8 @@ public struct ShadedSprite: Equatable, Sendable {
     ])
 
     /// Each agent's mark (its own logo's shape, 9 × 9): Claude Code's spark, its heart the lightest and its tips
-    /// fading; Codex's `>_`, lit along its upper edges; OpenCode's brackets and pi's π as raised strokes.
+    /// fading; Codex's `>_`, lit along its upper edges; OpenCode's brackets and pi's π as raised strokes; Grok's ring,
+    /// lit on its upper left, with the stroke that runs out of it to the upper right.
     public static let agents: [String: ShadedSprite] = [
         "claude-code": ShadedSprite([
             "....d....", ".d..#..d.", "..#.#.#..", "...###...", "d###W###d", "...###...", "..#.#.#..", ".d..#..d.", "....d....",
@@ -123,6 +124,9 @@ public struct ShadedSprite: Equatable, Sendable {
         "pi": ShadedSprite([
             "WWWWWWWW#", "#mmmmmmmd", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W##", "..#m..#mm",
         ]),
+        "grok": ShadedSprite([
+            "........W", "...WW#.W.", "..W#..W..", ".W#..W.m.", ".W#.W..m.", ".W#....m.", "..#m..m..", ".#.mmd...", "#........",
+        ]),
     ]
 
     /// Every picture by name, in the order the three copies list them (this file, the Mac's, the web's
@@ -131,7 +135,7 @@ public struct ShadedSprite: Equatable, Sendable {
         ("dispatch", dispatch), ("terminals", terminals), ("browser", browser), ("settings", settings), ("list", list),
         ("splitRight", splitRight), ("splitDown", splitDown), ("new", new), ("lock", lock), ("lockSmall", lockSmall),
         ("claude-code", agents["claude-code"]!), ("codex", agents["codex"]!), ("opencode", agents["opencode"]!), ("pi", agents["pi"]!),
-        ("stack", stack),
+        ("grok", agents["grok"]!), ("stack", stack),
     ]
 
     /// A number that changes when any picture does (FNV-1a over the names and rows): the three copies' tests hold the

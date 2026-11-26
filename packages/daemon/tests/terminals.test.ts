@@ -1374,9 +1374,9 @@ describe("terminals over HTTP", () => {
     expect((await call("POST", "/terminals", { harness: "claude-code", cwd: "relative/dir" })).status).toBe(400);
 
     const listed0 = await call("GET", "/terminals");
-    expect(listed0.json).toMatchObject({ terminals: [], agents: ["claude-code", "codex", "opencode", "pi"] });
-    // Each agent's models for the new terminal's menu, as people say them; pi has no catalog.
-    expect(Object.keys(listed0.json.models)).toEqual(["claude-code", "codex", "opencode", "pi"]);
+    expect(listed0.json).toMatchObject({ terminals: [], agents: ["claude-code", "codex", "opencode", "pi", "grok"] });
+    // Each agent's models for the new terminal's menu, as people say them; pi has no catalog, nor Grok (it is asked).
+    expect(Object.keys(listed0.json.models)).toEqual(["claude-code", "codex", "opencode", "pi", "grok"]);
     expect(listed0.json.models.pi).toEqual([]);
     for (const m of Object.values(listed0.json.models).flat() as { id: string; name: string }[]) expect(m.name.length).toBeGreaterThan(0);
     // A model id goes to the agent as `--model <id>`: nothing that reads as a flag.

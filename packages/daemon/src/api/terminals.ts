@@ -19,7 +19,7 @@ import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalEr
 import type { TerminalStyle } from "../terminals/style.js";
 import { LEFTOVER_GRACE_MS, type Leftovers } from "../terminals/leftovers.js";
 import type { ModelOffer, Offers } from "../models/modelOffers.js";
-import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
+import { CLAUDE_EFFORTS, EFFORT, effortsFor, GROK_EFFORTS, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { BrowserError, YOU } from "../browser/types.js";
 import { moveClaudeSession, moveCodexSession } from "../profiles/context.js";
@@ -127,8 +127,8 @@ const Raw = z.object({ data: z.string().min(1).max(MAX_INPUT) });
 
 const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400, busy: 409 };
 /** Agents that can go on with a session, and those that can fork one (docs/terminal-v0.md §5). */
-const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode", "pi"]);
-const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "pi"]);
+const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode", "pi", "grok"]);
+const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "pi", "grok"]);
 /** Events a stalled screen may fall behind by before its stream is ended (it reconnects to a fresh snapshot). */
 const MAX_QUEUED = 5_000;
 
@@ -634,9 +634,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
-    // Each agent's own levels: Claude Code's, pi's thinking levels. OpenCode's are its model's variants and Codex's its
-    // model's reasoning efforts, which their own servers know: checked there.
-    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
+    // Each agent's own levels: Claude Code's, pi's thinking levels, Grok's reasoning efforts. OpenCode's are its model's
+    // variants and Codex's its model's reasoning efforts, which their own servers know: checked there.
+    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : info.harness === "grok" ? GROK_EFFORTS : CLAUDE_EFFORTS;
     if (levels && !levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
     try { await host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });

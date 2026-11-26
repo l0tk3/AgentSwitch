@@ -33,5 +33,5 @@ export const STATE_MEETS: Readonly<Record<SeatState, string>> = {
   offline: "its node is unreachable: it gets the message when the node is back",
 };
 
-const AGENTS: Readonly<Record<string, string>> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi" };
+const AGENTS: Readonly<Record<string, string>> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok" };
 export const agentName = (agent: string): string => AGENTS[agent] ?? agent;

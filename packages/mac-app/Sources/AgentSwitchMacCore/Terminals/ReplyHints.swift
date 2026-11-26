@@ -58,8 +58,8 @@ public enum ReplyHints {
 
     /// The agents whose prompt runs a line that begins with `!` in the shell (read from the installed programs,
     /// 2026-10-07: Claude Code 2.1.292 "! for shell mode", Codex 0.158 "! to run it locally"; OpenCode and pi say the
-    /// same in their documents).
-    private static let shells: Set<String> = ["claude-code", "codex", "opencode", "pi"]
+    /// same in their documents, and Grok 1.0.77 in its guide: "`!` on an empty prompt: enter shell mode").
+    private static let shells: Set<String> = ["claude-code", "codex", "opencode", "pi", "grok"]
 
     public static func ask(text: String, caret: Int, harness: String) -> Ask? {
         let all = text as NSString

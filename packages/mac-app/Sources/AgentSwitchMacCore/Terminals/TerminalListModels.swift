@@ -189,7 +189,7 @@ public enum TerminalDaybreak {
 /// the same rules in its Kit): each agent's own word for it, and the levels the service lists for the model chosen.
 public enum TerminalEffort {
     /// The agent's own word, as the control's label: Claude Code's effort, Codex's reasoning, OpenCode's variant of a
-    /// model, pi's thinking.
+    /// model, pi's thinking, Grok's effort (its `/effort`).
     public static func word(_ harness: String) -> String {
         switch harness {
         case "codex": "Reasoning"

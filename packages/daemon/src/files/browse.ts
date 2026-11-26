@@ -361,7 +361,7 @@ const HOME_FILES: readonly (readonly [string, SensitiveReason])[] = [
   [".aws/credentials", "cloud"], [".netrc", "login"], [".git-credentials", "login"], [".npmrc", "login"], [".pypirc", "login"],
   [".docker/config.json", "login"], [".kube/config", "cloud"], [".config/gh/hosts.yml", "login"],
   // The agents' own logins (docs/agents-v0.md).
-  [".codex/auth.json", "login"], [".claude/.credentials.json", "login"], [".local/share/opencode/auth.json", "login"], [".pi/agent/auth.json", "login"],
+  [".codex/auth.json", "login"], [".claude/.credentials.json", "login"], [".local/share/opencode/auth.json", "login"], [".pi/agent/auth.json", "login"], [".grok/auth.json", "login"],
 ];
 const HOME_FOLDERS: readonly (readonly [string, SensitiveReason])[] = [[".ssh", "ssh"], [".gnupg", "gnupg"], ["Library/Keychains", "keychain"]];
 /** In `~/.ssh`, what is not a key. */

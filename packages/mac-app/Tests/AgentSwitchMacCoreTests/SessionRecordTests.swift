@@ -189,6 +189,7 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertTrue(RecordDisplay.setsDirectly("pi"))
         XCTAssertTrue(RecordDisplay.setsDirectly("codex"))
         XCTAssertTrue(RecordDisplay.setsDirectly("opencode"))
+        XCTAssertTrue(RecordDisplay.setsDirectly("grok"), "Grok's own prompt takes `/model <id>` and `/effort <level>`")
         XCTAssertFalse(RecordDisplay.setsDirectly("echo"))
         XCTAssertEqual(RecordDisplay.refusal("no session yet: it starts with the first message"), "它还没有会话：发出第一句话之后才能切换。")
         XCTAssertEqual(RecordDisplay.refusal("not a level of that model: one of low, high, max"), "这个模型没有这一档。")

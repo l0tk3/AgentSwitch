@@ -143,7 +143,7 @@ const STEP_CHARS = 60;
 const TARGET_CHARS = 120;
 const ENDED_CHARS = 90;
 const TOKEN = /enc:(?:v1|ref):[A-Za-z0-9_=-]{8,}/g;
-const HARNESS: Readonly<Record<string, string>> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", echo: "Echo" };
+const HARNESS: Readonly<Record<string, string>> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok", echo: "Echo" };
 
 export function liveSnapshot(terminals: TerminalHost | undefined, now: number): LiveSnapshot {
   // A terminal at work is a row; an idle or ended one is not.

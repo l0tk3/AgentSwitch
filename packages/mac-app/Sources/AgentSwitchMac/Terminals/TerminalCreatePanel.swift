@@ -56,14 +56,19 @@ struct TerminalCreatePanel: View {
 
     // MARK: the agent
 
-    /// The four agents side by side; in a narrow pane two rows of two.
+    /// The agents side by side; in a narrow pane rows of two. Five — Grok came (2026-11-11, user: 能否增加对Grok的支持)
+    /// — are set a little closer than four were: the longest name (`Claude Code`) still has its room.
     private var agents: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { ForEach(TerminalListText.agents, id: \.id) { tile($0.id, $0.name).frame(minWidth: 104) } }
+        let all = TerminalListText.agents
+        let five = all.count > 4
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: five ? 8 : 10) { ForEach(all, id: \.id) { tile($0.id, $0.name, inset: five ? 8 : 10).frame(minWidth: five ? 100 : 104) } }
             VStack(spacing: 10) {
-                ForEach([0, 2], id: \.self) { first in
+                ForEach(Array(stride(from: 0, to: all.count, by: 2)), id: \.self) { first in
                     HStack(spacing: 10) {
-                        ForEach(TerminalListText.agents[first..<min(first + 2, TerminalListText.agents.count)], id: \.id) { tile($0.id, $0.name) }
+                        ForEach(all[first..<min(first + 2, all.count)], id: \.id) { tile($0.id, $0.name) }
+                        // An odd one out keeps a tile's width.
+                        if first + 1 == all.count { Color.clear.frame(maxWidth: .infinity, maxHeight: Self.tileHeight) }
                     }
                 }
             }
@@ -73,7 +78,7 @@ struct TerminalCreatePanel: View {
     /// An agent's tile, whether or not the agent is installed.
     private static let tileHeight: CGFloat = 68
 
-    private func tile(_ id: String, _ name: String) -> some View {
+    private func tile(_ id: String, _ name: String, inset: CGFloat = 10) -> some View {
         let installed = model.agents.contains(id)
         let on = model.pickedAgent == id
         return Button { model.pickedAgent = id } label: {
@@ -91,7 +96,7 @@ struct TerminalCreatePanel: View {
                 }
             }
             .foregroundStyle(installed ? Look.ink : Look.faint)
-            .padding(EdgeInsets(top: 10, leading: 10, bottom: 8, trailing: 10))
+            .padding(EdgeInsets(top: 10, leading: inset, bottom: 8, trailing: inset))
             .frame(maxWidth: .infinity, minHeight: Self.tileHeight, maxHeight: Self.tileHeight, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0).fill(on && look.isClassic ? Color.signal.opacity(0.14) : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0)

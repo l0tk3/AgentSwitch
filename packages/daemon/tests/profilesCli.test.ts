@@ -13,6 +13,7 @@ const agents = (): Record<ProfileAgent, AgentProfiles> => ({
   codex: { current: "default", creatable: true, kinds: ["api"], profiles: [p("default", "Default"), p("c1", "Paid", { kind: "api" })] },
   opencode: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
   pi: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
+  grok: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
 });
 
 function harness(over: Partial<ProfilesOptions> = {}, key = "sk-typed-0123456789") {

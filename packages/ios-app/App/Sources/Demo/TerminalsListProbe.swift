@@ -30,7 +30,7 @@ enum TerminalsListProbe {
     /// The sessions: two to seven a folder, newest first; one written to just now while `tick` goes on.
     static func sessions(tick: Int) -> [SessionSummary] {
         var all: [SessionSummary] = []
-        let agents = ["claude-code", "codex", "opencode", "pi"]
+        let agents = ["claude-code", "codex", "opencode", "pi", "grok"]
         for (f, cwd) in folders.enumerated() {
             for k in 0..<(2 + (f * 5) % 6) {
                 let n = f * 10 + k
@@ -51,7 +51,7 @@ enum TerminalsListProbe {
                          subagents: t.1 == .working && (tick + i) % 3 != 0
                             ? (0..<(1 + (tick + i) % 3)).map { TerminalSubagent(id: "s\(i)\($0)", type: "Explore", name: "子任务 \($0)", doing: "读取 src/\(tick).ts") } : [])
         }
-        return TerminalList(terminals: terminals, agents: ["claude-code", "codex", "opencode", "pi"])
+        return TerminalList(terminals: terminals, agents: ["claude-code", "codex", "opencode", "pi", "grok"])
     }
 
     /// The tree loaded, then read again every 4 s for as long as the app runs.

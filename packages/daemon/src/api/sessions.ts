@@ -14,7 +14,7 @@ import { TerminalAudit } from "../terminals/audit.js";
 import { limitParam, parseBody, versionedJson, type ApiDeps } from "./shared.js";
 import { typedFolder } from "../sessions/shownFolders.js";
 
-const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi"]);
+const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi", "grok"]);
 /** Agents that keep no register of a running session and no writer lock (docs/terminal-v0.md §5): a session written in
  *  the last 90 seconds may be open in another program. */
 const UNSEEN: ReadonlySet<string> = new Set<SessionHarness>(["opencode", "pi"]);

@@ -9,6 +9,7 @@ import SwiftUI
 /// - `terminals-list`: one pane, the list with terminals at work, waiting and ended, sub-agents, earlier sessions, git;
 /// - `terminals-panes`: three panes — the second in focus with a request's card, the third empty;
 /// - `terminals-create`, `terminals-create-pane`: the new-terminal panel alone, and in a pane among several;
+///   `terminals-create-grok`: with Grok picked;
 /// - `terminals-sheet-light`, `terminals-create-light`, `terminals-rename-light`: the question box, the new-terminal
 ///   panel and a name being changed on the light page; `terminals-pane-was`: an empty pane and the long-titled session
 ///   it would go on with;
@@ -64,6 +65,11 @@ enum TerminalsPagePreview {
             model.split(.right)
             model.showCreate(folder: project)
             model.createError = "文件夹不存在：~/Desktop/WorkSpace/Projects/Nowhere"
+        }
+        // Grok picked (2026-11-11): its own models and its own levels, under its own word for them.
+        try await shot(to: file("terminals-create-grok")) { model in
+            model.showCreate(folder: project)
+            model.pickedAgent = "grok"
         }
         try await shot(to: file("terminals-search")) { $0.query = "登录" }
         try await shot(to: file("terminals-filter")) { $0.filter = TerminalListFilter(agent: "claude-code") }
@@ -341,12 +347,17 @@ enum TerminalsPagePreview {
         let gits = [project: FolderGit(branch: "main", changed: 42, ahead: 2), "\(project)/packages/secret-gate": FolderGit(branch: "main", changed: 5),
                     "\(home)/Desktop/WorkSpace/Projects/MailLab": FolderGit(branch: "main")]
         let five = ["low", "medium", "high", "xhigh", "max"]
+        let grok = ["low", "medium", "high", "xhigh"]
         let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five),
                                       TerminalModelOption(id: "opus-4", name: "Opus 4.5", older: true, efforts: ["low", "medium", "high", "max"])],
                       // Codex's, each with its place under Daybreak (docs/simple-view-v0.md §5.8).
                       "codex": [TerminalModelOption(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: five, daybreak: "never"), TerminalModelOption(id: "gpt-6-sol", name: "GPT-6-Sol", efforts: five, daybreak: "also"),
-                                TerminalModelOption(id: "gpt-6-luna", name: "GPT-6-Luna", efforts: five, daybreak: "also"), TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", efforts: five, daybreak: "only")]]
-        model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode"], models: models, efforts: ["claude-code": five])
+                                TerminalModelOption(id: "gpt-6-luna", name: "GPT-6-Luna", efforts: five, daybreak: "also"), TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", efforts: five, daybreak: "only")],
+                      // Grok's, as it lists them (the older ones folded away, as the others').
+                      "grok": [TerminalModelOption(id: "grok-4.7", name: "Grok 4.7", efforts: grok), TerminalModelOption(id: "grok-4.7-build-fast", name: "Grok 4.7 Fast", efforts: grok),
+                               TerminalModelOption(id: "grok-4.6", name: "Grok 4.6", older: true, efforts: grok), TerminalModelOption(id: "grok-4.5", name: "Grok 4.5", older: true, efforts: ["low", "medium", "high"])]]
+        // pi is the one that is not installed here: its tile says so.
+        model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode", "grok"], models: models, efforts: ["claude-code": five, "grok": grok])
         model.area = CGSize(width: size.width - 291, height: size.height)
         return model
     }

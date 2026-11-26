@@ -77,6 +77,7 @@ public enum HarnessName {
         case "claude-code", "claude": return Harness.claude.title
         case "codex": return Harness.codex.title
         case "opencode": return Harness.opencode.title
+        case "grok": return "Grok"
         default: return name
         }
     }

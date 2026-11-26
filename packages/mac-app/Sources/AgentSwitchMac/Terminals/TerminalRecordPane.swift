@@ -816,7 +816,7 @@ private struct RecordDock: View {
                 .popover(isPresented: $choosingEffort, arrowEdge: .top) {
                     EffortPicker(word: TerminalEffort.word(harness), levels: levels, level: effort,
                                  enabled: !record.changing,
-                                 note: harness == "claude-code" ? "会记成这个模型的默认；Max 只用于这一次。" : nil,
+                                 note: harness == "claude-code" ? "会记成这个模型的默认；Max 只用于这一次。" : harness == "grok" ? "Grok 会把它记成新会话的默认。" : nil,
                                  choose: { record.setEffort($0) })
                         .frame(width: 150)
                         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -890,7 +890,8 @@ private struct RecordDock: View {
         }
         let older = options.filter(\.older)
         return options.filter { !$0.older }.map(entry) + (older.isEmpty ? [] : [.separator, MenuEntry(title: "Older", symbol: "clock", children: older.map(entry))])
-            + (harness == "claude-code" ? [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)] : [])
+            + (harness == "claude-code" ? [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)]
+                : harness == "grok" ? [.separator, MenuEntry(title: "Grok 会把它记成新会话的默认模型", enabled: false)] : [])
     }
 }
 
