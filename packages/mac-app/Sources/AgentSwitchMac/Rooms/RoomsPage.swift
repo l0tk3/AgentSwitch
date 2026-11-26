@@ -662,8 +662,13 @@ private struct RoomView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                 }
-                .onAppear { proxy.scrollTo("end", anchor: .bottom); if let seq = model.jump { goTo(seq, proxy) } }
-                .onChange(of: room.room.id) { proxy.scrollTo("end", anchor: .bottom) }
+                // Opened at the end. A lazy stack guesses the height of rows it has not laid out, so one jump to the
+                // end can land in empty space past the rows it measured since (user #578: coming back from Terminals
+                // showed a blank page and `↓ Latest`): held at the bottom, and sent there again once the rows on screen
+                // are laid out.
+                .defaultScrollAnchor(.bottom)
+                .onAppear { if let seq = model.jump { goTo(seq, proxy) } else { settle(proxy) } }
+                .onChange(of: room.room.id) { settle(proxy) }
                 .onChange(of: model.taskFilter) { proxy.scrollTo("end", anchor: .bottom) }
                 .onChange(of: model.jump) { if let seq = model.jump { goTo(seq, proxy) } }
                 .onChange(of: model.rows.last?.id) {
@@ -683,6 +688,18 @@ private struct RoomView: View {
                         .padding(.bottom, 10)
                     }
                 }
+            }
+        }
+    }
+
+    /// To the end, and again after the rows on screen have been measured (a lazy stack's first guess is not where
+    /// they end up).
+    private func settle(_ proxy: ScrollViewProxy) {
+        proxy.scrollTo("end", anchor: .bottom)
+        Task { @MainActor in
+            for wait in [50, 150, 350] {
+                try? await Task.sleep(for: .milliseconds(wait))
+                if model.jump == nil { proxy.scrollTo("end", anchor: .bottom) }
             }
         }
     }
