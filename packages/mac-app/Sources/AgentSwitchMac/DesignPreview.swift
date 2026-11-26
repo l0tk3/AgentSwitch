@@ -158,6 +158,19 @@ enum DesignPreview {
                     try await renderSheet(Form { ProfilesSection(agent: .codex, profiles: codexList, error: nil, add: {}, remove: { _ in }, proxy: { _ in }, apiKey: { _ in }, color: { _, _ in }) }
                         .formStyle(.grouped).frame(width: 640), model: model, appearance: dark, to: directory.appendingPathComponent("profiles-rows-codex.png"))
                     try await renderSheet(ProfileKeySheet(agent: .claude, profile: list.profiles[4]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-key.png"))
+                    // Grok's (§6.3): the Mac's own signed in to xAI, an account profile signed in and one not yet — and
+                    // the sheet that makes one (one way only: Grok pays by no key here).
+                    let grokList = AgentProfiles(current: "default", profiles: [
+                        AgentProfile(id: "default", name: "Default", account: "me@example.com"),
+                        AgentProfile(id: "gr0k000001", name: "work", account: "work@example.com", color: "violet"),
+                        AgentProfile(id: "gr0k000002", name: "spare", color: "sand"),
+                    ], creatable: true, kinds: ["subscription"])
+                    for (name, appearance) in [("profiles-rows-grok", dark), ("profiles-rows-grok-light", NSAppearance(named: .aqua))] {
+                        try await renderSheet(Form { ProfilesSection(agent: .grok, profiles: grokList, error: nil, add: {}, remove: { _ in }, proxy: { _ in }, color: { _, _ in }) }
+                            .formStyle(.grouped).frame(width: 640), model: model, appearance: appearance, to: directory.appendingPathComponent("\(name).png"))
+                    }
+                    try await renderSheet(ProfileNewSheet(agent: .grok, kinds: ["subscription"]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-new-grok.png"))
+                    try await renderSheet(ProfileRenameSheet(agent: .grok, profile: grokList.profiles[1]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-rename-grok.png"))
                     FileHandle.standardError.write(Data("design preview (a profile's proxy) written to \(directory.path)\n".utf8))
                     exit(0)
                 }

@@ -95,8 +95,9 @@ Claude Code                              Codex
 | Codex 0.162 | `CODEX_HOME` | `auth.json`、`installation_id`（随机 UUID，随请求发出） | `codex login`（开浏览器），或 API 密钥；供应商在 `config.toml` |
 | OpenCode 2 | `XDG_DATA_HOME`（连同 CONFIG / STATE / CACHE） | 它的库 | `opencode auth login` |
 | pi | `PI_CODING_AGENT_DIR` | `auth.json`、`models.json` | 它自己的登录或密钥 |
+| Grok 1.0.92 | `GROK_HOME`（默认 `~/.grok`） | `auth.json`（顶层一个 map，账号在其中一项的 `email` 里，只读这个字段）；目录里还有设置、信任的文件夹、会话、钩子 | 在那个目录里启动 `grok`，它自己开登录界面（浏览器），或 `GROK_HOME=<目录> grok login` |
 
-四家都能靠环境变量换家目录，都不需要改它们的默认目录。
+五家都能靠环境变量换家目录，都不需要改它们的默认目录。
 
 **家目录里的东西分三类**（以 Claude Code 为例，其余同理）：
 
@@ -487,7 +488,7 @@ Codex
 - **整条链用真的东西走通了**（`packages/daemon/scripts/profile_login_flow_probe.ts`，临时目录）：服务自己的开终端路由在没代理的新配置下启动真的 Claude Code → 停在登录方式选择 → 回车选第一项 → 约 2 秒后授权页开在这个配置自己的 Camoufox 里（有窗口），并记下“请把这个窗口带到前面” → 页面最后是 `claude.ai/login`，标题 `Sign in - Claude`，正常显示出邮箱、Google、Apple 几种登录方式。没有登录任何账号；Mac 应用把窗口带到前面这一步不在这个探针里。
 - 探针里还看到一点：新配置的终端是带着“可以切到跳过权限”启动的，Claude Code 对没答过那条警告的目录会先停在警告上；配置的设置是链接到这台 Mac 自己那份的，所以这台 Mac 答过（`skipDangerousModePermissionPrompt`）就不会出现。
 
-## 6. 四个 agent 各自怎么落
+## 6. 五个 agent 各自怎么落
 
 形状相同，各管各的，不同的只有下面这张表：
 
@@ -497,6 +498,7 @@ Codex
 | Codex | 另一个 `CODEX_HOME`，`codex login --device-auth`（§6.2，已做） | 不另开目录，在这台 Mac 原有的里运行；供应商用启动时的 `-c` 给（§3.6，已做） | 能：`sessions/` 整个链接过去（§6.2） | 有 |
 | OpenCode | 另一套数据目录 | 不必另开目录：AgentSwitch 本来就给每个终端一份它的配置文件，供应商写在那里 | 供应商类能；订阅类不能（会话和登录在同一个目录里） | 有 |
 | pi | 另一个目录 | 同左 | 要实测 | 没有，只跟出口 |
+| Grok | 另一个 `GROK_HOME`；在那个目录里启动，它自己开登录界面（§6.3，已做） | 不做（Grok 只做账号类） | 不能：会话在自己的目录里，不链接 | 没有（登录页仍开在它自己的浏览器里） |
 
 - Codex 另有三处：服务对自己 hook 的信任记在 `CODEX_HOME` 的 `config.toml` 里，每个配置的家目录要各做一次；Daybreak 的默认值每个家目录各一份；它的后台服务也是每个家目录各一个。
 - 用量那几行（各家的额度）之后按配置分开显示。
@@ -540,6 +542,20 @@ Codex 0.163.0-alpha.5（服务管的那一份）；每项都在一次性的 `COD
 - **Mac**：新建 Codex 配置时 `Sign In With` 多了 `Account`（默认），说明换成设备码登录的那一段；配置那一节下面的说明与代理页里不再写 `/login`。手机上不能新建配置（同前），新建终端、恢复对话时照样能选它。
 - **查过的**：服务的测试（目录与链接、补链接不替换、删配置不动会话、读账号、启动参数、登录在前且是同一进程、登录失败不进 Codex、`login status` 的三种回答、开终端时问的是哪个目录、hook 信任查的是哪个目录）；真的 Codex 在一次性服务里（干净环境、临时的家目录与 `$AGENTSWITCH_HOME`、没有浏览器）：建配置、开终端，屏幕是设备码登录（网址与一次性码），结束终端后没有留下进程。Mac 的新建页与配置列表看了样图。
 - **没有查实的**（要真账号）：用 ChatGPT 账号真的登录一次——设备码登录可能要先在 ChatGPT 的安全设置里打开；OpenAI 的登录页在 Camoufox 里过不过得去（Claude 的在 beta.39 上过得去，真服务现在还是 beta.36）；配置的账号能用的模型与 Daybreak 和 `Default` 的不同时，新建终端里的列表仍按 `Default` 的；会话的名字（Codex 记在各目录自己的库里）和输入历史（`history.jsonl`）各配置各一份。
+
+### 6.3 Grok 的账号配置：第一版（2026-11-26）
+
+用户（房间里的任务）：让 Grok 支持多账号 Profile，每个 Profile 一个自己的 `GROK_HOME`，服务端加 Mac 的 Profiles 页。
+
+- **家目录**（`$AGENTSWITCH_HOME/profiles/grok/<id>/home`，在它名下的 Grok 以 `GROK_HOME` 指过去）：Grok 的登录（`auth.json`）、设置（`config.toml`）、信任（`trusted_folders.toml`）、会话（`sessions/`）、钩子（`hooks/`）都在里面。新配置建一个空目录，**不从** `~/.grok` 复制登录，也不链接它的会话或设置；Grok 自己第一次在那个目录里运行时把其余文件建好。
+- **启动**：`GROK_HOME` 换成配置的目录，其余同 `Default`（`GROK_DISABLE_AUTOUPDATER=1`、权限模式、模型与等级经 `GROK_CONFIG` 给）。AgentSwitch 的钩子文件（`hooks/agentswitch.json`）和 Chatroom Kit 的表（`config.toml` 的 `[mcp_servers.chatroom]`）写进**这次启动用的那个目录**，不再只写默认目录；在 AgentSwitch 里信任过的文件夹同样写进那个目录的 `trusted_folders.toml`——`GROK_HOME` 在写它们之前设好（`launch.ts` 的 `case "grok"`）。
+- **没登录的配置不另做**：在那个目录里启动 `grok`，它自己显示登录界面（浏览器登录）；服务不问、也不传 `/login`（Grok 没有 `auth status` 这种问法）。登录页**按设计**照 §5 走它自己的浏览器（非 `Default` 的配置有一个自己的浏览器，§5.5）；Grok 认不认 `BROWSER`／`open` 小程序、登录页会不会真开在那里，没有查实。
+- **谁登录着**：读那个目录 `auth.json` 顶层一项的 `email`（`grokAccount`；只读这个字段，token 不读、不存、不显示）；`Default` 读 `~/.grok/auth.json`（或 `GROK_HOME`）。
+- **会话**：每个配置的会话在自己的 `sessions/` 下，不链接。会话列表把这些目录一并读（`ProfileStore.grokSessionRoots` → `SessionMonitor` 的 `grokProfileSessions`），能列、能读、能搜、能删；恢复时用这段会话上次所在的配置启动（§3.3 的同一套记录）。同一段会话在两个配置里不共用。
+- **健康检查、用量**：Grok 先不做，显示 `unknown`。
+- **改名**：Profiles 页的行菜单里多一项 `Rename…`（`PUT /profiles/:agent/:id/name`、`ProfileStore.rename`），从这一版起对所有 agent 的配置都可用；规则同新建（1–40 字，同一个 agent 里重名拒绝；`Default` 不改名）。只在 Mac 上。
+- **没做**：API key 类（Grok 只建账号类）；`Continue As`（跨配置继续）；手机上新建与改名（照旧只在 Mac）；`elsewhere` 的检查仍只看默认目录的 `active_sessions.json`，在 AgentSwitch 之外用同一个 `GROK_HOME` 打开的会话查不出来。
+- **查过的**：服务的测试（空目录、`GROK_HOME`、账号只读 `email`、钩子与工具表写进配置目录、信任写进配置目录、配置目录的会话列出/读取/删除、改名）；真的 `grok` 1.0.92 在一个新配置下启动过（一次性的 `$AGENTSWITCH_HOME`、空的 `GROK_HOME`、没有账号、没有输入任何东西）：屏幕是它的登录页（`Approve in your browser to finish signing in`），钩子文件、`config.toml` 里的 `[mcp_servers.chatroom]` 和 `trusted_folders.toml` 的那个文件夹都写进了这个配置的目录，Grok 也在那里建了自己的文件。**没有查实的**：用真账号在新配置里登录（要用户自己点）；登录页开在这个配置自己的浏览器里（探针没有浏览器服务）；在装好的应用里点一遍新建/改名/删除。
 
 ## 7. 官方 App 与调度
 

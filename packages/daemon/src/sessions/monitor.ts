@@ -29,6 +29,8 @@ export type SessionSources = {
   readonly piSessions?: string;
   /** ~/.grok/sessions; absent: Grok's sessions are not read. */
   readonly grokSessions?: string;
+  /** The `sessions` folders of the Grok profiles that keep their own (docs/profiles-v0.md §6.3). */
+  readonly grokProfileSessions?: () => readonly string[];
   /** Deleting an OpenCode session (its own command); absent: OpenCode's sessions cannot be deleted here. */
   readonly openCodeDelete?: OpenCodeDelete;
   /** Folders whose sessions are not the user's own (prefix match). */
@@ -106,8 +108,9 @@ export class SessionMonitor {
       ...this.scan([...claude, ...forced.filter((r) => !have.has(r.path))], "claude-code", now),
       ...this.codexThreads(this.codexRoots().flatMap((root) => jsonlFiles(root, 3, now, this.scanFiles)), now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
-      // Grok: a folder a session, two below its sessions folder; the conversation in it stands for the session.
-      ...(this.sources.grokSessions ? this.scan(jsonlFiles(this.sources.grokSessions, 2, now, this.scanFiles, () => false, () => false, GROK_RECORD), "grok", now) : []),
+      // Grok: a folder a session, two below its sessions folder; the conversation in it stands for the session. The
+      // Mac's own folder, and those of the profiles that keep their own (§6.3).
+      ...this.grokRoots().flatMap((root) => this.scan(jsonlFiles(root, 2, now, this.scanFiles, () => false, () => false, GROK_RECORD), "grok", now)),
     ];
     // OpenCode's title is its own, kept in its own store: nothing of ours stands in for it.
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", { ...s, named: true }, now));
@@ -250,6 +253,11 @@ export class SessionMonitor {
     return [this.sources.codexSessions, ...(this.sources.codexProfileSessions?.() ?? [])];
   }
 
+  /** Where Grok's records are: the Mac's own `sessions` (when read), and those of the profiles that keep their own. */
+  private grokRoots(): string[] {
+    return [...(this.sources.grokSessions ? [this.sources.grokSessions] : []), ...(this.sources.grokProfileSessions?.() ?? [])];
+  }
+
   locate(harness: SessionHarness, id: string): string | null {
     if (harness === "opencode" || !SESSION_ID.test(id)) return null;
     const key = `${harness}:${id}`;
@@ -276,8 +284,8 @@ export class SessionMonitor {
       };
       for (const root of this.codexRoots()) walk(root, 3);
     } else if (harness === "grok") {
-      for (const dir of this.sources.grokSessions ? safeDirs(this.sources.grokSessions) : []) {
-        const file = join(this.sources.grokSessions!, dir, id, GROK_RECORD);
+      for (const root of this.grokRoots()) for (const dir of safeDirs(root)) {
+        const file = join(root, dir, id, GROK_RECORD);
         if (existsSync(file)) { found = file; break; }
       }
     } else if (this.sources.piSessions) {
@@ -365,13 +373,14 @@ export class SessionMonitor {
       try { rmSync(file); removed.push(file); } catch { failed.push(file); }
     };
     if (harness === "grok") {
-      // A folder a session: gone whole. Only one named for the session, under the sessions folder.
-      const root = this.sources.grokSessions;
+      // A folder a session: gone whole. Only one named for the session, under a sessions folder of the Mac's own or of
+      // a profile that keeps its own.
+      const roots = this.grokRoots();
       const gone = (dir: string) => {
         if (removed.includes(dir) || failed.includes(dir) || !existsSync(join(dir, GROK_RECORD))) return;
         try { rmSync(dir, { recursive: true }); removed.push(dir); } catch { failed.push(dir); }
       };
-      const folders = (session: string): string[] => (root ? safeDirs(root).map((group) => join(root, group, session)).filter((dir) => existsSync(dir)) : []);
+      const folders = (session: string): string[] => roots.flatMap((root) => safeDirs(root).map((group) => join(root, group, session))).filter((dir) => existsSync(dir));
       for (const dir of folders(id)) {
         for (const child of grokChildren(dir, (d) => safeDirs(d))) for (const sub of folders(child)) gone(sub);
         gone(dir);

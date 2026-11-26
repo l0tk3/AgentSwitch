@@ -207,6 +207,16 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     return c.json({ agents: store.all() });
   });
 
+  // A profile's name (§3.3), changed on the Mac as making one is; the same rules hold it.
+  app.put("/profiles/:agent/:id/name", async (c) => {
+    const agent = Agent.safeParse(c.req.param("agent"));
+    if (!agent.success) return c.json({ error: "no such agent" }, 404);
+    const body = await parseBody(c, z.object({ name: z.string().min(1).max(80) }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try { store.rename(agent.data, c.req.param("id"), body.data.name); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+    return c.json({ agents: store.all() });
+  });
+
   // A profile's colour (§3.2): the dot its terminals are marked with on every screen.
   app.put("/profiles/:agent/:id/color", async (c) => {
     const agent = Agent.safeParse(c.req.param("agent"));

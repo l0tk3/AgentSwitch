@@ -57,12 +57,12 @@ export type LauncherOptions = {
    *  without and its status is guessed. */
   readonly codexHooks?: (home?: string) => boolean;
   /** Grok gets AgentSwitch's hooks (status, the protected-path check, its sub-agents) where AgentSwitch's hook file
-   *  is in the folder Grok keeps its own in (grokHooks.ts `ensureGrokHooks`); else it goes without and its status is
-   *  read from its window title and its output. */
-  readonly grokHooks?: () => boolean;
-  /** The Chatroom Kit's server is in Grok's config.toml (grokHooks.ts `ensureGrokKit`), looked for at each start;
-   *  absent or false: a Grok session has no room tools. */
-  readonly grokKit?: () => boolean;
+   *  is in the folder Grok keeps its own in (grokHooks.ts `ensureGrokHooks`) — the terminal's `GROK_HOME` (`home`): a
+   *  profile's own, or the Mac's; else it goes without and its status is read from its window title and its output. */
+  readonly grokHooks?: (home?: string) => boolean;
+  /** The Chatroom Kit's server is in Grok's config.toml (grokHooks.ts `ensureGrokKit`), looked for at each start in the
+   *  terminal's `GROK_HOME` (`home`); absent or false: a Grok session has no room tools. */
+  readonly grokKit?: (home?: string) => boolean;
   /** OpenCode's TUI attaches to a private server the service starts and watches (status, permission requests;
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
@@ -503,15 +503,19 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         return { file, args, env, hooks: true };
       }
       case "grok": {
+        // A profile other than the Mac's own (docs/profiles-v0.md §6.3): its sign-in (`auth.json`), settings, trusted
+        // folders, sessions, hooks and the Chatroom Kit's table are all in a folder of its own, named for Grok by
+        // `GROK_HOME` — set before anything that reads it (its trusted folders below).
+        if (req.configHome) env.GROK_HOME = req.configHome;
         // Its hooks are a file in its own folder (grokHooks.ts), the same for every terminal and for none: what makes
         // them this terminal's is its environment — the three variables above, and the program to run.
-        const hooked = opts.grokHooks?.() ?? false;
+        const hooked = opts.grokHooks?.(req.configHome) ?? false;
         if (hooked) { env[GROK_HOOK_NODE] = node; env[GROK_HOOK_SCRIPT] = script; }
         // It does not look for a new version of its own at start, nor fetch one behind the session (user #460):
         // Settings › Agents says when there is one.
         env.GROK_DISABLE_AUTOUPDATER = "1";
         // The Chatroom Kit: a table of ours in its config.toml, the terminal named by the environment it starts in.
-        opts.grokKit?.();
+        opts.grokKit?.(req.configHome);
         if (opts.trustedFolders) pretrust("grok", req.cwd, env, opts.trustedFolders());
         const args: string[] = [];
         // The model and the level are configuration of this one start (`GROK_CONFIG`, which Grok lays over its

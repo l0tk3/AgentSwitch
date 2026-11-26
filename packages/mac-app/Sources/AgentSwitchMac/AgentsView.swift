@@ -2,6 +2,26 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
+/// An agent as the Profiles page knows it (docs/profiles-v0.md §3): the four CLIs 设置 › Agents installs and updates
+/// (`AgentCLI`, agents-v0), and Grok — which runs in AgentSwitch's terminals and so has profiles, but is not one of the
+/// four this page installs. The raw value (`id`) is the daemon's name for it.
+struct ProfileAgent: Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    init(id: String, title: String) { self.id = id; self.title = title }
+    init(_ cli: AgentCLI) { self.init(id: cli.rawValue, title: cli.title) }
+    var isClaude: Bool { id == "claude-code" }
+    var isCodex: Bool { id == "codex" }
+    static let claude = ProfileAgent(AgentCLI.claude)
+    static let codex = ProfileAgent(AgentCLI.codex)
+    static let opencode = ProfileAgent(AgentCLI.opencode)
+    static let pi = ProfileAgent(AgentCLI.pi)
+    /// Grok runs in AgentSwitch's terminals (docs/terminal-v0.md §3) but is not installed or updated by Agents.
+    static let grok = ProfileAgent(id: "grok", title: "Grok")
+    /// The page's agents, in order: the ones Agents looks after, then Grok.
+    static let shown: [ProfileAgent] = AgentCLI.allCases.map(ProfileAgent.init) + [.grok]
+}
+
 /// 设置 › Agents (docs/agents-v0.md §8, docs/design/concepts/agents.html): the four agent CLIs — what is installed and
 /// where it came from, what the vendors have that is newer, which install AgentSwitch runs — and what can be done with
 /// each: installing and updating the vendor's own, a beta or a pinned version; deleting any of them but ChatGPT App's
@@ -47,10 +67,11 @@ struct AgentsView: View {
     @State private var checkingHealth: Set<String> = []
     @State private var profileError: [String: String] = [:]
     /// The agent a new profile is being named for; the name; the profile asked to be removed.
-    @State private var naming: AgentCLI?
-    @State private var removing: (agent: AgentCLI, profile: AgentProfile)?
-    /// The profile whose own proxy is being set (docs/profiles-v0.md §4).
+    @State private var naming: ProfileAgent?
+    @State private var removing: (agent: ProfileAgent, profile: AgentProfile)?
+    /// The profile whose own proxy is being set (docs/profiles-v0.md §4); the one being renamed.
     @State private var proxying: ProfileProxyTarget?
+    @State private var renaming: ProfileProxyTarget?
     @State private var importingAuth: AgentProfile?
     @State private var keying: ProfileProxyTarget?
     @State private var copying: AgentProfile?
@@ -93,7 +114,7 @@ struct AgentsView: View {
 
             }
             if profilesOnly {
-                ForEach(AgentCLI.allCases) { agent in profilesSection(agent) }
+                ForEach(ProfileAgent.shown) { agent in profilesSection(agent) }
             } else {
             ForEach(board.agents) { report in
                 AgentSection(board: board, report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
@@ -152,7 +173,7 @@ struct AgentsView: View {
             if !profilesOnly, !onNode { model.checkAgentUpdates() }
         }
         .sheet(item: $naming) { agent in
-            ProfileNewSheet(agent: agent, kinds: profiles[agent.rawValue]?.newKinds ?? ["subscription"]) { profiles = $0 }
+            ProfileNewSheet(agent: agent, kinds: profiles[agent.id]?.newKinds ?? ["subscription"]) { profiles = $0 }
         }
         .sheet(item: $paying) { target in
             ProfileKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
@@ -162,6 +183,9 @@ struct AgentsView: View {
         .task { if profilesOnly { await loadProfiles() } }
         .sheet(item: $keying) { target in
             ProfileSessionKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
+        }
+        .sheet(item: $renaming) { target in
+            ProfileRenameSheet(agent: target.agent, profile: target.profile) { profiles = $0 }
         }
         .sheet(item: $copying) { profile in ProfileCopiesSheet(profile: profile) }
         .sheet(item: $importingAuth) { profile in
@@ -239,40 +263,41 @@ struct AgentsView: View {
     }
 
     /// Its sign-ins (docs/profiles-v0.md §3): the one new terminals start under, and others to switch to.
-    @ViewBuilder private func profilesSection(_ agent: AgentCLI) -> some View {
-        if let list = profiles[agent.rawValue] {
-            ProfilesSection(agent: agent, profiles: list, error: profileError[agent.rawValue],
+    @ViewBuilder private func profilesSection(_ agent: ProfileAgent) -> some View {
+        if let list = profiles[agent.id] {
+            ProfilesSection(agent: agent, profiles: list, error: profileError[agent.id],
                             add: { naming = agent },
                             remove: { profile in removing = (agent, profile) },
                             proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
+                            rename: { profile in renaming = ProfileProxyTarget(agent: agent, profile: profile) },
                             sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
                             copies: { profile in copying = profile },
                             apiKey: { profile in paying = ProfileProxyTarget(agent: agent, profile: profile) },
                             resetIdentity: profileNodeID == nil ? { change(.claude) { try await $0.resetDefaultClaudeIdentity() } } : nil,
                             authJSON: { importingAuth = $0 }, health: health, checkingHealth: checkingHealth,
                             checkHealth: { profile in
-                                let key = "\(agent.rawValue).\(profile.id)"
+                                let key = "\(agent.id).\(profile.id)"
                                 guard checkingHealth.insert(key).inserted else { return }
                                 Task {
                                     defer { checkingHealth.remove(key) }
-                                    do { health[key] = try await profileClient.checkProfileHealth(agent: agent.rawValue, id: profile.id); profileError[agent.rawValue] = nil }
-                                    catch { profileError[agent.rawValue] = error.localizedDescription }
+                                    do { health[key] = try await profileClient.checkProfileHealth(agent: agent.id, id: profile.id); profileError[agent.id] = nil }
+                                    catch { profileError[agent.id] = error.localizedDescription }
                                 }
                             },
-                            telemetry: { profile, on in change(agent) { try await $0.setProfileTelemetry(agent: agent.rawValue, id: profile.id, on: on) } },
-                            color: { profile, color in change(agent) { try await $0.setProfileColor(agent: agent.rawValue, id: profile.id, color: color) } })
+                            telemetry: { profile, on in change(agent) { try await $0.setProfileTelemetry(agent: agent.id, id: profile.id, on: on) } },
+                            color: { profile, color in change(agent) { try await $0.setProfileColor(agent: agent.id, id: profile.id, color: color) } })
         }
     }
 
-    private func delete(_ agent: AgentCLI, _ profile: AgentProfile) { change(agent) { try await $0.deleteProfile(agent: agent.rawValue, id: profile.id) } }
+    private func delete(_ agent: ProfileAgent, _ profile: AgentProfile) { change(agent) { try await $0.deleteProfile(agent: agent.id, id: profile.id) } }
     private var removingShown: Binding<Bool> { Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }) }
 
     /// One change to an agent's profiles, and what the service has afterwards (or why it did not take it).
-    private func change(_ agent: AgentCLI, _ call: @escaping (DaemonClient) async throws -> [String: AgentProfiles]) {
+    private func change(_ agent: ProfileAgent, _ call: @escaping (DaemonClient) async throws -> [String: AgentProfiles]) {
         let client = profileClient
         Task {
-            do { profiles = try await call(client); profileError[agent.rawValue] = nil }
-            catch { profileError[agent.rawValue] = (error as? DaemonError)?.reason ?? error.localizedDescription }
+            do { profiles = try await call(client); profileError[agent.id] = nil }
+            catch { profileError[agent.id] = (error as? DaemonError)?.reason ?? error.localizedDescription }
         }
     }
 }
@@ -341,9 +366,9 @@ struct CodexAuthSheet: View {
 
 /// The profile whose proxy is being set.
 struct ProfileProxyTarget: Identifiable {
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let profile: AgentProfile
-    var id: String { "\(agent.rawValue)/\(profile.id)" }
+    var id: String { "\(agent.id)/\(profile.id)" }
 }
 
 /// A profile's own proxy (docs/profiles-v0.md §4): its address, a user name, a password — sealed by this Mac's gate for
@@ -354,7 +379,7 @@ struct ProfileProxySheet: View {
     @Environment(\.profileNodeID) private var profileNodeID
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let profile: AgentProfile
     let done: ([String: AgentProfiles]) -> Void
     @State private var draft: BrowserProxyDraft
@@ -362,7 +387,7 @@ struct ProfileProxySheet: View {
     @State private var problem: String?
     @State private var busy = false
 
-    init(agent: AgentCLI, profile: AgentProfile, problem: String? = nil, done: @escaping ([String: AgentProfiles]) -> Void) {
+    init(agent: ProfileAgent, profile: AgentProfile, problem: String? = nil, done: @escaping ([String: AgentProfiles]) -> Void) {
         self.agent = agent
         self.profile = profile
         self.done = done
@@ -405,7 +430,7 @@ struct ProfileProxySheet: View {
     /// The proxy set (nil: none) and checked. With a problem the sheet stays, saying it; without, the exit is shown and
     /// the sheet stays for it to be read (nil closes).
     private func apply(_ draft: BrowserProxyDraft?) {
-        let client = profileClient, agent = agent.rawValue, id = profile.id, current = profile.proxy
+        let client = profileClient, agent = agent.id, id = profile.id, current = profile.proxy
         busy = true
         problem = nil
         Task {
@@ -435,7 +460,7 @@ struct ProfileSessionKeySheet: View {
     @Environment(\.profileNodeID) private var profileNodeID
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let profile: AgentProfile
     let done: ([String: AgentProfiles]) -> Void
     @State private var key = ""
@@ -467,7 +492,7 @@ struct ProfileSessionKeySheet: View {
     /// The key sealed and kept (nil: forgotten). The sheet closes when the service has taken it; it stays, saying why,
     /// when it has not.
     private func apply(_ value: String?) {
-        let client = profileClient, agent = agent.rawValue, id = profile.id
+        let client = profileClient, agent = agent.id, id = profile.id
         busy = true
         problem = nil
         Task {
@@ -483,6 +508,57 @@ struct ProfileSessionKeySheet: View {
     }
 }
 
+/// A profile's name, changed (docs/profiles-v0.md §3.3): the same rules as when it is made.
+struct ProfileRenameSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
+    @Environment(\.dismiss) private var dismiss
+    let agent: ProfileAgent
+    let profile: AgentProfile
+    let done: ([String: AgentProfiles]) -> Void
+    @State private var name: String
+    @State private var problem: String?
+    @State private var busy = false
+
+    init(agent: ProfileAgent, profile: AgentProfile, done: @escaping ([String: AgentProfiles]) -> Void) {
+        self.agent = agent
+        self.profile = profile
+        self.done = done
+        _name = State(initialValue: profile.name)
+    }
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespaces) }
+    private var ready: Bool { !trimmed.isEmpty && trimmed != profile.name }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename \(profile.name)").font(.headline)
+            Form { TextField("Name", text: $name) }.formStyle(.columns)
+            if let problem { Text(problem).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Rename", action: save).keyboardShortcut(.defaultAction).disabled(busy || !ready)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+
+    private func save() {
+        let client = profileClient, agent = agent.id, id = profile.id, name = trimmed
+        busy = true
+        problem = nil
+        Task {
+            do { done(try await client.renameProfile(agent: agent, id: id, name: name)); dismiss() }
+            catch { problem = (error as? DaemonError)?.reason ?? error.localizedDescription }
+            busy = false
+        }
+    }
+}
+
 /// A new profile (docs/profiles-v0.md §3, §3.6): its name, and how it signs in — with an account (it starts at the
 /// agent's own sign-in), or by a key, which is sealed by this Mac's gate for the address it is sent to before anything
 /// is sent. Only the ways the service offers for this agent are shown.
@@ -491,7 +567,7 @@ struct ProfileNewSheet: View {
     @Environment(\.profileNodeID) private var profileNodeID
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let kinds: [String]
     let done: ([String: AgentProfiles]) -> Void
     @State private var kind: String
@@ -508,7 +584,7 @@ struct ProfileNewSheet: View {
     @State private var copyProblem: String?
     @State private var loadingCopies = false
 
-    init(agent: AgentCLI, kinds: [String], done: @escaping ([String: AgentProfiles]) -> Void) {
+    init(agent: ProfileAgent, kinds: [String], done: @escaping ([String: AgentProfiles]) -> Void) {
         self.agent = agent
         self.kinds = kinds
         self.done = done
@@ -517,8 +593,8 @@ struct ProfileNewSheet: View {
 
     private var byKey: Bool { kind == "api" }
     private var ready: Bool {
-        if agent == .claude && copyOptions == nil { return false }
-        return byKey ? draft.canSave(agent: agent.rawValue, new: true) : !draft.name.trimmingCharacters(in: .whitespaces).isEmpty
+        if agent.isClaude && copyOptions == nil { return false }
+        return byKey ? draft.canSave(agent: agent.id, new: true) : !draft.name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
@@ -534,14 +610,14 @@ struct ProfileNewSheet: View {
                     .pickerStyle(.segmented)
                 }
                 if byKey { ApiKeyFields(agent: agent, draft: $draft, kept: false) }
-                if agent == .claude {
+                if agent.isClaude {
                     Toggle("Telemetry", isOn: $telemetry)
                         .help("关掉后，在它名下开的终端里设 DISABLE_TELEMETRY=1，Claude Code 不再上报使用统计。之后可在配置那一行的右键菜单里改。")
                 }
             }
             .formStyle(.columns)
-            if agent == .claude { copyChoices }
-            if agent == .codex, !byKey, !codexOptions.isEmpty {
+            if agent.isClaude { copyChoices }
+            if agent.isCodex, !byKey, !codexOptions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Copy from Default").font(.callout.weight(.semibold))
                     VStack(alignment: .leading, spacing: 6) {
@@ -551,7 +627,7 @@ struct ProfileNewSheet: View {
                     }
                 }
             }
-            if let said = (byKey ? draft.problem(agent: agent.rawValue) : nil) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if let said = (byKey ? draft.problem(agent: agent.id) : nil) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
@@ -562,8 +638,8 @@ struct ProfileNewSheet: View {
         .padding(20)
         .frame(width: 540)
         .task {
-            if agent == .claude { await loadCopies() }
-            if agent == .codex { codexOptions = (try? await profileClient.codexProfileCopyOptions()) ?? [] }
+            if agent.isClaude { await loadCopies() }
+            if agent.isCodex { codexOptions = (try? await profileClient.codexProfileCopyOptions()) ?? [] }
         }
     }
 
@@ -591,8 +667,11 @@ struct ProfileNewSheet: View {
     }
 
     private func create() {
-        let client = profileClient, agent = agent.rawValue, draft = draft, byKey = byKey, telemetry = telemetry
+        let client = profileClient, agent = agent.id, draft = draft, byKey = byKey, telemetry = telemetry
         let name = draft.name.trimmingCharacters(in: .whitespaces)
+        // Only Claude Code's telemetry is the service's to turn off; another agent is sent no word of it (its own, left
+        // as the agent has it).
+        let asked = agent == "claude-code" ? telemetry : nil
         let selection = agent == "claude-code" ? copies : nil
         busy = true
         problem = nil
@@ -600,9 +679,9 @@ struct ProfileNewSheet: View {
             do {
                 if byKey, let site = draft.site(agent: agent) {
                     let ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: profileNodeID)
-                    done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry, copyFromDefault: selection))
+                    done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: asked, copyFromDefault: selection))
                 } else {
-                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry, copyFromDefault: selection, copyCodex: agent == "codex" ? codexOptions.filter(codexCopies.contains) : nil))
+                    done(try await client.createProfile(agent: agent, name: name, telemetry: asked, copyFromDefault: selection, copyCodex: agent == "codex" ? codexOptions.filter(codexCopies.contains) : nil))
                 }
                 dismiss()
             } catch { problem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
@@ -618,14 +697,14 @@ struct ProfileKeySheet: View {
     @Environment(\.profileNodeID) private var profileNodeID
     private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let profile: AgentProfile
     let done: ([String: AgentProfiles]) -> Void
     @State private var draft: ApiKeyDraft
     @State private var problem: String?
     @State private var busy = false
 
-    init(agent: AgentCLI, profile: AgentProfile, done: @escaping ([String: AgentProfiles]) -> Void) {
+    init(agent: ProfileAgent, profile: AgentProfile, done: @escaping ([String: AgentProfiles]) -> Void) {
         self.agent = agent
         self.profile = profile
         self.done = done
@@ -633,18 +712,18 @@ struct ProfileKeySheet: View {
     }
 
     /// The site the key it has was sealed for.
-    private var keptSite: String? { ApiKeyDraft(profile.api).site(agent: agent.rawValue) }
+    private var keptSite: String? { ApiKeyDraft(profile.api).site(agent: agent.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(profile.name) · API Key").font(.headline)
             Form { ApiKeyFields(agent: agent, draft: $draft, kept: true) }.formStyle(.columns)
-            if let said = draft.problem(agent: agent.rawValue, keptSite: keptSite) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if let said = draft.problem(agent: agent.id, keptSite: keptSite) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(busy || !draft.canSave(agent: agent.rawValue, new: false, keptSite: keptSite))
+                Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(busy || !draft.canSave(agent: agent.id, new: false, keptSite: keptSite))
             }
         }
         .padding(20)
@@ -652,7 +731,7 @@ struct ProfileKeySheet: View {
     }
 
     private func save() {
-        let client = profileClient, agent = agent.rawValue, id = profile.id, draft = draft
+        let client = profileClient, agent = agent.id, id = profile.id, draft = draft
         busy = true
         problem = nil
         Task {
@@ -671,14 +750,14 @@ struct ProfileKeySheet: View {
 
 /// The three fields of a profile that pays by a key.
 private struct ApiKeyFields: View {
-    let agent: AgentCLI
+    let agent: ProfileAgent
     @Binding var draft: ApiKeyDraft
     /// It has a key already: the field may stay empty.
     let kept: Bool
 
     var body: some View {
         SecureField("API Key", text: $draft.key, prompt: Text(kept ? "Kept" : ""))
-        TextField("Base URL", text: $draft.baseUrl, prompt: Text(ApiKeyDraft.home(agent.rawValue) ?? ""))
+        TextField("Base URL", text: $draft.baseUrl, prompt: Text(ApiKeyDraft.home(agent.id) ?? ""))
         TextField("Model", text: $draft.model, prompt: Text("Optional"))
     }
 }
@@ -699,12 +778,14 @@ enum ProfileSwatch {
 /// One agent's profiles: a row each, the current one marked; a new one, and one removed (not `Default`).
 struct ProfilesSection: View {
     @Environment(\.profileNodeID) private var profileNodeID
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let profiles: AgentProfiles
     let error: String?
     let add: () -> Void
     let remove: (AgentProfile) -> Void
     let proxy: (AgentProfile) -> Void
+    /// Its name, changed (§3.3).
+    var rename: ((AgentProfile) -> Void)? = nil
     var sessionKey: ((AgentProfile) -> Void)? = nil
     /// What a profile of its own holds of `Default`'s, changed (§3.8).
     var copies: ((AgentProfile) -> Void)? = nil
@@ -735,7 +816,7 @@ struct ProfilesSection: View {
         Button("Copy Name") { Self.copy(profile.name) }
         if let account = profile.account { Button("Copy Account") { Self.copy(account) } }
         if profile.proxy != nil { Button("Copy Exit") { Self.copy(profile.way) } }
-        if agent == .claude {
+        if agent.isClaude {
             Divider()
             if profile.isolated == true, let copies {
                 Button("Copies…") { copies(profile) }.help("这个配置从 Default 复制了哪些技能、插件、MCP 与设置。")
@@ -745,11 +826,12 @@ struct ProfilesSection: View {
                 Toggle("Telemetry", isOn: Binding(get: { !profile.telemetryOff }, set: { telemetry(profile, $0) }))
             }
         }
-        if profile.isDefault && agent == .claude, resetIdentity != nil {
+        if profile.isDefault && agent.isClaude, resetIdentity != nil {
             Divider()
             Button("Reset Identity…", role: .destructive) { resettingIdentity = true }
         } else if !profile.isDefault {
             Divider()
+            if let rename { Button("Rename…") { rename(profile) } }
             Button("Delete…", role: .destructive) { remove(profile) }
         }
     }
@@ -796,9 +878,9 @@ struct ProfilesSection: View {
                         Text(Self.detail(profile, onNode: profileNodeID != nil)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if !profile.isDefault || agent == .claude || agent == .codex {
+                    if !profile.isDefault || agent.isClaude || agent.isCodex {
                         HStack(spacing: 6) {
-                            if agent == .codex, let authJSON {
+                            if agent.isCodex, let authJSON {
                                 Button("auth.json…") { authJSON(profile) }
                             }
                             // Claude Code's profiles only: the key signs its own browser in to claude.ai (§3.4).
@@ -806,7 +888,7 @@ struct ProfilesSection: View {
                                 Button("API Key…") { apiKey(profile) }
                             }
                             // One that pays by a key has nobody to sign in to claude.ai.
-                            if agent == .claude, !profile.paysByKey, let sessionKey {
+                            if agent.isClaude, !profile.paysByKey, let sessionKey {
                                 Button("Session Key…") { sessionKey(profile) }
                                     .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
                             }
@@ -822,7 +904,7 @@ struct ProfilesSection: View {
                 }
                 .contextMenu { rowMenu(profile) }
                 if let checkHealth {
-                    let key = "\(agent.rawValue).\(profile.id)"
+                    let key = "\(agent.id).\(profile.id)"
                     HStack(alignment: .top, spacing: 10) {
                         Button(checkingHealth.contains(key) ? "Checking…" : "Check Health") { checkHealth(profile) }
                             .controlSize(.small).disabled(checkingHealth.contains(key))

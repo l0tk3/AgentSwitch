@@ -14,11 +14,12 @@ import { parseExit } from "../src/browser/exit.js";
 import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
-import { DEFAULT_PROFILE, ProfileError, ProfileStore } from "../src/profiles/store.js";
+import { DEFAULT_PROFILE, ProfileError, ProfileStore, grokAccount } from "../src/profiles/store.js";
 import { ApiKeyError, ApiKeys, listModels, nearModel, probeModels, unknownModel } from "../src/profiles/apiKeys.js";
 import { mountSessions } from "../src/api/sessions.js";
 import { mountTerminals } from "../src/api/terminals.js";
 import { TerminalHost, type LaunchRequest } from "../src/terminals/host.js";
+import { SessionMonitor } from "../src/sessions/monitor.js";
 import { agentLauncher, CODEX_DEVICE_PAGE, proxyEnv } from "../src/terminals/launch.js";
 import { claudeSignedIn, codexSignedIn } from "../src/terminals/signIn.js";
 import { codexAccount } from "../src/profiles/store.js";
@@ -1206,5 +1207,117 @@ describe("a Claude sign-in put away (profiles/claudeLogin.ts)", () => {
     expect(claudeHome).not.toBeNull();
     expect((await app.request("/profiles/claude-code/default/reset-identity", { method: "POST" })).status).toBe(200);
     expect(forgotten).toEqual([claudeHome, null]);
+  });
+});
+
+describe("Grok profiles", () => {
+  it("gives an account profile a folder of its own: GROK_HOME, the email in its auth.json, and nothing else of it", () => {
+    const { store, home } = world();
+    // A Grok profile signs in with an account, in a folder of its own; it does not pay by a key here.
+    expect(store.all().grok).toMatchObject({ creatable: true, kinds: ["subscription"] });
+    const work = store.create("grok", "Work", "subscription");
+    const dir = store.homeOf("grok", work.id)!;
+    expect(dir).toBe(join(home, "profiles", "grok", work.id, "home"));
+    expect(existsSync(dir)).toBe(true);
+    // Nobody is signed in there yet: the folder is made empty, not copied from the Mac's own.
+    expect(store.all().grok.profiles.find((p) => p.id === work.id)?.account).toBeUndefined();
+
+    // Who is signed in is the `email` of its one entry; a token beside it is never read, nor stored.
+    writeFileSync(join(dir, "auth.json"), JSON.stringify({ "xai-account": { email: "work@example.com", access_token: "must-not-be-read" } }));
+    expect(store.all().grok.profiles.find((p) => p.id === work.id)?.account).toBe("work@example.com");
+    expect(JSON.stringify(store.all())).not.toContain("must-not-be-read");
+
+    // `Default` is the Mac's own folder (the tests' `GROK_HOME`).
+    writeFileSync(join(process.env.GROK_HOME!, "auth.json"), JSON.stringify({ a: { email: "me@example.com" } }));
+    expect(store.accountOf("grok", "default")).toBe("me@example.com");
+
+    // Not a folder that shares the Mac's own, and no key: a Grok profile cannot be made that way.
+    expect(() => store.create("grok", "Key", "api", { key: "enc:v1:" + "A".repeat(40) })).toThrow(ProfileError);
+    // Gone whole, its sign-in with it.
+    store.remove("grok", work.id);
+    expect(existsSync(join(home, "profiles", "grok", work.id))).toBe(false);
+  });
+
+  it("reads only the email from Grok's auth.json", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-grok-auth-"));
+    const file = (text: string) => { const f = join(dir, `${Math.random()}.json`); writeFileSync(f, text); return f; };
+    expect(grokAccount(file(JSON.stringify({ xai: { email: "a@example.com", access_token: "secret" } })))).toEqual({ account: "a@example.com" });
+    expect(grokAccount(file(JSON.stringify({ xai: { access_token: "secret", refresh_token: "also-secret" } })))).toEqual({});
+    expect(grokAccount(file(JSON.stringify({})))).toEqual({});
+    expect(grokAccount(file(JSON.stringify([])))).toEqual({});
+    expect(grokAccount(file("not json"))).toEqual({});
+    expect(grokAccount(join(dir, "missing.json"))).toEqual({});
+  });
+
+  it("starts Grok in its profile's folder: GROK_HOME, and the hooks and the kit written there", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-grok-profile-launch-"));
+    const homes: (string | undefined)[] = [], kits: (string | undefined)[] = [];
+    const launch = agentLauncher({ binaries: { grok: "/bin/grok" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", HOME: "/Users/u" },
+      grokHooks: (home) => { homes.push(home); return true; }, grokKit: (home) => { kits.push(home); return true; } });
+    const own = launch({ id: "g1", harness: "grok", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/profiles/grok/abc123/home" });
+    expect(own.env.GROK_HOME).toBe("/as/profiles/grok/abc123/home");
+    expect(homes).toEqual(["/as/profiles/grok/abc123/home"]);
+    expect(kits).toEqual(["/as/profiles/grok/abc123/home"]);
+    expect(own.env.AGENTSWITCH_TERMINAL_NODE).toBe("/n/node");
+    // The Mac's own: no folder of ours, so the hooks and the kit are asked with none and Grok keeps its own `GROK_HOME`.
+    const plain = launch({ id: "g2", harness: "grok", cwd: "/tmp", mode: "manual", hookToken: "tok" });
+    expect(plain.env.GROK_HOME).toBeUndefined();
+    expect(homes.at(-1)).toBeUndefined();
+    expect(kits.at(-1)).toBeUndefined();
+  });
+
+  it("marks a trusted folder in the profile's own trusted_folders.toml", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-grok-trust-"));
+    const grok = mkdtempSync(join(tmpdir(), "agentswitch-grok-trust-home-"));
+    const launch = agentLauncher({ binaries: { grok: "/bin/grok" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, env: { PATH: "/usr/bin", HOME: "/Users/u" }, trustedFolders: () => ["/w/app"] });
+    launch({ id: "g1", harness: "grok", cwd: "/w/app", mode: "manual", hookToken: "tok", configHome: grok });
+    // `GROK_HOME` is set before the trusted folders are written, so they land in the profile's folder, not the Mac's own.
+    expect(readFileSync(join(grok, "trusted_folders.toml"), "utf8")).toContain('[folders."/w/app"]');
+    expect(existsSync(join(process.env.GROK_HOME!, "trusted_folders.toml"))).toBe(false);
+  });
+
+  it("lists a Grok profile's sessions beside the Mac's own, and opens and deletes them where they are", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agentswitch-grok-sessions-"));
+    const own = join(root, "own"), theirs = join(root, "theirs");
+    const write = (sessions: string, id: string, cwd: string, text: string) => {
+      const dir = join(sessions, encodeURIComponent(cwd), id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "summary.json"), JSON.stringify({ info: { id, cwd }, created_at: 1_790_000_000, updated_at: 1_790_000_100 }));
+      writeFileSync(join(dir, "updates.jsonl"), [
+        JSON.stringify({ timestamp: 1_790_000_000, params: { update: { sessionUpdate: "user_message_chunk", content: { type: "text", text } } } }),
+        JSON.stringify({ timestamp: 1_790_000_050, params: { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "ok" } } } }),
+      ].join("\n") + "\n");
+      return dir;
+    };
+    const mine = write(own, "a1b2c3d4e5f6", "/w/one", "the Mac's own session");
+    const profile = write(theirs, "b1b2c3d4e5f6", "/w/two", "the profile's session");
+    const monitor = new SessionMonitor({ claudeProjects: join(root, "none"), codexSessions: join(root, "none-codex"), opencodeDb: join(root, "none.db"), grokSessions: own, grokProfileSessions: () => [theirs], excluded: [] });
+    expect(monitor.list().map((s) => [s.harness, s.id, s.cwd])).toEqual(expect.arrayContaining([
+      ["grok", "a1b2c3d4e5f6", "/w/one"], ["grok", "b1b2c3d4e5f6", "/w/two"],
+    ]));
+    expect(monitor.locate("grok", "b1b2c3d4e5f6")).toBe(join(profile, "updates.jsonl"));
+    expect(monitor.read("grok", "b1b2c3d4e5f6")?.messages[0]?.text).toContain("the profile's session");
+    expect((await monitor.remove("grok", "b1b2c3d4e5f6")).removed).toEqual([profile]);
+    expect(existsSync(profile)).toBe(false);
+    expect(existsSync(mine)).toBe(true);
+  });
+});
+
+describe("Grok profiles over HTTP", () => {
+  it("makes one with no telemetry word sent, renames it, and refuses a name another has", async () => {
+    const { store } = world();
+    const app = new Hono<any>();
+    mountProfiles(app, { profiles: store } as ApiDeps);
+    // The Mac sends no `telemetry` for an agent that is not Claude Code (it would be refused as Claude's alone).
+    const made = await app.request("/profiles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent: "grok", name: "Work", kind: "subscription" }) });
+    expect(made.status).toBe(201);
+    const id = (await made.json()).profile.id;
+    expect(store.homeOf("grok", id)).not.toBeNull();
+
+    const renamed = await app.request(`/profiles/grok/${id}/name`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "  Home  " }) });
+    expect(renamed.status).toBe(200);
+    expect((await renamed.json()).agents.grok.profiles.find((p: { id: string }) => p.id === id).name).toBe("Home");
+    expect((await app.request(`/profiles/grok/${id}/name`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Default" }) })).status).toBe(409);
+    expect((await app.request(`/profiles/grok/default/name`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Mine" }) })).status).toBe(404);
   });
 });

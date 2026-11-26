@@ -388,10 +388,11 @@ extension DaemonClient {
         return try decode(ClaudeProfileCopyState.self, try await call("PUT", "/profiles/claude-code/\(Self.segment(id))/copies", body: try JSONEncoder().encode(Body(add: add, remove: remove)), timeout: 60))
     }
 
-    /// `telemetry`: false to have Claude Code's telemetry off under it from the start (docs/profiles-v0.md §3.7).
+    /// `telemetry`: false to have Claude Code's telemetry off under it from the start (docs/profiles-v0.md §3.7); nil,
+    /// the agent's own — only Claude Code's is this service's to turn off, and another agent is sent no word of it.
     /// `copyCodex`: what of the node's own Codex a new Codex account profile is given a copy of (it has a folder all
     /// its own): names from `codexProfileCopyOptions`.
-    public func createProfile(agent: String, name: String, kind: String = "subscription", telemetry: Bool = false, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil, copyCodex: [String]? = nil) async throws -> [String: AgentProfiles] {
+    public func createProfile(agent: String, name: String, kind: String = "subscription", telemetry: Bool? = nil, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil, copyCodex: [String]? = nil) async throws -> [String: AgentProfiles] {
         struct Body: Encodable { let agent: String; let name: String; let kind: String; let telemetry: Bool?; let sharedSkills: [String]; let copyFromDefault: ClaudeProfileCopies?; let copyCodex: [String]? }
         return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, kind: kind, telemetry: telemetry, sharedSkills: sharedSkills, copyFromDefault: copyFromDefault, copyCodex: copyCodex)))).agents
     }
@@ -405,7 +406,7 @@ extension DaemonClient {
     private struct ApiBody: Encodable { let key: String?; let baseUrl: String?; let model: String? }
 
     /// A new profile that pays by a key (§3.6): `ciphertext` is the key sealed for the site it is sent to.
-    public func createKeyProfile(agent: String, name: String, ciphertext: String, baseUrl: String?, model: String?, telemetry: Bool = false, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil) async throws -> [String: AgentProfiles] {
+    public func createKeyProfile(agent: String, name: String, ciphertext: String, baseUrl: String?, model: String?, telemetry: Bool? = nil, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil) async throws -> [String: AgentProfiles] {
         struct Body: Encodable { let agent: String; let name: String; let kind = "api"; let api: ApiBody; let telemetry: Bool?; let sharedSkills: [String]; let copyFromDefault: ClaudeProfileCopies? }
         return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, api: ApiBody(key: ciphertext, baseUrl: baseUrl, model: model), telemetry: telemetry, sharedSkills: sharedSkills, copyFromDefault: copyFromDefault)))).agents
     }
@@ -418,6 +419,11 @@ extension DaemonClient {
     /// A profile's address and model from now on, and its key when one is given (nil: the one it has).
     public func setProfileApi(agent: String, id: String, ciphertext: String?, baseUrl: String?, model: String?) async throws -> [String: AgentProfiles] {
         try decode(ProfilesReply.self, try await call("PUT", "/profiles/\(agent)/\(id)/api", body: try JSONEncoder().encode(ApiBody(key: ciphertext, baseUrl: baseUrl, model: model)))).agents
+    }
+
+    /// A profile's name from now on (docs/profiles-v0.md §3.3): the same rules as when it is made.
+    public func renameProfile(agent: String, id: String, name: String) async throws -> [String: AgentProfiles] {
+        try decode(ProfilesReply.self, try await call("PUT", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/name", body: try JSONEncoder().encode(["name": name]))).agents
     }
 
     /// A profile's colour from now on; the terminals open under it change their dot with it.

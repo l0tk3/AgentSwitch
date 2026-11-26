@@ -476,10 +476,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         // Folders trusted once in AgentSwitch: read at each start, so a change on the Mac counts from the next one.
         trustedFolders: () => loadTrustList(cfg.home),
         // Grok's hooks are a file of ours in its own folder (terminals/grokHooks.ts), looked for — and written again
-        // where it is gone — as each Grok terminal starts.
-        grokHooks: () => ensureGrokHooks(grokHome(), QUICK_HOOK_TIMEOUT_S),
+        // where it is gone — as each Grok terminal starts: a profile's folder, or the Mac's own for `Default`.
+        grokHooks: (home) => ensureGrokHooks(home ?? grokHome(), QUICK_HOOK_TIMEOUT_S),
         // The Chatroom Kit's server in Grok's config.toml, under this service's node.
-        grokKit: () => ensureGrokKit(grokHome(), process.execPath, ROOM_KIT_SCRIPT),
+        grokKit: (home) => ensureGrokKit(home ?? grokHome(), process.execPath, ROOM_KIT_SCRIPT),
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's
@@ -574,7 +574,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The sessions the old Dispatch's executors made in the user's own stores stay off the list, as they always were.
   const oldSessions = cfg.watchSessions ? oldDispatchSessionIds(join(cfg.home, "agentswitch.db")) : new Set<string>();
   const sessions = cfg.watchSessions ? new SessionMonitor({
-    ...sessionSources, claudeProfileProjects: () => profiles.claudeProjectRoots(), codexProfileSessions: () => profiles.codexSessionRoots(), ...(openCodeDelete ? { openCodeDelete } : {}),
+    ...sessionSources, claudeProfileProjects: () => profiles.claudeProjectRoots(), codexProfileSessions: () => profiles.codexSessionRoots(), grokProfileSessions: () => profiles.grokSessionRoots(), ...(openCodeDelete ? { openCodeDelete } : {}),
     ownIds: () => oldSessions, ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
     agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id) || profiles.sessionProfile(harness, id) !== null, folders: () => sessionFolders.get(),
   }) : undefined;

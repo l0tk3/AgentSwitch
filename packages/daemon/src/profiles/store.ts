@@ -2,8 +2,8 @@
  *  with (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), so the Mac's own `~/.claude` and `~/.codex` are never rewritten and the
  *  agents' own apps and other terminals are untouched. Every agent has `Default` — the Mac's own, with no folder here —
  *  and a current profile that new terminals start under. Claude Code first (step 2); Codex has the ones that pay by a
- *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); OpenCode, pi and Grok have
- *  `Default` alone for now.
+ *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); Grok's sign in with an xAI
+ *  account, each in a folder of its own (`GROK_HOME`, §6.3); OpenCode and pi have `Default` alone for now.
  *
  *  New Claude profiles created through the API use private configuration and history; project folders remain user-selected. Skills are
  *  explicit read-only copies. Existing profiles retain their legacy links; Codex still uses its existing sharing
@@ -28,8 +28,9 @@ export type ProfileApi = { readonly key: string; readonly baseUrl?: string | und
 /** The vendor's own address for each agent that can pay by a key: where a key goes when the profile names no other. */
 export const API_HOME: Partial<Record<ProfileAgent, string>> = { "claude-code": "https://api.anthropic.com", codex: "https://api.openai.com/v1" };
 /** The ways a profile of each agent can sign in (absent: `Default` alone). A Codex account profile has a home folder of
- *  its own (§6.2); one that pays by a key needs none. */
-export const PROFILE_KINDS: Partial<Record<ProfileAgent, readonly ProfileKind[]>> = { "claude-code": ["subscription", "api"], codex: ["subscription", "api"] };
+ *  its own (§6.2); one that pays by a key needs none. A Grok profile signs in with an xAI account and has a folder of its
+ *  own (§6.3); it does not pay by a key here. */
+export const PROFILE_KINDS: Partial<Record<ProfileAgent, readonly ProfileKind[]>> = { "claude-code": ["subscription", "api"], codex: ["subscription", "api"], grok: ["subscription"] };
 const API_MODEL = /^[\w.:/@[\]-]{1,120}$/;
 
 /** An address a key is sent to, as kept: http(s), no account in it, no query, no trailing slash. Null: not one. */
@@ -239,6 +240,17 @@ export class ProfileStore {
     this.change(agent, id, ({ telemetry: _was, ...p }) => (on ? p : { ...p, telemetry: false }));
   }
 
+  /** `id`'s name from now on (the name a new one is held to: 1 to 40 characters, not another's). `Default` keeps its. */
+  rename(agent: ProfileAgent, id: string, name: string): void {
+    if (id === DEFAULT_PROFILE) throw new ProfileError("not_found", "no such profile");
+    const said = name.trim().replace(/\s+/g, " ");
+    if (!said || said.length > 40) throw new ProfileError("invalid", "a profile needs a name of 1 to 40 characters");
+    const known = this.of(agent, this.read()).profiles;
+    if (!known.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
+    if (known.some((p) => p.id !== id && p.name.toLowerCase() === said.toLowerCase())) throw new ProfileError("conflict", `there is a profile named ${said} already`);
+    this.change(agent, id, (p) => ({ ...p, name: said }));
+  }
+
   setColor(agent: ProfileAgent, id: string, color: ProfileColor): void {
     if (id === DEFAULT_PROFILE) throw new ProfileError("not_found", "no such profile");
     if (!PROFILE_COLORS.includes(color)) throw new ProfileError("invalid", "no such colour");
@@ -404,6 +416,13 @@ export class ProfileStore {
         } catch (error) { writableDirectories(root); rmSync(root, { recursive: true, force: true }); throw error; }
       }
     }
+    // Grok's sign-in and its sessions are a folder's too (§6.3). The folder is made empty: Grok fills it on its first
+    // run there, and nobody is copied in from the Mac's own (the account is the user's to sign in to where it starts).
+    if (agent === "grok") {
+      const root = join(this.dir, agent, profile.id);
+      try { mkdirSync(join(root, "home"), { recursive: true, mode: 0o700 }); }
+      catch (error) { rmSync(root, { recursive: true, force: true }); throw error; }
+    }
     const stored = file.agents?.[agent] ?? {};
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [...(stored.profiles ?? []), { ...profile, ...(checked ? { api: checked } : {}) }] } } });
     return this.of(agent, this.read()).profiles.find((p) => p.id === profile.id)!;
@@ -436,6 +455,15 @@ export class ProfileStore {
   /** Where Codex keeps the sessions that run under `id`: the profile's own folder, else the Mac's. */
   codexSessionsOf(id: string): string {
     return this.all().codex.profiles.find((p) => p.id === id)?.isolated ? join(this.dir, "codex", id, "home", "sessions") : join(this.userHome, ".codex", "sessions");
+  }
+
+  /** The `sessions` folders of the Grok profiles that keep their own (the list of sessions reads them too); `Default`'s
+   *  is the Mac's own, read as before. */
+  grokSessionRoots(): string[] {
+    return this.all().grok.profiles.flatMap((p) => {
+      const home = this.homeOf("grok", p.id);
+      return home ? [join(home, "sessions")] : [];
+    });
   }
 
   /** The folder of a Claude Code profile that has its own configuration (not one linked to `Default`'s). */
@@ -511,10 +539,18 @@ export class ProfileStore {
     return { current: profiles.some((p) => p.id === stored.current) ? stored.current! : DEFAULT_PROFILE, profiles, creatable: Boolean(PROFILE_KINDS[agent]), kinds: PROFILE_KINDS[agent] ?? [] };
   }
 
+  /** Grok's own folder where `Default` signs in: `GROK_HOME`, else the Mac's `~/.grok` (sessions/grok.ts reads the
+   *  same two for a terminal's `GROK_HOME`). */
+  private grokOwnFolder(): string {
+    return process.env.GROK_HOME?.trim() || join(this.userHome, ".grok");
+  }
+
   /** Who the agent's own files in `home` (null: the Mac's own) say is signed in: Claude Code's address as it shows it
-   *  itself, Codex's from the ChatGPT sign-in it keeps (the address in its identity token; nothing else is read). */
+   *  itself, Codex's from the ChatGPT sign-in it keeps (the address in its identity token), Grok's `email` in its
+   *  `auth.json` (nothing else of it is read). */
   private account(agent: ProfileAgent, home: string | null): { account?: string; device?: string } {
     if (agent === "codex") return codexAccount(join(home ?? join(this.userHome, ".codex"), "auth.json"));
+    if (agent === "grok") return grokAccount(join(home ?? this.grokOwnFolder(), "auth.json"));
     if (agent !== "claude-code") return {};
     try {
       const file = JSON.parse(readFileSync(home ? join(home, ".claude.json") : join(this.userHome, ".claude.json"), "utf8")) as { oauthAccount?: { emailAddress?: unknown }; userID?: unknown };
@@ -633,5 +669,19 @@ export function codexAccount(file: string): { account?: string } {
     if (typeof token !== "string") return {};
     const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { email?: unknown };
     return typeof claims.email === "string" && claims.email ? { account: claims.email.slice(0, 120) } : {};
+  } catch { return {}; }
+}
+
+/** Who Grok's `auth.json` says is signed in: the `email` of its one entry (the file is a map of accounts). Only that
+ *  field is read — never a token, never anything else. Nothing for no file, unreadable JSON, or no address. */
+export function grokAccount(file: string): { account?: string } {
+  try {
+    const auth = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    if (!auth || typeof auth !== "object" || Array.isArray(auth)) return {};
+    for (const who of Object.values(auth as Record<string, unknown>)) {
+      const email = who && typeof who === "object" ? (who as { email?: unknown }).email : undefined;
+      if (typeof email === "string" && email.trim()) return { account: email.trim().slice(0, 120) };
+    }
+    return {};
   } catch { return {}; }
 }
