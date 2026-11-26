@@ -264,7 +264,7 @@ struct RoomMessageRow: View {
                 }
                 .padding(.horizontal, classic ? 11 : 0).padding(.vertical, classic ? 7 : 0)
                 .background(RoundedRectangle(cornerRadius: classic ? Look.cardRadius : 0, style: .continuous)
-                    .fill(!classic ? Color.clear : seat?.isUser == true ? Color.signal.opacity(0.13) : Look.panel))
+                    .fill(!classic ? Color.clear : seat?.isUser == true ? Color.signal.opacity(0.07) : Look.panel))
                 .padding(.top, classic && !row.continues ? 2 : 0)
                 failures
             }
