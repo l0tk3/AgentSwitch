@@ -281,6 +281,9 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let modelNow: String?
     /// What Claude Code offers as your next message (its prompt suggestion), while it rests and shows one.
     public let suggestion: String?
+    /// How full its context and the allowances are, as its status line said last; nil: not said (docs/simple-view-v0.md
+    /// §5.25).
+    public var meter: TerminalMeter? = nil
     /// Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8); nil: this terminal has none
     /// (and from a Mac that does not say).
     public let daybreak: Bool?
@@ -360,7 +363,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, sets, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
+        case id, harness, cwd, workdir, model, modelNow, suggestion, meter, daybreak, sets, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
              agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents, progress, sent, choices, notices, profile
     }
 
@@ -373,6 +376,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         modelNow = try? c.decodeIfPresent(String.self, forKey: .modelNow)
         suggestion = (try? c.decodeIfPresent(String.self, forKey: .suggestion)).flatMap { $0.isEmpty ? nil : $0 }
+        meter = (try? c.decodeIfPresent(TerminalMeter.self, forKey: .meter)) ?? nil
         daybreak = (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil
         sets = (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil
         effort = try? c.decodeIfPresent(String.self, forKey: .effort)
@@ -720,6 +724,8 @@ public enum TerminalEvent: Sendable, Equatable {
     case model(String)
     /// What it offers as your next message changed (nil: it offers none now).
     case suggestion(String?)
+    /// How full its context and the allowances are, as its status line said (record view only).
+    case meter(TerminalMeter)
     /// Codex's Daybreak switch stands otherwise now.
     case daybreak(Bool)
     /// What it is writing now (docs/simple-view-v0.md §5.14; nil: nothing is).
@@ -788,6 +794,8 @@ public enum TerminalEvent: Sendable, Equatable {
             return .suggestion((obj["text"] as? String).flatMap { $0.isEmpty ? nil : $0 })
         case "daybreak":
             return (obj["on"] as? Bool).map { .daybreak($0) }
+        case "meter":
+            return obj["meter"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { try? JSONDecoder().decode(TerminalMeter.self, from: $0) }.map { .meter($0) }
         default:
             return nil
         }

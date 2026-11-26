@@ -226,9 +226,9 @@ struct NewTerminalSheet: View {
             agent = id
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                // The agent's shaded mark (§9): whole for the one chosen, fainter for the others; the tile's frame says which.
-                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : installed ? Theme.ink : Theme.inkDim,
-                            strength: on ? 1 : installed ? 0.75 : 0.4, cell: 7.0 / 3)
+                // The agent's own logo as its program draws it (user #590), in its colours; fainter where it is not on
+                // this Mac. The tile's frame says which is chosen.
+                AgentLogo(harness: id, size: 28).opacity(installed ? 1 : 0.4)
                 Text(name).mono(13).foregroundStyle(installed ? Theme.ink : Theme.inkDim)
                 if !installed { Text("Not Installed").mono(10).foregroundStyle(.tertiary) }
             }

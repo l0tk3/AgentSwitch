@@ -144,6 +144,36 @@ public enum RecordDisplay {
     }
 
     /// How full the context is: `62%` when the record says how much it holds, else the tokens in it (`238k`).
+    /// The line under the reply box (§5.25): the context's fill as its status line said it (`meter`), else as the
+    /// record says; the allowances from the status line, else from the record (Codex). `now`: ms since 1970.
+    public static func usageLine(_ usage: RecordUsage?, meter: TerminalMeter?, now: Int64) -> UsageLine {
+        var context: String? = nil, help: String? = nil
+        if let c = meter?.context {
+            context = "\(Int(min(100, max(0, c.percent)).rounded()))%"
+            if let used = c.used, let window = c.window, used > 0, window > 0 { help = "\(tokens(used)) / \(tokens(window))" }
+        } else if let words = Self.context(usage) {
+            context = words
+            if let used = usage?.used, let window = usage?.window, used > 0, window > 0 { help = "\(tokens(used)) / \(tokens(window))" }
+        }
+        let limits = (meter.map(\.limits).flatMap { $0.isEmpty ? nil : $0 } ?? usage?.limits ?? []).map { l in
+            UsageLine.Limit(text: "\(l.label) \(Int(min(100, max(0, l.percent)).rounded()))%", near: l.percent >= 80,
+                            help: l.resetsAt.flatMap { $0 > now ? "Resets in \(span(($0 - now) / 1000))" : nil })
+        }
+        return UsageLine(context: context, contextHelp: help, limits: limits)
+    }
+
+    /// `2h 1m`, `5d 8h`, `12m`, `40s`.
+    static func span(_ seconds: Int64) -> String {
+        let d = seconds / 86_400, h = seconds % 86_400 / 3600, m = seconds % 3600 / 60
+        if d > 0 { return h > 0 ? "\(d)d \(h)h" : "\(d)d" }
+        if h > 0 { return m > 0 ? "\(h)h \(m)m" : "\(h)h" }
+        return m > 0 ? "\(m)m" : "\(max(0, seconds))s"
+    }
+
+    private static func tokens(_ n: Int) -> String {
+        n >= 1_000_000 ? (n % 1_000_000 == 0 ? "\(n / 1_000_000)M" : String(format: "%.1fM", Double(n) / 1_000_000)) : "\(max(1, Int((Double(n) / 1000).rounded())))k"
+    }
+
     public static func context(_ usage: RecordUsage?) -> String? {
         guard let used = usage?.used, used > 0 else { return nil }
         if let window = usage?.window, window > 0 { return "\(min(100, Int((Double(used) / Double(window) * 100).rounded())))%" }

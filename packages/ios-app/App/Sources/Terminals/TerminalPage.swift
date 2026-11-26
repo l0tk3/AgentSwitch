@@ -522,19 +522,44 @@ struct TerminalPage: View {
     /// Under the reply box in the simple view: how it asks, the model, how full its context is.
     private var sessionLine: some View {
         let mode = RecordDisplay.mode(record.mode) ?? RecordDisplay.mode(listed.mode) ?? listed.mode.capitalized
-        return HStack(spacing: 6) {
+        let usage = RecordDisplay.usageLine(record.usage, meter: page.meter, now: Int64(Date().timeIntervalSince1970 * 1000))
+        let session = HStack(spacing: 6) {
             // Skipping every permission is said in the colour of a warning (2026-10-07, as on the Mac).
             Text(mode).lineLimit(1).foregroundStyle(mode == "Bypass" ? AnyShapeStyle(Theme.failed) : AnyShapeStyle(.tertiary))
             Text("·")
             modelMenu
             effortButton
             daybreakMenu
-            Spacer(minLength: 4)
-            // With Codex's Daybreak switch in the row there is no room for the word: the figure alone.
-            if let context = RecordDisplay.context(record.usage) { Text(daybreak == nil ? "Context \(context)" : context).lineLimit(1).layoutPriority(-1) }
+        }
+        // How full the context is and the allowances (§5.25): at the row's end where they fit, else a row of their own
+        // under it, at its end.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { session; Spacer(minLength: 8); usageWords(usage) }
+            VStack(alignment: .trailing, spacing: 3) {
+                HStack(spacing: 6) { session; Spacer(minLength: 0) }
+                usageWords(usage)
+            }
         }
         .mono(11).foregroundStyle(.tertiary)
         .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
+    }
+
+    /// `Context 28% · 5h 12% · 7d 84%`: an allowance at 80% or over in the colour of what needs you. A long press says
+    /// how full in tokens and when each starts afresh (a phone has no pointer to hover with).
+    @ViewBuilder private func usageWords(_ line: UsageLine) -> some View {
+        if !line.isEmpty {
+            let parts: [(String, Bool)] = (line.context.map { [("Context \($0)", false)] } ?? []) + line.limits.map { ($0.text, $0.near) }
+            parts.enumerated().reduce(Text("")) { text, part in
+                let (i, (words, near)) = part
+                let word = Text(words).foregroundColor(near ? Theme.waiting : nil)
+                return i == 0 ? word : text + Text(" · ") + word
+            }
+            .lineLimit(1)
+            .contextMenu {
+                if let help = line.contextHelp { Text("Context \(help)") }
+                ForEach(line.limits, id: \.text) { l in Text(l.help.map { "\(l.text) · \($0)" } ?? l.text) }
+            }
+        }
     }
 
     /// The model it is on, as far as anything says: what the agent last reported, the model of its last answer, the one

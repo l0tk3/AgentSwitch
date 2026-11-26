@@ -30,6 +30,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     /// Asked once, the first time there is something to say (the system remembers the answer).
     private func allowed() async -> Bool {
         guard let center else { return false }
+        #if DEBUG
+        // The sample screens (`-uiDemo YES`) never ask: the system's question would stand over the picture.
+        if UserDefaults.standard.bool(forKey: "uiDemo") { return false }
+        #endif
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral: return true

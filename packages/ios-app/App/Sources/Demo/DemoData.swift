@@ -59,6 +59,17 @@ enum DemoData {
         "/Users/me/Work/api": GitSummary(branch: "feat/health", changed: 3, behind: 4),
     ]
 
+    /// The first terminal's status line said how full its context and the allowances are (docs/simple-view-v0.md §5.25):
+    /// the week's near its end.
+    private static func meter(_ t: TerminalInfo) -> TerminalInfo {
+        guard t.id == "a1b2c3d4", t.harness == "claude-code" else { return t }
+        var said = t
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        said.meter = TerminalMeter(context: .init(percent: 28, used: 280_000, window: 1_000_000),
+                                   limits: [UsageLimit(label: "5h", percent: 12, resetsAt: now + 7_260_000), UsageLimit(label: "7d", percent: 84, resetsAt: now + 460_800_000)])
+        return said
+    }
+
     static var terminalList: TerminalList {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
@@ -70,7 +81,7 @@ enum DemoData {
         let clash = screen == "simpledaybreakclash", daybreak = screen == "simpledaybreak" || clash
         let busy = screen == "simplebusy" || compact, prompt = screen == "simpleprompt", idle = daybreak || screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep" || screen == "simplesuggest"
         let five = ["low", "medium", "high", "xhigh", "max"]
-        return TerminalList(terminals: [
+        return TerminalList(terminals: ([
             TerminalInfo(id: "a1b2c3d4", harness: daybreak ? "codex" : "claude-code", cwd: repo, model: clash ? "gpt-6.1-sol" : daybreak ? "gpt-6-sol" : "claude-opus-5-5", mode: daybreak ? "manual" : "auto", name: "iPhone 终端标签页",
                          status: busy ? .working : idle ? .idle : .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
                          permissions: screen == "terminallink" || busy || prompt || idle ? []
@@ -94,7 +105,7 @@ enum DemoData {
         ] : []) + [
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
                          createdAt: ago(7200), lastOutputAt: ago(3000)),
-        ], agents: ["claude-code", "codex", "opencode"], models: [
+        ]).map(meter), agents: ["claude-code", "codex", "opencode"], models: [
             "claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "claude-fable-5-1", name: "Fable 5.1", efforts: five),
                             TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five), TerminalModelOption(id: "haiku", name: "Haiku 4.5", efforts: []),
                             TerminalModelOption(id: "claude-opus-4-6", name: "Opus 4.6", older: true, efforts: ["low", "medium", "high", "max"])],

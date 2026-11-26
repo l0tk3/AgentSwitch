@@ -345,13 +345,70 @@ public struct RecordUsage: Decodable, Sendable, Hashable {
     public let window: Int?
     /// How hard it thought at the last turn, in the agent's word (Claude Code, Codex).
     public let effort: String?
+    /// The account's allowances as the record said last (Codex's rate limits), the shorter window first.
+    public let limits: [UsageLimit]?
 
-    public init(model: String? = nil, used: Int? = nil, window: Int? = nil, effort: String? = nil) {
+    public init(model: String? = nil, used: Int? = nil, window: Int? = nil, effort: String? = nil, limits: [UsageLimit]? = nil) {
         self.model = model
         self.used = used
         self.window = window
         self.effort = effort
+        self.limits = limits
     }
+}
+
+/// One of the account's allowances (docs/simple-view-v0.md §5.25): its window's name (`5h`, `7d`), how much of it is
+/// used, and when it starts afresh (ms since 1970; nil: not said).
+public struct UsageLimit: Decodable, Sendable, Hashable {
+    public let label: String
+    public let percent: Double
+    public let resetsAt: Int64?
+
+    public init(label: String, percent: Double, resetsAt: Int64? = nil) {
+        self.label = label
+        self.percent = percent
+        self.resetsAt = resetsAt
+    }
+}
+
+/// How full a terminal's context and the account's allowances are, as the agent's status line said last (Claude Code,
+/// Antigravity; `TerminalInfo.meter`, the record stream's `meter`).
+public struct TerminalMeter: Decodable, Sendable, Hashable {
+    public struct Context: Decodable, Sendable, Hashable {
+        public let percent: Double
+        public let used: Int?
+        public let window: Int?
+        public init(percent: Double, used: Int? = nil, window: Int? = nil) { self.percent = percent; self.used = used; self.window = window }
+    }
+    public let context: Context?
+    public let limits: [UsageLimit]
+
+    public init(context: Context?, limits: [UsageLimit] = []) { self.context = context; self.limits = limits }
+
+    private enum CodingKeys: String, CodingKey { case context, limits }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        context = (try? c.decodeIfPresent(Context.self, forKey: .context)) ?? nil
+        limits = (try? c.decodeIfPresent([UsageLimit].self, forKey: .limits)) ?? []
+    }
+}
+
+/// The line under the reply box (docs/simple-view-v0.md §5.25): how full the context is and the allowances.
+public struct UsageLine: Equatable, Sendable {
+    public struct Limit: Equatable, Sendable {
+        public let text: String
+        /// Near its end (80% and over): drawn in the colour of what needs you.
+        public let near: Bool
+        /// When it starts afresh, in words (`Resets in 2h 1m`); nil: not said.
+        public let help: String?
+        public init(text: String, near: Bool, help: String?) { self.text = text; self.near = near; self.help = help }
+    }
+    /// How full the context is (`28%`, or the tokens in it where its size is not known); nil: not said.
+    public let context: String?
+    /// How full in tokens (`280k / 1M`); nil where not known.
+    public let contextHelp: String?
+    public let limits: [Limit]
+    public var isEmpty: Bool { context == nil && limits.isEmpty }
 }
 
 /// `GET /sessions/:harness/:id/record`.

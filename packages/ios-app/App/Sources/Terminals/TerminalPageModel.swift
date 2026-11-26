@@ -115,6 +115,8 @@ final class TerminalPageModel {
     private(set) var daybreakNow: Bool?
     /// What Claude Code offers as your next message, while it shows one: said over the empty reply box, a tap takes it.
     private(set) var suggestion: String?
+    /// How full its context and the allowances are, as its status line said last (docs/simple-view-v0.md §5.25).
+    private(set) var meter: TerminalMeter?
     /// A change of model is on its way to the agent.
     private(set) var changingModel = false
     /// The thinking level a screen here asked for, until a turn has run at it (the record then says).
@@ -130,6 +132,7 @@ final class TerminalPageModel {
         self.showsScreen = showsScreen
         modelNow = terminal.modelNow
         suggestion = terminal.suggestion
+        meter = terminal.meter
         activity = terminal.activity
         subagents = terminal.subagents
         progress = terminal.progress
@@ -297,6 +300,8 @@ final class TerminalPageModel {
             daybreakNow = on
         case .suggestion(let text):
             suggestion = text
+        case .meter(let now):
+            if meter != now { meter = now }
         case .name(let n):
             name = n
         case .resize(_, _, let by):
