@@ -16,14 +16,14 @@ object TerminalsListProbe {
     const val home = "/Users/me"
 
     val folders: List<String> by lazy {
-        val paths = mutableListOf("", "/Desktop", "/Desktop/WorkSpace/Worktop", "/Desktop/WorkSpace/Worktop/培训", "/Desktop/WorkSpace/Worktop/培训/靶场")
+        val paths = mutableListOf("", "/Projects", "/Projects/notes", "/Projects/notes/lab", "/Projects/notes/lab/sandbox")
         for (p in listOf(
             "harbor", "harbor/deploy", "lumen", "lumen/packages/api", "lumen/packages/web", "notes", "relay", "relay/cli",
             "atlas", "atlas/ios", "atlas/server", "kiln", "quarry", "quarry/tools", "tidewater", "beacon", "beacon/docs", "ember",
         )) {
-            paths.add("/Desktop/WorkSpace/Projects/$p")
+            paths.add("/Projects/$p")
         }
-        paths += listOf("/Work/api", "/Work/api/scripts", "/Blog", "/Downloads/scratch")
+        paths += listOf("/Projects/demo-api", "/Projects/demo-api/scripts", "/Projects/demo-site", "/Downloads/scratch")
         paths.map { home + it }
     }
 

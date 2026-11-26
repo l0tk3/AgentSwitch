@@ -141,7 +141,7 @@ class LinkTests {
         assertEquals("$workdir/docs/design/concepts/split.html", path("docs/design/concepts/split.html"))
         assertEquals("$workdir/packages/daemon/ui/terminal.js", path("packages/daemon/ui/terminal.js:1287"), "a place in the file is not its path")
         assertEquals("$workdir/src/a.ts", path("src/a.ts:12:5"))
-        assertEquals("$workdir/培训/靶场/说明.md", path("培训/靶场/说明.md"))
+        assertEquals("$workdir/课程/沙盒/说明.md", path("课程/沙盒/说明.md"))
         for (word in listOf("/help", "/compact", "//", "/", "~", "and/or", "text/plain", "1/2", "2026/10/03", "v2/3.1", "origin/main", "README.md", "a//b.md",
             "https://example.com/a.html", "-/x.md")) {
             assertNull(path(word), "$word is not a path")
@@ -253,13 +253,13 @@ class LinkTests {
     fun testAPathCutOverLinesKeepsItsOtherReadings() {
         // Filled to the width and too long for a line: surely one path.
         val cut = rows(
-            "⏺ Wrote /private/tmp/claude-501/-Users-me-Desktop-WorkSpace/0e3e5e94-d0e2-4f5b-b869-85d",
+            "⏺ Wrote /private/tmp/claude-501/-Users-me-Desktop-Workbench/0e3e5e94-d0e2-4f5b-b869-85d",
             "       7a3bb725b/scratchpad/out/agentswitch-browser.html",
         )
         val one = TerminalLinks.find(cut)
-        assertEquals(listOf<TappedLink>(TappedLink.File("/private/tmp/claude-501/-Users-me-Desktop-WorkSpace/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b/scratchpad/out/agentswitch-browser.html")), one.map { it.link })
+        assertEquals(listOf<TappedLink>(TappedLink.File("/private/tmp/claude-501/-Users-me-Desktop-Workbench/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b/scratchpad/out/agentswitch-browser.html")), one.map { it.link })
         assertEquals(listOf(0, 1), one[0].spans.map { it.row })
-        assertEquals(listOf<TappedLink>(TappedLink.File("/private/tmp/claude-501/-Users-me-Desktop-WorkSpace/0e3e5e94-d0e2-4f5b-b869-85d")), one[0].alternates)
+        assertEquals(listOf<TappedLink>(TappedLink.File("/private/tmp/claude-501/-Users-me-Desktop-Workbench/0e3e5e94-d0e2-4f5b-b869-85d")), one[0].alternates)
         // A path that ends its line, the next line a new word: the path alone, the join only as another reading for
         // the Mac to tell.
         val ended = rows("⏺ Wrote /Users/me/out/index.html", "  done")
@@ -274,18 +274,18 @@ class LinkTests {
         // The path's row is not the widest of its paragraph (the address above is wider): whether it goes on is not sure,
         // so it is read alone, the join kept for the Mac to tell. The next row's own word (a relative path) also reads
         // as the whole, so a tap on either half finds it (files-v0 §12.4.2).
-        val workdir = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        val workdir = "/Users/me/Desktop/Workbench/Projects/AgentSwitch"
         val screen = rows(
             "⏺ 分屏的说明见这一页，也可以直接打开预览：",
             "  https://code.claude.com/docs/en/agent-teams.md#choo",
             "  se-a-display-mode",
-            "  ~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi",
+            "  ~/Desktop/Workbench/Projects/AgentSwitch/docs/desi",
             "  gn/concepts/split.html",
         )
         val paths = TerminalLinks.find(screen, workdir = workdir).filter { it.link is TappedLink.File }
         assertEquals(2, paths.size)
-        val whole = TappedLink.File("~/Desktop/WorkSpace/Projects/AgentSwitch/docs/design/concepts/split.html")
-        assertEquals(TappedLink.File("~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi"), paths.first().link)
+        val whole = TappedLink.File("~/Desktop/Workbench/Projects/AgentSwitch/docs/design/concepts/split.html")
+        assertEquals(TappedLink.File("~/Desktop/Workbench/Projects/AgentSwitch/docs/desi"), paths.first().link)
         assertEquals(listOf<TappedLink>(whole), paths.first().alternates)
         assertEquals(TappedLink.File("$workdir/gn/concepts/split.html"), paths.last().link)
         assertEquals(listOf<TappedLink>(whole), paths.last().alternates)
@@ -297,34 +297,34 @@ class LinkTests {
         // path and the size each wrapped in a column of its own, so the path's rest starts under its first cell — right
         // after another column's word, or a space from it — and the size's rest follows it.
         val screen = rows(
-            "  ›      ~/Desktop/WorkSpace/Scratch/classic-dark/send (554.4",
+            "  ›      ~/Desktop/Workbench/Scratch/classic-dark/send (554.4",
             "  [image]-before-after.png                             KB)",
             "",
-            "  ›      ~/Desktop/WorkSpace/Scratch/classic-dark/prob (298.3",
+            "  ›      ~/Desktop/Workbench/Scratch/classic-dark/prob (298.3",
             "  [image]e-real/after-terminals.png                    KB)",
             "",
-            "  ›       ~/Desktop/WorkSpace/Scratch/classic-dark/web (81.2K",
+            "  ›       ~/Desktop/Workbench/Scratch/classic-dark/web (81.2K",
             "  [image] /web-terminal-classic.png                    B)",
         )
         val found = TerminalLinks.find(screen, workdir = "/Users/me/Projects/AgentSwitch")
-        assertEquals(listOf<TappedLink>(TappedLink.File("~/Desktop/WorkSpace/Scratch/classic-dark/send-before-after.png"),
-            TappedLink.File("~/Desktop/WorkSpace/Scratch/classic-dark/probe-real/after-terminals.png"),
-            TappedLink.File("~/Desktop/WorkSpace/Scratch/classic-dark/web/web-terminal-classic.png")), found.map { it.link },
+        assertEquals(listOf<TappedLink>(TappedLink.File("~/Desktop/Workbench/Scratch/classic-dark/send-before-after.png"),
+            TappedLink.File("~/Desktop/Workbench/Scratch/classic-dark/probe-real/after-terminals.png"),
+            TappedLink.File("~/Desktop/Workbench/Scratch/classic-dark/web/web-terminal-classic.png")), found.map { it.link },
             "each one path; what the next row holds before the path's column is no path of its own")
         assertEquals(listOf(span(0, 9 until 54), span(1, 9 until 26)), found[0].spans, "both rows are the link's: a touch on either lands on it")
-        assertEquals(listOf<TappedLink>(TappedLink.File("~/Desktop/WorkSpace/Scratch/classic-dark/send")), found[0].alternates, "the first row alone, should the Mac not have the whole")
+        assertEquals(listOf<TappedLink>(TappedLink.File("~/Desktop/Workbench/Scratch/classic-dark/send")), found[0].alternates, "the first row alone, should the Mac not have the whole")
         assertEquals(listOf(span(6, 10 until 54), span(7, 10 until 35)), found[2].spans)
         assertEquals(found[0].link, TerminalLinks.hit(found, column = 14.0, row = 1.5, cell = cell, slop = 12.0)?.link, "on the second row")
         assertEquals(found[0].link, TerminalLinks.hit(found, column = 30.0, row = 0.5, cell = cell, slop = 12.0)?.link, "on the first")
 
         // Three rows: the middle one fills the column.
         val three = rows(
-            "  ›      ~/Desktop/WorkSpace/Scratch/classic-dark/send (1.2",
+            "  ›      ~/Desktop/Workbench/Scratch/classic-dark/send (1.2",
             "  [image]-before-after-with-a-very-long-name-that-goes MB)",
             "         -on.png",
         )
         val long = TerminalLinks.find(three)
-        assertEquals(listOf<TappedLink>(TappedLink.File("~/Desktop/WorkSpace/Scratch/classic-dark/send-before-after-with-a-very-long-name-that-goes-on.png")), long.map { it.link })
+        assertEquals(listOf<TappedLink>(TappedLink.File("~/Desktop/Workbench/Scratch/classic-dark/send-before-after-with-a-very-long-name-that-goes-on.png")), long.map { it.link })
         assertEquals(listOf(0, 1, 2), long[0].spans.map { it.row })
     }
 

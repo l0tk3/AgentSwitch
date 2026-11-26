@@ -171,7 +171,7 @@ class BrowserTests {
 
     @Test
     fun testAProfilesOwnBrowserIsAskedByTheSameRoutesUnderItsAddress() = runTest {
-        val listed = """{"browsers":[{"key":null,"name":"Shared","running":true},{"key":"claude-code.abc123def0","name":"cwork1","agent":"claude-code","exit":{"ip":"203.0.113.9","place":"Tokyo"},"running":false}]}"""
+        val listed = """{"browsers":[{"key":null,"name":"Shared","running":true},{"key":"claude-code.abc123def0","name":"work01","agent":"claude-code","exit":{"ip":"203.0.113.9","place":"Tokyo"},"running":false}]}"""
         val transport = FakeTransport({ req, _ ->
             if (req.path == "/browsers") return@FakeTransport listed.toByteArray() to httpResponse(req.url, status = 200)
             if (req.path.endsWith("/browser/tabs") && req.method == "GET") return@FakeTransport """{"running":false,"groups":[]}""".toByteArray() to httpResponse(req.url, status = 200)
@@ -181,7 +181,7 @@ class BrowserTests {
         // The browsers the Mac holds: the shared one, then each profile's own with where it leaves the Mac from.
         val browsers = api.browsers()
         assertEquals(listOf(BrowserChoice(key = null, name = "Shared", running = true),
-            BrowserChoice(key = "claude-code.abc123def0", name = "cwork1", exit = BrowserChoice.Exit(ip = "203.0.113.9", place = "Tokyo"))), browsers)
+            BrowserChoice(key = "claude-code.abc123def0", name = "work01", exit = BrowserChoice.Exit(ip = "203.0.113.9", place = "Tokyo"))), browsers)
         assertEquals(listOf("", "claude-code.abc123def0"), browsers.map { it.id })
         assertEquals("Tokyo 203.0.113.9", browsers[1].exit?.text)
         // The shared browser's routes as they are; a profile's own under its address; other routes untouched.

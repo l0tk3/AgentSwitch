@@ -13,10 +13,10 @@ import com.agentswitch.kit.api.graphemePrefix
  * opened, then its sessions newest-begun first, then the folders under it. Work going on moves nothing; something new
  * only comes in at its place.
  *
- * Which folders show and where (2026-10-03, user: 怎么分别显示了两个worktop；有共同的祖父节点时并没能正确显示，比如“靶场”
- * 就在 /WorkSpace/Worktop/培训/靶场 下，但是显示起来是独立的): every folder with terminals or sessions of its own, and every
+ * Which folders show and where (2026-10-03, user: 怎么分别显示了两个同名目录；有共同的祖父节点时并没能正确显示，比如“沙盒”
+ * 就在 /Workbench/Toolbox/课程/沙盒 下，但是显示起来是独立的): every folder with terminals or sessions of its own, and every
  * folder two or more of those sit directly in. Each sits in the nearest of these above it, named by the path from
- * there ("培训/靶场"); a folder with sessions of its own that also holds others is one line. Folders near the top hold
+ * there ("课程/沙盒"); a folder with sessions of its own that also holds others is one line. Folders near the top hold
  * only what sits directly in them: two levels from the top of the disk (`/`, `/Users`, your home, `/private/tmp`) and the
  * places in your home (`~/Desktop`).
  */
@@ -25,7 +25,7 @@ object TerminalTree {
         val cwd: String,
         /**
          * At the top its own name ("AgentSwitch"; a repeated one carries its parent's, "Work/api"; your home is "~");
-         * under another folder the path from there ("培训/靶场").
+         * under another folder the path from there ("课程/沙盒").
          */
         val name: String,
         /** Its own: none for a folder that only gathers others. */
@@ -99,7 +99,7 @@ object TerminalTree {
 
     /**
      * Every folder, depth first, with its name as a search shows it: under the names of the folders it sits in
-     * ("Worktop/培训/靶场").
+     * ("Toolbox/课程/沙盒").
      */
     fun flatten(folders: List<Folder>, above: String? = null): List<Named> = folders.flatMap { f ->
         val name = if (above != null) "$above/${f.name}" else f.name

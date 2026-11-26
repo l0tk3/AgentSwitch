@@ -69,7 +69,7 @@ object Demo {
         val profiles: Map<String, ProfileChoices> = if (screen?.contains("profile") == true) mapOf(
             "claude-code" to ProfileChoices(current = "abc123def0", profiles = listOf(
                 ProfileChoice(id = "default", name = "Default", account = "me@example.com"),
-                ProfileChoice(id = "abc123def0", name = "cwork1", account = "work@example.com", color = ProfileColor.Violet),
+                ProfileChoice(id = "abc123def0", name = "work", account = "work@example.com", color = ProfileColor.Violet),
                 ProfileChoice(id = "abc123def1", name = "side", color = ProfileColor.Sand),
             )),
         ) else emptyMap()

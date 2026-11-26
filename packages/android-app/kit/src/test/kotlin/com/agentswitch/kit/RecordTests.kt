@@ -483,12 +483,12 @@ class RecordTests {
         fun terminal(profile: String): TerminalInfo =
             KitJson.decodeFromString(TerminalInfo.serializer(), """{"id":"t1","harness":"claude-code","cwd":"/w","name":"a","status":"idle","createdAt":1,"profile":$profile}""")
         assertEquals(
-            TerminalProfile(name = "cwork1", color = ProfileColor.Violet),
-            terminal("""{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":"Tokyo"},"color":"violet"}""").profile,
+            TerminalProfile(name = "work01", color = ProfileColor.Violet),
+            terminal("""{"id":"abc123def0","name":"work01","exit":{"ip":"203.0.113.9","place":"Tokyo"},"color":"violet"}""").profile,
         )
         // No colour, or one this app does not know yet: the profile all the same, without a dot.
-        assertEquals(TerminalProfile(name = "cwork1"), terminal("""{"id":"abc123def0","name":"cwork1"}""").profile)
-        assertEquals(TerminalProfile(name = "cwork1"), terminal("""{"id":"abc123def0","name":"cwork1","color":"plaid"}""").profile)
+        assertEquals(TerminalProfile(name = "work01"), terminal("""{"id":"abc123def0","name":"work01"}""").profile)
+        assertEquals(TerminalProfile(name = "work01"), terminal("""{"id":"abc123def0","name":"work01","color":"plaid"}""").profile)
         // The Mac's own, and a Mac that does not say.
         assertNull(terminal("null").profile)
         assertNull(KitJson.decodeFromString(TerminalInfo.serializer(), """{"id":"t1","harness":"codex"}""").profile)
@@ -519,7 +519,7 @@ class RecordTests {
                 """
                 {"agents":{"claude-code":{"current":"abc123def0","creatable":true,"profiles":[
                     {"id":"default","name":"Default","kind":"subscription","createdAt":0,"account":"me@example.com"},
-                    {"id":"abc123def0","name":"cwork1","kind":"subscription","createdAt":1,"color":"violet","proxy":{"server":"http://proxy.example:8080","sealed":true},"exit":{"ip":"203.0.113.9","place":"Tokyo"}},
+                    {"id":"abc123def0","name":"work01","kind":"subscription","createdAt":1,"color":"violet","proxy":{"server":"http://proxy.example:8080","sealed":true},"exit":{"ip":"203.0.113.9","place":"Tokyo"}},
                     {"id":"abc123def1","name":"later","kind":"subscription","createdAt":2,"color":"a-colour-of-a-newer-mac"}]},
                   "codex":{"current":"default","creatable":false,"profiles":[{"id":"default","name":"Default","kind":"subscription","createdAt":0}]}}}
                 """.trimIndent(),
@@ -529,7 +529,7 @@ class RecordTests {
         val claude = assertNotNull(agents["claude-code"])
         assertTrue(claude.several)
         assertEquals(
-            ProfileChoice(id = "abc123def0", name = "cwork1", color = ProfileColor.Violet, proxy = ProxySetting(server = "http://proxy.example:8080", sealed = true), exit = ProxyExit(ip = "203.0.113.9", place = "Tokyo")),
+            ProfileChoice(id = "abc123def0", name = "work01", color = ProfileColor.Violet, proxy = ProxySetting(server = "http://proxy.example:8080", sealed = true), exit = ProxyExit(ip = "203.0.113.9", place = "Tokyo")),
             claude.offered,
         )
         assertEquals(listOf("me@example.com", "Not Signed In", "Not Signed In"), claude.profiles.map { it.who })

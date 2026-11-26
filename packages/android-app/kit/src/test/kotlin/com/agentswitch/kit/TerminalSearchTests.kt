@@ -52,11 +52,11 @@ class TerminalSearchTests {
     @Test
     fun testNestedFoldersAreNamedByTheFoldersTheySitIn() {
         val tree = TerminalTree.build(emptyList(), listOf(
-            session("w", "/Users/u/Worktop", "整理"), session("r", "/Users/u/Worktop/培训/靶场", "靶机"), session("c", "/Users/u/Worktop/Codex", "其他"),
+            session("w", "/Users/u/Toolbox", "整理"), session("r", "/Users/u/Toolbox/课程/沙盒", "测试机"), session("c", "/Users/u/Toolbox/Codex", "其他"),
         ))
-        val result = TerminalSearch.run(tree, "worktop")
-        assertEquals(listOf("Worktop", "Worktop/Codex", "Worktop/培训/靶场"), result.folders.map { it.name })
-        assertEquals(listOf(1), TerminalSearch.run(tree, "靶场").folders.map { it.rows.size })
+        val result = TerminalSearch.run(tree, "toolbox")
+        assertEquals(listOf("Toolbox", "Toolbox/Codex", "Toolbox/课程/沙盒"), result.folders.map { it.name })
+        assertEquals(listOf(1), TerminalSearch.run(tree, "沙盒").folders.map { it.rows.size })
     }
 
     @Test

@@ -36,7 +36,7 @@ object TerminalSearch {
 
     data class Folder(
         val cwd: String,
-        /** As the tree names it, under the names of the folders it sits in ("Worktop/Codex", "Worktop/培训/靶场"). */
+        /** As the tree names it, under the names of the folders it sits in ("Toolbox/Codex", "Toolbox/课程/沙盒"). */
         val name: String,
         val git: GitSummary?,
         val nameHit: Boolean,
@@ -62,7 +62,7 @@ object TerminalSearch {
 
     /**
      * `said`: a session's words around the match, by `harness:id` (a terminal by the session it writes). Each folder
-     * with terminals or sessions of its own, named by the folders it sits in ("Worktop/培训/靶场"): a match on a
+     * with terminals or sessions of its own, named by the folders it sits in ("Toolbox/课程/沙盒"): a match on a
      * folder's name keeps every folder under it as well.
      */
     fun run(tree: List<TerminalTree.Folder>, query: String, said: Map<String, String> = emptyMap()): Result {

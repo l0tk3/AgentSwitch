@@ -32,7 +32,7 @@ import com.agentswitch.kit.api.SeatCard
  */
 object DemoRooms {
     const val room = "ab12cd34ef"
-    private const val repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+    private const val repo = "/Users/me/Projects/AgentSwitch"
     private const val folder = "/Users/me/.agentswitch/room-files/$room"
     private fun ago(minutes: Int): Long = DemoData.now - minutes * 60_000L
 
@@ -193,6 +193,6 @@ object DemoRooms {
             last = RoomSummary.Last(seq = 5, from = "docs", text = messages.last().text, at = ago(8)), unread = 1, forYou = true,
             tasks = RoomTaskCounts(todo = 3, doing = 2, done = 2), attention = 2,
         ),
-        RoomSummary(id = "cd34ef56ab", name = "博客迁移", topic = "换主题之后的构建问题", paused = true, createdAt = ago(3000), members = 2, last = RoomSummary.Last(seq = 12, from = RoomSeat.you, text = "先停一下，明天再说", at = ago(1400))),
+        RoomSummary(id = "cd34ef56ab", name = "文档整理", topic = "换主题之后的构建问题", paused = true, createdAt = ago(3000), members = 2, last = RoomSummary.Last(seq = 12, from = RoomSeat.you, text = "先停一下，明天再说", at = ago(1400))),
     ))
 }

@@ -86,7 +86,7 @@ object DemoData {
 
     val sessions: List<SessionSummary>
         get() {
-            val repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+            val repo = "/Users/me/Projects/AgentSwitch"
             return listOf(
                 SessionSummary(
                     harness = "claude-code", sessionId = "c1", cwd = repo, title = "iPhone 端：编码会话列表和未读标记",
@@ -97,30 +97,30 @@ object DemoData {
                     lastText = "已读取 session_meta 中的 cwd 和 originator。", updatedAt = ago(1500), origin = "desktop", branch = "main", model = "gpt-6-luna",
                 ),
                 SessionSummary(
-                    harness = "opencode", sessionId = "o1", cwd = "/Users/me/Blog", title = "换主题后的构建报错",
-                    lastText = "hexo-renderer-marked 升级到 7.0 后构建成功。", updatedAt = ago(3 * 3600), model = "deepseek/deepseek-flash",
+                    harness = "opencode", sessionId = "o1", cwd = "/Users/me/Projects/demo-site", title = "升级依赖后的构建报错",
+                    lastText = "渲染插件升级到新版后构建成功。", updatedAt = ago(3 * 3600), model = "deepseek/deepseek-flash",
                 ),
                 SessionSummary(
-                    harness = "claude-code", sessionId = "c2", cwd = "/Users/me/Work/api", title = "给健康检查加缓存",
+                    harness = "claude-code", sessionId = "c2", cwd = "/Users/me/Projects/demo-api", title = "给健康检查加缓存",
                     lastText = "缓存 30 秒，命中率 92%。", updatedAt = ago(26 * 3600),
                 ),
                 // Folders inside folders the list shows (docs/terminal-v0.md §1 目录树的层级, 2026-10-03): one in the
-                // project, and Worktop with a session of its own over the folders in it.
+                // project, and notes with a session of its own over the folders in it.
                 SessionSummary(
                     harness = "claude-code", sessionId = "c3", cwd = "$repo/packages/secret-gate", title = "fill-value 的探针模板",
                     lastText = "探针模板固定在包里。", updatedAt = ago(5 * 3600),
                 ),
                 SessionSummary(
-                    harness = "claude-code", sessionId = "c4", cwd = "/Users/me/Desktop/WorkSpace/Worktop", title = "整理工作目录",
-                    lastText = "做完的项目搬到 Archived。", updatedAt = ago(30 * 3600),
+                    harness = "claude-code", sessionId = "c4", cwd = "/Users/me/Projects/notes", title = "整理笔记目录",
+                    lastText = "旧的笔记搬到 Archived。", updatedAt = ago(30 * 3600),
                 ),
                 SessionSummary(
-                    harness = "codex", sessionId = "x2", cwd = "/Users/me/Desktop/WorkSpace/Worktop/Codex", title = "给脚本加上重试",
+                    harness = "codex", sessionId = "x2", cwd = "/Users/me/Projects/notes/scripts", title = "给脚本加上重试",
                     lastText = "下载失败时指数退避重试三次。", updatedAt = ago(40 * 3600),
                 ),
                 SessionSummary(
-                    harness = "codex", sessionId = "x3", cwd = "/Users/me/Desktop/WorkSpace/Worktop/培训/靶场", title = "靶场环境搭建",
-                    lastText = "docker compose 起三台靶机。", updatedAt = ago(50 * 3600),
+                    harness = "codex", sessionId = "x3", cwd = "/Users/me/Projects/notes/lab/sandbox", title = "本地测试环境搭建",
+                    lastText = "docker compose 起三个服务。", updatedAt = ago(50 * 3600),
                 ),
             )
         }
@@ -139,13 +139,13 @@ object DemoData {
 
     /** The folders' git, after their names in the tree. */
     val git: Map<String, GitSummary> = mapOf(
-        "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch" to GitSummary(branch = "main", changed = 5, ahead = 2),
-        "/Users/me/Work/api" to GitSummary(branch = "feat/health", changed = 3, behind = 4),
+        "/Users/me/Projects/AgentSwitch" to GitSummary(branch = "main", changed = 5, ahead = 2),
+        "/Users/me/Projects/demo-api" to GitSummary(branch = "feat/health", changed = 3, behind = 4),
     )
 
     /** [screen] is the demo screen's name (`uiDemoScreen`), null for none. */
     fun terminalList(screen: String?): TerminalList {
-        val repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        val repo = "/Users/me/Projects/AgentSwitch"
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
         // `simplecompact`: while it compacts its context (docs/simple-view-v0.md §5.7).
         val compact = screen == "simplecompact"
@@ -186,7 +186,7 @@ object DemoData {
             progress = if (screen == "simplebusy") TurnProgress(tokens = 3300) else null,
             sent = if (screen == "simplebusy") listOf(SentReply(id = "s1", text = "顺便把测试也跑一遍", at = ago(3))) else emptyList(),
             // `terminalprofiles`: under a profile other than the Mac's own (docs/profiles-v0.md §3.2) — its lit dot.
-            profile = if (screen == "terminalprofiles") TerminalProfile(name = "cwork1", color = ProfileColor.Violet) else null,
+            profile = if (screen == "terminalprofiles") TerminalProfile(name = "work", color = ProfileColor.Violet) else null,
         )
         val second = TerminalInfo(
             id = "e5f6a7b8", harness = "codex", cwd = repo, model = "gpt-6-luna", name = "daemon 审计修复", status = TerminalStatus.Working,
@@ -199,7 +199,7 @@ object DemoData {
             ),
         ) else emptyList()
         val blog = TerminalInfo(
-            id = "c3d4e5f6", harness = "opencode", cwd = "/Users/me/Blog", name = "Blog", status = TerminalStatus.Idle,
+            id = "c3d4e5f6", harness = "opencode", cwd = "/Users/me/Projects/demo-site", name = "demo-site", status = TerminalStatus.Idle,
             createdAt = ago(7200), lastOutputAt = ago(3000),
         )
         return TerminalList(
@@ -256,7 +256,7 @@ object DemoData {
         val cyan = "\u001B[36m"
         val lines = listOf(
             "${orange}✻${off} ${bold}Claude Code${off} ${dim}· Opus 5.5${off}",
-            "${dim}  ~/Desktop/WorkSpace/Projects/AgentSwitch${off}",
+            "${dim}  ~/Projects/AgentSwitch${off}",
             "",
             "${dim}>${off} 给 iPhone 加终端标签页，列表按目录树排",
             "",
@@ -280,8 +280,8 @@ object DemoData {
             "${green}⏺${off} 分屏的说明见这一页，也可以直接打开预览：",
             "  https://code.claude.com/docs/en/agent-teams.md#choo",
             "  se-a-display-mode",
-            "  ~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi",
-            "  gn/concepts/split.html",
+            "  ~/Projects/AgentSwitch/docs/design/concepts/split.",
+            "  html",
         )
         val withLinks = screen == "terminallink" || screen == "terminalpath"
         return (if (withLinks) lines.dropLast(3) + links else lines).joinToString("\r\n")
@@ -336,7 +336,7 @@ object DemoData {
     fun sessionRecord(harness: String, id: String, screen: String?): SessionRecord {
         val summary: SessionSummary = decode(
             mapOf(
-                "harness" to harness, "id" to id, "cwd" to "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch", "title" to "iPhone 终端标签页",
+                "harness" to harness, "id" to id, "cwd" to "/Users/me/Projects/AgentSwitch", "title" to "iPhone 终端标签页",
                 "lastText" to "", "updatedAt" to ago(20), "startedAt" to ago(1800), "active" to true, "model" to "claude-opus-5-5", "branch" to "main",
             ),
         )
@@ -519,8 +519,8 @@ object DemoData {
                 profiles = listOf(
                     ProfileChoice(id = "default", name = "Default", account = "me@example.com"),
                     ProfileChoice(
-                        id = "abc123def0", name = "cwork1", account = "work@example.com", color = ProfileColor.Violet,
-                        proxy = ProxySetting(server = "http://proxy.example.net:8080", username = "cwork", sealed = true), exit = ProxyExit(ip = "203.0.113.9", place = "Tokyo"),
+                        id = "abc123def0", name = "work", account = "work@example.com", color = ProfileColor.Violet,
+                        proxy = ProxySetting(server = "http://proxy.example.net:8080", username = "work", sealed = true), exit = ProxyExit(ip = "203.0.113.9", place = "Tokyo"),
                     ),
                     ProfileChoice(id = "abc123def1", name = "side", color = ProfileColor.Mint),
                 ),

@@ -104,7 +104,7 @@ object DemoBrowser {
     /** `browserprofiles`: a profile's own browser beside the shared one (the store shows the last). */
     val profileBrowsers: List<BrowserChoice> = listOf(
         BrowserChoice.shared,
-        BrowserChoice(key = "abc123def0", name = "cwork1", exit = BrowserChoice.Exit(ip = "203.0.113.9", place = "Tokyo"), running = true),
+        BrowserChoice(key = "abc123def0", name = "work", exit = BrowserChoice.Exit(ip = "203.0.113.9", place = "Tokyo"), running = true),
     )
 
     /** The tab a demo screen opens. */

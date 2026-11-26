@@ -29,7 +29,7 @@ class TerminalTreeTests {
         }
     }
 
-    private val w = "/Users/u/Desktop/WorkSpace"
+    private val w = "/Users/u/Desktop/Workbench"
 
     // 2026-09-30, user: 目录树顺序应该是固定的，现在会根据活跃状态顺序乱跳.
     @Test
@@ -48,38 +48,38 @@ class TerminalTreeTests {
         assertEquals(lines(folders), lines(later))
     }
 
-    // 2026-10-03, user: 怎么分别显示了两个worktop.
+    // 2026-10-03, user: 怎么分别显示了两个同名目录.
     @Test
     fun testAFolderWithSessionsOfItsOwnThatHoldsOthersIsOneLine() {
-        val folders = TerminalTree.build(emptyList(), listOf(session("own", "$w/Worktop"), session("c1", "$w/Worktop/Codex"), session("c2", "$w/Worktop/Claude")))
-        assertEquals(listOf("Worktop/", "  · own", "  Claude/", "    · c2", "  Codex/", "    · c1"), lines(folders))
+        val folders = TerminalTree.build(emptyList(), listOf(session("own", "$w/Toolbox"), session("c1", "$w/Toolbox/Codex"), session("c2", "$w/Toolbox/Claude")))
+        assertEquals(listOf("Toolbox/", "  · own", "  Claude/", "    · c2", "  Codex/", "    · c1"), lines(folders))
         assertTrue(folders[0].holdsOwn)
     }
 
-    // 2026-10-03, user: 有共同的祖父节点时并没能正确显示，比如“靶场”就在 /WorkSpace/Worktop/培训/靶场 下，但是显示起来是独立的.
+    // 2026-10-03, user: 有共同的祖父节点时并没能正确显示，比如“沙盒”就在 /Workbench/Toolbox/课程/沙盒 下，但是显示起来是独立的.
     @Test
     fun testAFolderSitsInTheNearestFolderAboveItThatTheListShows() {
         val sessions = listOf(session("a1", "$w/Projects/AgentSwitch"), session("a2", "$w/Projects/AgentSwitch/packages/secret-gate"),
-            session("m1", "$w/Projects/MailLab"), session("w1", "$w/Worktop"), session("c1", "$w/Worktop/Claude"),
-            session("v1", "$w/Worktop/Claude/CVP_bypass"), session("x1", "$w/Worktop/Codex"), session("r1", "$w/Worktop/培训/靶场"),
+            session("m1", "$w/Projects/DemoApp"), session("w1", "$w/Toolbox"), session("c1", "$w/Toolbox/Claude"),
+            session("v1", "$w/Toolbox/Claude/sandboxing"), session("x1", "$w/Toolbox/Codex"), session("r1", "$w/Toolbox/课程/沙盒"),
             session("d1", "/Users/u/Documents/工作文章/CBwork"))
         assertEquals(listOf(
-            "Projects/", "  AgentSwitch/", "    · a1", "    packages/secret-gate/", "      · a2", "  MailLab/", "    · m1",
-            "Worktop/", "  · w1", "  Claude/", "    · c1", "    CVP_bypass/", "      · v1", "  Codex/", "    · x1", "  培训/靶场/", "    · r1",
+            "Projects/", "  AgentSwitch/", "    · a1", "    packages/secret-gate/", "      · a2", "  DemoApp/", "    · m1",
+            "Toolbox/", "  · w1", "  Claude/", "    · c1", "    sandboxing/", "      · v1", "  Codex/", "    · x1", "  课程/沙盒/", "    · r1",
             "CBwork/", "  · d1",
         ), lines(TerminalTree.build(emptyList(), sessions)))
     }
 
     @Test
     fun testAFolderThatOnlyGathersOthersHoldsTheDeeperOnesToo() {
-        val folders = TerminalTree.build(emptyList(), listOf(session("c1", "$w/Worktop/Codex"), session("c2", "$w/Worktop/Claude"), session("r1", "$w/Worktop/培训/靶场")))
-        assertEquals(listOf("Worktop/", "  Claude/", "    · c2", "  Codex/", "    · c1", "  培训/靶场/", "    · r1"), lines(folders))
-        assertEquals(listOf("Worktop", "Worktop/Claude", "Worktop/Codex", "Worktop/培训/靶场"), TerminalTree.flatten(folders).map { it.name })
+        val folders = TerminalTree.build(emptyList(), listOf(session("c1", "$w/Toolbox/Codex"), session("c2", "$w/Toolbox/Claude"), session("r1", "$w/Toolbox/课程/沙盒")))
+        assertEquals(listOf("Toolbox/", "  Claude/", "    · c2", "  Codex/", "    · c1", "  课程/沙盒/", "    · r1"), lines(folders))
+        assertEquals(listOf("Toolbox", "Toolbox/Claude", "Toolbox/Codex", "Toolbox/课程/沙盒"), TerminalTree.flatten(folders).map { it.name })
         assertEquals(listOf("c2", "c1", "r1"), folders[0].allSessions.map { it.sessionId })
         // Projects that only share a grandparent get no folder over them.
         val apart = TerminalTree.build(emptyList(), listOf(session("a", "$w/Projects/A"), session("b", "$w/Projects/B"),
-            session("c", "$w/Worktop/C"), session("d", "$w/Worktop/D")))
-        assertEquals(listOf("Projects", "Worktop"), apart.map { it.name })
+            session("c", "$w/Toolbox/C"), session("d", "$w/Toolbox/D")))
+        assertEquals(listOf("Projects", "Toolbox"), apart.map { it.name })
     }
 
     @Test
