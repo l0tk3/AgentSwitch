@@ -286,6 +286,7 @@ struct PasswordsPage: View {
                     }
                     .grounded(Look.panel, radius: Look.cardRadius)
                     .framed(look.isClassic ? Look.ring : Look.line, radius: Look.cardRadius)
+                    .lifted()
                     if let said = model.said { Text(said).font(.system(size: 12)).foregroundStyle(Look.ink2) }
                 }
                 .padding(.horizontal, 28).padding(.vertical, 24)
@@ -378,6 +379,7 @@ private struct PasswordEditor: View {
                 .textFieldStyle(.plain).font(.system(size: 13))
                 .grounded(Look.panel, radius: Look.cardRadius)
                 .framed(look.isClassic ? Look.ring : Look.line, radius: Look.cardRadius)
+                    .lifted()
                 if let made = model.generated {
                     Text(made).font(.system(size: 12.5).monospaced()).foregroundStyle(Look.ink).textSelection(.enabled)
                         .padding(.horizontal, 12).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)

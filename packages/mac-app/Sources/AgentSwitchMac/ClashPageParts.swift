@@ -58,6 +58,7 @@ struct ClashCard<Trailing: View, Content: View>: View {
         }
         .grounded(Look.panel)
         .framed(Look.line)
+        .lifted()
     }
 }
 

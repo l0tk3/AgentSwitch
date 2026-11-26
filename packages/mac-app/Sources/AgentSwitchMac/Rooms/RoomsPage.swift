@@ -807,6 +807,7 @@ private struct RoomWriter: View {
                     .padding(.vertical, 6)
                     .grounded(Look.raised, radius: 17)
                     .framed(Look.line, radius: 17)
+                    .sunk()
                 Button { model.send() } label: {
                     Group {
                         if model.sending { BrailleSpinner() }

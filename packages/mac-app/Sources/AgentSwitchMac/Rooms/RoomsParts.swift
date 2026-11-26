@@ -368,6 +368,7 @@ struct RoomMessageRow: View {
                                 .frame(width: max(image.size.width * fit, 24), height: max(image.size.height * fit, 24))
                                 .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 8 : 0))
                                 .framed(Look.line, radius: look.isClassic ? 8 : 0)
+                                .lifted()
                         } else {
                             HStack(spacing: 9) {
                                 Image(nsImage: RoomPictures.icon(path)).resizable().frame(width: 30, height: 30)
@@ -382,6 +383,7 @@ struct RoomMessageRow: View {
                             .frame(width: 300, alignment: .leading)
                             .grounded(Look.raised, radius: look.isClassic ? 8 : 0)
                             .framed(Look.line, radius: look.isClassic ? 8 : 0)
+                            .lifted()
                             .contentShape(Rectangle())
                         }
                     }

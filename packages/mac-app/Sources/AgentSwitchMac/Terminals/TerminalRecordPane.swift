@@ -171,6 +171,7 @@ struct TerminalRecordPane: View {
                                                 .padding(.horizontal, 10).padding(.vertical, 5)
                                                 .grounded(Look.panel, radius: look.isClassic ? 13 : 0)
                                                 .framed(Look.line, radius: look.isClassic ? 13 : 0)
+                                                .lifted()
                                         }
                                         .buttonStyle(.plain)
                                         .fixedSize()
@@ -243,12 +244,15 @@ struct TerminalRecordPane: View {
 
     private func header(_ info: TerminalInfo, _ record: PaneRecord) -> some View {
         let modelName = RecordDisplay.model(now: record.modelNow, record: record.usage?.model, started: info.model).map(ModelName.display)
-        return VStack(alignment: .leading, spacing: 5) {
+        return HStack(alignment: .top, spacing: 12) {
+        AgentLogo(harness: info.harness, size: 38).padding(.top, 2)
+        VStack(alignment: .leading, spacing: 5) {
             Text(info.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Look.ink).textSelection(.enabled).lineLimit(2)
             Text([TerminalListText.agentName(info.harness), modelName, state.session?.gitWords].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                 .mono(Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1)
             Text(DisplayPath.short(info.workdir, home: NSHomeDirectory())).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2)
                 .lineLimit(1).truncationMode(.middle)
+        }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 2)
@@ -541,6 +545,7 @@ private struct RecordChoiceCard: View {
         .frame(maxWidth: 520, alignment: .leading)
         .grounded(Look.panel, radius: Look.cardRadius)
         .framed(look.isClassic ? Look.line : Look.ink2, radius: Look.cardRadius)
+        .lifted()
     }
 }
 
@@ -560,6 +565,7 @@ private struct RecordPromptNote: View {
         .frame(maxWidth: 480, alignment: .leading)
         .grounded(Look.panel, radius: Look.cardRadius)
         .framed(look.isClassic ? Look.line : Look.ink2, radius: Look.cardRadius)
+        .lifted()
     }
 }
 
@@ -704,6 +710,7 @@ private struct RecordDock: View {
             }
             .grounded(Look.panel, radius: radius)
             .framed(Look.line, radius: radius)
+            .lifted()
             // A hairline and the faintest lift: a soft shadow all round before (2026-11-11).
             .shadow(color: .black.opacity(look.isClassic ? 0.05 : 0), radius: 3, y: 1)
             if look.isClassic {
@@ -1018,6 +1025,7 @@ private struct RecordFileChips: View {
                     .padding(.horizontal, 9).padding(.vertical, 5)
                     .grounded(Look.panel, radius: look.isClassic ? 8 : 0)
                     .framed(Look.line, radius: look.isClassic ? 8 : 0)
+                    .lifted()
                 }
                 .buttonStyle(.plain)
                 .help(file.path)

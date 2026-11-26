@@ -118,10 +118,19 @@ extension View {
 
 extension View {
     /// A side column in the classic look (§8.1): a card that floats on the page — its own ground, round corners, a
-    /// faint ring and a soft shadow —, this far from what is beside it. Nothing in the pixel look.
+    /// faint ring and a soft shadow —, this far from what is beside it. In the pixel look a ground a step off the window's.
     func sideCard(leading: CGFloat = 0, trailing: CGFloat = 0, bottom: CGFloat = 2) -> some View {
         modifier(SideCard(leading: leading, trailing: trailing, bottom: bottom))
     }
+
+    /// A card in the content, one step up (docs/ui-v0.md §9.2, 2026-11-26, user #565: classic版现在很有层次了，但是像素版还是
+    /// 很平): in the pixel look a hard shadow 2 pt down and right, solid, no blur — over a ground and a frame it sits on;
+    /// nothing in the classic look, whose cards have their own (§8.1).
+    func lifted() -> some View { modifier(PixelLift()) }
+
+    /// A place to type, one step down (§9.2): in the pixel look a 1 pt shade along its top and left, as a key's empty
+    /// seat; nothing in the classic look.
+    func sunk() -> some View { modifier(PixelSink()) }
 
     /// A frame around a part: 1 px and square in the pixel look; a hairline with round corners in the classic one, the
     /// part clipped to them.
@@ -154,7 +163,41 @@ private struct SideCard: ViewModifier {
                 .padding(.trailing, trailing)
                 .padding(.bottom, bottom)
         } else {
+            // Two grounds (§9.2): the column a step off the window's, its edge the line beside it.
+            content.background(Look.panel)
+        }
+    }
+}
+
+private struct PixelLift: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
             content
+        } else {
+            content.background(Rectangle().fill(Color.shadedShadow(dark: scheme == .dark)).offset(x: 2, y: 2))
+        }
+    }
+}
+
+private struct PixelSink: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
+            content
+        } else {
+            let shade = Color.shadedShadow(dark: scheme == .dark)
+            content.overlay(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(shade).frame(height: 2).padding(.leading, 1).padding(.top, 1)
+                    Rectangle().fill(shade).frame(width: 2).padding(.top, 1).padding(.leading, 1)
+                }
+                .allowsHitTesting(false)
+            }
         }
     }
 }
