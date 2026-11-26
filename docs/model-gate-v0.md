@@ -23,6 +23,23 @@ Feasibility check: room-files `feasibility-model-gateway.md`. Design: `design-re
 
 `vault/` is read-denied to terminals and executors (`executors/protected.ts`).
 
+## Regular expressions (2026-11-26, user #596)
+
+A word, global or a room's, can be a regular expression: tick `Regex` beside the word field. Lists show it as `/pattern/` with a `Regex` tag.
+
+- **Placeholders:** each piece of text a pattern matches is treated as a word of its own. It gets the same salted placeholder that text would get as a plain word (the gateway is sent the pattern and the profile's salt: `patterns` in its table, next to `pairs`; `hash_ref` in `model_gate.py` is `hashRef` in `words.ts`, and both test files check the same value). The gateway remembers, per scope and while it runs, which placeholder stood for which text (at most 10,000), so the reply, streamed or not and a placeholder cut across pieces included, comes back with the text.
+- **A replacement of the user's own:** every match becomes that one text, one way only (`Replace Only`). There is no telling which match to put back.
+- **JSON bodies:** patterns are matched inside the decoded strings, never across the JSON's own quotes and braces. The body is written again only when something was replaced. Other bodies are matched as text.
+- **Refused** (`checkPattern` in `words.ts`, with the reason in Chinese):
+  - fewer than 3 or more than 200 characters;
+  - not valid;
+  - matches the empty string;
+  - matches a sample of ordinary English and Chinese text (too wide);
+  - a repeated group that repeats inside (`(a+)+`, the kind that backtracks without end);
+  - what JavaScript and Python's `re` read differently: named groups, lookbehind, inline flags, `\p{…}`.
+  The gateway reads patterns with `re.ASCII`, so `\d` and `\w` mean what they mean in JavaScript. A pattern it cannot compile is skipped and said on its stderr.
+- **Tests:** daemon `tests/redactRegex.test.ts`; secret-gate `tests/test_model_gate.py` (the `regex` part); Mac `RedactRegexTests`.
+
 ## Not yet
 
 - **Gateway account:** the gateway runs under the user's account. Moving it into the gate service's own account is the next step; the design stays the same.

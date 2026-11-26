@@ -163,10 +163,10 @@ final class RoomsModel {
         Task { roomWords = (try? await client().roomRedactWords(id)) ?? [] }
     }
 
-    func addRoomWord(_ value: String, replace: String) async -> Bool {
+    func addRoomWord(_ value: String, replace: String, regex: Bool = false) async -> Bool {
         guard let id = selected else { return false }
         do {
-            let (_, warning) = try await client().addRedactWord(value.trimmingCharacters(in: .whitespaces), replace: replace.trimmingCharacters(in: .whitespaces), room: id)
+            let (_, warning) = try await client().addRedactWord(value.trimmingCharacters(in: .whitespaces), replace: replace.trimmingCharacters(in: .whitespaces), regex: regex, room: id)
             wordsSaid = warning
             roomWords = try await client().roomRedactWords(id)
             return true

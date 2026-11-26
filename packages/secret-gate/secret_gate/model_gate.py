@@ -10,6 +10,12 @@ Who is who: each terminal is a *scope*, named in the proxy credentials its launc
     every connection of the scope, opened or not, goes on through it, so the route out is the one it was;
   - `pairs`: `{value, ref, restore}` — `value` becomes `ref` in what is sent; `ref` becomes `value` again in what comes
     back when `restore` (a placeholder too plain to be told from ordinary text is replaced one way only);
+  - `patterns`: `{pattern, ref?, salt?, restore}` — regular expressions (AgentSwitch room #596): each piece of text
+    one matches is a value of its own, replaced by `ref` when the user gave one (one way only), else by the
+    placeholder the service would give that text as a plain word (`hash_ref`, the profile's salt). Read with
+    `re.ASCII`, so that digits and word characters are what JavaScript takes them to be (the service refuses what
+    the two read otherwise). What was
+    replaced is remembered per scope, so that the placeholder is put back when it comes back;
   - `log`: whether both sides are written down (before: what the agent sent and got; after: what the model's
     provider got and sent).
 
@@ -21,8 +27,11 @@ two pieces is put together first (`Swapper`), holding back at most one placehold
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -35,6 +44,8 @@ PROXY_USER = "s"
 MAX_LOG_ENTRY = 1 << 20          # one request or response in a log: the first MiB of it
 MAX_LOG_FILE = 64 << 20          # one day's log of one scope, each side
 LOG_FULL = "[log full for today: later entries are not written]"
+MAX_LEARNED = 10_000             # what a scope's patterns matched, remembered to be put back
+BASE32 = "abcdefghijklmnopqrstuvwxyz234567"
 
 
 # ---- the table ----------------------------------------------------------------------------------------------------
@@ -46,11 +57,28 @@ class Pair:
     restore: bool = True
 
 
+@dataclass(frozen=True)
+class Pattern:
+    regex: re.Pattern[str]
+    ref: str | None = None
+    salt: bytes | None = None
+    restore: bool = True
+
+
+def hash_ref(salt: bytes, value: str) -> str:
+    """The salted placeholder of a value, as the service makes it (daemon vault/words.ts `hashRef`): `h_` and the
+    first ten base32 letters of HMAC-SHA256(salt, value)."""
+    mac = hmac.new(salt, value.encode("utf-8"), hashlib.sha256).digest()
+    bits = int.from_bytes(mac[:7], "big")      # 56 bits: the first 50 are read
+    return "h_" + "".join(BASE32[(bits >> (51 - 5 * i)) & 31] for i in range(10))
+
+
 @dataclass
 class Scope:
     hosts: tuple[str, ...] = ()
     upstream: str | None = None
     pairs: tuple[Pair, ...] = ()
+    patterns: tuple[Pattern, ...] = ()
     log: bool = False
 
     def opens(self, host: str | None) -> bool:
@@ -83,9 +111,26 @@ class Table:
                 hosts=tuple(str(h) for h in s.get("hosts") or []),
                 upstream=s.get("upstream") or None,
                 pairs=pairs,
+                patterns=tuple(p for p in (pattern_of(x) for x in s.get("patterns") or []) if p),
                 log=bool(s.get("log")),
             )
         return cls(scopes, Path(o["logDir"]) if o.get("logDir") else None)
+
+
+def pattern_of(o: Any) -> Pattern | None:
+    """A pattern of the table; None: not one (it does not compile here, or has neither a placeholder nor a salt)."""
+    if not isinstance(o, dict) or not isinstance(o.get("pattern"), str):
+        return None
+    try:
+        regex = re.compile(o["pattern"], re.ASCII)
+        salt = bytes.fromhex(o["salt"]) if isinstance(o.get("salt"), str) else None
+    except (re.error, ValueError):
+        print("model gate: a pattern was not taken", file=sys.stderr)
+        return None
+    ref = o.get("ref") if isinstance(o.get("ref"), str) and o.get("ref") else None
+    if ref is None and salt is None:
+        return None
+    return Pattern(regex, ref, salt, bool(o.get("restore", True)) and ref is None)
 
 
 # ---- swapping -----------------------------------------------------------------------------------------------------
@@ -96,20 +141,64 @@ def forms(value: str) -> list[str]:
     return list(dict.fromkeys(f for f in out if f))
 
 
-def hide(text: str, pairs: tuple[Pair, ...]) -> str:
-    """value -> ref, the longest value first (a value that is part of another is not split)."""
+def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (), learned: dict[str, str] | None = None) -> str:
+    """value -> ref, the longest value first (a value that is part of another is not split); then what each pattern
+    matches, each piece to its own placeholder — remembered in `learned` (ref -> value) to be put back."""
     for p in sorted(pairs, key=lambda p: -len(p.value)):
         for f in forms(p.value):
             if f in text:
                 text = text.replace(f, p.ref)
-    return text
+    if not patterns:
+        return text
+    placed = {p.ref for p in pairs} | set(learned or ())
+
+    def swap(pat: Pattern, m: re.Match[str]) -> str:
+        value = m.group(0)
+        if value in placed:
+            return value
+        ref = pat.ref or hash_ref(pat.salt or b"", value)
+        placed.add(ref)
+        if pat.restore and learned is not None:
+            learned.pop(ref, None)
+            learned[ref] = value
+            while len(learned) > MAX_LEARNED:
+                learned.pop(next(iter(learned)))
+        return ref
+
+    def each(s: str) -> str:
+        for pat in patterns:
+            s = pat.regex.sub(lambda m, pat=pat: swap(pat, m), s)
+        return s
+
+    # A JSON body: in its strings as they read, so that no match takes in a quote or a brace of the JSON itself;
+    # written again only when something was replaced.
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return each(text)
+    changed = False
+
+    def walk(v: Any) -> Any:
+        nonlocal changed
+        if isinstance(v, str):
+            out = each(v)
+            changed = changed or out != v
+            return out
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        return v
+
+    doc = walk(doc)
+    return json.dumps(doc, ensure_ascii=False, separators=(",", ":")) if changed else text
 
 
 class Swapper:
     """ref -> value in what comes back, piece by piece: a stream's text arrives cut anywhere, a placeholder too."""
 
-    def __init__(self, pairs: tuple[Pair, ...]):
-        self.back = {p.ref: p.value for p in pairs if p.restore}
+    def __init__(self, pairs: tuple[Pair, ...], learned: dict[str, str] | None = None):
+        self.back = {**(learned or {}), **{p.ref: p.value for p in pairs if p.restore}}
         self.carry: dict[Any, str] = {}
         self.tmpl: dict[Any, Any] = {}
 
@@ -318,6 +407,9 @@ class ModelGate:
         self.table = table or Table()
         self.logs = Logs()
         self.ws: dict[str, Swapper] = {}
+        # What each scope's patterns matched (ref -> value): kept while the gateway runs, so a placeholder the model
+        # repeats a turn later is still put back.
+        self.learned: dict[str, dict[str, str]] = {}
         if read_stdin:
             threading.Thread(target=self._stdin, daemon=True).start()
 
@@ -378,7 +470,7 @@ class ModelGate:
         url = f"{flow.request.method} {flow.request.pretty_url}"
         if scope.log:
             self.logs.write(self.table, name, "before", {"dir": "out", "url": url, "body": text})
-        hidden = hide(text, scope.pairs) if scope.pairs else text
+        hidden = hide(text, scope.pairs, scope.patterns, self.learned.setdefault(name or "", {})) if scope.pairs or scope.patterns else text
         if hidden != text:
             flow.request.set_text(hidden)
         if scope.log:
@@ -390,7 +482,7 @@ class ModelGate:
             return
         if "text/event-stream" not in flow.response.headers.get("content-type", ""):
             return
-        sse = SSE(Swapper(scope.pairs))
+        sse = SSE(Swapper(scope.pairs, self.learned.get(name or "")))
         url = f"{flow.request.method} {flow.request.pretty_url}"
 
         said = False
@@ -421,7 +513,7 @@ class ModelGate:
         url = f"{flow.request.method} {flow.request.pretty_url}"
         if scope.log:
             self.logs.write(self.table, name, "after", {"dir": "in", "url": url, "status": flow.response.status_code, "body": text})
-        sw = Swapper(scope.pairs)
+        sw = Swapper(scope.pairs, self.learned.get(name or ""))
         if sw.back and any(r in text for r in sw.back):
             try:
                 back = json.dumps(sw.walk(json.loads(text)), ensure_ascii=False)
@@ -443,14 +535,15 @@ class ModelGate:
         if m.from_client:
             if scope.log:
                 self.logs.write(self.table, name, "before", {"dir": "out", "url": url, "body": m.text})
-            if scope.pairs:
-                m.text = hide(m.text, scope.pairs)
+            if scope.pairs or scope.patterns:
+                m.text = hide(m.text, scope.pairs, scope.patterns, self.learned.setdefault(name or "", {}))
             if scope.log:
                 self.logs.write(self.table, name, "after", {"dir": "out", "url": url, "body": m.text})
             return
         if scope.log:
             self.logs.write(self.table, name, "after", {"dir": "in", "url": url, "body": m.text})
-        sw = self.ws.setdefault(flow.id, Swapper(scope.pairs))
+        sw = self.ws.setdefault(flow.id, Swapper(scope.pairs, self.learned.get(name or "")))
+        sw.back.update(self.learned.get(name or "") or {})   # what this socket sent since it opened
         if sw.back:
             try:
                 o = json.loads(m.text)

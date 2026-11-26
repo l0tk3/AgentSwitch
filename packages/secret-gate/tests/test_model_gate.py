@@ -3,7 +3,7 @@
 import base64
 import json
 
-from secret_gate.model_gate import SSE, Logs, Pair, Scope, Swapper, Table, forms, hide, scope_of_auth
+from secret_gate.model_gate import SSE, Logs, Pair, Scope, Swapper, Table, forms, hash_ref, hide, scope_of_auth
 
 P = (Pair("AGSW-REAL-秘密", "h_7kq3m9x2pd"), Pair("Alice", "PERSON_A", restore=False))
 
@@ -124,3 +124,65 @@ def test_an_event_that_cannot_be_read_goes_on_as_it_came():
     assert sse.failed and "KeyError" in sse.failed
     # Chat Completions pieces of an odd shape are read past.
     assert Swapper.deltas({"choices": [{"delta": "text"}, {"delta": {"tool_calls": ["x", {"function": "y"}]}}]}) == []
+
+
+# ---- regular expressions (AgentSwitch room #596) --------------------------------------------------------------------
+
+SALT = "01" * 32
+
+
+def regex_scope(**more):
+    line = {"scopes": {"t1": {"hosts": ["api.anthropic.com"], "pairs": [], "patterns": [
+        {"pattern": r"sk-[A-Za-z0-9]{20,}", "salt": SALT, "restore": True},
+        {"pattern": r"acct-\d{6}", "ref": "ACCOUNT_ID", "restore": True},
+        {"pattern": r"(?<id>broken", "salt": SALT},
+        {"pattern": r"nothing-to-use"},
+    ], **more}}}
+    return Table.parse(json.dumps(line)).scopes["t1"]
+
+
+def test_the_placeholder_is_the_services_own():
+    # daemon tests/redactRegex.test.ts fixes the same: this salt and text give this placeholder there too.
+    assert hash_ref(bytes.fromhex(SALT), "sk-abcdefghijklmnopqrstuv") == "h_dqmolpdzrc"
+
+
+def test_patterns_are_read_and_the_unusable_left_out():
+    sc = regex_scope()
+    assert [p.regex.pattern for p in sc.patterns] == [r"sk-[A-Za-z0-9]{20,}", r"acct-\d{6}"]
+    assert sc.patterns[1].restore is False   # every match becomes the user's one placeholder: nothing to put back
+
+
+def test_each_match_gets_its_own_placeholder_and_comes_back_whole_even_split_in_a_stream():
+    sc, learned = regex_scope(), {}
+    k1, k2 = "sk-abcdefghijklmnopqrstuv", "sk-ZYXWVUTSRQPONMLKJIHGFE"
+    body = json.dumps({"messages": [{"role": "user", "content": f"keys {k1} and {k2}, again {k1}; acct-123456"}]})
+    sent = hide(body, (), sc.patterns, learned)
+    r1, r2 = hash_ref(bytes.fromhex(SALT), k1), hash_ref(bytes.fromhex(SALT), k2)
+    assert k1 not in sent and k2 not in sent and "acct-123456" not in sent
+    assert json.loads(sent)["messages"][0]["content"] == f"keys {r1} and {r2}, again {r1}; ACCOUNT_ID"
+    assert learned == {r1: k1, r2: k2}
+    sw = Swapper((), learned)
+    ev = lambda s: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": s}}
+    got = []
+    for piece in ["use ", r1[:5], r1[5:] + " ok ", "ACCOUNT_ID"]:
+        got += sw.event(ev(piece))
+    got += sw.event({"type": "content_block_stop", "index": 0})
+    assert "".join(e["delta"]["text"] for e in got if e.get("type") == "content_block_delta") == f"use {k1} ok ACCOUNT_ID"
+
+
+def test_a_match_that_needed_json_escaping_is_put_back_as_it_reads():
+    learned = {}
+    sc = Table.parse(json.dumps({"scopes": {"t": {"patterns": [{"pattern": r'tok-[a-z"\\]{6,}', "salt": SALT}]}}})).scopes["t"]
+    value = 'tok-ab"cd\\ef'
+    sent = hide(json.dumps({"q": value}), (), sc.patterns, learned)
+    ref = hash_ref(bytes.fromhex(SALT), value)
+    assert json.loads(sent) == {"q": ref} and learned == {ref: value}
+    assert Swapper((), learned).walk({"a": f"x {ref}"}) == {"a": f"x {value}"}
+
+
+def test_a_placeholder_already_there_is_not_matched_again():
+    learned = {}
+    pats = Table.parse(json.dumps({"scopes": {"t": {"patterns": [{"pattern": r"h_[a-z2-7]{10}x?", "salt": SALT}]}}})).scopes["t"].patterns
+    once = hide("v h_abcdefghij", (), pats, learned)
+    ref = next(iter(learned))
+    assert hide(once, (), pats, learned) == once and once == f"v {ref}"

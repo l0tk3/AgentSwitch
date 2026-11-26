@@ -32,7 +32,13 @@ public struct RedactWord: Decodable, Equatable, Sendable, Identifiable {
     public let value: String
     public let replace: String?
     public let restore: Bool
+    /// `value` is a regular expression (user #596): what it matches is replaced, each piece by its own placeholder.
+    public let regex: Bool?
     public let addedAt: Int64
+
+    public var isRegex: Bool { regex == true }
+    /// As the lists show it: a pattern between slashes.
+    public var shown: String { isRegex ? "/\(value)/" : value }
 }
 
 public struct RedactLog: Decodable, Equatable, Sendable, Identifiable {
@@ -61,9 +67,10 @@ public extension DaemonClient {
     }
 
     /// A word added (to a room's list when `room`), and the warning when its replacement goes one way only.
-    func addRedactWord(_ value: String, replace: String?, room: String? = nil) async throws -> (word: RedactWord, warning: String?) {
+    func addRedactWord(_ value: String, replace: String?, regex: Bool = false, room: String? = nil) async throws -> (word: RedactWord, warning: String?) {
         struct Answer: Decodable { let word: RedactWord; let warning: String? }
         var body: [String: Any] = ["value": value]
+        if regex { body["regex"] = true }
         if let replace, !replace.isEmpty { body["replace"] = replace }
         let path = room.map { "/rooms/\(DaemonClient.segment($0))/redaction/words" } ?? "/redaction/words"
         let a = try decode(Answer.self, try await call("POST", path, body: try JSONSerialization.data(withJSONObject: body), timeout: 10))

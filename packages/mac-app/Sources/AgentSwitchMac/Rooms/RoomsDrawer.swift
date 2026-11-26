@@ -380,6 +380,7 @@ struct RoomWordsSheet: View {
     @Bindable var model: RoomsModel
     @State private var value = ""
     @State private var replace = ""
+    @State private var regex = false
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -392,12 +393,18 @@ struct RoomWordsSheet: View {
             .background(look.isClassic ? Color.clear : Look.raised)
             HairRule(color: Look.line)
             HStack(spacing: 8) {
-                TextField("", text: $value, prompt: Text("Word")).textFieldStyle(.roundedBorder)
+                TextField("", text: $value, prompt: Text(regex ? "Pattern" : "Word")).textFieldStyle(.roundedBorder)
+                // The row hides its controls' own labels: the word stands beside the box, and a click on it ticks it too.
+                HStack(spacing: 4) {
+                    Toggle("Regex", isOn: $regex).toggleStyle(.checkbox).labelsHidden()
+                    Text("Regex").font(.system(size: 12.5)).foregroundStyle(Look.ink).onTapGesture { regex.toggle() }
+                }
+                .fixedSize().help("Regular Expression")
                 Image(systemName: "arrow.right").foregroundStyle(.tertiary)
                 TextField("", text: $replace, prompt: Text("Replacement (Empty: Hash)")).textFieldStyle(.roundedBorder)
                 Button {
-                    let v = value, r = replace
-                    Task { if await model.addRoomWord(v, replace: r) { value = ""; replace = "" } }
+                    let v = value, r = replace, x = regex
+                    Task { if await model.addRoomWord(v, replace: r, regex: x) { value = ""; replace = ""; regex = false } }
                 } label: { BracketLabel(word: "Add") }
                 .buttonStyle(BracketButtonStyle(role: .primary, size: 12))
                 .disabled(value.trimmingCharacters(in: .whitespaces).count < 3)
@@ -430,9 +437,10 @@ struct RoomWordsSheet: View {
 
     private func row(_ w: RedactWord) -> some View {
         HStack(spacing: 10) {
-            Text(w.value).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
+            Text(w.shown).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
             Text("→").foregroundStyle(Look.faint)
             Text(w.replace ?? "Hash").font(.system(size: 12.5)).foregroundStyle(w.replace == nil ? Look.ink2 : Look.ink).lineLimit(1)
+            if w.isRegex { Text("Regex").font(.system(size: 11)).foregroundStyle(Look.ink2) }
             if !w.restore { Text("Replace Only").font(.system(size: 11)).foregroundStyle(Color.waiting) }
             Spacer()
             Button { model.removeRoomWord(w) } label: { BracketLabel(word: "Remove") }.buttonStyle(BracketButtonStyle(size: 12))

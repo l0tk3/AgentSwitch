@@ -13,6 +13,7 @@ struct RedactionView: View {
     @State private var said: String?
     @State private var value = ""
     @State private var replace = ""
+    @State private var regex = false
     @State private var logs: [RedactLog] = []
     /// The terminals running now, to pick which are written down.
     @State private var terminals: [TerminalInfo] = []
@@ -77,7 +78,14 @@ struct RedactionView: View {
         Section {
             ForEach(s.words) { w in wordRow(w) { Task { await remove(w, room: nil) } } }
             HStack(spacing: 8) {
-                TextField("", text: $value, prompt: Text("Word"))
+                TextField("", text: $value, prompt: Text(regex ? "Pattern" : "Word"))
+                    .font(regex ? .body.monospaced() : .body)
+                // The row hides its controls' own labels: the word stands beside the box, and a click on it ticks it too.
+                HStack(spacing: 4) {
+                    Toggle("Regex", isOn: $regex).toggleStyle(.checkbox).labelsHidden()
+                    Text("Regex").font(.callout).onTapGesture { regex.toggle() }
+                }
+                .fixedSize().help("Regular Expression")
                 Image(systemName: "arrow.right").foregroundStyle(.tertiary)
                 TextField("", text: $replace, prompt: Text("Replacement (Empty: Hash)"))
                 Button("Add") { Task { await add(value, replace, room: nil) } }
@@ -92,9 +100,10 @@ struct RedactionView: View {
 
     private func wordRow(_ w: RedactWord, remove: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
-            Text(w.value).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
+            Text(w.shown).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
             Image(systemName: "arrow.right").foregroundStyle(.tertiary)
             Text(w.replace ?? "Hash").foregroundStyle(w.replace == nil ? .secondary : .primary).lineLimit(1)
+            if w.isRegex { Text("Regex").font(.caption).foregroundStyle(.secondary) }
             if !w.restore { Text("Replace Only").font(.caption).foregroundStyle(.orange) }
             Spacer()
             Button("Remove", action: remove).buttonStyle(.borderless)
@@ -180,9 +189,9 @@ struct RedactionView: View {
 
     private func add(_ v: String, _ r: String, room: String?) async {
         do {
-            let (_, warning) = try await model.client.addRedactWord(v.trimmingCharacters(in: .whitespaces), replace: r.trimmingCharacters(in: .whitespaces), room: room)
+            let (_, warning) = try await model.client.addRedactWord(v.trimmingCharacters(in: .whitespaces), replace: r.trimmingCharacters(in: .whitespaces), regex: regex, room: room)
             said = warning
-            value = ""; replace = ""
+            value = ""; replace = ""; regex = false
             await load()
         } catch {
             said = (error as? CommandError)?.message ?? error.localizedDescription
@@ -231,7 +240,9 @@ enum RedactionDemo {
             {"settings":{"enabled":true,"username":true,"host":false,"log":true,"keepDays":3,"hosts":[]},
              "words":[{"id":"a1","value":"sk-live-51Hx••••9fQ","restore":true,"addedAt":0},
                       {"id":"a2","value":"张三丰","replace":"PERSON_A","restore":true,"addedAt":0},
-                      {"id":"a3","value":"13800138000","replace":"A","restore":false,"addedAt":0}],
+                      {"id":"a3","value":"13800138000","replace":"A","restore":false,"addedAt":0},
+                      {"id":"a4","value":"ghp_[A-Za-z0-9]{36}","restore":true,"regex":true,"addedAt":0},
+                      {"id":"a5","value":"acct-\\\\d{6}","replace":"ACCOUNT_ID","restore":false,"regex":true,"addedAt":0}],
              "gateway":true,"logDir":"/demo"}
             """),
               let logs = decode([RedactLog].self, """
@@ -243,7 +254,8 @@ enum RedactionDemo {
             [{"id":"df8433f731","name":"聊天室功能设计探讨","topic":"","paused":false,"members":3,"last":null,"unread":0,"forYou":false,"rounds":null,"terminals":[]}]
             """),
               let roomWords = decode([RedactWord].self, """
-            [{"id":"r1","value":"project-falcon","restore":true,"addedAt":0}]
+            [{"id":"r1","value":"project-falcon","restore":true,"addedAt":0},
+             {"id":"r2","value":"falcon-[0-9]{4,}","restore":true,"regex":true,"addedAt":0}]
             """)
         else { return nil }
         return Data(state: state, logs: logs, rooms: rooms, roomWords: roomWords, said: "「A」少于 6 个字符，换回时没法和普通文字区分：只替换，不还原（模型看到它，你看到的也是它）。")
