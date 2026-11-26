@@ -18,8 +18,11 @@ struct ProfileAgent: Identifiable, Hashable, Sendable {
     static let pi = ProfileAgent(AgentCLI.pi)
     /// Grok runs in AgentSwitch's terminals (docs/terminal-v0.md §3) but is not installed or updated by Agents.
     static let grok = ProfileAgent(id: "grok", title: "Grok")
-    /// The page's agents, in order: the ones Agents looks after, then Grok.
-    static let shown: [ProfileAgent] = AgentCLI.allCases.map(ProfileAgent.init) + [.grok]
+    /// Antigravity CLI: its sign-in is in the Mac's keychain, one for the Mac, so it has its `Default` only (the daemon
+    /// says it is not `creatable`: no New Profile…); shown so the page lists every agent (user #562).
+    static let agy = ProfileAgent(id: "agy", title: "Antigravity")
+    /// The page's agents, in order: the ones Agents looks after, then Grok and agy.
+    static let shown: [ProfileAgent] = AgentCLI.allCases.map(ProfileAgent.init) + [.grok, .agy]
 }
 
 /// 设置 › Agents (docs/agents-v0.md §8, docs/design/concepts/agents.html): the four agent CLIs — what is installed and
