@@ -431,13 +431,31 @@ export class ProfileStore {
 
   copyOptions() { return claudeCopyOptions(this.userHome); }
 
-  /** Where `id` keeps what the Add-Ons page shows and changes (profiles/addons.ts); null: no such profile, or one
-   *  with no folder to speak of (OpenCode, pi). A Codex profile that pays by a key runs in the Mac's own folder. */
+  /** Where `id` keeps what the Add-Ons page shows and changes (profiles/addons.ts); null: no such profile. A Codex
+   *  profile that pays by a key runs in the Mac's own folder. OpenCode, pi and agy have `Default` alone: the Mac's own
+   *  folders (`$XDG_CONFIG_HOME/opencode`, `PI_CODING_AGENT_DIR`, `<gemini dir>/config`); a Grok profile its `GROK_HOME`. */
   addonPlace(agent: ProfileAgent, id: string): AddonPlace | null {
-    if (agent !== "claude-code" && agent !== "codex") return null;
     if (id !== DEFAULT_PROFILE && !this.all()[agent].profiles.some((p) => p.id === id)) return null;
-    const home = id === DEFAULT_PROFILE ? null : this.homeOf(agent, id);
     const kept = join(this.dir, agent, id, "addons.json");
+    if (agent === "opencode") {
+      if (id !== DEFAULT_PROFILE) return null;
+      const config = join(process.env.XDG_CONFIG_HOME?.trim() || join(this.userHome, ".config"), "opencode");
+      const json = ["opencode.json", "opencode.jsonc", "config.json"].map((n) => join(config, n)).find((f) => existsSync(f)) ?? join(config, "opencode.json");
+      return { agent, id, config, json, kept, own: false };
+    }
+    if (agent === "pi") return id === DEFAULT_PROFILE ? { agent, id, config: process.env.PI_CODING_AGENT_DIR?.trim() || join(this.userHome, ".pi", "agent"), kept, own: false } : null;
+    if (agent === "agy") {
+      if (id !== DEFAULT_PROFILE) return null;
+      // AgentSwitch's own variable for another folder (sessions/agy.ts `AGY_HOME_VAR`; profiles may not import
+      // sessions): the program is told it by `--gemini_dir`.
+      const named = process.env.AGENTSWITCH_AGY_HOME?.trim(), config = join(named || join(this.userHome, ".gemini"), "config");
+      return { agent, id, config, json: join(config, "mcp_config.json"), kept, own: false, ...(named ? { args: [`--gemini_dir=${named}`] } : {}) };
+    }
+    if (agent === "grok") {
+      const home = id === DEFAULT_PROFILE ? this.grokOwnFolder() : this.homeOf(agent, id);
+      return home ? { agent, id, config: home, kept, own: id !== DEFAULT_PROFILE } : null;
+    }
+    const home = id === DEFAULT_PROFILE ? null : this.homeOf(agent, id);
     if (agent === "codex") return { agent, id, config: home ?? join(this.userHome, ".codex"), kept: home ? kept : join(this.dir, agent, DEFAULT_PROFILE, "addons.json"), own: home !== null };
     return home ? { agent, id, config: home, json: join(home, ".claude.json"), kept, own: true }
       : id === DEFAULT_PROFILE ? { agent, id, config: join(this.userHome, ".claude"), json: join(this.userHome, ".claude.json"), kept, own: false } : null;

@@ -8,7 +8,9 @@ import SwiftUI
 /// themselves. `Install MCP…` takes the agent's own command and runs it under the profiles chosen.
 struct AddonsView: View {
     @Environment(AppModel.self) private var model
-    @State private var agent: AgentCLI = .claude
+    @State private var agent: ProfileAgent = AddonsView.firstAgent
+    /// The agent the page opens on: Claude, but for the design preview's pictures of the others.
+    static var firstAgent: ProfileAgent = .claude
     @State private var profiles: [AgentProfile] = []
     @State private var data: ProfileAddons?
     @State private var selected: Set<String> = []
@@ -21,7 +23,8 @@ struct AddonsView: View {
     @State private var installing = false
     @State private var copying: ProfileAddon?
 
-    private static let agents: [AgentCLI] = [.claude, .codex]
+    /// Every agent with profiles (user #567): the four Agents looks after, Grok and Antigravity.
+    private static let agents: [ProfileAgent] = ProfileAgent.shown
 
     /// The profiles the right side is about, in the list's order: the ticked ones, or all.
     private var scope: [AgentProfile] { selected.isEmpty ? profiles : profiles.filter { selected.contains($0.id) } }
@@ -33,10 +36,18 @@ struct AddonsView: View {
             if !model.daemonReady {
                 EmptyPage(title: "Service Not Ready", symbol: "hourglass", message: model.daemonLine.text)
             } else if let data {
-                HStack(spacing: 0) {
-                    profilePane(data).frame(width: 236)
-                    Divider()
-                    content(data)
+                VStack(spacing: 0) {
+                    // Six agents (user #567): a row of their own across the page — the profile column is too narrow.
+                    Picker("Agent", selection: $agent) {
+                        ForEach(Self.agents) { Text(AddonWords.agent($0.id)).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 4)
+                    HStack(spacing: 0) {
+                        profilePane(data).frame(width: 236)
+                        Divider()
+                        content(data)
+                    }
                 }
             } else if let problem {
                 EmptyPage(title: "Add-Ons: Unavailable", symbol: "exclamationmark.triangle", message: problem) {
@@ -52,7 +63,7 @@ struct AddonsView: View {
                     .help("Reload").disabled(!model.daemonReady || busy)
             }
         }
-        .task(id: "\(model.daemonReady)/\(agent.rawValue)") { await load() }
+        .task(id: "\(model.daemonReady)/\(agent.id)") { await load() }
         .sheet(isPresented: $installing) {
             AddonInstallSheet(agent: agent, profiles: profiles, data: data, preselected: Set(scope.map(\.id))) { results in
                 note = AddonWords.summary(results, done: "Installed", name: name)
@@ -62,7 +73,7 @@ struct AddonsView: View {
         .sheet(item: $copying) { item in
             AddonTargetsSheet(title: "Copy \(item.name) to Profiles", confirm: "Copy", profiles: profiles.filter { $0.id != one?.id }, blocked: blocked(kind: item.kind)) { targets in
                 guard let from = one?.id else { return }
-                run("Copied") { try await $0.copyAddon(agent: agent.rawValue, kind: item.kind, name: item.name, from: from, profiles: targets) }
+                run("Copied") { try await $0.copyAddon(agent: agent.id, kind: item.kind, name: item.name, from: from, profiles: targets) }
             }
         }
     }
@@ -72,11 +83,7 @@ struct AddonsView: View {
     private func profilePane(_ data: ProfileAddons) -> some View {
         let shown = profiles.filter { profileFilter.isEmpty || $0.name.localizedCaseInsensitiveContains(profileFilter) }
         return VStack(alignment: .leading, spacing: 8) {
-            Picker("Agent", selection: $agent) {
-                ForEach(Self.agents) { Text($0 == .claude ? "Claude" : $0.title).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden()
-            TextField("Filter \(profiles.count) Profiles", text: $profileFilter).textFieldStyle(.roundedBorder)
+            TextField(profiles.count == 1 ? "Filter 1 Profile" : "Filter \(profiles.count) Profiles", text: $profileFilter).textFieldStyle(.roundedBorder)
             HStack(spacing: 6) {
                 Button(profileFilter.isEmpty ? "Select All" : "Select Shown") { selected = Set(shown.map(\.id)) }
                 Button("Isolated") { selected = Set(shown.filter { $0.isolated == true }.map(\.id)) }
@@ -86,7 +93,7 @@ struct AddonsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(shown) { profile in
-                        profileRow(profile, count: data.items(of: profile.id).filter { $0.kind == "mcp" }.count)
+                        profileRow(profile, count: data.kinds.contains("mcp") ? data.items(of: profile.id).filter { $0.kind == "mcp" }.count : nil)
                     }
                     if shown.isEmpty { Text("没有匹配的配置。").font(.callout).foregroundStyle(.secondary).padding(8) }
                 }
@@ -101,7 +108,7 @@ struct AddonsView: View {
         .padding(12)
     }
 
-    private func profileRow(_ profile: AgentProfile, count: Int) -> some View {
+    private func profileRow(_ profile: AgentProfile, count: Int?) -> some View {
         let on = selected.contains(profile.id)
         return HStack(spacing: 8) {
             Toggle("Select \(profile.name)", isOn: Binding(get: { on }, set: { if $0 { selected.insert(profile.id) } else { selected.remove(profile.id) } }))
@@ -111,7 +118,7 @@ struct AddonsView: View {
                     AddonDot(profile: profile)
                     Text(profile.name).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
-                    Text("\(count) mcp").font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary)
+                    if let count { Text("\(count) mcp").font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary) }
                 }
                 .contentShape(Rectangle())
             }
@@ -127,7 +134,7 @@ struct AddonsView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 if let one { AddonDot(profile: one); Text(one.name).font(.headline).lineLimit(1) }
-                else { Text(selected.isEmpty ? "All \(profiles.count) Profiles" : "\(selected.count) Profiles").font(.headline) }
+                else { Text(selected.isEmpty ? (profiles.count == 1 ? "1 Profile" : "All \(profiles.count) Profiles") : "\(selected.count) Profiles").font(.headline) }
                 Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
@@ -136,7 +143,7 @@ struct AddonsView: View {
             HStack(spacing: 8) {
                 TextField("Search Add-Ons", text: $search).textFieldStyle(.roundedBorder).frame(width: 190)
                 Spacer()
-                Button("Install MCP…") { installing = true }.buttonStyle(.borderedProminent).disabled(busy)
+                if data.kinds.contains("mcp") { Button("Install MCP…") { installing = true }.buttonStyle(.borderedProminent).disabled(busy) }
             }
             .padding(.horizontal, 20).padding(.vertical, 10)
             if let note { noteLine(note) }
@@ -224,7 +231,7 @@ struct AddonsView: View {
     }
 
     /// A Codex server is switched off by how its terminal is started, whoever's file it is in.
-    private func canSwitch(_ item: ProfileAddon) -> Bool { item.kind == "mcp" && (!item.shared || agent == .codex) }
+    private func canSwitch(_ item: ProfileAddon) -> Bool { item.kind == "mcp" && (!item.shared || agent.isCodex) }
 
     // One profile: a switch a row.
     @ViewBuilder
@@ -234,7 +241,7 @@ struct AddonsView: View {
             AddonTag(text: item.shared ? "Shared" : "Own", tint: item.shared ? .orange : nil)
             if item.kind == "mcp" {
                 Toggle("On", isOn: Binding(get: { item.isOn }, set: { on in
-                    run(on ? "Turned on" : "Turned off") { try await $0.switchMCP(agent: agent.rawValue, name: item.name, on: on, profiles: [profile.id]) }
+                    run(on ? "Turned on" : "Turned off") { try await $0.switchMCP(agent: agent.id, name: item.name, on: on, profiles: [profile.id]) }
                 }))
                 .toggleStyle(.switch).controlSize(.mini).labelsHidden().disabled(busy || !canSwitch(item))
             }
@@ -275,15 +282,15 @@ struct AddonsView: View {
                 HStack(spacing: 8) {
                     if AddonWords.files.contains(item.kind), let from = have.first?.0 {
                         Button("Add to \(missing.count) Missing") {
-                            run("Copied") { try await $0.copyAddon(agent: agent.rawValue, kind: item.kind, name: item.name, from: from, profiles: missing) }
+                            run("Copied") { try await $0.copyAddon(agent: agent.id, kind: item.kind, name: item.name, from: from, profiles: missing) }
                         }
                         .disabled(missing.isEmpty)
                     }
                     if item.kind == "mcp" {
                         let switchable = have.filter { $0.1.map(canSwitch) == true }
-                        Button("Turn Off") { run("Turned off") { try await $0.switchMCP(agent: agent.rawValue, name: item.name, on: false, profiles: switchable.filter { $0.1?.isOn == true }.map(\.0)) } }
+                        Button("Turn Off") { run("Turned off") { try await $0.switchMCP(agent: agent.id, name: item.name, on: false, profiles: switchable.filter { $0.1?.isOn == true }.map(\.0)) } }
                             .disabled(!switchable.contains { $0.1?.isOn == true })
-                        Button("Turn On") { run("Turned on") { try await $0.switchMCP(agent: agent.rawValue, name: item.name, on: true, profiles: switchable.filter { $0.1?.isOn == false }.map(\.0)) } }
+                        Button("Turn On") { run("Turned on") { try await $0.switchMCP(agent: agent.id, name: item.name, on: true, profiles: switchable.filter { $0.1?.isOn == false }.map(\.0)) } }
                             .disabled(!switchable.contains { $0.1?.isOn == false })
                     }
                     if item.kind != "plugins" {
@@ -306,7 +313,7 @@ struct AddonsView: View {
             if let held {
                 if held.shared && !canSwitch(held) { Text("Shares Default’s") }
                 if canSwitch(held) {
-                    Button(held.isOn ? "Turn Off" : "Turn On") { run(held.isOn ? "Turned off" : "Turned on") { try await $0.switchMCP(agent: agent.rawValue, name: item.name, on: !held.isOn, profiles: [id]) } }
+                    Button(held.isOn ? "Turn Off" : "Turn On") { run(held.isOn ? "Turned off" : "Turned on") { try await $0.switchMCP(agent: agent.id, name: item.name, on: !held.isOn, profiles: [id]) } }
                 }
                 Button("Show \(name(id))") { selected = [id]; open.insert(item.id) }
                 if !held.shared, item.kind != "plugins" {
@@ -314,7 +321,7 @@ struct AddonsView: View {
                     Button("Remove from \(name(id))", role: .destructive) { remove(item, from: [id]) }
                 }
             } else if AddonWords.files.contains(item.kind), let from, !blocked(kind: item.kind).contains(id) {
-                Button("Add to \(name(id))") { run("Copied") { try await $0.copyAddon(agent: agent.rawValue, kind: item.kind, name: item.name, from: from, profiles: [id]) } }
+                Button("Add to \(name(id))") { run("Copied") { try await $0.copyAddon(agent: agent.id, kind: item.kind, name: item.name, from: from, profiles: [id]) } }
             } else {
                 Button("Show \(name(id))") { selected = [id] }
             }
@@ -334,15 +341,15 @@ struct AddonsView: View {
     /// The profiles whose `kind` is `Default`'s, linked: nothing is copied there or removed from there.
     private func blocked(kind: String) -> Set<String> {
         guard let data else { return [] }
-        return Set(profiles.map(\.id).filter { id in id != "default" && (data.items(of: id).contains { $0.kind == kind && $0.shared } || (agent == .codex && profiles.first { $0.id == id }?.isolated != true)) })
+        return Set(profiles.map(\.id).filter { id in id != "default" && (data.items(of: id).contains { $0.kind == kind && $0.shared } || (agent.isCodex && profiles.first { $0.id == id }?.isolated != true)) })
     }
 
     // MARK: Changes
 
     private func remove(_ item: ProfileAddon, from ids: [String]) {
         guard !ids.isEmpty else { return }
-        if item.kind == "mcp" { run("Removed") { try await $0.removeMCP(agent: agent.rawValue, name: item.name, profiles: ids) } }
-        else { run("Removed") { try await $0.removeAddon(agent: agent.rawValue, kind: item.kind, name: item.name, profiles: ids) } }
+        if item.kind == "mcp" { run("Removed") { try await $0.removeMCP(agent: agent.id, name: item.name, profiles: ids) } }
+        else { run("Removed") { try await $0.removeAddon(agent: agent.id, kind: item.kind, name: item.name, profiles: ids) } }
     }
 
     private func run(_ done: String, _ work: @escaping (DaemonClient) async throws -> [AddonResult]) {
@@ -361,14 +368,14 @@ struct AddonsView: View {
         guard model.daemonReady else { return }
         do {
             async let listed = model.client.profiles()
-            async let addons = model.client.profileAddons(agent: agent.rawValue)
+            async let addons = model.client.profileAddons(agent: agent.id)
             let (all, got) = try await (listed, addons)
-            profiles = all[agent.rawValue]?.profiles ?? []
+            profiles = all[agent.id]?.profiles ?? []
             data = got
             selected = selected.filter { id in profiles.contains { $0.id == id } }
             problem = nil
         } catch {
-            if data == nil || data?.agent != agent.rawValue { data = nil; problem = (error as? DaemonError)?.reason ?? error.localizedDescription }
+            if data == nil || data?.agent != agent.id { data = nil; problem = (error as? DaemonError)?.reason ?? error.localizedDescription }
         }
     }
 }
@@ -444,7 +451,7 @@ private struct AddonTargets: View {
 struct AddonInstallSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    let agent: AgentCLI
+    let agent: ProfileAgent
     let profiles: [AgentProfile]
     let data: ProfileAddons?
     let preselected: Set<String>
@@ -457,7 +464,7 @@ struct AddonInstallSheet: View {
 
     /// Codex's profiles that are not isolated run on `Default`'s config: the server is installed there.
     private var blocked: Set<String> {
-        Set(profiles.filter { p in !p.isDefault && (agent == .codex ? p.isolated != true : false) }.map(\.id))
+        Set(profiles.filter { p in !p.isDefault && (agent.isCodex ? p.isolated != true : false) }.map(\.id))
     }
 
     private var notes: [String: String] {
@@ -468,7 +475,7 @@ struct AddonInstallSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Install MCP · \(agent.title)").font(.headline)
-            TextField(AddonWords.example(agent.rawValue), text: $command, axis: .vertical)
+            TextField(AddonWords.example(agent.id), text: $command, axis: .vertical)
                 .font(.system(size: 12, design: .monospaced)).lineLimit(2...4).textFieldStyle(.roundedBorder).disabled(busy || results != nil)
             AddonTargets(profiles: profiles, blocked: blocked, notes: notes, targets: $targets, preselection: preselected)
                 .disabled(busy || results != nil)
@@ -495,7 +502,7 @@ struct AddonInstallSheet: View {
         let client = model.client, order = profiles.map(\.id).filter(targets.contains)
         Task {
             do {
-                let got = try await client.installMCP(agent: agent.rawValue, command: command.trimmingCharacters(in: .whitespacesAndNewlines), profiles: order)
+                let got = try await client.installMCP(agent: agent.id, command: command.trimmingCharacters(in: .whitespacesAndNewlines), profiles: order)
                 results = got
                 done(got)
             } catch { problem = (error as? DaemonError)?.reason ?? error.localizedDescription }

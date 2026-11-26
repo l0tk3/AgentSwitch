@@ -66,14 +66,21 @@ public enum AddonWords {
         case "commands": "Commands"
         case "prompts": "Prompts"
         case "rules": "Rules"
+        case "extensions": "Extensions"
+        case "workflows": "Workflows"
         default: kind
         }
     }
     /// The kinds kept as files: copied between profiles and removed as files.
-    public static let files: Set<String> = ["skills", "agents", "commands", "prompts", "rules"]
+    public static let files: Set<String> = ["skills", "agents", "commands", "prompts", "rules", "extensions", "workflows"]
     /// What the agent's own install command looks like, for the field's placeholder.
     public static func example(_ agent: String) -> String {
-        agent == "codex" ? "codex mcp add sentry -- npx -y @sentry/mcp-server" : "claude mcp add sentry -- npx -y @sentry/mcp-server"
+        let cli = ["claude-code": "claude", "codex": "codex", "opencode": "opencode", "grok": "grok", "agy": "agy"][agent] ?? "claude"
+        return "\(cli) mcp add sentry -- npx -y @sentry/mcp-server"
+    }
+    /// The picker's word for an agent: short, so six fit side by side.
+    public static func agent(_ id: String) -> String {
+        ["claude-code": "Claude", "codex": "Codex", "opencode": "OpenCode", "pi": "pi", "grok": "Grok", "agy": "agy"][id] ?? id
     }
     /// `Installed in 3 profiles` / `2 of 3: work: <why>`.
     public static func summary(_ results: [AddonResult], done: String, name: (String) -> String) -> String {

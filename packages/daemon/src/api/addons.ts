@@ -5,10 +5,10 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import { remoteCaller } from "../core/caller.js";
 import { ADDON_KINDS, AddonError, FILE_KINDS, type Addon, type AddonPlace } from "../profiles/addons.js";
-import { DEFAULT_PROFILE } from "../profiles/store.js";
+import { DEFAULT_PROFILE, PROFILE_AGENTS, type ProfileAgent } from "../profiles/store.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
-const Agent = z.enum(["claude-code", "codex"]);
+const Agent = z.enum(PROFILE_AGENTS);
 const Profiles = z.array(z.string().min(1).max(40)).min(1).max(500);
 
 export function mountAddons(app: Hono<any>, deps: ApiDeps): void {
@@ -16,7 +16,7 @@ export function mountAddons(app: Hono<any>, deps: ApiDeps): void {
   if (!store || !addons) return;
   const local = (c: { env: unknown }) => !remoteCaller(c.env as never);
   /** The places of the profiles named; a name that is no profile's is refused whole. */
-  const places = (agent: "claude-code" | "codex", ids: readonly string[]): AddonPlace[] | null => {
+  const places = (agent: ProfileAgent, ids: readonly string[]): AddonPlace[] | null => {
     const found = ids.map((id) => store.addonPlace(agent, id));
     return found.every((p): p is AddonPlace => p !== null) ? found : null;
   };
@@ -24,7 +24,7 @@ export function mountAddons(app: Hono<any>, deps: ApiDeps): void {
 
   app.get("/profiles/addons", async (c) => {
     const agent = Agent.safeParse(c.req.query("agent"));
-    if (!agent.success) return c.json({ error: "agent: claude-code or codex" }, 400);
+    if (!agent.success) return c.json({ error: `agent: one of ${PROFILE_AGENTS.join(", ")}` }, 400);
     const all = store.all()[agent.data].profiles;
     const own = await addons.list(store.addonPlace(agent.data, DEFAULT_PROFILE)!).catch((): Addon[] => []);
     const profiles = await Promise.all(all.map(async (p) => {
@@ -50,6 +50,7 @@ export function mountAddons(app: Hono<any>, deps: ApiDeps): void {
     if (!local(c)) return c.json({ error: "on the Mac only" }, 403);
     const body = await parseBody(c, z.object({ agent: Agent, name: z.string().min(1).max(64), profiles: Profiles }));
     if (!body.ok) return c.json({ error: body.error }, 400);
+    if (!ADDON_KINDS[body.data.agent].includes("mcp")) return c.json({ error: "this agent has no MCP servers" }, 400);
     const at = places(body.data.agent, body.data.profiles);
     if (!at) return c.json({ error: "no such profile" }, 404);
     try { return c.json({ results: await addons.removeMcp(body.data.name, at) }); } catch (err) { return refused(c, err); }
@@ -59,12 +60,13 @@ export function mountAddons(app: Hono<any>, deps: ApiDeps): void {
     if (!local(c)) return c.json({ error: "on the Mac only" }, 403);
     const body = await parseBody(c, z.object({ agent: Agent, name: z.string().min(1).max(64), on: z.boolean(), profiles: Profiles }));
     if (!body.ok) return c.json({ error: body.error }, 400);
+    if (!ADDON_KINDS[body.data.agent].includes("mcp")) return c.json({ error: "this agent has no MCP servers" }, 400);
     const at = places(body.data.agent, body.data.profiles);
     if (!at) return c.json({ error: "no such profile" }, 404);
     try { return c.json({ results: await addons.switchMcp(body.data.name, body.data.on, at) }); } catch (err) { return refused(c, err); }
   });
 
-  const Kind = z.enum(["skills", "agents", "commands", "prompts", "rules"]);
+  const Kind = z.enum(["skills", "agents", "commands", "prompts", "rules", "extensions", "workflows"]);
   app.post("/profiles/addons/copy", async (c) => {
     if (!local(c)) return c.json({ error: "on the Mac only" }, 403);
     const body = await parseBody(c, z.object({ agent: Agent, kind: Kind, name: z.string().min(1).max(80), from: z.string().min(1).max(40), profiles: Profiles }));

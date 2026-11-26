@@ -306,7 +306,9 @@ extension DemoData {
             ["id": "c0dex00001", "name": "team", "kind": "subscription", "createdAt": 0, "color": "violet"],
             ["id": "c0dex00002", "name": "apart", "kind": "subscription", "createdAt": 0, "color": "orchid", "isolated": true],
         ]
-        return ["agents": ["claude-code": agent(claude), "codex": agent(codex), "opencode": agent([]), "pi": agent([])]]
+        let own: [[String: Any]] = [["id": "default", "name": "Default", "kind": "subscription", "createdAt": 0]]
+        let grok: [[String: Any]] = own + [["id": "gr0k000001", "name": "xai-work", "kind": "subscription", "createdAt": 0, "color": "mint", "isolated": true]]
+        return ["agents": ["claude-code": agent(claude), "codex": agent(codex), "opencode": agent(own), "pi": agent(own), "grok": agent(grok), "agy": agent(own)]]
     }
 
     static func addonsJSON(agent: String) -> [String: Any] {
@@ -319,6 +321,24 @@ extension DemoData {
             var item: [String: Any] = ["kind": kind, "name": name, "shared": shared]
             if let about { item["about"] = about }
             return item
+        }
+        // The four with `Default` alone (Grok has a profile of its own too), as the daemon reads them (user #567).
+        switch agent {
+        case "opencode":
+            return ["agent": agent, "kinds": ["mcp", "skills", "agents", "commands"], "profiles": [
+                ["id": "default", "items": [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest"), mcp("linear", "https://mcp.example.com/linear", on: false, secrets: 1, http: true),
+                                            file("skills", "pdf", "Read and fill PDF files"), file("agents", "reviewer"), file("commands", "ship")]]]]
+        case "pi":
+            return ["agent": agent, "kinds": ["skills", "prompts", "extensions"], "profiles": [
+                ["id": "default", "items": [file("skills", "pdf", "Read and fill PDF files"), file("prompts", "review"), file("extensions", "plan-mode.ts"), file("extensions", "subagents")]]]]
+        case "grok":
+            return ["agent": agent, "kinds": ["mcp", "skills", "agents", "plugins"], "profiles": [
+                ["id": "default", "items": [mcp("notion", "npx -y @notionhq/notion-mcp-server", secrets: 1), file("skills", "pdf", "Read and fill PDF files"), file("agents", "planner")]],
+                ["id": "gr0k000001", "items": [mcp("notion", "npx -y @notionhq/notion-mcp-server", on: false, secrets: 1)]]]]
+        case "agy":
+            return ["agent": agent, "kinds": ["mcp", "skills", "rules", "workflows"], "profiles": [
+                ["id": "default", "items": [mcp("github", "docker run -i ghcr.io/github/mcp", secrets: 1), file("skills", "notes", "Meeting notes"), file("rules", "style"), file("workflows", "ship")]]]]
+        default: break
         }
         if agent == "codex" {
             let own: [[String: Any]] = [mcp("chrome-devtools", "npx chrome-devtools-mcp@latest"), mcp("linear", "https://mcp.example.com/linear", secrets: 1, http: true), file("skills", "commit-style", "How commits are written here"), file("prompts", "review")]

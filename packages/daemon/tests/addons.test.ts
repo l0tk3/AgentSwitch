@@ -3,9 +3,9 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountAddons } from "../src/api/addons.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
@@ -151,7 +151,7 @@ describe("the routes", () => {
     const listed = await (await app.request("/profiles/addons?agent=claude-code")).json();
     expect(listed.kinds).toEqual(["mcp", "skills", "plugins", "agents", "commands"]);
     expect(listed.profiles.map((p: { id: string; items: { name: string }[] }) => [p.id, p.items.map((i) => i.name)])).toEqual([["default", ["db", "pdf"]], [own.id, []]]);
-    expect((await app.request("/profiles/addons?agent=pi")).status).toBe(400);
+    expect((await app.request("/profiles/addons?agent=gemini")).status).toBe(400);
     const post = (path: string, body: object, env: object = {}) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, env);
     for (const [path, body] of [["/profiles/addons/mcp/install", { agent: "claude-code", command: "claude mcp add x -- y", profiles: [own.id] }], ["/profiles/addons/mcp/remove", { agent: "claude-code", name: "x", profiles: [own.id] }],
       ["/profiles/addons/mcp/switch", { agent: "claude-code", name: "x", on: false, profiles: [own.id] }], ["/profiles/addons/copy", { agent: "claude-code", kind: "skills", name: "pdf", from: "default", profiles: [own.id] }],
@@ -162,5 +162,182 @@ describe("the routes", () => {
     expect((await post("/profiles/addons/mcp/install", { agent: "claude-code", command: "rm -rf /", profiles: [own.id] })).status).toBe(400);
     expect((await post("/profiles/addons/mcp/install", { agent: "claude-code", command: "claude mcp add x -- y", profiles: ["nobody0000"] })).status).toBe(404);
     expect((await post("/profiles/addons/copy", { agent: "claude-code", kind: "prompts", name: "x", from: "default", profiles: [own.id] })).status).toBe(400);
+  });
+});
+
+describe("the other four agents (user #567)", () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  /** A place of each in a temporary folder, and a runner that is each agent's `mcp` as far as these tests go. */
+  function places() {
+    const root = mkdtempSync(join(tmpdir(), "agentswitch-addons-four-"));
+    const oc: AddonPlace = { agent: "opencode", id: "default", config: join(root, "xdg", "opencode"), json: join(root, "xdg", "opencode", "opencode.json"), kept: join(root, "kept", "oc.json"), own: false };
+    const pi: AddonPlace = { agent: "pi", id: "default", config: join(root, "pi"), kept: join(root, "kept", "pi.json"), own: false };
+    const grok: AddonPlace = { agent: "grok", id: "g1", config: join(root, "grok-g1"), kept: join(root, "kept", "g1.json"), own: true };
+    const agy: AddonPlace = { agent: "agy", id: "default", config: join(root, "gemini", "config"), json: join(root, "gemini", "config", "mcp_config.json"), kept: join(root, "kept", "agy.json"), own: false, args: [`--gemini_dir=${join(root, "gemini")}`] };
+    for (const p of [oc, pi, grok, agy]) mkdirSync(p.config, { recursive: true });
+    const calls: { file: string; args: readonly string[]; env: NodeJS.ProcessEnv }[] = [];
+    const grokServers: Record<string, Record<string, unknown>> = {};
+    const run: Runner = async (file, args, opts) => {
+      calls.push({ file, args, env: opts.env });
+      if (file === "/bin/grok") {
+        const [, verb, name] = args;
+        if (verb === "list") return { ok: true, out: JSON.stringify([...Object.entries(grokServers).map(([n, d]) => ({ ...d, name: n, scope: "user" })), { name: "chatroom", command: "node", enabled: true, scope: "user" }, { name: "here", command: "x", scope: "project" }]) };
+        if (verb === "add") { grokServers[args[6]!] = { command: args[8], args: args.slice(9), env: { K: "v" }, enabled: true }; return { ok: true, out: "" }; }
+        if (!(name! in grokServers)) return { ok: false, out: `MCP server '${name}' not found\n` };
+        if (verb === "remove") delete grokServers[name!]; else grokServers[name!]!.enabled = verb === "enable";
+        return { ok: true, out: "" };
+      }
+      return { ok: true, out: "" };
+    };
+    const addons = new Addons({ binaries: { opencode: "/bin/opencode", grok: "/bin/grok", agy: "/bin/agy" }, run, userHome: root });
+    return { root, oc, pi, grok, agy, calls, addons };
+  }
+
+  it("read each one's own `mcp add`, always for the user, and refuse AgentSwitch's own names and pi", () => {
+    expect(readInstall("opencode mcp add fs -- npx -y pkg", "opencode")).toEqual({ name: "fs", args: ["mcp", "add", "--global", "fs", "--", "npx", "-y", "pkg"] });
+    expect(readInstall("opencode mcp add --global --url https://x.example/mcp --header Authorization=Bearer\\ t api", "opencode"))
+      .toEqual({ name: "api", args: ["mcp", "add", "--global", "--url", "https://x.example/mcp", "--header", "Authorization=Bearer t", "api"] });
+    expect(readInstall("grok mcp add -s project -e K=V fs -- npx -y pkg", "grok")).toEqual({ name: "fs", args: ["mcp", "add", "-s", "user", "-e", "K=V", "fs", "--", "npx", "-y", "pkg"] });
+    expect(readInstall("agy mcp add --env K=V gh -- docker run -i img", "agy")).toEqual({ name: "gh", args: ["mcp", "add", "--env", "K=V", "gh", "--", "docker", "run", "-i", "img"] });
+    expect(readInstall("agy mcp add api https://x.example/mcp", "agy")).toEqual({ name: "api", args: ["mcp", "add", "api", "https://x.example/mcp"] });
+    for (const [bad, agent] of [["grok mcp add chatroom -- node x", "grok"], ["agy mcp add agentswitch -- node x", "agy"], ["claude mcp add fs -- x", "grok"], ["pi mcp add fs -- x", "pi"]] as const)
+      expect(readInstall(bad, agent), bad).toHaveProperty("err");
+  });
+
+  it("OpenCode: its servers from opencode.json (either shape), switched and removed in the file, installed by its command", async () => {
+    const { oc, calls, addons } = places();
+    writeFileSync(oc.json!, JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "m", mcp: { servers: {
+      fs: { type: "local", command: ["npx", "-y", "pkg", "--token", "abcdefabcdefabcdefabcdefabcdefabcdef"], environment: { K: "v" } },
+      api: { type: "remote", url: "https://x.example/mcp?key=s", headers: { Authorization: "Bearer s" }, enabled: false } } } }));
+    mkdirSync(join(oc.config, "agent"), { recursive: true });
+    writeFileSync(join(oc.config, "agent", "review.md"), "x");
+    mkdirSync(join(oc.config, "skills", "pdf"), { recursive: true });
+    writeFileSync(join(oc.config, "skills", "pdf", "SKILL.md"), "---\ndescription: PDFs\n---\n");
+    const items = await addons.list(oc);
+    expect(items).toEqual([
+      { kind: "mcp", name: "api", shared: false, enabled: false, transport: "http", command: "https://x.example/mcp", secrets: 1 },
+      { kind: "mcp", name: "fs", shared: false, enabled: true, transport: "stdio", command: "npx -y pkg --token •••", secrets: 1 },
+      { kind: "skills", name: "pdf", shared: false, about: "PDFs" },
+      { kind: "agents", name: "review", shared: false },
+    ]);
+    expect(JSON.stringify(items)).not.toMatch(/Bearer|key=s|abcdefabcdef/);
+    expect(await addons.switchMcp("api", true, [oc])).toEqual([{ profile: "default", ok: true, said: "" }]);
+    expect(await addons.switchMcp("fs", false, [oc])).toEqual([{ profile: "default", ok: true, said: "" }]);
+    let doc = JSON.parse(readFileSync(oc.json!, "utf8"));
+    expect(doc.model).toBe("m");
+    expect(doc.mcp.servers.api).not.toHaveProperty("enabled");
+    expect(doc.mcp.servers.fs).toMatchObject({ enabled: false, environment: { K: "v" } });
+    expect(await addons.removeMcp("api", [oc])).toEqual([{ profile: "default", ok: true, said: "" }]);
+    expect((await addons.removeMcp("api", [oc]))[0]).toMatchObject({ ok: false, said: "it is not there" });
+    doc = JSON.parse(readFileSync(oc.json!, "utf8"));
+    expect(Object.keys(doc.mcp.servers)).toEqual(["fs"]);
+    // The shape before 2.x: servers straight under `mcp`.
+    writeFileSync(oc.json!, JSON.stringify({ mcp: { old: { type: "local", command: ["x", "y"] } } }));
+    expect((await addons.list(oc)).filter((i) => i.kind === "mcp").map((i) => i.name)).toEqual(["old"]);
+    await addons.switchMcp("old", false, [oc]);
+    expect(JSON.parse(readFileSync(oc.json!, "utf8"))).toEqual({ mcp: { old: { type: "local", command: ["x", "y"], enabled: false } } });
+    // Installed by its own command, into the folder named for it.
+    await addons.install("opencode mcp add fs2 -- npx pkg", [oc]);
+    expect(calls.at(-1)).toMatchObject({ file: "/bin/opencode", args: ["mcp", "add", "--global", "fs2", "--", "npx", "pkg"] });
+    expect(calls.at(-1)!.env).toMatchObject({ XDG_CONFIG_HOME: dirname(oc.config), OPENCODE_DISABLE_AUTOUPDATE: "1" });
+    // A `.jsonc` is read, and left alone.
+    const jsonc: AddonPlace = { ...oc, json: join(oc.config, "opencode.jsonc") };
+    writeFileSync(jsonc.json!, '{\n  // mine\n  "mcp": { "servers": { "c": { "type": "local", "command": ["a"], }, }, },\n}\n');
+    expect((await addons.list(jsonc)).filter((i) => i.kind === "mcp").map((i) => i.name)).toEqual(["c"]);
+    expect((await addons.switchMcp("c", false, [jsonc]))[0]).toMatchObject({ ok: false });
+  });
+
+  it("Grok: listed, switched and removed by its own command under the profile's GROK_HOME; AgentSwitch's chatroom not shown", async () => {
+    const { grok, calls, addons } = places();
+    await addons.install("grok mcp add -e K=v fs -- npx pkg", [grok]);
+    expect(calls.at(-1)).toMatchObject({ file: "/bin/grok", args: ["mcp", "add", "-s", "user", "-e", "K=v", "fs", "--", "npx", "pkg"] });
+    expect(calls.at(-1)!.env).toMatchObject({ GROK_HOME: grok.config, GROK_DISABLE_AUTOUPDATER: "1" });
+    mkdirSync(join(grok.config, "skills", "s1"), { recursive: true });
+    mkdirSync(join(grok.config, "agents"), { recursive: true });
+    writeFileSync(join(grok.config, "agents", "planner.md"), "x");
+    expect(await addons.list(grok)).toEqual([
+      { kind: "mcp", name: "fs", shared: false, enabled: true, transport: "stdio", command: "npx pkg", secrets: 1 },
+      { kind: "skills", name: "s1", shared: false },
+      { kind: "agents", name: "planner", shared: false },
+    ]);
+    expect(await addons.switchMcp("fs", false, [grok])).toEqual([{ profile: "g1", ok: true, said: "" }]);
+    expect(calls.at(-1)!.args).toEqual(["mcp", "disable", "fs"]);
+    expect((await addons.list(grok)).find((i) => i.name === "fs")?.enabled).toBe(false);
+    expect(await addons.removeMcp("fs", [grok])).toEqual([{ profile: "g1", ok: true, said: "" }]);
+    expect(calls.at(-1)!.args).toEqual(["mcp", "remove", "fs", "-s", "user"]);
+    expect((await addons.removeMcp("fs", [grok]))[0]).toMatchObject({ ok: false, said: "MCP server 'fs' not found" });
+  });
+
+  it("agy: its mcp_config.json read, its own commands with --gemini_dir; AgentSwitch's entry not shown; rules and workflows by name", async () => {
+    const { agy, calls, addons } = places();
+    writeFileSync(agy.json!, JSON.stringify({ mcpServers: { agentswitch: { command: "node", args: ["kit.js"] }, fs: { command: "npx", args: ["-y", "pkg"], env: { K: "v" }, disabled: true }, api: { serverUrl: "https://x.example/mcp?k=1", headers: { A: "b" } } } }));
+    mkdirSync(join(agy.config, "rules"), { recursive: true });
+    writeFileSync(join(agy.config, "rules", "style.md"), "x");
+    mkdirSync(join(agy.config, "global_workflows"), { recursive: true });
+    writeFileSync(join(agy.config, "global_workflows", "ship.md"), "x");
+    mkdirSync(join(agy.config, "workflows"), { recursive: true });
+    writeFileSync(join(agy.config, "workflows", "deploy.md"), "x");
+    expect(await addons.list(agy)).toEqual([
+      { kind: "mcp", name: "api", shared: false, enabled: true, transport: "http", command: "https://x.example/mcp", secrets: 1 },
+      { kind: "mcp", name: "fs", shared: false, enabled: false, transport: "stdio", command: "npx -y pkg", secrets: 1 },
+      { kind: "rules", name: "style", shared: false },
+      { kind: "workflows", name: "ship", shared: false },
+      { kind: "workflows", name: "deploy", shared: false },
+    ]);
+    await addons.switchMcp("fs", true, [agy]);
+    expect(calls.at(-1)).toMatchObject({ file: "/bin/agy", args: [agy.args![0], "mcp", "enable", "fs"] });
+    expect(calls.at(-1)!.env).toMatchObject({ AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
+    await addons.removeMcp("api", [agy]);
+    expect(calls.at(-1)!.args).toEqual([agy.args![0], "mcp", "remove", "api"]);
+    expect(addons.removeFile("workflows", "deploy", [agy])).toEqual([{ profile: "default", ok: true, said: "" }]);
+    expect(existsSync(join(agy.config, "workflows", "deploy.md"))).toBe(false);
+  });
+
+  it("pi: skills, prompts and extensions as files, copied as they are", async () => {
+    const { root, pi, addons } = places();
+    mkdirSync(join(pi.config, "skills", "pdf"), { recursive: true });
+    mkdirSync(join(pi.config, "prompts"), { recursive: true });
+    writeFileSync(join(pi.config, "prompts", "review.md"), "x");
+    mkdirSync(join(pi.config, "extensions", "kit"), { recursive: true });
+    writeFileSync(join(pi.config, "extensions", "one.ts"), "export default () => {}");
+    expect(await addons.list(pi)).toEqual([
+      { kind: "skills", name: "pdf", shared: false },
+      { kind: "prompts", name: "review", shared: false },
+      { kind: "extensions", name: "kit", shared: false },
+      { kind: "extensions", name: "one.ts", shared: false },
+    ]);
+    const other: AddonPlace = { ...pi, id: "x", config: join(root, "pi2") };
+    expect(addons.copyFile("extensions", "one.ts", pi, [other])).toEqual([{ profile: "x", ok: true, said: "" }]);
+    expect(readFileSync(join(other.config, "extensions", "one.ts"), "utf8")).toBe("export default () => {}");
+    await expect(addons.install("pi mcp add a -- b", [pi])).rejects.toThrow(/MCP/);
+  });
+
+  it("the routes list each of them from the Mac's own folders — a Grok profile from its own — and refuse MCP for pi", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agentswitch-addons-four-api-"));
+    const userHome = join(root, "user");
+    vi.stubEnv("XDG_CONFIG_HOME", ""); vi.stubEnv("PI_CODING_AGENT_DIR", ""); vi.stubEnv("GROK_HOME", ""); vi.stubEnv("AGENTSWITCH_AGY_HOME", "");
+    mkdirSync(join(userHome, ".config", "opencode"), { recursive: true });
+    writeFileSync(join(userHome, ".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { servers: { fs: { type: "local", command: ["x"] } } } }));
+    mkdirSync(join(userHome, ".pi", "agent", "skills", "pdf"), { recursive: true });
+    mkdirSync(join(userHome, ".gemini", "config", "skills", "notes"), { recursive: true });
+    mkdirSync(join(userHome, ".grok", "skills", "mine"), { recursive: true });
+    const store = new ProfileStore({ home: join(root, "service"), userHome });
+    const work = store.create("grok", "Work", "subscription");
+    mkdirSync(join(store.homeOf("grok", work.id)!, "skills", "theirs"), { recursive: true });
+    const addons = new Addons({ binaries: {}, userHome, run: async () => ({ ok: true, out: "" }) });
+    const app = new Hono<any>();
+    mountAddons(app, { profiles: store, addons } as ApiDeps);
+    const names = async (agent: string) => (await (await app.request(`/profiles/addons?agent=${agent}`)).json()).profiles.map((p: { id: string; items: { name: string }[] }) => [p.id, p.items.map((i) => i.name)]);
+    expect(await names("opencode")).toEqual([["default", ["fs"]]]);
+    expect(await names("pi")).toEqual([["default", ["pdf"]]]);
+    expect(await names("agy")).toEqual([["default", ["notes"]]]);
+    expect(await names("grok")).toEqual([["default", ["mine"]], [work.id, ["theirs"]]]);
+    expect((await (await app.request("/profiles/addons?agent=pi")).json()).kinds).toEqual(["skills", "prompts", "extensions"]);
+    const post = (path: string, body: object) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post("/profiles/addons/mcp/switch", { agent: "pi", name: "x", on: false, profiles: ["default"] })).status).toBe(400);
+    expect((await post("/profiles/addons/mcp/install", { agent: "opencode", command: "opencode mcp add x -- y", profiles: ["nobody0000"] })).status).toBe(404);
+    expect((await post("/profiles/addons/copy", { agent: "grok", kind: "skills", name: "mine", from: "default", profiles: [work.id] })).status).toBe(200);
+    expect(existsSync(join(store.homeOf("grok", work.id)!, "skills", "mine"))).toBe(true);
   });
 });

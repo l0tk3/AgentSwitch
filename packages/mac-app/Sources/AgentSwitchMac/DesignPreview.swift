@@ -112,6 +112,12 @@ enum DesignPreview {
                     for (name, appearance) in [("settings-addons-dark", NSAppearance(named: .darkAqua)), ("settings-addons", NSAppearance(named: .aqua))] {
                         try await renderSettings(.addons, model: model, appearance: appearance, height: 760, to: directory.appendingPathComponent("\(name).png"))
                     }
+                    // The other agents (user #567): each opened on its own, dark.
+                    for agent in ProfileAgent.shown where !agent.isClaude {
+                        AddonsView.firstAgent = agent
+                        try await renderSettings(.addons, model: model, appearance: NSAppearance(named: .darkAqua), height: 560, to: directory.appendingPathComponent("settings-addons-\(agent.id).png"))
+                    }
+                    AddonsView.firstAgent = .claude
                     FileHandle.standardError.write(Data("design preview (Add-Ons) written to \(directory.path)\n".utf8))
                     exit(0)
                 }

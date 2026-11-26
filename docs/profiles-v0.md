@@ -24,6 +24,14 @@
 - 停用 MCP：Claude Code 对用户级的服务没有开关，所以停用是把定义用 `mcp remove` 取出、整份记在配置旁边的 `addons.json`（0600），启用时用 `mcp add-json <name> -`（定义走 stdin，不进进程列表）放回去；Codex 有 `enabled` 但没有改它的命令，所以只记名字，终端启动时带 `-c mcp_servers.<name>.enabled=false`——只对 `config.toml` 里还在的名字带，给一个已不存在的名字带这个参数会凭空造出一个只有 `enabled` 的服务，Codex 就起不来了（`invalid transport`）。因此 Codex 的停用只在 AgentSwitch 开的终端里生效，且对之后开的终端生效。
 - skills、agents、commands、prompts、rules：在配置之间按文件复制（原样，不覆盖已有的，不跟链接）和删除；链接到 Default 的那一类不能复制进去也不能从那里删。插件只列出，不在这里装和删（agent 自己的 `/plugin`，或 `Copies…`）。
 - 实测（真的 `claude` 2.1.330 与 `codex` 0.171.0，临时目录）：安装 → 停用 → 启用 → 删除各走了一轮，两家都通。没做的：别的节点上的 Add-Ons、iPhone 上的这一页、Dispatch 的 Extensions 与它互通。
+- **六个 agent（2026-11-26，用户 #567）**：页面顶上一排分段 `Claude · Codex · OpenCode · pi · Grok · agy`（原来在左栏里，六个排不下，挪到整页上方一行）。OpenCode、pi、agy 只有 `Default`（本机自己的目录），Grok 每个配置一个 `GROK_HOME`。各家在本机的放法（2026-11-26 实测：OpenCode 2.3.2、Grok 1.0.92、agy、pi 1.6.1，只看键名）：
+  - OpenCode：`$XDG_CONFIG_HOME/opencode/opencode.json`（没有就 `opencode.jsonc`、`config.json`）。2.x 的 `opencode mcp add --global` 写在 `mcp.servers.<名字>`（`type: local` 时 `command` 是数组、环境叫 `environment`；`remote` 是 `url` + `headers`），老版本直接在 `mcp.<名字>` 下，两种都认。装用它自己的命令（一律加 `--global`）；它没有删和停用的命令，所以直接改文件：删掉那一项，停用写 `enabled: false`、启用去掉这个键。带注释的 `.jsonc` 只读不改（改写会丢注释），在界面上报原因。skills / agents / commands 是 `skills/`、`agents/`（或 `agent/`）、`commands/`（或 `command/`）下的文件。
+  - pi：没有 MCP（页面上不出 `MCP Servers` 和 `Install MCP…`）。`PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`）下的 `skills/`、`prompts/*.md`、`extensions/`（`.ts` 文件或目录，按原名）。
+  - Grok：都用它自己的命令，在配置的 `GROK_HOME` 下跑：`grok mcp list --json`（只取 `scope` 为 `user` 的）、`grok mcp add`（一律 `-s user`）、`remove -s user`、`enable` / `disable`（它自己在 `config.toml` 里记 `enabled` 和 `disabled_mcp_servers`）。skills、`agents/*.md` 是文件，`plugins/` 只列出。
+  - agy：`<gemini 目录>/config/mcp_config.json` 的 `mcpServers`（地址可能叫 `serverUrl`，停用是 `disabled: true`）直接读；改用它自己的 `agy mcp add / remove / enable / disable`（设了 `AGENTSWITCH_AGY_HOME` 时带 `--gemini_dir`）。skills、`rules/*.md`、`global_workflows/*.md` 与 `workflows/*.md` 是文件（两个 workflow 目录合成一类 `Workflows`）。插件不列（`agy plugin list --json` 在这台 Mac 上是空的，没见过它的格式）。
+  - AgentSwitch 自己放进去的服务（Codex 的 `browser`、Grok 的 `chatroom`、agy 的 `agentswitch`）不列出，也不许用这几个名字装。
+  - 跑这些命令时都关掉它们自己的更新检查（`OPENCODE_DISABLE_AUTOUPDATE`、`GROK_DISABLE_AUTOUPDATER`、`AGY_CLI_DISABLE_AUTO_UPDATE`）。
+  - 验证：daemon `tests/addons.test.ts` 用临时目录和假程序把四家的列、装、停用、启用、删、复制各走一遍；真 `opencode`、`grok`、`agy` 在临时目录里跑过 `mcp add / disable / list` 看它们写出什么（上面的格式由此而来）；本机真实配置只读列了一次（Grok 列出用户自己的一个 MCP，其余三家为空，与磁盘一致）。没做：在本机真实配置上装 / 删（按要求不碰）、装好的应用里点一遍。
 
 删除隔离 Profile 会删除它自己目录内的历史和文件，界面会明确提示；用户选择的外部项目目录不删除。旧 Profile 的共享记录仍保留。
 
