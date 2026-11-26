@@ -219,15 +219,15 @@ struct RoomMessageRow: View {
         let classic = look.isClassic
         // Classic (user #467, beside a Discord channel): a larger round face level with the name, the quoted line
         // above both with a hook down to the face, more air between speakers.
-        let face: CGFloat = classic ? 36 : 26
+        let face: CGFloat = classic ? 30 : 26
         let quoted = message.replyTo.flatMap { n in room.messages.first { $0.seq == n } }
-        HStack(alignment: .top, spacing: classic ? 14 : 12) {
+        HStack(alignment: .top, spacing: 12) {
             if row.continues {
                 Color.clear.frame(width: face, height: 1)
             } else {
-                Button { actions.card(message.from) } label: { RoomFaceView(seat: seat, side: face, cell: classic ? 6 : 4) }.buttonStyle(.plain)
-                    .padding(.top, classic ? (quoted == nil ? 2 : 24) : 1)
-                    .overlay(alignment: .topLeading) { if classic, quoted != nil { ReplyHook().stroke(Look.faint, lineWidth: 1.5).frame(width: 26, height: 12).offset(x: face / 2, y: 9) } }
+                Button { actions.card(message.from) } label: { RoomFaceView(seat: seat, side: face, cell: classic ? 5 : 4) }.buttonStyle(.plain)
+                    .padding(.top, classic ? (quoted == nil ? 2 : 22) : 1)
+                    .overlay(alignment: .topLeading) { if classic, quoted != nil { ReplyHook().stroke(Look.faint, lineWidth: 1.5).frame(width: 22, height: 11).offset(x: face / 2, y: 8) } }
             }
             VStack(alignment: .leading, spacing: classic ? 3 : 2) {
                 if let quoted { quote(quoted).padding(.bottom, classic ? 3 : 0) }
@@ -235,9 +235,9 @@ struct RoomMessageRow: View {
                 if message.deleted {
                     Text("这条消息已删除").font(.system(size: Look.scaled(13))).italic().foregroundStyle(Look.faint)
                 } else {
-                    Text(RoomRich.text(message.text, handles: handles, look: look, size: classic ? 14 : 13.5))
-                        .font(.system(size: Look.scaled(classic ? 14 : 13.5)))
-                        .lineSpacing(classic ? 5 : 4)
+                    Text(RoomRich.text(message.text, handles: handles, look: look, size: classic ? 13 : 13.5))
+                        .font(.system(size: Look.scaled(classic ? 13 : 13.5)))
+                        .lineSpacing(4)
                         .foregroundStyle(Look.ink)
                         .textSelection(.enabled)
                         .lineLimit(long && !expanded ? Self.foldLines : nil)
@@ -260,10 +260,10 @@ struct RoomMessageRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, classic ? 18 : 14)
-        .padding(.top, row.continues ? 1 : classic ? 10 : 9)
-        .padding(.bottom, classic ? 5 : 3)
+        .padding(.top, row.continues ? 1 : classic ? 7 : 9)
+        .padding(.bottom, classic ? 4 : 3)
         .background(actions.lit ? Color.signal.opacity(0.14) : row.forYou && look.isClassic ? Color.waiting.opacity(0.07) : hovering ? Look.hover.opacity(classic ? 0.5 : 1) : Color.clear)
-        .padding(.top, !row.continues && classic ? 8 : 0)
+        .padding(.top, !row.continues && classic ? 4 : 0)
         // For the user and not yet seen: amber, the colour of what waits for you.
         .overlay(alignment: .leading) { if row.forYou { Rectangle().fill(Color.waiting).frame(width: 3) } }
         .overlay(alignment: .bottomTrailing) { readCount.padding(.trailing, 14).padding(.bottom, 3) }
@@ -298,7 +298,7 @@ struct RoomMessageRow: View {
     private func head(_ seat: RoomSeat?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Button { actions.card(message.from) } label: {
-                Text(seat?.isUser == true ? "You" : message.from).mono(look.isClassic ? 14.5 : 13, weight: .semibold).foregroundStyle(Look.ink)
+                Text(seat?.isUser == true ? "You" : message.from).mono(13, weight: .semibold).foregroundStyle(Look.ink)
             }
             .buttonStyle(.plain)
             if let agent = seat?.card?.agent { AgentSprite(harness: agent).scaleEffect(0.8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
