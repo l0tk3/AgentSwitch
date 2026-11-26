@@ -314,6 +314,7 @@ struct RoomMessageRow: View {
             .buttonStyle(.plain)
             if let agent = seat?.card?.agent { AgentSprite(harness: agent).scaleEffect(0.8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
             Text(TimeText.at(message.date)).mono(11.5).foregroundStyle(Look.faint)
+            if message.aside { RoomAsideLabel() }
             if let n = message.task, !actions.inTask { RoomTaskLabel(n: n, title: room.tasks.first { $0.n == n }?.title) { actions.task(n) } }
         }
         .lineLimit(1)
@@ -862,6 +863,20 @@ struct RoomField: View {
             .grounded(Look.raised, radius: Look.controlRadius)
             .framed(Look.line, radius: Look.controlRadius)
             .onSubmit(submit)
+    }
+}
+
+/// A member at work's quick answer, asked through its own `/btw` while the user's message waits for its main line
+/// (docs/chatroom-v0.md §13, 2026-11-26, user #529): a word beside its name, drawn as a task's label is.
+struct RoomAsideLabel: View {
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Text("Aside").mono(11).foregroundStyle(Look.ink2).lineLimit(1)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .grounded(look.isClassic ? Look.raised : Color.clear, radius: 4)
+            .framed(Look.line, radius: look.isClassic ? 4 : 0)
+            .help("忙碌中的快速回答；原消息仍在排队，这一轮结束后它会看到")
     }
 }
 

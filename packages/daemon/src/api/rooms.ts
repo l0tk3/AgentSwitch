@@ -506,6 +506,9 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
       if (gone) return c.json({ error: `文件不存在：${gone}` }, 400);
       const message = rooms.post(id, { from: YOU, text: body.data.text, ...(body.data.files ? { files: body.data.files } : {}), ...(body.data.replyTo === undefined ? {} : { replyTo: body.data.replyTo }), ...(body.data.expects ? { expects: body.data.expects } : {}), ...(body.data.task === undefined ? {} : { task: body.data.task }) });
       deps.roomsChanged?.(id);
+      // A member at work is asked beside its turn through its own /btw, and says that answer here (§13). The message
+      // keeps its place in the queue: what it is told reaches it when the turn ends.
+      void deps.roomDelivery?.quickAnswer(id, message.seq).catch(() => undefined);
       return c.json({ message, receipts: rooms.get(id).receipts[message.seq] ?? {} }, 201);
     } catch (err) { return refused(c, err); }
   });

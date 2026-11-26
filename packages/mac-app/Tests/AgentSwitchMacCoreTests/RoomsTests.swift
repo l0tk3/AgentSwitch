@@ -157,6 +157,10 @@ final class RoomsTests: XCTestCase {
         XCTAssertTrue(RoomText.isLong(String(repeating: "长", count: 800), lines: 12))
         let gone = try! JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":3,"from":"you","to":[],"text":"","at":1,"deleted":{"at":2,"by":"you"}}"#.utf8))
         XCTAssertTrue(gone.deleted)
+        XCTAssertFalse(gone.aside)   // what was said before the field existed decodes as before
+        // A member at work's quick answer (user #529), marked beside its name.
+        let aside = try! JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":4,"from":"api","to":["you"],"replyTo":3,"text":"〔快速回答 · /btw〕在读接口。","at":2,"aside":true}"#.utf8))
+        XCTAssertTrue(aside.aside)
         // Typed above lines already written (user #262).
         let text = "第一行 @da\n第二行\n第三行"
         let caret = ("第一行 @da" as NSString).length

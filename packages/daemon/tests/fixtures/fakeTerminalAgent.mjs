@@ -95,6 +95,9 @@ async function handle(line) {
   if (line === "reached") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n"); return; }
   // Any agent: its window's title set to what follows (Grok says in its title what it does and that it waits).
   if (line.startsWith("title ")) { process.stdout.write(`\x1b]0;${line.slice(6)}\x07titled\r\n`); return; }
+  // Claude Code's /btw: its question echoed over the bottom, the answer under it, the keys named once it is whole; Esc
+  // closes it, as the real one takes Esc before the turn does. `FAKE_BTW` is the answer's rows.
+  if (line.startsWith("/btw ")) { btw = line.slice(5); drawBtw(); return; }
   // Grok's question before a tool (1.0.77): numbered rows with a round mark, the filled one where the selection is.
   if (line === "grokperm") { perm = 2; drawPerm(); return; }
   // Grok's question about a folder it does not trust: two rows, each taken by the key at its end; Enter takes the first.
@@ -157,8 +160,20 @@ function drawSlash() {
   process.stdout.write("\x1b[2J\x1b[H" + SLASH.slice(top, top + 3).map(([n, d], i) => `${top + i === slash ? "› " : "  "}/${n.padEnd(10)}  ${d}`).join("\r\n") + "\r\n\r\n› /\r\n");
 }
 let buf = "";
+// Claude Code's side question (`/btw`): its panel, and whether it is up.
+let btw = null;
+const BTW = (process.env.FAKE_BTW ?? "I have read the config and\nam now writing the parser.").split("\n");
+function drawBtw() {
+  // A key alone, as a full-screen program takes one: the panel's Esc is read before any line.
+  process.stdin.setRawMode?.(true);
+  process.stdout.write("\x1b[2J\x1b[H" + "▔".repeat(120) + "\r\n  /btw " + btw + "\r\n\r\n" + BTW.map((l) => "    " + l).join("\r\n") + "\r\n\r\n  c to copy · f to fork · Esc to close\r\n");
+}
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => {
+  if (btw !== null) {
+    if (String(d).includes("\x1b")) { btw = null; process.stdin.setRawMode?.(false); process.stdout.write("\x1b[2J\x1b[Haside closed\r\n"); }
+    return;
+  }
   if (process.env.FAKE_SLASH && slash === null && String(d) === "/" && !buf) { slash = 0; drawSlash(); return; }
   if (slash !== null) {
     for (const key of String(d).match(/\x1b[\[O][AB]|\x7f/g) ?? []) {

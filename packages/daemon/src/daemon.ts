@@ -451,8 +451,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   let roomSeat: SeatLookup = () => null;
   let roomSay: (terminal: string, text: string) => Promise<boolean> = async () => false;
   let roomPoke: (terminal: string, text: string) => Promise<{ readonly given: boolean; readonly why?: string }> = async () => ({ given: false, why: "没有终端" });
+  let roomAside: (terminal: string, question: string) => Promise<{ readonly ok: boolean; readonly answer?: string; readonly why?: string }> = async () => ({ ok: false, why: "没有终端" });
   // Only a session that has the Kit is given anything: one that could not answer in the room is not spoken to.
-  const roomDelivery: RoomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir(), push: (terminal, text) => (roomKit.has(terminal) ? roomSay(terminal, text) : Promise.resolve(false)), poke: (terminal, text) => roomPoke(terminal, text) });
+  const roomDelivery: RoomDelivery = new RoomDelivery({ store: rooms, seat: (terminal) => roomSeat(terminal), home: homedir(), push: (terminal, text) => (roomKit.has(terminal) ? roomSay(terminal, text) : Promise.resolve(false)), poke: (terminal, text) => roomPoke(terminal, text), aside: (terminal, question) => roomAside(terminal, question) });
   let roomAsk: Ask | null = null;
   // The new dispatch (api/dispatchDesk.ts): a session at the 调度台 room; it may start more sessions than an admin.
   const dispatchDesk = new DispatchDesk({ home: cfg.home, rooms, ask: (method, path, body) => (roomAsk ? roomAsk(method, path, body) : Promise.resolve({ status: 503, body: { error: "the service is not ready" } })), changed: () => roomDelivery.look() });
@@ -552,7 +553,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     leftovers = new Leftovers({ url: () => `http://127.0.0.1:${localPort}`, live: () => new Set(terminalHost.list().filter((t) => t.status !== "exited").map((t) => t.id)), log: (line) => console.error(line) });
   }
   let style: TerminalStyle | null = null;
-  if (terminalHost) { roomSeat = (terminal) => seatLive(terminalHost.get(terminal)); roomSay = (terminal, text) => terminalHost.say(terminal, text); roomPoke = (terminal, text) => terminalHost.poke(terminal, text); }
+  if (terminalHost) { roomSeat = (terminal) => seatLive(terminalHost.get(terminal)); roomSay = (terminal, text) => terminalHost.say(terminal, text); roomPoke = (terminal, text) => terminalHost.poke(terminal, text); roomAside = (terminal, question) => terminalHost.aside(terminal, question); }
   // A session's state changes without the rooms being told (it comes to rest, it ends): what has not arrived is
   // looked at again every little while.
   // Each time, seats first follow their sessions (rooms/follow.ts): a session that runs in another terminal now — the

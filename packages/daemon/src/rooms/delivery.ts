@@ -15,7 +15,7 @@
 
 import { agentName, type SeatLookup, type SeatState } from "./state.js";
 import { YOU } from "./names.js";
-import type { Message, Room, RoomStore, Seat } from "./store.js";
+import { MAX_SESSION_TEXT, type Message, type Room, type RoomStore, type Seat } from "./store.js";
 
 export type DeliveryOptions = {
   readonly store: RoomStore;
@@ -25,6 +25,9 @@ export type DeliveryOptions = {
   readonly push?: (terminal: string, text: string) => Promise<boolean>;
   /** 戳一下: a text put in front of a session now, what it is doing interrupted (TerminalHost.poke). */
   readonly poke?: (terminal: string, text: string) => Promise<{ readonly given: boolean; readonly why?: string }>;
+  /** 旁答: a question put to a session at work through its own `/btw`, its answer read back (TerminalHost.aside); null
+   *  when nothing was read. Claude Code only (§13). */
+  readonly aside?: (terminal: string, question: string) => Promise<{ readonly ok: boolean; readonly answer?: string }>;
   readonly home?: string;
   readonly now?: () => number;
 };
@@ -68,6 +71,8 @@ export class RoomDelivery {
   private readonly typedAt = new Map<string, number>();
   /** When 戳一下 last typed a room's message into each terminal. */
   private readonly pokedAt = new Map<string, number>();
+  /** Terminals whose own `aside` is being asked now: one at a time (§13). */
+  private readonly asides = new Set<string>();
   private now(): number { return (this.o.now ?? Date.now)(); }
 
   constructor(private readonly o: DeliveryOptions) {}
@@ -146,6 +151,53 @@ export class RoomDelivery {
       for (const w of waiting) this.o.store.setReceipt(w.room.id, w.message.seq, w.seat.handle, "delivered");
       return done;
     } finally { this.pushing.delete(terminal); }
+  }
+
+  /** 旁答 (user #529, #538; §13): the user's message names a member that is at work, and waits for an answer. Besides
+   *  its place in the queue — unchanged: what it is told reaches it at the turn's end — the member is asked through
+   *  its own `/btw`, which answers beside the turn; that answer is said in the room as the member, marked `aside`.
+   *  Claude Code only for now. Quiet when anything is off: the queue still has the message. */
+  async quickAnswer(roomId: string, seq: number): Promise<void> {
+    if (!this.o.aside) return;
+    const room = this.o.store.get(roomId);
+    const message = this.o.store.messages(roomId, { after: seq - 1, limit: 1 })[0];
+    if (!message || message.seq !== seq) return;
+    // The user's own question, asked of a member and waiting for an answer; a colleague's message is not this.
+    if (message.from !== YOU || message.expects !== "answer") return;
+    const asked: Promise<void>[] = [];
+    for (const handle of message.to) {
+      if (handle === YOU) continue;
+      const seat = room.seats.find((s) => s.handle === handle && s.left === undefined);
+      if (!seat?.terminal || seat.muted || this.asides.has(seat.terminal)) continue;
+      const live = this.o.seat(seat.terminal);
+      if (!live || live.state !== "busy" || live.card.agent !== "claude-code") continue;
+      this.asides.add(seat.terminal);
+      asked.push(this.asideTo(room, seat, message).catch(() => undefined).finally(() => this.asides.delete(seat.terminal!)));
+    }
+    await Promise.all(asked);
+  }
+
+  private async asideTo(room: Room, seat: Seat, message: Message): Promise<void> {
+    const asked = await this.o.aside!(seat.terminal!, this.asideQuestion(room, message));
+    const answer = asked.ok ? (asked.answer ?? "").trim() : "";
+    if (!answer) return;
+    const tail = `\n\n原消息 #${message.seq} 已排队：这一轮结束后主线会看到。`;
+    const head = "〔快速回答 · /btw〕";
+    const space = MAX_SESSION_TEXT - [...tail].length - [...head].length - 1;
+    const body = [...answer];
+    const text = head + body.slice(0, space).join("") + (body.length > space ? "…" : "") + tail;
+    this.o.store.post(room.id, {
+      from: seat.handle, to: [YOU], replyTo: message.seq, expects: "none", aside: true, text,
+      ...(message.task === undefined ? {} : { task: message.task }),
+    });
+  }
+
+  /** What the member is asked beside its turn: who is asking, in what room, the user's words, and what is wanted —
+   *  progress, not action, since nothing said here reaches its main conversation. */
+  private asideQuestion(room: Room, message: Message): string {
+    const words = [...message.text.replace(/\s+/g, " ").trim()];
+    const said = words.slice(0, 600).join("") + (words.length > 600 ? "…" : "");
+    return `You are at work; do not stop. The user asked in AgentSwitch Chat Room "${room.name}" while you work, and the message is queued for your main conversation: it will be seen when this turn ends. Answer here, beside the turn, in two or three sentences: what you have done so far on the work in hand and what remains, as far as you can see. Do not act on it and do not call tools: this aside cannot use tools, and nothing said here reaches your main conversation. The user's words: "${said}"`;
   }
 
   /** The agent's waiting program asks. One per terminal: a later one takes the place of the one before. */

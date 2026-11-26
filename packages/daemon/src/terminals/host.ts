@@ -666,6 +666,62 @@ export function printedSince(before: readonly string[], after: readonly string[]
 
 export { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
 
+/** A `/btw` side question's answer as Claude Code draws it: over the bottom of its screen while it works — a rule of
+ *  `▔`, the question as it was asked (`  /btw …`), the answer indented under it, and, once it is all there, a line
+ *  naming the keys (`c to copy · f to fork · Esc to close`). `complete`: that line was seen; without it the answer may
+ *  still be arriving. Read off Claude Code 2.1.332 (2026-11-26). */
+export type AsideAnswer = { readonly answer: string; readonly complete: boolean; readonly working: boolean };
+
+const ASIDE_RULE = /^\s*▔{10,}\s*$/u;
+const ASIDE_ASK = /^\s{0,4}\/btw\b/u;
+const ASIDE_KEYS = /\bEsc to close\b|\bc to copy\b/u;
+const ASIDE_INDENT = /^\s*/u;
+/** The panel's own line while the answer is still coming: a spinner and a word (`✽ Answering…`), not the answer. */
+const ASIDE_WORKING = /^\s*[✳✶✷✸✹✺✻✼✽✢✣✤✥·*•]\s+\S.*…\s*$/u;
+/** A character that ends a word by itself (Chinese sets no spaces): wrapped rows of a paragraph join without one. */
+const CJK = /[⺀-鿿豈-﫿　-〿＀-￯]/u;
+
+/** The side question's panel on the screen, if it shows one: its answer lines, dedented, a paragraph a line. */
+export function asideOnScreen(lines: readonly string[]): AsideAnswer | null {
+  let rule = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (ASIDE_RULE.test(lines[i]!)) { rule = i; break; }
+  if (rule < 0) return null;
+  let ask = -1;
+  for (let i = rule + 1; i < Math.min(lines.length, rule + 4); i++) if (ASIDE_ASK.test(lines[i]!)) { ask = i; break; }
+  if (ask < 0) return null;
+  // The question itself may take several rows: the answer begins after the blank row under it.
+  let from = ask + 1;
+  while (from < lines.length && lines[from]!.trim()) from += 1;
+  const text: string[] = [];
+  let complete = false, working = false;
+  for (let i = from; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.trim()) { text.push(""); continue; }
+    if (ASIDE_INDENT.exec(line)![0].length >= 4) {
+      // Its spinner says an answer is on the way; it is not part of the answer.
+      if (ASIDE_WORKING.test(line)) { working = true; continue; }
+      text.push(line);
+      continue;
+    }
+    if (ASIDE_KEYS.test(line)) complete = true;
+    // Anything else at the margin is the screen again, not the panel.
+    break;
+  }
+  while (text.length && !text[text.length - 1]!.trim()) text.pop();
+  const rows = text.filter((l) => l.trim());
+  if (!rows.length) return working ? { answer: "", complete, working } : null;
+  const indent = Math.min(...rows.map((l) => ASIDE_INDENT.exec(l)![0].length));
+  const paragraphs: string[][] = [[]];
+  for (const line of text) {
+    if (!line.trim()) { if (paragraphs[paragraphs.length - 1]!.length) paragraphs.push([]); continue; }
+    paragraphs[paragraphs.length - 1]!.push(line.slice(indent).trimEnd());
+  }
+  const answer = paragraphs.filter((p) => p.length)
+    .map((p) => p.reduce((out, row) => (!out ? row : out + (CJK.test(out.slice(-1)) || CJK.test(row[0] ?? "") ? "" : " ") + row), ""))
+    .join("\n\n").trim();
+  return answer || working ? { answer, complete, working } : null;
+}
+
 /** A reply a screen sent, kept until the agent's own record holds it. The record is what the screens show, and a
  *  message reaches it late: the agent writes it down only as its turn begins — seconds after, for a session's first —
  *  and one sent while it works is not written down until it is taken (Codex). Meanwhile it is at work with nothing
@@ -1823,6 +1879,37 @@ export class TerminalHost {
     if (asking()) return { given: false, why: "它在等你回答或批准，先处理那个" };
     this.write(id, replyBytes(text, this.bracketedPaste(id), true));
     return { given: true };
+  }
+
+  /** A side question put to a Claude Code at work through its own `/btw` (docs/chatroom-v0.md §13): it is answered
+   *  beside the turn, without the turn being interrupted; the answer is read off the panel and the panel closed with
+   *  Esc, which the panel takes before the turn sees it. Only while it works, with nothing typed and nothing asked of
+   *  the user. `answer`: "" or null — nothing was read; the panel is closed all the same. */
+  async aside(id: string, question: string, o: { stepMs?: number; waitMs?: number; stillMs?: number } = {}): Promise<{ readonly ok: boolean; readonly answer?: string; readonly why?: string }> {
+    const s = this.sessions.get(id);
+    if (!s || s.status === "exited") return { ok: false, why: "它的终端已经结束" };
+    if (s.harness !== "claude-code") return { ok: false, why: "这个 agent 的旁路提问还没有接" };
+    if (s.status !== "working") return { ok: false, why: "它此刻不在干活" };
+    if (s.pending.size || s.attention || this.choicesNow(s)) return { ok: false, why: "它在等你回答或批准" };
+    if (!this.inputClear(s)) return { ok: false, why: "它的输入框里有没发出的字" };
+    this.write(id, replyBytes(`/btw ${question}`, this.bracketedPaste(id), true));
+    const step = o.stepMs ?? 250, still = o.stillMs ?? 4000, until = this.o.now() + (o.waitMs ?? 60_000);
+    const read = (): AsideAnswer | null => (this.sessions.get(id) === s && s.status !== "exited" ? asideOnScreen(this.screenAll(s)) : null);
+    let seen: AsideAnswer | null = null, changed = this.o.now();
+    while (this.o.now() < until) {
+      await new Promise((r) => setTimeout(r, step));
+      const now = read();
+      if (!now) continue;
+      if (now.answer !== seen?.answer) { seen = now; changed = this.o.now(); }
+      // Its keys' line may be drawn before the answer is: done is that line, an answer, and no spinner; or an answer
+      // that has stood still a good while without one (some answers are drawn without the line).
+      if (now.complete && now.answer && !now.working) break;
+      if (seen && now.answer && !now.working && this.o.now() - changed >= still) break;
+    }
+    // Esc closes the panel: while it is up it takes the key, so the turn goes on undisturbed.
+    const ctx = this.keyContext(id);
+    for (let i = 0; i < 2 && read(); i++) { this.write(id, keySequence("esc", ctx)); await new Promise((r) => setTimeout(r, step)); }
+    return seen ? { ok: true, answer: seen.answer } : { ok: false, why: "它没有打开旁路的面板" };
   }
 
   /** 撤回 in the agent's own server (OpenCode: Companion.revertTo); undefined when its terminal has none. */

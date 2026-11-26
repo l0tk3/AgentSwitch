@@ -303,15 +303,19 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
     public let deleted: Bool
     /// Said in a stretch of its sender's conversation that was taken back since (user #288): 「已退回」.
     public let rewound: Bool
+    /// A member at work answering at once through its own `/btw`, the message it answers still in its queue (§13,
+    /// 2026-11-26, user #529): drawn with an `Aside` beside its name.
+    public let aside: Bool
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, deleted, rewound }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, deleted, rewound, aside }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, deleted: Bool = false, rewound: Bool = false) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, deleted: Bool = false, rewound: Bool = false, aside: Bool = false) {
         self.deleted = deleted
         self.rewound = rewound
+        self.aside = aside
         self.files = files
         self.task = task
         self.seq = seq
@@ -334,6 +338,7 @@ public struct RoomMessage: Decodable, Equatable, Sendable, Identifiable {
         task = try? c.decodeIfPresent(Int.self, forKey: .task)
         deleted = (try? c.contains(.deleted) && !c.decodeNil(forKey: .deleted)) ?? false
         rewound = (try? c.contains(.rewound) && !c.decodeNil(forKey: .rewound)) ?? false
+        aside = (try? c.contains(.aside) && !c.decodeNil(forKey: .aside)) ?? false
     }
 }
 

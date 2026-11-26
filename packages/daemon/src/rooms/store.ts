@@ -121,6 +121,9 @@ export type Message = {
   /** Said in a stretch of its sender's conversation that was taken back since (rooms/rewind.ts): its sender no longer
    *  remembers saying it (「已退回」). */
   readonly rewound?: { readonly at: number };
+  /** A quick answer from a member at work, put to it through its own `/btw` while the message it answers waits for
+   *  its main line (§13, 2026-11-26): the original is still queued. */
+  readonly aside?: true;
 };
 
 /** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
@@ -844,7 +847,7 @@ export class RoomStore {
     return this.save({ ...room, notes: clean ? { text: clean, at: this.now(), by: seat.handle } : null });
   }
 
-  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[]; readonly expects?: "none" | "answer"; readonly task?: number }): Message {
+  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[]; readonly expects?: "none" | "answer"; readonly task?: number; readonly aside?: true }): Message {
     const room = this.get(id);
     const from = this.seatOf(room, o.from);
     if (from.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
@@ -882,7 +885,7 @@ export class RoomStore {
         ? here.filter((s) => s.kind === "session" && s.canAdd).map((s) => s.handle)
         : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
-    const message: Message = { seq: Math.max(room.lastSeq, this.db.last(id)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }) };
+    const message: Message = { seq: Math.max(room.lastSeq, this.db.last(id)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}), ...(o.expects ? { expects: o.expects } : {}), ...(task === undefined ? {} : { task }), ...(o.aside ? { aside: true as const } : {}) };
     const waiting = to.filter((h) => h !== YOU);
     this.count(id, from.handle, { posts: 1 }, message.task);
     this.db.add(id, message, JSON.stringify(message));
@@ -1158,5 +1161,5 @@ function messageFrom(v: unknown): Message | null {
   const o = v as Record<string, unknown>;
   // A message of files alone has no words: it is kept all the same.
   if (!num(o.seq) || !str(o.from) || typeof o.text !== "string" || !num(o.at)) return null;
-  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}), ...(o.deleted && typeof o.deleted === "object" && num((o.deleted as Record<string, unknown>).at) ? { deleted: { at: (o.deleted as { at: number }).at, by: str((o.deleted as Record<string, unknown>).by) ? (o.deleted as { by: string }).by : YOU } } : {}), ...(o.rewound && typeof o.rewound === "object" && num((o.rewound as Record<string, unknown>).at) ? { rewound: { at: (o.rewound as { at: number }).at } } : {}) };
+  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}), ...(o.expects === "none" || o.expects === "answer" ? { expects: o.expects } : {}), ...(num(o.task) ? { task: o.task } : {}), ...(o.deleted && typeof o.deleted === "object" && num((o.deleted as Record<string, unknown>).at) ? { deleted: { at: (o.deleted as { at: number }).at, by: str((o.deleted as Record<string, unknown>).by) ? (o.deleted as { by: string }).by : YOU } } : {}), ...(o.rewound && typeof o.rewound === "object" && num((o.rewound as Record<string, unknown>).at) ? { rewound: { at: (o.rewound as { at: number }).at } } : {}), ...(o.aside === true ? { aside: true as const } : {}) };
 }
