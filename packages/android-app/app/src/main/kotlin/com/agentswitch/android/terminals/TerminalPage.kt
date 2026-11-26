@@ -525,6 +525,7 @@ private fun PageContent(opened: TerminalInfo, page: TerminalPageModel, record: S
                 val head = when (page.harness) {
                     "claude-code" -> "Model · Claude Code 会把它记成新会话的默认模型"
                     "grok" -> "Model · Grok 会把它记成新会话的默认模型"
+                    "agy" -> "Model · Antigravity 会把它记成新会话的默认模型"
                     else -> "Model"
                 }
                 val older = offer.options.filter { it.older }

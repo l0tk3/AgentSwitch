@@ -88,6 +88,7 @@ import kotlinx.coroutines.launch
 /** The agents a phone starts (no Shell here), in the order of the tiles: id and name. */
 val newTerminalAgents: List<Pair<String, String>> = listOf(
     "claude-code" to "Claude Code", "codex" to "Codex", "opencode" to "OpenCode", "pi" to "pi", "grok" to "Grok",
+    "agy" to "Antigravity",
 )
 
 /** `< >` is one of several (§7.2.6). */

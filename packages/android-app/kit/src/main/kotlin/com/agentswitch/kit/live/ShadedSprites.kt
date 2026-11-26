@@ -136,6 +136,9 @@ data class ShadedSprite(
             "grok" to ShadedSprite(listOf(
                 "........W", "...WW#.W.", "..W#..W..", ".W#..W.m.", ".W#.W..m.", ".W#....m.", "..#m..m..", ".#.mmd...", "#........",
             )),
+            "agy" to ShadedSprite(listOf(
+                "....W....", "...W##...", "...W##...", "..W###m..", "..W#.#m..", ".W##.##m.", ".W#...#m.", "W##...##m", "W#.....#m",
+            )),
         )
 
         /**
@@ -146,7 +149,7 @@ data class ShadedSprite(
             "dispatch" to dispatch, "terminals" to terminals, "browser" to browser, "settings" to settings, "list" to list,
             "splitRight" to splitRight, "splitDown" to splitDown, "new" to new, "lock" to lock, "lockSmall" to lockSmall,
             "claude-code" to agents.getValue("claude-code"), "codex" to agents.getValue("codex"), "opencode" to agents.getValue("opencode"),
-            "pi" to agents.getValue("pi"), "grok" to agents.getValue("grok"), "stack" to stack,
+            "pi" to agents.getValue("pi"), "grok" to agents.getValue("grok"), "agy" to agents.getValue("agy"), "stack" to stack,
         )
 
         /**

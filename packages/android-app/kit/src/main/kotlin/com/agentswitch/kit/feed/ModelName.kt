@@ -40,6 +40,7 @@ object ModelName {
         "opencode" -> "OpenCode"
         "pi" -> "pi"
         "grok" -> "Grok"
+        "agy" -> "Antigravity"
         "echo" -> "Echo"
         else -> capitalized(id)
     }

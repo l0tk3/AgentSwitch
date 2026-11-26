@@ -23,8 +23,8 @@ class ShadedSpritesTests {
      */
     @Test
     fun testThePicturesAreTheOnesTheOtherCopiesHave() {
-        assertEquals(3_628_782_494L, ShadedSprite.digest)
-        assertEquals(16, all.size)
+        assertEquals(1_503_404_347L, ShadedSprite.digest)
+        assertEquals(17, all.size)
         assertEquals(all.size, all.map { it.first }.toSet().size)
     }
 
@@ -35,7 +35,7 @@ class ShadedSpritesTests {
             assertTrue(sprite.rows.all { it.length == sprite.width }, "$name: every row is as long as the first")
             assertTrue(sprite.width <= 16, name)
             assertTrue(sprite.height <= 16, name)
-            assertEquals(name.endsWith("code") || name == "codex" || name == "pi" || name == "grok", ShadedSprite.agents[name] != null, name)
+            assertEquals(name.endsWith("code") || name == "codex" || name == "pi" || name == "grok" || name == "agy", ShadedSprite.agents[name] != null, name)
             for (tone in sprite.rows.joinToString("").toSet()) {
                 if (tone == '.') continue
                 assertNotNull(ShadedSprite.color(tone, dark = true), "$name: $tone is a tone")

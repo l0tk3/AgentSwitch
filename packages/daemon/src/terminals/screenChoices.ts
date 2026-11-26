@@ -19,6 +19,14 @@
  *  number (`    (○) Yes, and don't ask again for anything (always-approve mode)`), and the numbered rows keep their
  *  numbers around it, so the numbers skip one (`1 (○) Always allow: …`, then `3 (●) Yes, proceed`, 4, 5).
  *
+ *  Antigravity CLI's lists are the two common shapes (2026-11-26, seen with agy 1.5.17 in a pty): what it asks before a
+ *  tool is numbered rows with `>` before the selected one (`> 1. Yes, run command`), its folder question two plain
+ *  rows (`> Yes, I trust this folder` / `  No, exit`). Only the line under them is its own: `↑/↓ Navigate · …`, which
+ *  for the first names no Enter at all (`↑/↓ Navigate · tab Amend · ctrl+g edit/expand command`) — taken as the hint on
+ *  an Antigravity terminal's screen. The same line stands under what it completes while a command is typed (`> /model
+ *  …`, `  /mcp …`): rows that all begin with `/` are that, and no question. And its status line stands under that
+ *  line, at the screen's very end (in a terminal of ours the model's name, terminals/agy.ts): passed over.
+ *
  *  `title` is what is asked: the paragraph above the rows that asks something, else the nearest. `text` is everything
  *  the screen says above the rows, when that is more than the title — a folder's question is several paragraphs, and
  *  the last line of one of them (`decision will be saved.`) said nothing. */
@@ -37,6 +45,8 @@ const CHOICE_ROW = /^\s*(?:[│|]\s*)?(?:([›❯>▶])\s+)?(\d{1,2})[.)]\s+(\S.
 const PLAIN_ROW = /^(\s*(?:[│|]\s*)?)(?:([›❯>▶])(\s+)|(\s+))(\S.*?)\s*(?:[│|]\s*)?$/u;
 /** The line under a list that says how to take a row of it. */
 const TAKE_HINT = /\benter\b.*\b(select|confirm|continue|choose|submit)|\besc\b.*\b(back|cancel|quit|exit)/i;
+/** The same line as Antigravity CLI writes it, whatever keys it goes on to name. */
+const AGY_HINT = /↑\/↓\s*Navigate\b/iu;
 /** A rule, or an edge of a box: nothing but line-drawing. */
 const RULE_ROW = /^[\s─━═╭╮╰╯┌┐└┘├┤│|]*[─━═]{3,}[\s─━═╭╮╰╯┌┐└┘├┤│|]*$/u;
 /** A row of the conversation, not of the question: an agent's bullet, a prompt mark, a spinner. */
@@ -58,14 +68,33 @@ const edges = (l: string): string => l.replace(/^[\s│|╭╰─]+|[\s│|╮�
 
 /** The list on the screen's last rows, if it shows one. `lines` are the screen's rows top to bottom, blank ones
  *  included or not; `cols` its width, for telling a wrapped line from one that ends (else the widest row's);
- *  `harness` the agent whose screen it is, for the shapes only one of them draws (Grok's). */
-export function choicesOnScreen(lines: readonly string[], cols?: number, harness?: string): ScreenChoices | null {
+ *  `harness` the agent whose screen it is, for the shapes only one of them draws (Grok's) and the hint only one of
+ *  them writes (Antigravity's). */
+export function choicesOnScreen(all: readonly string[], cols?: number, harness?: string): ScreenChoices | null {
+  const lines = harness === "agy" ? aboveStatusLine(all) : all;
   const width = cols ?? Math.max(0, ...lines.map((l) => l.trimEnd().length));
   const own = harness === "grok" ? radio(lines) ?? keyed(lines, width) : null;
-  const found = own ?? numbered(lines) ?? plain(lines);
+  const hint = harness === "agy" ? AGY_HINT : TAKE_HINT;
+  const found = own ?? numbered(lines, hint) ?? plain(lines, hint);
   if (!found) return null;
+  // What Antigravity completes under its input while a command is typed is no question.
+  if (harness === "agy" && found.options.every((o) => o.label.startsWith("/"))) return null;
   const { title, text } = found.asked ?? asked(lines, found.first, width);
   return { title, options: found.options, selected: found.selected, ...(text && text !== title ? { text } : {}) };
+}
+
+/** How many rows Antigravity's status line may take under a list's hint. */
+const AGY_STATUS_ROWS = 2;
+
+/** An Antigravity screen without its status line, where a list's hint stands right above it. */
+function aboveStatusLine(lines: readonly string[]): readonly string[] {
+  let under = 0;
+  for (let i = lines.length - 1; i >= 0 && under <= AGY_STATUS_ROWS; i--) {
+    if (!lines[i]!.trim()) continue;
+    if (AGY_HINT.test(lines[i]!)) return under ? lines.slice(0, i + 1) : lines;
+    under += 1;
+  }
+  return lines;
 }
 
 /** `asked`: what stands above the rows, where the shape reads it itself. */
@@ -159,7 +188,7 @@ function keyed(all: readonly string[], width: number): Found | null {
  *  The rows need not begin at 1: a list longer than its room shows the rows around the selection (Codex's question
  *  with five options draws `2.` `3.` `› 4.` over `option 4/5 | …`), and was read as no list at all (same day: 当前
  *  codex的选项并不会在简略模式蹦出来). A row is taken by moving the selection, so the rows not shown are not needed. */
-function numbered(all: readonly string[]): Found | null {
+function numbered(all: readonly string[], takeHint: RegExp = TAKE_HINT): Found | null {
   const at = all.map((_, i) => i).filter((i) => all[i]!.trim());
   const lines = at.map((i) => all[i]!);
   let end = -1;
@@ -176,7 +205,7 @@ function numbered(all: readonly string[]): Found | null {
   }
   if (!rows.length || rows.length > MAX_CHOICES || rows.filter((r) => r.marked).length !== 1) return null;
   const under = lines.slice(end + 1, end + 1 + MAX_UNDER);
-  const hint = under.findIndex((l) => TAKE_HINT.test(l));
+  const hint = under.findIndex((l) => takeHint.test(l));
   if (hint >= 0) {
     if (under.slice(0, hint).some((l) => SAID_ROW.test(l))) return null;
   } else {
@@ -197,10 +226,10 @@ function numbered(all: readonly string[]): Found | null {
 
 /** Rows without numbers: the last thing on the screen is the line that says how to take one, and right above it two
  *  rows or more, their words beginning in one column, exactly one with the mark before them. */
-function plain(lines: readonly string[]): Found | null {
+function plain(lines: readonly string[], takeHint: RegExp = TAKE_HINT): Found | null {
   let hint = lines.length - 1;
   while (hint >= 0 && !lines[hint]!.trim()) hint -= 1;
-  if (hint < 1 || !TAKE_HINT.test(lines[hint]!)) return null;
+  if (hint < 1 || !takeHint.test(lines[hint]!)) return null;
   let end = hint - 1;
   while (end >= 0 && hint - end <= MAX_GAP && !lines[end]!.trim()) end -= 1;
   if (end < 0 || !lines[end]!.trim()) return null;

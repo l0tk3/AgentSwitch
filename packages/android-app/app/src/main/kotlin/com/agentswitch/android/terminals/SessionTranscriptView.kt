@@ -65,7 +65,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The agents a past session can be resumed in (the iPhone's `TerminalsTab.resumable`). */
-private val resumable = setOf("claude-code", "codex", "opencode", "pi", "grok")
+private val resumable = setOf("claude-code", "codex", "opencode", "pi", "grok", "agy")
 
 /** A running session is read again this often (the iPhone's `SessionsView.activePoll`). */
 private const val activePollMs = 10_000L

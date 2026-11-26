@@ -355,7 +355,7 @@ fun ClassicMarkView(state: PixelArt.MarkState, height: Dp, modifier: Modifier = 
     }
 }
 
-/** The agents' marks as lines, each from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π, Grok's ring with the stroke that runs out of it. */
+/** The agents' marks as lines, each from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π, Grok's ring with the stroke that runs out of it, Antigravity's peak with a smaller one in its opening. */
 fun DrawScope.drawClassicAgent(harness: String, rect: Rect, color: Color) {
     val s = min(rect.width, rect.height)
     val origin = Offset(rect.center.x - s / 2, rect.center.y - s / 2)
@@ -386,6 +386,11 @@ fun DrawScope.drawClassicAgent(harness: String, rect: Rect, color: Color) {
             path.arcTo(Rect(c.x - r, c.y - r, c.x + r, c.y + r), -20f, 310f, true)
             path.move(0.5f, 0.5f); path.line(0.9f, 0.1f)
             path.move(0.1f, 0.9f); path.line(0.29f, 0.71f)
+        }
+        "agy" -> {
+            // A peak, and a smaller one standing in its opening.
+            path.move(0.12f, 0.88f); path.line(0.5f, 0.12f); path.line(0.88f, 0.88f)
+            path.move(0.36f, 0.88f); path.line(0.5f, 0.6f); path.line(0.64f, 0.88f)
         }
         else -> {
             path.move(0.1f, 0.24f); path.line(0.9f, 0.24f)

@@ -525,6 +525,32 @@
 - §5.17 的“还没有会话、屏幕上是列表时不收回复”对它原样成立：Grok 在信任之前没有会话。
 - **验证**：`tests/grok.test.ts` 里三条——两种真实屏幕的原样行和各种不认的样子（没有实心的、两个实心的、编号不连、只有一行、被对话顶到上面去的、键不是首字母的、上面没有问话的、别的 agent 的屏幕上的同样几行）；假 agent 画出这两种，经服务各选一行。真的 Grok：`scripts/grok_terminal_probe.ts`，经服务选了信任提问的 `Yes, proceed` 和工具提问的 `Yes, proceed`，两次都按预期走下去。
 
+### 5.24 Antigravity 屏幕上的列表（2026-11-26）
+
+用户 #508：加 Antigravity CLI。它和 Grok 一样只在自己的屏幕上问（terminal-v0 §3 “Antigravity”）。看到的是用户机器上的 agy 1.5.17（伪终端里的 TUI）：
+
+```
+Requesting permission for:
+   rm probe-file.txt
+
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with 'rm probe-file.txt'
+  3. Yes, and always allow for commands that start with 'rm probe-file.txt' (Persist to settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+Gemini 3.8 Flash (High)
+```
+
+信任文件夹是 `> Yes, I trust this folder` / `  No, exit`，底下 `↑/↓ Navigate · enter Confirm`。两种都是已经读得出的样子（带编号、`>` 标选中；不带编号、`>` 标选中），差的只有两处，所以没有加新的读法：
+
+- 底下那行提示是它自己的写法，前一种里没有 Enter 这个词。在 Antigravity 的终端上，`↑/↓ Navigate` 就算提示；别的 agent 的屏幕上同样几行不认。
+- 最后一行是它的状态栏（AgentSwitch 的终端里是模型的名字），排在提示下面：读之前先去掉。
+- 它在输入命令时弹出的补全（`> /mcp …` / `  /model …`）底下也是这行提示：每一行都以 `/` 开头的不是提问。
+- 选一行：方向键移到那一行再回车，和别的列表一样。
+- **验证**：`tests/agy.test.ts` 里一条（两种真实屏幕的原样行、带状态栏的、补全、空闲时、别的 agent 的屏幕）；真的 agy：`scripts/agy_terminal_probe.ts` 经服务各选了一行。
+
 ## 6. 安全
 
 - 记录是 agent 自己写下的会话，原来就经 `/sessions/:harness/:id` 给到已配对的手机；新接口是同一份内容的更细的读法，同一道门（远程只给已配对的设备，路由表里登记）。

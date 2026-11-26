@@ -1,6 +1,7 @@
 /** What each agent offers today for a new terminal's model menu (docs/terminal-v0.md §1): its own list, in its own
  *  order, under its own names — Claude Code's picker (`supportedModels()`), Codex's `model/list`, Grok's `grok models`
- *  with the list it keeps (grokModels.ts). A model a newer one of
+ *  with the list it keeps (grokModels.ts), Antigravity's `agy models` with each model's variants folded into one
+ *  entry (agyModels.ts). A model a newer one of
  *  the same family supersedes (Opus 4.8 under Opus 5.5, GPT-5.6-Sol under GPT-6-Sol), or one the agent names an upgrade
  *  for, is marked older: the menus fold those away, as Claude Code's picker does. Claude's aliases stay aliases
  *  (`opus` follows the next Opus by itself). Asked again every few hours and whenever an agent's binary changes (an
@@ -11,6 +12,7 @@ import { claudeIds, codexDaybreakDefault, codexIds, listClaudeModels, listCodexF
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { ordered } from "../harness/efforts.js";
 import { grokOwnDefaults, listGrokModels, type GrokModelInfo, type GrokOwnDefaults } from "./grokModels.js";
+import { agyFamilies, agyNamed, agyOwnModel, listAgyModels, type AgyModelInfo } from "./agyModels.js";
 
 export type ModelOffer = {
   readonly id: string; readonly name: string; readonly description?: string; readonly older?: true;
@@ -29,7 +31,7 @@ export type AgentOffer = {
   readonly daybreak?: boolean;
 };
 
-export type Offers = Partial<Record<"claude-code" | "codex" | "grok", AgentOffer>>;
+export type Offers = Partial<Record<"claude-code" | "codex" | "grok" | "agy", AgentOffer>>;
 
 /** "Opus 5.5" → opus / [5, 5]; "GPT-6-Sol" → gpt sol / [6]; "GPT-5.5" → gpt / [5, 5]. Null without a version. */
 export function familyOf(name: string): { family: string; version: number[] } | null {
@@ -108,17 +110,38 @@ export function grokOffer(list: readonly GrokModelInfo[], own: GrokOwnDefaults =
   };
 }
 
+/** Antigravity's list: a model once, with its levels (agyModels.ts). "default" is the model new sessions start on —
+ *  the one the user's own settings name (`own`, the picker's name of a variant, which a `/model` in any session of
+ *  theirs changes) at that variant's level, else the one listed first. */
+export function agyOffer(list: readonly AgyModelInfo[], own: string | null = null): AgentOffer {
+  const families = agyFamilies(list);
+  const named = own ? agyNamed(families, own) : null;
+  const first = families.find((f) => f.id === named?.model) ?? families[0];
+  const level = named?.effort ?? first?.defaultEffort;
+  const entries = families.map((f): Entry => ({ id: f.id, name: f.name, efforts: ordered(f.efforts), ...(f.defaultEffort ? { defaultEffort: f.defaultEffort } : {}) }));
+  return {
+    models: markOlder(entries), ...(first ? { defaultName: first.name } : {}),
+    ...(first?.efforts.length ? { efforts: ordered(first.efforts) } : {}), ...(level ? { defaultEffort: level } : {}),
+  };
+}
+
 export type ModelOffersOptions = {
   readonly claudeExecutable?: string;
   readonly codexBinary?: string;
   /** Grok's program, and the folder it keeps its own in (`~/.grok`); absent: Grok is not asked. */
   readonly grokBinary?: string;
   readonly grokHome?: string | null;
+  /** Antigravity's program, the folder it keeps its own in (`~/.gemini/antigravity-cli`, for its settings), and its
+   *  home where that is not `~/.gemini` (tests, probes: passed to it as `--gemini_dir`); absent: it is not asked. */
+  readonly agyBinary?: string;
+  readonly agyHome?: string | null;
+  readonly agyGeminiDir?: string | null;
   readonly log?: (line: string) => void;
   /** Tests: the agents' answers without starting them. */
   readonly listClaude?: () => Promise<ClaudeModelInfo[]>;
   readonly listCodex?: () => Promise<CodexModelInfo[]>;
   readonly listGrok?: () => Promise<GrokModelInfo[]>;
+  readonly listAgy?: () => Promise<AgyModelInfo[]>;
   /** Tests: the feature flags Codex knows, and how its new sessions start. */
   readonly codexFeatures?: () => Promise<string[]>;
   readonly codexDaybreakDefault?: () => Promise<boolean>;
@@ -144,6 +167,9 @@ export class ModelOffers {
   /** Grok's models as last listed, and its configuration as it stood when the offer was made from them. */
   private grokList: readonly GrokModelInfo[] | null = null;
   private grokConfig = "";
+  /** Antigravity's models as last listed, and its settings as they stood when the offer was made from them. */
+  private agyList: readonly AgyModelInfo[] | null = null;
+  private agySettings = "";
 
   constructor(private readonly o: ModelOffersOptions) {
     for (const path of this.watched()) this.signatures.set(path, this.signature(path));
@@ -157,7 +183,19 @@ export class ModelOffers {
       const now = this.signature(`${home}/config.toml`);
       if (now !== this.grokConfig) { this.grokConfig = now; this.offers = { ...this.offers, grok: grokOffer(this.grokList, grokOwnDefaults(home)) }; }
     }
+    // So Antigravity's: `/model` and `/effort` there write its settings.json.
+    const agy = this.o.agyHome;
+    if (this.agyList && agy) {
+      const now = this.signature(`${agy}/settings.json`);
+      if (now !== this.agySettings) { this.agySettings = now; this.offers = { ...this.offers, agy: agyOffer(this.agyList, agyOwnModel(agy)) }; }
+    }
     return this.offers;
+  }
+
+  /** The model Antigravity names (as its picker shows a variant) as the menus list it, with its level; null before
+   *  its list was read, or for one not on it. */
+  agyNamed(name: string): { readonly model: string; readonly effort: string | null } | null {
+    return this.agyList ? agyNamed(agyFamilies(this.agyList), name) : null;
   }
 
   /** OpenCode's variants per model (`provider/id`), as last read; none until a server of ours has listed its models. */
@@ -226,7 +264,7 @@ export class ModelOffers {
   }
 
   private watched(): string[] {
-    return [this.o.claudeExecutable, this.o.codexBinary, this.o.grokBinary].filter((p): p is string => Boolean(p));
+    return [this.o.claudeExecutable, this.o.codexBinary, this.o.grokBinary, this.o.agyBinary].filter((p): p is string => Boolean(p));
   }
 
   private signature(path: string): string { return (this.o.signature ?? fileSignature)(path); }
@@ -236,11 +274,14 @@ export class ModelOffers {
     const listClaude = this.o.listClaude ?? (() => listClaudeModels(this.o.claudeExecutable));
     const listCodex = this.o.listCodex ?? (this.o.codexBinary ? () => listCodexModels(this.o.codexBinary!) : null);
     const listGrok = this.o.listGrok ?? (this.o.grokBinary ? () => listGrokModels(this.o.grokBinary!, this.o.grokHome ?? null) : null);
-    const [claude, codex, grok] = await Promise.all([
+    const listAgy = this.o.listAgy ?? (this.o.agyBinary ? () => listAgyModels(this.o.agyBinary!, this.o.agyGeminiDir ?? null) : null);
+    const [claude, codex, grok, agy] = await Promise.all([
       listClaude().catch((e: Error) => { log(`model discovery (claude-code): ${e.message}`); return null; }),
       listCodex ? listCodex().catch((e: Error) => { log(`model discovery (codex): ${e.message}`); return null; }) : Promise.resolve(null),
       // Only a terminal runs Grok (the router sends it no task): its ids are no part of what is returned.
       listGrok ? listGrok().catch((e: Error) => { log(`model discovery (grok): ${e.message}`); return null; }) : Promise.resolve(null),
+      // Nor Antigravity's.
+      listAgy ? listAgy().catch((e: Error) => { log(`model discovery (agy): ${e.message}`); return null; }) : Promise.resolve(null),
     ]);
     const next: { -readonly [K in keyof Offers]: Offers[K] } = { ...this.offers };
     if (claude?.length) next["claude-code"] = claudeOffer(claude);
@@ -250,6 +291,12 @@ export class ModelOffers {
       this.grokList = grok;
       this.grokConfig = home ? this.signature(`${home}/config.toml`) : "";
       next.grok = grokOffer(grok, home ? grokOwnDefaults(home) : undefined);
+    }
+    if (agy?.length) {
+      const home = this.o.agyHome ?? null;
+      this.agyList = agy;
+      this.agySettings = home ? this.signature(`${home}/settings.json`) : "";
+      next.agy = agyOffer(agy, home ? agyOwnModel(home) : null);
     }
     this.offers = next;
     await this.readVariants();

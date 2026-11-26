@@ -23,6 +23,7 @@ function world() {
     opencode: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
     pi: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
     grok: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
+    agy: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
   };
   let settings: NodeSettings = { name: "box", lan: "10.0.0.9" };
   const client = {

@@ -1,5 +1,5 @@
-/** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex, OpenCode, pi and
- *  Grok, each file parsed again only when it changed. Sessions that ran in a temporary folder or in AgentSwitch's own data
+/** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex, OpenCode, pi,
+ *  Grok and Antigravity, each file parsed again only when it changed. Sessions that ran in a temporary folder or in AgentSwitch's own data
  *  directory are left out (probes, tests, AgentSwitch's executors). Read-only, except `remove`: the user deleting a
  *  session's record (docs/terminal-v0.md §5). */
 
@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages, codexProviderOf, codexThreadName } from "./codex.js";
 import { GROK_RECORD, grokChildren, grokFacts, grokHome, grokMessages } from "./grok.js";
+import { agyDelete, agyFacts, agyHome, agyMessagesIn, agySessions, agyTranscript } from "./agy.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
 import type { KeptPictures } from "./pictures.js";
@@ -31,6 +32,8 @@ export type SessionSources = {
   readonly grokSessions?: string;
   /** The `sessions` folders of the Grok profiles that keep their own (docs/profiles-v0.md §6.3). */
   readonly grokProfileSessions?: () => readonly string[];
+  /** ~/.gemini/antigravity-cli; absent: Antigravity's conversations are not read. */
+  readonly agyHome?: string;
   /** Deleting an OpenCode session (its own command); absent: OpenCode's sessions cannot be deleted here. */
   readonly openCodeDelete?: OpenCodeDelete;
   /** Folders whose sessions are not the user's own (prefix match). */
@@ -65,6 +68,7 @@ export function defaultSessionSources(dataHome: string, env: NodeJS.ProcessEnv =
     opencodeDb: join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode", "opencode.db"),
     piSessions: join(piAgentDir(env), "sessions"),
     grokSessions: join(grokHome(env) ?? join(home, ".grok"), "sessions"),
+    agyHome: agyHome(env),
     excluded: [tmpdir(), "/tmp/", "/private/tmp/", "/private/var/folders/", "/var/folders/", dataHome],
   };
 }
@@ -114,8 +118,14 @@ export class SessionMonitor {
     ];
     // OpenCode's title is its own, kept in its own store: nothing of ours stands in for it.
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", { ...s, named: true }, now));
+    // Antigravity's conversations are listed in its own index, each with the title it gave it; what was said is in a
+    // transcript of its own, which stands for the conversation where a file is asked for.
+    const agy = this.sources.agyHome ? agySessions(this.sources.agyHome, this.scanFiles).map((s) => {
+      this.files.set(`agy:${s.id}`, agyTranscript(this.sources.agyHome!, s.id));
+      return this.summary("agy", { ...s, named: true }, now);
+    }) : [];
     const own = this.sources.ownIds?.() ?? new Set<string>();
-    return [...fromFiles, ...opencode]
+    return [...fromFiles, ...opencode, ...agy]
       .filter((s): s is SessionSummary => s !== null && !within(s.cwd, hidden) && (!this.isExcluded(s.cwd) || within(s.cwd, shown) || (this.sources.ranHere?.(s.harness, s.id) ?? false)) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, limit)
@@ -240,7 +250,8 @@ export class SessionMonitor {
     try {
       const st = statSync(path);
       if (harness === "codex") this.sources.pictures?.noticed(path, st.size, st.mtimeMs);
-      const facts = factsOf(harness, path, st.mtimeMs);
+      // (Antigravity's are in its index, by the conversation's id.)
+      const facts = harness === "agy" ? (this.sources.agyHome ? agyFacts(this.sources.agyHome, id) : null) : factsOf(harness, path, st.mtimeMs);
       return facts ? { session: this.summary(harness, { startedAt: st.birthtimeMs || st.ctimeMs, ...facts }, this.now()), path } : null;
     } catch { return null; }
   }
@@ -288,7 +299,11 @@ export class SessionMonitor {
         const file = join(root, dir, id, GROK_RECORD);
         if (existsSync(file)) { found = file; break; }
       }
-    } else if (this.sources.piSessions) {
+    } else if (harness === "agy") {
+      // Its transcript, which a conversation has once something was said in it.
+      const file = this.sources.agyHome ? agyTranscript(this.sources.agyHome, id) : "";
+      if (file && existsSync(file)) found = file;
+    } else if (harness === "pi" && this.sources.piSessions) {
       for (const dir of safeDirs(this.sources.piSessions)) {
         const name = safeDirs(join(this.sources.piSessions, dir), true).find((n) => n.endsWith(`_${id}.jsonl`));
         if (name) { found = join(this.sources.piSessions, dir, name); break; }
@@ -366,6 +381,15 @@ export class SessionMonitor {
       const record = `${this.sources.opencodeDb}#${id}`;
       if (!this.sources.openCodeDelete) return { removed, failed: [record] };
       try { if (await this.sources.openCodeDelete(id)) removed.push(record); } catch { failed.push(record); }
+      return { removed, failed };
+    }
+    if (harness === "agy") {
+      // The conversation's own file, its folder of artefacts and transcript (sessions/agy.ts); its row in the
+      // program's index stays, and the list passes over it.
+      const home = this.sources.agyHome;
+      const record = home ? join(home, "conversations", `${id}.db`) : `agy#${id}`;
+      try { if (home && agyDelete(home, id)) removed.push(record); } catch { failed.push(record); }
+      if (removed.length) this.files.delete(`${harness}:${id}`);
       return { removed, failed };
     }
     const drop = (file: string) => {
@@ -478,12 +502,14 @@ export function codexFileOf(name: string, id: string): boolean {
 
 /** A session's messages from the file it is kept in, by its agent's own reader. */
 function messagesOf(harness: SessionHarness, path: string, limit: number, chars: number): SessionMessage[] {
-  return harness === "claude-code" ? claudeMessages(path, limit, chars) : harness === "pi" ? piMessages(path, limit, chars) : harness === "grok" ? grokMessages(path, limit, chars) : codexMessages(path, limit, chars);
+  return harness === "claude-code" ? claudeMessages(path, limit, chars) : harness === "pi" ? piMessages(path, limit, chars) : harness === "grok" ? grokMessages(path, limit, chars)
+    : harness === "agy" ? agyMessagesIn(path, limit, chars) : codexMessages(path, limit, chars);
 }
 
 /** What the list shows of a session kept in a file, by its agent's own reader. */
 function factsOf(harness: SessionHarness, path: string, mtime: number) {
-  return harness === "claude-code" ? claudeFacts(path, mtime) : harness === "pi" ? piFacts(path, mtime) : harness === "grok" ? grokFacts(path, mtime) : codexFacts(path, mtime);
+  // (Antigravity's are read from its index, not from a file: never asked here.)
+  return harness === "claude-code" ? claudeFacts(path, mtime) : harness === "pi" ? piFacts(path, mtime) : harness === "grok" ? grokFacts(path, mtime) : harness === "agy" ? null : codexFacts(path, mtime);
 }
 
 /** `*.jsonl` files `depth` directories below `root`, the newest `limit` modified within `MAX_AGE_MS`; top-level

@@ -37,9 +37,10 @@ object LiveArt {
         "opencode" to listOf("##.##", "#...#", "#...#", "#...#", "##.##"),
         "pi" to listOf("#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"),
         "grok" to listOf(".##.#", "#..#.", "#.#.#", ".#..#", "#.##."),
+        "agy" to listOf("..#..", ".#.#.", ".#.#.", "#...#", "#...#"),
     )
 
     /** A terminal row names its agent as the app shows it (ModelName.harness): the harness for that name. */
     fun harness(named: String): String? =
-        mapOf("Claude Code" to "claude-code", "Codex" to "codex", "OpenCode" to "opencode", "pi" to "pi", "Grok" to "grok")[named]
+        mapOf("Claude Code" to "claude-code", "Codex" to "codex", "OpenCode" to "opencode", "pi" to "pi", "Grok" to "grok", "Antigravity" to "agy")[named]
 }

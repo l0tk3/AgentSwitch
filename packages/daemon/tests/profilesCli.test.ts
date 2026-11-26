@@ -14,6 +14,7 @@ const agents = (): Record<ProfileAgent, AgentProfiles> => ({
   opencode: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
   pi: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
   grok: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
+  agy: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
 });
 
 function harness(over: Partial<ProfilesOptions> = {}, key = "sk-typed-0123456789") {

@@ -127,7 +127,7 @@ data class BrowserTabOwner(val kind: Kind, val id: String, /** `You`, the termin
         get() {
             val first = label.split(" · ").first().swiftTrimmed().lowercase()
             return mapOf("claude code" to "claude-code", "claude" to "claude-code", "codex" to "codex", "opencode" to "opencode",
-                "pi" to "pi", "grok" to "grok")[first]
+                "pi" to "pi", "grok" to "grok", "agy" to "agy", "antigravity" to "agy")[first]
         }
 
     /**

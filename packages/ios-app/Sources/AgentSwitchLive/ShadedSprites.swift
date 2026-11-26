@@ -127,6 +127,9 @@ public struct ShadedSprite: Equatable, Sendable {
         "grok": ShadedSprite([
             "........W", "...WW#.W.", "..W#..W..", ".W#..W.m.", ".W#.W..m.", ".W#....m.", "..#m..m..", ".#.mmd...", "#........",
         ]),
+        "agy": ShadedSprite([
+            "....W....", "...W##...", "...W##...", "..W###m..", "..W#.#m..", ".W##.##m.", ".W#...#m.", "W##...##m", "W#.....#m",
+        ]),
     ]
 
     /// Every picture by name, in the order the three copies list them (this file, the Mac's, the web's
@@ -135,7 +138,7 @@ public struct ShadedSprite: Equatable, Sendable {
         ("dispatch", dispatch), ("terminals", terminals), ("browser", browser), ("settings", settings), ("list", list),
         ("splitRight", splitRight), ("splitDown", splitDown), ("new", new), ("lock", lock), ("lockSmall", lockSmall),
         ("claude-code", agents["claude-code"]!), ("codex", agents["codex"]!), ("opencode", agents["opencode"]!), ("pi", agents["pi"]!),
-        ("grok", agents["grok"]!), ("stack", stack),
+        ("grok", agents["grok"]!), ("agy", agents["agy"]!), ("stack", stack),
     ]
 
     /// A number that changes when any picture does (FNV-1a over the names and rows): the three copies' tests hold the

@@ -123,8 +123,8 @@ describe("the classic look's icons", () => {
   });
 
   it("has a line mark for each agent, pi's for one it does not know", () => {
-    for (const harness of ["claude-code", "codex", "opencode", "pi", "grok"]) expect(L.ICONS[L.AGENT_ICON[harness]!], harness).toBeTruthy();
-    expect(new Set(Object.values(L.AGENT_ICON)).size).toBe(5);
+    for (const harness of ["claude-code", "codex", "opencode", "pi", "grok", "agy"]) expect(L.ICONS[L.AGENT_ICON[harness]!], harness).toBeTruthy();
+    expect(new Set(Object.values(L.AGENT_ICON)).size).toBe(6);
   });
 
   it("draws status as dots and progress as the system's spinner", () => {

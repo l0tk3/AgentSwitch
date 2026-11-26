@@ -14,7 +14,7 @@ struct DispatchDeskView: View {
     @State private var saving = false
     @State private var editing = false
 
-    private static let agents: [(String, String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi"), ("grok", "Grok")]
+    private static let agents: [(String, String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi"), ("grok", "Grok"), ("agy", "Antigravity")]
 
     var body: some View {
         Form {

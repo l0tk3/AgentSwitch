@@ -6,6 +6,8 @@
 
 **2026-11-11：Grok 不在这一页里。** 终端能开 Grok 了（terminal-v0 §3 “Grok”），但它的安装、更新和选版本还没有做：它照 xAI 的说明自己装、自己更新（`grok update`），服务自己找它——`GROK_BIN`，其次 PATH，其次 `~/.local/bin/grok`、`~/.grok/bin/grok`。新建面板里它没装时同样写 `Not Installed`。
 
+**2026-11-26：Antigravity CLI 也不在这一页里。** 终端能开它了（terminal-v0 §3 “Antigravity”），安装、更新和选版本没有做：服务自己找它——`AGY_BIN`，其次 PATH，其次 `~/.local/bin/agy`。它每次启动都会起一个后台更新，AgentSwitch 的终端里关掉了（`AGY_CLI_DISABLE_AUTO_UPDATE=true`）。
+
 本文是草案；界面以演示页 `docs/design/concepts/agents.html` 为准。此前 app-v0 §4 的规定是“执行器需自行安装并登录，应用只检查、不代为运行安装命令”，本文取代其中“只检查”的部分；登录仍由用户自己在终端里完成。
 
 ## 0. 要点

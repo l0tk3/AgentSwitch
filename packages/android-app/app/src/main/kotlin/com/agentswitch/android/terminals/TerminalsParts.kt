@@ -54,13 +54,13 @@ import java.util.Calendar
 // `ProfileDot`; Components.swift's `ConnectionBanner`, `Date.relative`; Look.swift's `LookGlyph`).
 
 /** The agents whose sessions can be gone on with (pi's since 2026-10-11, Grok's since 2026-11-11, docs/terminal-v0.md §5). */
-val terminalsResumable: Set<String> = setOf("claude-code", "codex", "opencode", "pi", "grok")
+val terminalsResumable: Set<String> = setOf("claude-code", "codex", "opencode", "pi", "grok", "agy")
 
 /**
  * Sessions whose record the Mac can delete: every agent's (docs/terminal-v0.md §5; OpenCode, through its own command,
  * and pi since 2026-10-01, user: opencode、pi 都加上删除支持).
  */
-val terminalsDeletable: Set<String> = setOf("claude-code", "codex", "opencode", "pi", "grok")
+val terminalsDeletable: Set<String> = setOf("claude-code", "codex", "opencode", "pi", "grok", "agy")
 
 /**
  * Now · 3m ago · Today 14:20 · Yesterday 14:20 · 9/24 (docs/ui-v0.md §7.2.7, as on the Mac). `ms`: milliseconds since

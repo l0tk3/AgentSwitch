@@ -15,6 +15,9 @@
  *
  *    node hookClient.js                 Claude Code: event name from the payload's hook_event_name
  *    node hookClient.js codex '<json>'  Codex notify
+ *    node hookClient.js agy             Antigravity CLI's status line (terminals/agy.ts): its state on stdin; what the
+ *                                       service follows of it is handed on (never the account's e-mail, plan or
+ *                                       quota), and the model's name is printed for the line under its input
  *    node hookClient.js key             the key this terminal's profile pays by (docs/profiles-v0.md §3.6): Claude
  *                                       Code's `apiKeyHelper`, Codex's provider `auth` command. Printed alone on one
  *                                       line; without one it says why on stderr and fails, so the agent says it has
@@ -125,7 +128,39 @@ async function mail(): Promise<string> {
   return "";
 }
 
-if (process.argv[2] === "wait") {
+/** Antigravity's status line: the line to show is printed at once (it waits for it), then the service is told. Of
+ *  what the program says only this is passed on: its state, whether it waits for an answer, the conversation's id and
+ *  title, the folder, how it asks, the model's name. */
+const AGY_WAIT_MS = 4000;
+async function agy(): Promise<string> {
+  const said = JSON.parse((await readStdin()) || "{}") as Record<string, unknown>;
+  const text = (v: unknown): string => (typeof v === "string" ? v : "");
+  const model = said.model && typeof said.model === "object" ? said.model as Record<string, unknown> : {};
+  const workspace = said.workspace && typeof said.workspace === "object" ? said.workspace as Record<string, unknown> : {};
+  const name = text(model.display_name) || text(model.id);
+  const line = name.slice(0, 80);
+  if (!url || !id || !token) return line;
+  const payload: Record<string, unknown> = {
+    at: Date.now(), agent_state: text(said.agent_state), tool_confirmation_pending: said.tool_confirmation_pending === true,
+    session_id: text(said.conversation_id) || text(said.session_id), conversation_title: text(said.conversation_title).slice(0, 300),
+    cwd: text(workspace.current_dir) || text(said.cwd), model: name.slice(0, 200),
+    // Said only while it is in a mode other than asking each time.
+    ...(typeof said.cycle_mode === "string" ? { cycle_mode: said.cycle_mode.slice(0, 40) } : {}),
+  };
+  await Promise.race([
+    post(`${url}/terminals/hook`, { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, JSON.stringify({ event: "AgyStatus", payload })).catch(() => null),
+    new Promise((r) => setTimeout(r, AGY_WAIT_MS).unref()),
+  ]);
+  return line;
+}
+
+if (process.argv[2] === "agy") {
+  agy().catch(() => "").then((out) => {
+    if (out) process.stdout.write(out, () => process.exit(0));
+    else process.exit(0);
+  });
+}
+else if (process.argv[2] === "wait") {
   mail().catch(() => "").then((text) => {
     if (text) process.stderr.write(`${text}\n`, () => process.exit(2));
     else process.exit(0);

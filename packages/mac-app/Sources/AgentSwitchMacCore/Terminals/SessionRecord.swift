@@ -896,10 +896,10 @@ public enum RecordDisplay {
 
     /// The agents whose model and level a screen can set at once: their own prompt takes a command that does (Claude
     /// Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`, Grok's
-    /// `/model <id>` and `/effort <level>`), or their own server does, the one the terminal's TUI is attached to
+    /// `/model <id>` and `/effort <level>`, Antigravity's the same two), or their own server does, the one the terminal's TUI is attached to
     /// (OpenCode's `POST /api/session/:id/model`, Codex's `thread/settings/update`). All five now; a terminal says
     /// itself when it cannot (`TerminalInfo.sets`: a Codex or an OpenCode started without its server).
-    public static func setsDirectly(_ harness: String) -> Bool { ["claude-code", "pi", "opencode", "codex", "grok"].contains(harness) }
+    public static func setsDirectly(_ harness: String) -> Bool { ["claude-code", "pi", "opencode", "codex", "grok", "agy"].contains(harness) }
 
     /// Why the service did not make a change, in the page's words where it is one of the reasons it gives.
     public static func refusal(_ reason: String) -> String? {
@@ -929,6 +929,7 @@ public enum RecordDisplay {
         case "opencode": "OpenCode"
         case "pi": "pi"
         case "grok": "Grok"
+        case "agy": "Antigravity"
         default: harness
         }
     }

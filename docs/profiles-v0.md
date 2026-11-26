@@ -96,8 +96,9 @@ Claude Code                              Codex
 | OpenCode 2 | `XDG_DATA_HOME`（连同 CONFIG / STATE / CACHE） | 它的库 | `opencode auth login` |
 | pi | `PI_CODING_AGENT_DIR` | `auth.json`、`models.json` | 它自己的登录或密钥 |
 | Grok 1.0.92 | `GROK_HOME`（默认 `~/.grok`） | `auth.json`（顶层一个 map，账号在其中一项的 `email` 里，只读这个字段）；目录里还有设置、信任的文件夹、会话、钩子 | 在那个目录里启动 `grok`，它自己开登录界面（浏览器），或 `GROK_HOME=<目录> grok login` |
+| Antigravity CLI 1.5.17 | 没有环境变量；只有 `HOME`，或隐藏的 `--gemini_dir` | 登录在系统钥匙串里，**只有一条**，换了目录还是同一个账号 | `agy` 里用浏览器登录 Google 账号 |
 
-五家都能靠环境变量换家目录，都不需要改它们的默认目录。
+五家都能靠环境变量换家目录，都不需要改它们的默认目录。**Antigravity 不行**（2026-11-26）：它的登录不跟目录走，换目录换不了账号，所以它只有 `Default`（`creatable: false`，没有账号信息，没有额度），和 OpenCode、pi 现在一样；等它的登录能按目录分开再说。
 
 **家目录里的东西分三类**（以 Claude Code 为例，其余同理）：
 

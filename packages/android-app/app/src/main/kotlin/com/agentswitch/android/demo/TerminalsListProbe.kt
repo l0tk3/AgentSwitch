@@ -35,7 +35,7 @@ object TerminalsListProbe {
     /** The sessions: two to seven a folder, newest first; one written to just now while [tick] goes on. */
     fun sessions(tick: Int): List<SessionSummary> {
         val all = mutableListOf<SessionSummary>()
-        val agents = listOf("claude-code", "codex", "opencode", "pi", "grok")
+        val agents = listOf("claude-code", "codex", "opencode", "pi", "grok", "agy")
         for ((f, cwd) in folders.withIndex()) {
             for (k in 0 until (2 + (f * 5) % 6)) {
                 val n = f * 10 + k
@@ -66,6 +66,6 @@ object TerminalsListProbe {
                 else emptyList(),
             )
         }
-        return TerminalList(terminals = terminals, agents = listOf("claude-code", "codex", "opencode", "pi", "grok"))
+        return TerminalList(terminals = terminals, agents = listOf("claude-code", "codex", "opencode", "pi", "grok", "agy"))
     }
 }

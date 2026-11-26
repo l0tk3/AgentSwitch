@@ -249,8 +249,16 @@ final class TerminalsPageRulesTests: XCTestCase {
         XCTAssertEqual(TerminalListText.mayBeOpen("pi"), "此会话可能正在其他终端中运行，继续将写入同一会话。")
         // Grok (2026-11-11, user: 能否增加对Grok的支持): the fifth agent of the panel, under its own name; its sessions go
         // on, and the service can tell where one is open (Grok lists what it has open), so nothing is asked first.
-        XCTAssertEqual(TerminalListText.agents.map(\.id), ["claude-code", "codex", "opencode", "pi", "grok"])
-        XCTAssertEqual(TerminalListText.agents.last?.name, "Grok")
+        XCTAssertEqual(TerminalListText.agents.map(\.id), ["claude-code", "codex", "opencode", "pi", "grok", "agy"])
+        XCTAssertEqual(TerminalListText.agents.first { $0.id == "grok" }?.name, "Grok")
+        // Antigravity (2026-11-26, user #508): the sixth, under its own name; its conversations go on, the service
+        // can tell where one is open, and it asks about a folder itself — so AgentSwitch asks first, once.
+        XCTAssertEqual(TerminalListText.agents.last?.name, "Antigravity")
+        XCTAssertTrue(TerminalListText.resumable.contains("agy"))
+        XCTAssertTrue(TerminalListText.checked.contains("agy"))
+        XCTAssertEqual(TerminalEffort.word("agy"), "Effort")
+        XCTAssertTrue(TrustChoice.asks("agy"))
+        XCTAssertTrue(TrustChoice.asks("grok"))   // since 1.0.92 its trusted folders are written too
         XCTAssertTrue(TerminalListText.resumable.contains("grok"))
         XCTAssertTrue(TerminalListText.checked.contains("grok"))
         // Its level goes under its own word for it (`/effort`).

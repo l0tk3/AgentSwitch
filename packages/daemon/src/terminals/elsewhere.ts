@@ -2,7 +2,9 @@
  *  session — one record, and whoever opens it next sees what was said — so only one program may write it at a time.
  *  Codex locks a conversation while a process writes it (`~/.codex/thread-writer-locks/<id>.lock`); Claude Code has no
  *  lock, but lists each running session in `~/.claude/sessions/<pid>.json` and removes the file when it exits; Grok
- *  lists the sessions that are open, each with the process that has it, in `~/.grok/active_sessions.json`. */
+ *  lists the sessions that are open, each with the process that has it, in `~/.grok/active_sessions.json`; Antigravity
+ *  CLI holds a conversation's mark open while it has the conversation (`presence/<id>.lock` — the file itself stays
+ *  after it quits: seen with 1.5.17). */
 
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -10,6 +12,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import type { TerminalHarness } from "./host.js";
+import { agyHome } from "../sessions/agy.js";
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 3000;
@@ -29,6 +32,8 @@ export type ElsewhereOptions = {
   readonly home?: string;
   /** Grok's own folder (default: `GROK_HOME`, else `~/.grok`). */
   readonly grokHome?: string;
+  /** Antigravity CLI's own folder (default: `~/.gemini/antigravity-cli`). */
+  readonly agyHome?: string;
   /** The pids holding a file open (lsof). */
   readonly holders?: (file: string) => Promise<number[]>;
   /** Every process: pid → parent and executable path (ps). */
@@ -130,6 +135,9 @@ export function elsewhereCheck(opts: ElsewhereOptions = {}): ElsewhereCheck {
       pids = existsSync(lock) ? await holders(lock).catch(() => []) : [];
     } else if (harness === "grok") {
       pids = grokRunning(join(grok, "active_sessions.json"), sessionId).filter(alive);
+    } else if (harness === "agy") {
+      const lock = join(opts.agyHome ?? agyHome(), "presence", `${sessionId}.lock`);
+      pids = existsSync(lock) ? await holders(lock).catch(() => []) : [];
     } else {
       return null;   // OpenCode, pi: nothing to look at (the page asks when the session was active lately)
     }

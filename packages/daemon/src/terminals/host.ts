@@ -1,7 +1,7 @@
 /** Terminal sessions the service holds (docs/terminal-v0.md): each one an agent CLI in a pseudo-terminal of its own,
  *  mirrored into a headless terminal so a screen that connects gets the current picture first, then the output as it
- *  comes. Status comes from the agent's hooks where it has them (Claude Code, Codex, Grok, pi's extension) or from a
- *  companion beside it (OpenCode's own server), else from output activity. Permission requests from a hook wait here until a screen answers (or the wait runs out and the agent asks
+ *  comes. Status comes from the agent's hooks where it has them (Claude Code, Codex, Grok, pi's extension), from its
+ *  status line (Antigravity) or from a companion beside it (OpenCode's own server), else from output activity. Permission requests from a hook wait here until a screen answers (or the wait runs out and the agent asks
  *  in the terminal). */
 
 import { worthShowing } from "../sessions/titles.js";
@@ -14,13 +14,14 @@ import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
 import { grokCall, grokTitle } from "./grokHooks.js";
+import { AGY_STATUS_EVENT, agyInputEmpty, agyStatus } from "./agy.js";
 import { attachHeld, endHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
 import { troubleOnScreen } from "./screenTrouble.js";
 import { screenView } from "./screenView.js";
 
-export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi", "grok"] as const;
+export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi", "grok", "agy"] as const;
 export type TerminalHarness = (typeof TERMINAL_HARNESSES)[number];
 /** How the agent asks before acting: every time, its own automatic mode, or not at all (bypass). The protected paths
  *  stay closed in every mode (the PreToolUse floor). */
@@ -329,6 +330,9 @@ export type TerminalHostOptions = {
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
   /** The agent of a terminal gave the session it writes a title worth showing (sessions/titles.ts). */
   readonly onTitle?: (harness: TerminalHarness, sessionId: string, title: string) => void;
+  /** An agent that names its model as its picker shows it (Antigravity's status line: `Gemini 4 Hydrogen (High)`):
+   *  the model as the menus list it, and the level; null: not one of the listed. */
+  readonly modelNamed?: (harness: TerminalHarness, name: string) => { readonly model: string; readonly effort: string | null } | null;
   readonly customTitle?: (harness: TerminalHarness, sessionId: string) => string | null;
   /** What the list of sessions calls this one (its first message, cut short); null while it has none. */
   readonly saidTitle?: (harness: TerminalHarness, sessionId: string) => string | null;
@@ -442,9 +446,9 @@ const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
 const ECHO_MS = 600;
 /** The agents whose own prompt takes a command that sets the model or the level at once — Claude Code's `/model <id>`
  *  and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`, Grok's `/model <id>` and
- *  `/effort <level>` — so a screen can change them. Codex and OpenCode choose in pickers of their own
- *  (docs/simple-view-v0.md §5.4). */
-const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi", "grok"]);   // OpenCode: through its companion's server (`Companion.setModel`)
+ *  `/effort <level>`, Antigravity's `/model <id>` and `/effort <level>` — so a screen can change them. Codex and
+ *  OpenCode choose in pickers of their own (docs/simple-view-v0.md §5.4). */
+const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi", "grok", "agy"]);   // OpenCode: through its companion's server (`Companion.setModel`)
 /** The screen is read for a suggestion once nothing has been drawn for this long. */
 const SUGGEST_MS = 200;
 /** What a terminal is doing while its agent compacts its context: the tool its `activity` names. */
@@ -479,7 +483,7 @@ const TITLE_GLYPHS = /^[\s✳✶✷✸✹✺✻✼✽✢✣✤✥*·•●○◐
 /** Codex puts this in front of its title while something waits for you (`!` and `.` alternating): left out of the name,
  *  which would otherwise blink. Status comes from its notifications instead (OSC 9, launch.ts CODEX_ATTENTION). */
 const ACTION_REQUIRED = /^\[ [!.] \] Action Required(?:\s*\|\s*)?/;
-const AGENT_LABELS: Record<TerminalHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok" };
+const AGENT_LABELS: Record<TerminalHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok", agy: "Antigravity" };
 
 /** The title without the agent's status glyphs and markers. */
 export function cleanTitle(raw: string): string {
@@ -847,6 +851,9 @@ class Session {
   /** The level it was started at; null: the agent's own default. */
   effort: string | null = null;
   modelAsked: { readonly model: string; readonly at: number } | null = null;
+  /** Antigravity: when its status line was last read (`at`), and the model's name it gave then. */
+  agyAt = 0;
+  agyModel = "";
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
   readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string; note?: string } | null; since: number }>();
   launches: { type: string; name: string; at: number }[] = [];
@@ -962,7 +969,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed" | "modelGate">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "modelNamed" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed" | "modelGate">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -993,7 +1000,9 @@ export class TerminalHost {
     // The model traffic gateway: the way out the terminal would have had (its profile's, or this service's own)
     // is the gateway's way on.
     const envProxy = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.all_proxy || process.env.ALL_PROXY || null;
-    const gate = await this.opts.modelGate?.open({ terminal: id, harness: req.harness, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
+    // Not Antigravity's: it speaks Gemini's own format to Google's own hosts, which the gateway does not read
+    // (docs/terminal-v0.md §3 Antigravity) — it leaves this Mac as the profile says, past the gateway.
+    const gate = req.harness === "agy" ? null : await this.opts.modelGate?.open({ terminal: id, harness: req.harness, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
     let plan: LaunchPlan;
     try {
       plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(gate ? { gate } : {}), ...(req.profile ? { ...(req.profile.isolated ? { isolated: true as const } : {}), ...(req.profile.home ? { configHome: req.profile.home } : {}), ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}), ...(req.profile.browserKey ? { browserKey: req.profile.browserKey } : {}), ...(req.profile.api ? { api: { name: req.profile.name, ...req.profile.api } } : {}), ...(req.profile.telemetryOff ? { telemetryOff: true as const } : {}) } : {}), ...(req.signIn ? { signIn: true as const } : {}), ...(req.ownProvider ? { ownProvider: true as const } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
@@ -1316,12 +1325,28 @@ export class TerminalHost {
     if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
     if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
     if (s.harness === "claude-code") s.modelAsked = { model, at: this.o.now() };
-    this.write(id, replyBytes(`/model ${model}`, this.bracketedPaste(id), true));
+    await this.command(id, `/model ${model}`);
     // pi says nothing of its model to the service: the one asked for is taken as the one it is on (its own line
     // says "Model: …"; an id it does not know leaves it where it was, and the screens list only its own ids).
     // Nor does Grok (it has no hook for a change of model): the same. Grok keeps the choice as what its later sessions
     // start on, as Claude Code does; so its `/effort`.
+    // (Antigravity's status line says which model it is on afterwards: `AgyStatus`. It keeps the choice as its default too.)
     if ((s.harness === "pi" || s.harness === "grok") && s.modelNow !== model) { s.modelNow = model; s.emit({ type: "model", model }); }
+  }
+
+  /** How long after one of Antigravity's commands is typed its Enter follows: while a command with something after it
+   *  is typed it offers what completes it, and an Enter in the same breath is lost on that (seen with 1.5.17: `/model
+   *  <id>` and Enter at once left its list standing; a moment apart the model was set). */
+  static readonly AGY_COMMAND_MS = 400;
+
+  /** One of the agent's own commands typed into terminal `id` and entered. */
+  async command(id: string, text: string): Promise<void> {
+    const s = this.need(id);
+    const wait = s.harness === "agy" && /^\s*\/\S+\s+\S/.test(text) ? TerminalHost.AGY_COMMAND_MS : 0;
+    if (!wait) { this.write(id, replyBytes(text, this.bracketedPaste(id), true)); return; }
+    this.write(id, replyBytes(text, this.bracketedPaste(id), false));
+    await new Promise((r) => setTimeout(r, wait));
+    if (this.sessions.get(id) === s && s.status !== "exited") this.write(id, "\r");
   }
 
   /** A screen asks the agent in terminal `id` to think at another level: Claude Code's own command (`/effort <level>`),
@@ -1342,11 +1367,12 @@ export class TerminalHost {
       s.effort = effort;
       return;
     }
-    if (s.harness === "grok") {
+    if (s.harness === "grok" || s.harness === "agy") {
       // Grok's `/effort <level>` sets it for the model it is on. While it works, what is typed waits in its queue as
       // the next message would: only while it rests. It says nothing of its level to the service either.
+      // Antigravity's `/effort <level>` moves it to the model's variant of that level (its status line then says so).
       if (s.status !== "idle") throw new TerminalError("busy", "the agent is at work");
-      this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
+      await this.command(id, `/effort ${effort}`);
       s.effort = effort;
       return;
     }
@@ -1553,7 +1579,8 @@ export class TerminalHost {
     if (s.compactFrom && !agentId) { this.compacts(s, false); s.compactEndedAt = this.o.now(); }
     // The agent goes on: what waited for you on its screen was answered. (Not Grok's: its title says for how long
     // its screen waits, `titled` — a sub-agent of its goes on working beside a question that still stands.)
-    if (call.event !== "SessionStart" && s.attention && s.harness !== "grok") { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
+    // (Nor Antigravity's: each reading of its status line says whether it still waits.)
+    if (call.event !== "SessionStart" && s.attention && s.harness !== "grok" && s.harness !== "agy") { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
     switch (call.event) {
       // A request answered in the terminal itself leaves its hook waiting here (Claude Code does not end it): what the
       // agent does next tells us — the tool ran (PostToolUse), the turn ended (Stop), or the user typed on (UserPromptSubmit).
@@ -1668,6 +1695,44 @@ export class TerminalHost {
         return null;
       // pi blocks on a question of its own (a confirm or a choice in its screen): the terminal waits for you.
       case "PiWaiting": this.setStatus(s, "waiting"); return null;
+      // Antigravity's status line (agy.ts): what it is doing, whether it waits for an answer on its screen, how it
+      // asks, the conversation's title and the model it is on. (Which conversation it writes: read above.)
+      case AGY_STATUS_EVENT: {
+        if (s.harness !== "agy") return null;
+        const now = agyStatus(p, s.mode);
+        // Several readings leave the program within a moment, each a process of its own: an earlier one that arrives
+        // after a later one says nothing new.
+        if (now.at && now.at < s.agyAt) return null;
+        if (now.at) s.agyAt = now.at;
+        if (now.mode) this.modeIs(s, now.mode);
+        if (now.title && now.title.slice(0, MAX_TITLE) !== s.title) {
+          const before = this.nameOf(s);
+          s.title = now.title.slice(0, MAX_TITLE);
+          const after = this.nameOf(s);
+          if (after !== before) s.emit({ type: "name", name: after });
+          this.titled(s);
+        }
+        if (now.model && now.model !== s.agyModel) {
+          s.agyModel = now.model;
+          const named = this.opts.modelNamed?.(s.harness, now.model) ?? null;
+          const model = named?.model ?? now.model;
+          if (named) s.effort = named.effort;
+          if (model !== s.modelNow) { s.modelNow = model; s.emit({ type: "model", model }); }
+        }
+        if (now.state === "waiting") { s.attention = true; this.setStatus(s, "waiting"); }
+        else if (now.state === "working") { s.attention = false; this.setStatus(s, "working"); }
+        else if (now.state === "idle" || now.state === "error") {
+          s.attention = false;
+          if (s.status === "working" || s.status === "waiting") {
+            this.turnEnded(s, now.state === "idle", now.state === "idle" ? null : "这一轮出错结束");
+            this.setStatus(s, "idle");
+            if (now.state === "error") this.opts.failed?.(s.id);
+            // It leaves no program waiting: what a room has for it is typed in now that it rests (`say`).
+            this.opts.mail?.(s.id, false);
+          } else this.setStatus(s, "idle");
+        }
+        return null;
+      }
       case "CodexNotify": {
         const thread = typeof p["thread-id"] === "string" ? p["thread-id"] : "";
         // Codex starts helper threads of its own beside the one its TUI shows (seen 2026-10-07 on 0.162 with a real
@@ -1719,17 +1784,23 @@ export class TerminalHost {
 
   /** A text put in front of a resting agent from outside its own screens (a Chat Room message, docs/chatroom-v0.md
    *  §12), for the agents that leave no program waiting: through its companion's server where that takes one
-   *  (OpenCode), else typed into its terminal and entered (Codex; OpenCode before it has a session). Only at rest,
+   *  (OpenCode), else typed into its terminal and entered (Codex, Antigravity; OpenCode before it has a session). Only at rest,
    *  with nothing asked of the user, no list on its screen and nothing in its input: it never answers a question in
    *  the user's place and never mixes with what the user is typing. False: not given now. */
   async say(id: string, text: string): Promise<boolean> {
     const s = this.sessions.get(id);
     if (!s || s.status !== "idle" || s.pending.size || s.attention) return false;
     if (s.companion?.say && await s.companion.say(text).catch(() => false)) return true;
-    if (s.harness !== "codex" && s.harness !== "opencode" && s.harness !== "grok") return false;
-    if (this.sessions.get(id) !== s || s.status !== "idle" || this.choicesNow(s) || !inputEmpty(screenRows(s.term, s.rows))) return false;
+    if (s.harness !== "codex" && s.harness !== "opencode" && s.harness !== "grok" && s.harness !== "agy") return false;
+    if (this.sessions.get(id) !== s || s.status !== "idle" || this.choicesNow(s) || !this.inputClear(s)) return false;
     this.write(id, replyBytes(text, this.bracketedPaste(id), true));
     return true;
+  }
+
+  /** Its input line is there with nothing typed in it (Antigravity marks its own with `>`). */
+  private inputClear(s: Session): boolean {
+    const rows = screenRows(s.term, s.rows);
+    return s.harness === "agy" ? agyInputEmpty(rows) : inputEmpty(rows);
   }
 
   /** 戳一下 (user #236): a text put in front of the agent now, not when it next rests — what it is doing is interrupted
@@ -1741,7 +1812,7 @@ export class TerminalHost {
     if (!s || s.status === "exited") return { given: false, why: "它的终端已经结束" };
     const asking = (): boolean => s.status === "waiting" || s.pending.size > 0 || s.attention || !!this.choicesNow(s);
     if (asking()) return { given: false, why: "它在等你回答或批准，先处理那个" };
-    if (!inputEmpty(screenRows(s.term, s.rows))) return { given: false, why: "它的输入框里有没发出的字" };
+    if (!this.inputClear(s)) return { given: false, why: "它的输入框里有没发出的字" };
     if (s.status !== "idle") {
       s.proc!.write("\x1b");
       const step = o.stepMs ?? 200, until = this.o.now() + (o.waitMs ?? 5000);

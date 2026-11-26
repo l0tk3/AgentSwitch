@@ -19,7 +19,7 @@ import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalEr
 import type { TerminalStyle } from "../terminals/style.js";
 import { LEFTOVER_GRACE_MS, type Leftovers } from "../terminals/leftovers.js";
 import type { ModelOffer, Offers } from "../models/modelOffers.js";
-import { CLAUDE_EFFORTS, EFFORT, effortsFor, GROK_EFFORTS, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
+import { AGY_EFFORTS, CLAUDE_EFFORTS, EFFORT, effortsFor, GROK_EFFORTS, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { BrowserError, YOU } from "../browser/types.js";
 import { moveClaudeSession, moveCodexSession } from "../profiles/context.js";
@@ -127,7 +127,7 @@ const Raw = z.object({ data: z.string().min(1).max(MAX_INPUT) });
 
 const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400, busy: 409 };
 /** Agents that can go on with a session, and those that can fork one (docs/terminal-v0.md §5). */
-const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode", "pi", "grok"]);
+const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode", "pi", "grok", "agy"]);
 const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "pi", "grok"]);
 /** Events a stalled screen may fall behind by before its stream is ended (it reconnects to a fresh snapshot). */
 const MAX_QUEUED = 5_000;
@@ -447,7 +447,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if (open) return c.json({ terminal: open, existing: true });
       const ours = host.list().flatMap((x) => (x.pid && x.status !== "exited" ? [x.pid] : []));
       const other = await t.elsewhere(body.data.harness, agentSessionId, ours).catch(() => null);
-      if (other) return c.json({ error: `会话正在${other.app ?? "其他程序"}中运行`, elsewhere: other }, 409);
+      // (An agent that cannot fork — Antigravity — is offered none: the screens take `elsewhere` for the choice to.)
+      if (other) return c.json(FORKS.has(body.data.harness) ? { error: `会话正在${other.app ?? "其他程序"}中运行`, elsewhere: other } : { error: `会话正在${other.app ?? "其他程序"}中运行，请先在那里退出。` }, 409);
       // Checked again with nothing awaited before the spawn: two screens resuming at once get one terminal.
       const raced = openHere();
       if (raced) return c.json({ terminal: raced, existing: true });
@@ -634,9 +635,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
-    // Each agent's own levels: Claude Code's, pi's thinking levels, Grok's reasoning efforts. OpenCode's are its model's
+    // Each agent's own levels: Claude Code's, pi's thinking levels, Grok's reasoning efforts, Antigravity's. OpenCode's are its model's
     // variants and Codex's its model's reasoning efforts, which their own servers know: checked there.
-    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : info.harness === "grok" ? GROK_EFFORTS : CLAUDE_EFFORTS;
+    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : info.harness === "grok" ? GROK_EFFORTS : info.harness === "agy" ? AGY_EFFORTS : CLAUDE_EFFORTS;
     if (levels && !levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
     try { await host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });
@@ -711,7 +712,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if (body.data.submit && /^\s*\//.test(text)) host.commanded(id);
       const bracketed = host.bracketedPaste(id);
       if (!files.length) {
-        host.write(id, replyBytes(text, bracketed, body.data.submit));
+        // (A command of the agent's own, entered: Antigravity's wants a moment before its Enter, `host.command`.)
+        if (body.data.submit && /^\s*\//.test(text) && !text.trim().includes("\n")) await host.command(id, text);
+        else host.write(id, replyBytes(text, bracketed, body.data.submit));
       } else {
         for (const piece of pieces) {
           if (!piece) continue;

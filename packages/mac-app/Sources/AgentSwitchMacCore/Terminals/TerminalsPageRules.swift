@@ -181,11 +181,13 @@ public enum TerminalListRows {
 
 /// The page's short words.
 public enum TerminalListText {
-    public static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi"), ("grok", "Grok")]
-    /// The agents whose sessions can be gone on with (pi's since 2026-10-11, Grok's since 2026-11-11, docs/terminal-v0.md §5).
-    public static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi", "grok"]
-    /// The agents the service can tell are open elsewhere (not OpenCode's or pi's; Grok lists what it has open).
-    public static let checked: Set<String> = ["claude-code", "codex", "grok"]
+    public static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi"), ("grok", "Grok"), ("agy", "Antigravity")]
+    /// The agents whose sessions can be gone on with (pi's since 2026-10-11, Grok's since 2026-11-11, Antigravity's
+    /// since 2026-11-26, docs/terminal-v0.md §5).
+    public static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi", "grok", "agy"]
+    /// The agents the service can tell are open elsewhere (not OpenCode's or pi's; Grok lists what it has open,
+    /// Antigravity holds a conversation's mark while it has it).
+    public static let checked: Set<String> = ["claude-code", "codex", "grok", "agy"]
     /// What is asked before going on with a session the service cannot tell is open elsewhere, when it was written
     /// lately: it goes on in the same record (OpenCode cannot fork one).
     public static func mayBeOpen(_ harness: String) -> String {

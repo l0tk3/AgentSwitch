@@ -67,6 +67,7 @@ import { listenRemote, type RemoteListener } from "./remote/server.js";
 import { mergeLogged } from "./models/discovery.js";
 import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
 import { ensureGrokHooks, ensureGrokKit, grokHome } from "./terminals/grokHooks.js";
+import { AGY_HOME_VAR, agyGeminiDir, agyHome, ensureAgyMcp } from "./terminals/agy.js";
 import { ModelOffers } from "./models/modelOffers.js";
 import { readOpenCodeVariants } from "./models/opencodeVariants.js";
 import { DeviceStore } from "./remote/deviceStore.js";
@@ -291,8 +292,11 @@ export function terminalBinaries(targets: Pick<Targets, "harnesses">, opencodeBi
   if (opencode) out.opencode = opencode;
   // Grok as chosen there (`GROK_BIN`), else where it is found, else where its installer puts it.
   const grok = first(env.GROK_BIN, resolveCommand(undefined, "grok", env.PATH), join(home, ".local", "bin", "grok"), join(home, ".grok", "bin", "grok"));
+  // Antigravity CLI as chosen there (`AGY_BIN`), else where it is found, else where its installer puts it.
+  const agy = first(env.AGY_BIN, resolveCommand(undefined, "agy", env.PATH), join(home, ".local", "bin", "agy"));
   if (pi) out.pi = pi;
   if (grok) out.grok = grok;
+  if (agy) out.agy = agy;
   return out;
 }
 
@@ -465,6 +469,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       deviceOf: (harness, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); return agent ? profiles.deviceOf(agent, profile ?? DEFAULT_PROFILE) : null; },
       onSession: (harness, sessionId, profile) => { sessionTitles.seen(harness, sessionId); const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
       onTitle: (harness, sessionId, title) => sessionTitles.note(harness, sessionId, title),
+      // Antigravity names its model as its picker shows it: the menus' entry for it, and its level.
+      modelNamed: (harness, name) => (harness === "agy" ? overrides.modelOffers?.agyNamed(name) ?? null : null),
       customTitle: (harness, sessionId) => sessionTitles.custom(harness, sessionId),
       // The list of sessions is made after the terminals: asked through it once it is there.
       saidTitle: (harness, sessionId) => saidTitle(harness, sessionId),
@@ -480,6 +486,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         grokHooks: (home) => ensureGrokHooks(home ?? grokHome(), QUICK_HOOK_TIMEOUT_S),
         // The Chatroom Kit's server in Grok's config.toml, under this service's node.
         grokKit: (home) => ensureGrokKit(home ?? grokHome(), process.execPath, ROOM_KIT_SCRIPT),
+        // Antigravity's Chat Room tools are an entry of ours in its own MCP configuration (terminals/agy.ts), looked
+        // for — and written again where it is gone — as each of its terminals starts: the kit under this service's node.
+        agyMcp: () => ensureAgyMcp(agyGeminiDir(), process.execPath, ROOM_KIT_SCRIPT),
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's
@@ -658,7 +667,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
 export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void; stop: () => Promise<void> }> {
   const yaml = loadTargets(cfg.targetsPath);
   const grokBinary = cfg.terminals ? terminalBinaries(yaml, cfg.opencodeBinary).grok : undefined;
-  const modelOffers = cfg.modelOffers ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()), ...(grokBinary ? { grokBinary, grokHome: grokHome() } : {}) }) : undefined;
+  const agyBinary = cfg.terminals ? terminalBinaries(yaml, cfg.opencodeBinary).agy : undefined;
+  const modelOffers = cfg.modelOffers ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()), ...(grokBinary ? { grokBinary, grokHome: grokHome() } : {}),
+    ...(agyBinary ? { agyBinary, agyHome: agyHome(), agyGeminiDir: process.env[AGY_HOME_VAR]?.trim() || null } : {}) }) : undefined;
   const targets = modelOffers ? mergeLogged(yaml, await modelOffers.refresh()) : yaml;
   const stopOffers = modelOffers?.start();
   // OpenCode's variants (its models' thinking levels) for the terminals' menus, asked of a server of its own each time.

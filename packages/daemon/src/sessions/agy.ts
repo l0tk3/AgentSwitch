@@ -5,6 +5,10 @@
  *  `<USER_REQUEST>…</USER_REQUEST>` and followed by what the program adds), PLANNER_RESPONSE (the reply), and a
  *  step's own type for a tool. The conversation itself is `conversations/<id>.db` (protobuf: not read here).
  *
+ *  A tool, as a turn that used one wrote it (seen 2026-11-26 with a real turn that ran a command): the reply's line
+ *  carries `tool_calls: [{ name, args }]` and no `content` — each value of `args` is itself JSON
+ *  (`"CommandLine": "\"rm x.txt\""`) — and the line after it, `type: "GENERIC"`, is what the tool answered.
+ *
  *  A conversation belongs to the folders it was started in (`workspace_uris`, `file://` addresses); the first is its
  *  folder. Sub-agents' conversations (`parent_conversation_id`) are left out of the list. */
 
@@ -18,9 +22,18 @@ import { clipText, MESSAGE_CHARS, type SessionMessage } from "./types.js";
 
 export type AgyFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
 
-/** Where the CLI keeps its own data: `<HOME>/.gemini/antigravity-cli` (it has no variable of its own for it). */
+/** The folder Antigravity keeps everything under: `<HOME>/.gemini` — `antigravity-cli/` the CLI's own, `config/` what
+ *  it shares with the Antigravity app. The program has no variable for it; `AGENTSWITCH_AGY_HOME` is AgentSwitch's own,
+ *  for tests and probes: a terminal is then started with the program's `--gemini_dir` naming the same folder
+ *  (terminals/launch.ts), which the one sign-in in the keychain serves too. */
+export const AGY_HOME_VAR = "AGENTSWITCH_AGY_HOME";
+export function agyGeminiDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return env[AGY_HOME_VAR]?.trim() || join(env.HOME || homedir(), ".gemini");
+}
+
+/** Where the CLI keeps its own data: `<gemini dir>/antigravity-cli`. */
 export function agyHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
-  return join(env.HOME || homedir(), ".gemini", "antigravity-cli");
+  return join(agyGeminiDir(env), "antigravity-cli");
 }
 
 /** A transcript's lines; none where it is not there (a conversation with nothing said yet, or one deleted). */
@@ -78,6 +91,25 @@ export function agyPrompt(content: string): string {
 const userText = (line: Json): string | null => (line.type === "USER_INPUT" ? agyPrompt(str(line.content)) || null : null);
 const replyText = (line: Json): string | null => (line.type === "PLANNER_RESPONSE" ? str(line.content).trim() || null : null);
 
+/** A tool's argument out of its own JSON: `"\"rm x\""` is `rm x`; what is not JSON is itself. */
+function argText(value: unknown): string {
+  if (typeof value !== "string") return value === undefined || value === null ? "" : JSON.stringify(value);
+  try { const v: unknown = JSON.parse(value); return typeof v === "string" ? v : value; } catch { return value; }
+}
+
+/** What a tool call is about, in a line: the command, the file, the pattern — else what the model said it is for. */
+const ARG_KEYS = ["CommandLine", "AbsolutePath", "TargetFile", "Path", "DirectoryPath", "SearchPath", "Query", "Pattern", "Url", "toolSummary"];
+function callSummary(args: Json): string {
+  for (const key of ARG_KEYS) { const text = argText(args[key]).trim(); if (text) return text; }
+  return Object.entries(args).filter(([k]) => k !== "toolSummary").map(([k, v]) => `${k}: ${argText(v)}`).join(", ");
+}
+
+/** The tools a reply's line calls: `[{ name, args }]`. */
+export function agyToolCalls(line: Json): { tool: string; text: string }[] {
+  const calls = Array.isArray(line.tool_calls) ? line.tool_calls.map(obj) : [];
+  return calls.flatMap((c) => (str(c.name) ? [{ tool: str(c.name), text: callSummary(obj(c.args)) }] : []));
+}
+
 /** What a line says, for search: a prompt or a reply (not a tool's step). */
 export function agySaid(line: Json): string | null {
   return userText(line) ?? replyText(line);
@@ -119,18 +151,26 @@ export function agyFacts(home: string, id: string): AgyFacts | null {
 
 /** The last `limit` messages: prompts, replies, and a line for each step that is a tool's. */
 export function agyMessages(home: string, id: string, limit: number, chars = MESSAGE_CHARS): SessionMessage[] {
-  if (!ID.test(id)) return [];
+  return ID.test(id) ? agyMessagesIn(agyTranscript(home, id), limit, chars) : [];
+}
+
+/** The same, from a transcript's own file. */
+export function agyMessagesIn(path: string, limit: number, chars = MESSAGE_CHARS): SessionMessage[] {
   const out: SessionMessage[] = [];
-  for (const line of tailLines(agyTranscript(home, id)).map(obj)) {
+  for (const line of tailLines(path).map(obj)) {
     const ts = time(line.created_at), at = typeof line.step_index === "number" ? line.step_index : undefined;
     const where = at === undefined ? {} : { at };
     const user = userText(line);
     if (user) { out.push({ role: "user", text: clipText(user, chars), ts, ...where }); continue; }
     const reply = replyText(line);
-    if (reply) { out.push({ role: "assistant", text: clipText(reply, chars), ts, ...where }); continue; }
+    if (reply) out.push({ role: "assistant", text: clipText(reply, chars), ts, ...where });
+    // The tools a reply calls, each a line of its own; what a tool answered (`GENERIC`) is not shown beside them.
+    const calls = line.type === "PLANNER_RESPONSE" ? agyToolCalls(line) : [];
+    for (const call of calls) out.push({ role: "tool", tool: call.tool, text: clipText(call.text, chars), ts, ...where });
+    if (reply || calls.length) continue;
     const type = str(line.type);
-    // A tool's step: its kind as the program names it (`RUN_COMMAND`, `VIEW_FILE`, …) and what it has to say of it.
-    if (type && type !== "USER_INPUT" && type !== "PLANNER_RESPONSE" && str(line.source) !== "SYSTEM") {
+    // Any other step of a tool's: its kind as the program names it (`RUN_COMMAND`, `VIEW_FILE`, …) and what it says.
+    if (type && type !== "USER_INPUT" && type !== "PLANNER_RESPONSE" && type !== "GENERIC" && str(line.source) !== "SYSTEM") {
       out.push({ role: "tool", tool: type.toLowerCase(), text: clipText(str(line.content), chars), ts, ...where });
     }
   }

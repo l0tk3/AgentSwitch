@@ -7,7 +7,9 @@
  *    session's folder up and then each folder above it up to the repository's root, so the folder (as given and as the
  *    system resolves it) is marked, and the repository's root too when that is inside the trusted folder.
  *  - Codex (0.171.0): `<CODEX_HOME or ~/.codex>/config.toml`, `[projects."<folder>"] trust_level = "trusted"`.
- *  - OpenCode and pi ask no such question: nothing.
+ *  - Antigravity CLI (1.5.17): `<~/.gemini>/antigravity-cli/settings.json`, the folder's path in `trustedWorkspaces`
+ *    (where its own "Yes, I trust this folder" puts it: seen).
+ *  - OpenCode and pi ask no such question: nothing. Grok's is not written yet.
  *
  *  Each file is read, changed and replaced whole (a temporary file renamed over it); everything else in it is kept
  *  as it was. When the file changed while it was being changed (the agent writing it), it is done again from what is
@@ -19,6 +21,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { trustInGrok } from "./grokHooks.js";
 import type { TerminalHarness } from "./host.js";
+import { agyHome } from "../sessions/agy.js";
 
 export const TRUSTED_FOLDERS_FILE = "trusted-folders.json";
 
@@ -140,7 +143,7 @@ export type TrustOutcome = "written" | "already" | "skipped";
  *  is on the list. Never throws. */
 export function pretrust(harness: TerminalHarness, cwd: string, env: Readonly<Record<string, string | undefined>>, trusted: readonly string[] | TrustList, log: (line: string) => void = (l) => console.error(l)): TrustOutcome | null {
   try {
-    if (harness !== "claude-code" && harness !== "codex" && harness !== "grok") return null;
+    if (harness !== "claude-code" && harness !== "codex" && harness !== "grok" && harness !== "agy") return null;
     const list: TrustList = "folders" in trusted ? trusted : { folders: trusted, only: [] };
     // A folder trusted by itself is its own root: nothing above it (its repository's root) is marked with it.
     const root = trustedRootOf(cwd, list.folders) ?? (trustedAlone(cwd, list.only) ? cwd : null);
@@ -148,7 +151,10 @@ export function pretrust(harness: TerminalHarness, cwd: string, env: Readonly<Re
     const keys = trustKeys(cwd, root);
     // Grok (1.0.92): `<GROK_HOME or ~/.grok>/trusted_folders.toml`.
     if (harness === "grok") return trustInGrok(env.GROK_HOME || join(env.HOME || homedir(), ".grok"), keys);
-    const out = harness === "claude-code" ? trustInClaude(claudeConfigFile(env), keys) : trustInCodex(codexConfigFile(env), keys);
+    const out = harness === "claude-code" ? trustInClaude(claudeConfigFile(env), keys)
+      // Antigravity lists the folder it is started in, as the system resolves it; the repository's root is not asked about.
+      : harness === "agy" ? trustInAgy(agySettingsFile(env), [...new Set([safeReal(cwd), resolve(cwd)])])
+      : trustInCodex(codexConfigFile(env), keys);
     if (out.note) log(`trusted folders: ${harness}: ${out.note}`);
     return out.outcome;
   } catch (err) {
@@ -170,6 +176,11 @@ export function claudeConfigFile(env: Readonly<Record<string, string | undefined
 
 export function codexConfigFile(env: Readonly<Record<string, string | undefined>>): string {
   return join(env.CODEX_HOME || join(env.HOME || homedir(), ".codex"), "config.toml");
+}
+
+/** Antigravity CLI's own settings for this environment. */
+export function agySettingsFile(env: Readonly<Record<string, string | undefined>>): string {
+  return join(agyHome(env), "settings.json");
 }
 
 type Change = { readonly outcome: TrustOutcome; readonly note?: string };
@@ -233,6 +244,27 @@ export function trustInClaude(path: string, keys: readonly string[]): Change {
     }
     if (!changed) return { outcome: "already" };
     return `${JSON.stringify({ ...config, projects }, null, 2)}\n`;
+  });
+}
+
+/** `trustedWorkspaces` in Antigravity's settings.json: the folders it does not ask about, as absolute paths. A list
+ *  that is something else, or a file that does not parse, is left alone. */
+export function trustInAgy(path: string, keys: readonly string[]): Change {
+  return rewrite(path, (text) => {
+    let settings: Record<string, unknown> = {};
+    if (text !== null && text.trim() !== "") {
+      try { settings = JSON.parse(text) as Record<string, unknown>; } catch { return { outcome: "skipped", note: `${path} does not parse; left alone` }; }
+      if (!settings || typeof settings !== "object" || Array.isArray(settings)) return { outcome: "skipped", note: `${path} is not an object; left alone` };
+    }
+    const had = settings.trustedWorkspaces;
+    if (had !== undefined && !Array.isArray(had)) return { outcome: "skipped", note: `${path} keeps trustedWorkspaces some other way; left alone` };
+    const list: unknown[] = [...(had ?? [])];
+    // Each spelling of the folder: it looks its working folder up as it was given it (a link's own path where it
+    // was started through one: seen), which is not always how the system resolves it.
+    const missing = keys.filter((k) => !list.includes(k));
+    if (!missing.length) return { outcome: "already" };
+    list.push(...missing);
+    return `${JSON.stringify({ ...settings, trustedWorkspaces: list }, null, 2)}\n`;
   });
 }
 

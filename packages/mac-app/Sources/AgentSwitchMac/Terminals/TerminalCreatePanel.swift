@@ -56,20 +56,23 @@ struct TerminalCreatePanel: View {
 
     // MARK: the agent
 
-    /// The agents side by side; in a narrow pane rows of two. Five — Grok came (2026-11-11, user: 能否增加对Grok的支持)
-    /// — are set a little closer than four were: the longest name (`Claude Code`) still has its room.
+    /// The agents in two rows of three — six since Antigravity came (2026-11-26, user #508; five had stood in one
+    /// row) — and in a narrow pane rows of two.
     private var agents: some View {
         let all = TerminalListText.agents
-        let five = all.count > 4
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: five ? 8 : 10) { ForEach(all, id: \.id) { tile($0.id, $0.name, inset: five ? 8 : 10).frame(minWidth: five ? 100 : 104) } }
-            VStack(spacing: 10) {
-                ForEach(Array(stride(from: 0, to: all.count, by: 2)), id: \.self) { first in
-                    HStack(spacing: 10) {
-                        ForEach(all[first..<min(first + 2, all.count)], id: \.id) { tile($0.id, $0.name) }
-                        // An odd one out keeps a tile's width.
-                        if first + 1 == all.count { Color.clear.frame(maxWidth: .infinity, maxHeight: Self.tileHeight) }
-                    }
+            rows(all, of: 3, minWidth: 104)
+            rows(all, of: 2)
+        }
+    }
+
+    private func rows(_ all: [(id: String, name: String)], of n: Int, minWidth: CGFloat? = nil) -> some View {
+        VStack(spacing: 10) {
+            ForEach(Array(stride(from: 0, to: all.count, by: n)), id: \.self) { first in
+                HStack(spacing: 10) {
+                    ForEach(all[first..<min(first + n, all.count)], id: \.id) { tile($0.id, $0.name).frame(minWidth: minWidth) }
+                    // A row that is not full keeps its tiles' width.
+                    ForEach(0..<max(0, first + n - all.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: Self.tileHeight) }
                 }
             }
         }

@@ -265,6 +265,61 @@ const GROK: Builtin = [
   ["workflow", "Launch a saved workflow, or manage a running one"],
 ];
 
+/** Antigravity CLI 1.5.17, read 2026-11-26 off the list its own screen shows for `/` (and its documentation for the
+ *  few that list scrolled past): the commands an ordinary interactive session has. Aliases (new → clear, quit → exit,
+ *  settings → config, branch → fork, undo → rewind, cs → codesearch, quota → usage, …) and its bundled skills are
+ *  left out. */
+const AGY: Builtin = [
+  ["add-dir", "Add a directory to the workspace"],
+  ["agents", "List available custom agents"],
+  ["artifact", "View and review artifacts"],
+  ["boost", "Give the current task more effort"],
+  ["browser", "Invoke a browser agent for web tasks"],
+  ["btw", "Ask a side question without interrupting the current task"],
+  ["changelog", "Show release notes and changes"],
+  ["clear", "Clear conversation and start a new one"],
+  ["codesearch", "Search code in the workspace"],
+  ["compact", "Compact the conversation now to free up the context window"],
+  ["config", "Open settings panel"],
+  ["context", "Visualize current context usage"],
+  ["copy", "Copy the last response to the clipboard"],
+  ["credits", "Show remaining credits and purchase link"],
+  ["diff", "Show what changed in the workspace"],
+  ["effort", "Set the reasoning effort"],
+  ["exit", "Quit Antigravity CLI"],
+  ["feedback", "Submit qualitative feedback to improve the agent"],
+  ["fork", "Create a branch of the current conversation at this point"],
+  ["goal", "Run until the specified goal is completely finished"],
+  ["grill-me", "Be questioned about a plan until it holds"],
+  ["help", "Show available commands and keybindings"],
+  ["hooks", "Manage hook configurations for tool events"],
+  ["keybindings", "Set custom keybindings"],
+  ["learn", "Reflect on recent successes or corrections to capture reusable skills or rules"],
+  ["logout", "Sign out"],
+  ["mcp", "Manage MCP servers"],
+  ["model", "Switch models"],
+  ["open", "Open a file or view opened/edited files"],
+  ["permissions", "Manage tool permissions"],
+  ["plan", "Plan carefully before executing a task"],
+  ["plugin", "Manage, discover, install, uninstall, enable, and disable plugins"],
+  ["projects", "Create and edit projects"],
+  ["record", "Dictate a prompt using your microphone"],
+  ["remote-control", "Create a remote connection for this session"],
+  ["rename", "Rename the current conversation"],
+  ["resume", "Resume a previous conversation"],
+  ["rewind", "Rewind conversation to a previous message"],
+  ["schedule", "Run an instruction on a recurring schedule or as a one-time timer"],
+  ["skills", "List available skills"],
+  ["statusline", "Toggle the statusline"],
+  ["swarm", "Run a swarm: several agents working in parallel on one task"],
+  ["tasks", "View background tasks"],
+  ["teamwork", "Run a team of agents on one task"],
+  ["thinking", "Toggle streaming the model's full thinking in the transcript"],
+  ["title", "Set the terminal title"],
+  ["usage", "Show quota and usage"],
+  ["voice", "Talk to the agent"],
+];
+
 /** Per call: files read, folders listed, folder entries looked at. */
 type Scan = { files: number; dirs: number; entries: number };
 const LIMITS = { files: 300, dirs: 200, entries: 5000 } as const;
@@ -285,6 +340,7 @@ const AGENTS = new Map<string, { readonly builtin: Builtin; readonly custom: Cus
   ["opencode", { builtin: OPENCODE, custom: opencodeCustom }],
   ["pi", { builtin: PI, custom: piCustom }],
   ["grok", { builtin: GROK, custom: grokCustom }],
+  ["agy", { builtin: AGY, custom: agyCustom }],
 ]);
 
 /** Project commands first, then the user's, then built-in; each alphabetical, one per name (project beats user beats
@@ -474,6 +530,24 @@ function grokCustom(cwd: string | null, home: string | null, scan: Scan): SlashC
   const add = (dir: string, source: Source) => out.push(...skills(join(dir, ".grok", "skills"), source), ...commands(join(dir, ".grok", "commands"), source), ...skills(join(dir, ".agents", "skills"), source));
   for (const dir of cwd ? upward(cwd, home) : []) add(dir, "project");
   if (home) add(home, "user");
+  return out;
+}
+
+// ── Antigravity ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** From Antigravity CLI 1.5.17's documentation: skills are `<name>/SKILL.md` under `.agents/skills` in each folder
+ *  from the terminal's up to the repository root, and for the user under `~/.gemini/config/skills` (shared with the
+ *  Antigravity app), `~/.gemini/antigravity-cli/skills`, `~/.gemini/skills` and `~/.agents/skills`; named after the
+ *  front matter's `name` (else the folder). Its bundled skills and its plugins' are not read here — the list it shows
+ *  itself is the whole one. */
+function agyCustom(cwd: string | null, home: string | null, scan: Scan): SlashCommand[] {
+  const skills = (dir: string, source: Source) => skillFolders(dir, scan, 1).flatMap(({ file, parts }): SlashCommand[] => {
+    const own = readDoc(file, scan)?.meta["name"];
+    return fromFile(typeof own === "string" && own.trim() ? own.trim() : parts[parts.length - 1] ?? "", file, source, scan, invocable);
+  });
+  const out: SlashCommand[] = [];
+  for (const dir of cwd ? upward(cwd, home) : []) out.push(...skills(join(dir, ".agents", "skills"), "project"));
+  if (home) for (const dir of [join(home, ".gemini", "config", "skills"), join(home, ".gemini", "antigravity-cli", "skills"), join(home, ".gemini", "skills"), join(home, ".agents", "skills")]) out.push(...skills(dir, "user"));
   return out;
 }
 

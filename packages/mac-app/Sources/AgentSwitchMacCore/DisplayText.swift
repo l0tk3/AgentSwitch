@@ -78,6 +78,7 @@ public enum HarnessName {
         case "codex": return Harness.codex.title
         case "opencode": return Harness.opencode.title
         case "grok": return "Grok"
+        case "agy": return "Antigravity"
         default: return name
         }
     }

@@ -11,11 +11,14 @@
  *  - Grok: reasoning effort — per model (its model list: `reasoning_efforts`, and which one a model uses unless told);
  *    for one session it is configuration of that start (`GROK_CONFIG`, terminals/launch.ts — its `--reasoning-effort`
  *    flag also rewrites the user's default); `/effort <level>` in a running one, which Grok keeps as the default.
+ *  - Antigravity: a level is a variant of the model, the ending of its id (`gemini-4-hydrogen-high`); `--effort
+ *    <level>` picks the sibling of the user's default model, and `/effort <level>` in a running session. A model is
+ *    offered once, by the variant its list names first, with its levels (models/agyModels.ts).
  *
  *  A level is never passed on unless the agent (or its own help) lists it: an unknown one would fail the launch. */
 
 /** The agents a terminal runs (the terminals' own list, which this layer does not reach up to). */
-type TerminalHarness = "claude-code" | "codex" | "opencode" | "pi" | "grok";
+type TerminalHarness = "claude-code" | "codex" | "opencode" | "pi" | "grok" | "agy";
 
 /** A level's name as the agents write them: a short lowercase word. */
 export const EFFORT = /^[a-z][a-z0-9_-]{0,23}$/;
@@ -28,6 +31,9 @@ export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 export const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 /** Grok's reasoning efforts, lowest first (its `/effort`, Grok 1.0.77), for a model whose own list is not known. */
 export const GROK_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+/** Antigravity's levels, lowest first (its `--effort`), for a model whose own list is not known. */
+export const AGY_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+const AGY_LEVEL = new RegExp(`-(${AGY_EFFORTS.join("|")})$`);
 
 /** Lowest first, whatever order an agent lists them in; a level this does not know keeps its place after the known. */
 const ORDER = ["off", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -55,6 +61,7 @@ export function effortsFor(offers: EffortOffers, harness: TerminalHarness, model
   if (harness === "codex") return CODEX_EFFORTS;
   if (harness === "pi") return PI_THINKING;
   if (harness === "grok") return GROK_EFFORTS;
+  if (harness === "agy") return AGY_EFFORTS;
   return null;
 }
 
@@ -67,6 +74,12 @@ export function effortArgs(harness: TerminalHarness, effort: string | undefined,
     case "opencode": return { args: [], model: model ? `${model}#${effort}` : model };
     case "pi": return { args: ["--thinking", effort], model };
     case "grok": return { args: [], model };   // no argument: its level goes with the start's configuration (launch.ts)
+    // The level is the model id's own ending. Named beside a model of another level, `--effort` makes the program
+    // take neither (seen on 1.5.17: "--model … conflicts with --effort"), so it is passed only without a model.
+    case "agy":
+      if (!(AGY_EFFORTS as readonly string[]).includes(effort)) return { args: [], model };
+      if (!model) return { args: ["--effort", effort], model };
+      return { args: [], model: AGY_LEVEL.test(model) ? model.replace(AGY_LEVEL, `-${effort}`) : model };
   }
 }
 

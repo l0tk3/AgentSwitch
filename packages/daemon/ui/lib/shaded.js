@@ -75,7 +75,7 @@ export const SHADED = {
     "..mmm..", ".m...d.", ".m...d.", "WWWWWW#", "W##k##m", "W##k##m", "W#####m", "#mmmmmd",
   ],
   /** Each agent's mark, 9 × 9 (its own logo's shape): Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π,
-   *  Grok's ring with the stroke that runs out of it. */
+   *  Grok's ring with the stroke that runs out of it, Antigravity's peak. */
   "claude-code": [
     "....d....", ".d..#..d.", "..#.#.#..", "...###...", "d###W###d", "...###...", "..#.#.#..", ".d..#..d.",
     "....d....",
@@ -95,6 +95,10 @@ export const SHADED = {
   grok: [
     "........W", "...WW#.W.", "..W#..W..", ".W#..W.m.", ".W#.W..m.", ".W#....m.", "..#m..m..", ".#.mmd...",
     "#........",
+  ],
+  agy: [
+    "....W....", "...W##...", "...W##...", "..W###m..", "..W#.#m..", ".W##.##m.", ".W#...#m.", "W##...##m",
+    "W#.....#m",
   ],
   /** The app's mark (docs/ui-v0.md §10): three windows one behind another, each further one a tone darker; the front
    *  one has a raised title bar — where a state shows — a dark screen, a bright prompt and a cursor. */

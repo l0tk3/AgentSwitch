@@ -45,7 +45,7 @@ class PixelArtTests {
     fun testSprites() {
         assertEquals(16, PixelArt.sprite(PixelArt.square).size)
         assertEquals(12, PixelArt.sprite(PixelArt.hollow).size)
-        assertEquals(setOf("claude-code", "codex", "opencode", "pi", "grok"), PixelArt.agents.keys)
+        assertEquals(setOf("claude-code", "codex", "opencode", "pi", "grok", "agy"), PixelArt.agents.keys)
         assertTrue(PixelArt.agents.values.all { it.size == 5 && it.all { row -> row.length == 5 } })
         // the terminals tab is not Codex's >_ (one icon, one meaning)
         assertNotEquals(PixelArt.terminalWindow, PixelArt.agents["codex"])

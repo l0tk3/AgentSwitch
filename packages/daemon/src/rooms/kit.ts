@@ -129,7 +129,7 @@ const ORG_TOOLS: readonly KitTool[] = [
       type: "object",
       properties: {
         action: { type: "string", enum: ["sessions", "profiles", "models", "check", "add", "resume", "mute", "unmute", "kick", "end", "delete", "create", "dissolve", "rooms"] },
-        handle: { type: "string" }, terminal: { type: "string" }, terminals: { type: "array", items: { type: "string" } }, agent: { type: "string", enum: ["claude-code", "codex", "opencode", "pi", "grok"] },
+        handle: { type: "string" }, terminal: { type: "string" }, terminals: { type: "array", items: { type: "string" } }, agent: { type: "string", enum: ["claude-code", "codex", "opencode", "pi", "grok", "agy"] },
         cwd: { type: "string" }, profile: { type: "string" }, model: { type: "string" }, mode: { type: "string", enum: ["manual", "auto", "bypass"] },
         resume: { type: "string" }, name: { type: "string" }, topic: { type: "string" }, search: { type: "string" }, limit: { type: "integer" },
         room: ROOM_ARG,

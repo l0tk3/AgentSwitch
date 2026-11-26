@@ -18,7 +18,7 @@ const MAX_KEPT = 3000;
 const MAX_TITLE = 200;
 const WRITE_AFTER_MS = 1500;
 
-const AGENT_NAMES: Readonly<Record<string, string>> = { "claude-code": "claude code", codex: "codex", opencode: "opencode", pi: "pi", grok: "grok" };
+const AGENT_NAMES: Readonly<Record<string, string>> = { "claude-code": "claude code", codex: "codex", opencode: "opencode", pi: "pi", grok: "grok", agy: "antigravity" };
 
 /** A title worth showing, glyphs already off it (terminals/host.ts cleanTitle): not the agent's own name, a bare
  *  program name or a shell's `user@host: dir`. */

@@ -111,7 +111,7 @@ struct ClassicMarkView: View {
 }
 
 /// The agents' marks as lines, each from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π,
-/// Grok's ring with the stroke that runs out of it.
+/// Grok's ring with the stroke that runs out of it, Antigravity's peak with a smaller one in its opening.
 enum ClassicAgent {
     static func draw(_ harness: String, _ context: inout GraphicsContext, in rect: CGRect, color: Color) {
         let s = min(rect.width, rect.height)
@@ -138,6 +138,10 @@ enum ClassicAgent {
             path.addArc(center: p(0.5, 0.5), radius: s * 0.3, startAngle: .degrees(-20), endAngle: .degrees(290), clockwise: false)
             path.move(to: p(0.5, 0.5)); path.addLine(to: p(0.9, 0.1))
             path.move(to: p(0.1, 0.9)); path.addLine(to: p(0.29, 0.71))
+        case "agy":
+            // A peak, and a smaller one standing in its opening.
+            path.move(to: p(0.12, 0.88)); path.addLine(to: p(0.5, 0.12)); path.addLine(to: p(0.88, 0.88))
+            path.move(to: p(0.36, 0.88)); path.addLine(to: p(0.5, 0.6)); path.addLine(to: p(0.64, 0.88))
         default:
             path.move(to: p(0.1, 0.24)); path.addLine(to: p(0.9, 0.24))
             path.move(to: p(0.34, 0.24)); path.addLine(to: p(0.3, 0.86))

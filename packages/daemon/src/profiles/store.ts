@@ -3,7 +3,8 @@
  *  agents' own apps and other terminals are untouched. Every agent has `Default` — the Mac's own, with no folder here —
  *  and a current profile that new terminals start under. Claude Code first (step 2); Codex has the ones that pay by a
  *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); Grok's sign in with an xAI
- *  account, each in a folder of its own (`GROK_HOME`, §6.3); OpenCode and pi have `Default` alone for now.
+ *  account, each in a folder of its own (`GROK_HOME`, §6.3); OpenCode and pi have `Default` alone for now;
+ *  Antigravity has `Default` alone for good while its one sign-in lives in the keychain (docs/profiles-v0.md).
  *
  *  New Claude profiles created through the API use private configuration and history; project folders remain user-selected. Skills are
  *  explicit read-only copies. Existing profiles retain their legacy links; Codex still uses its existing sharing
@@ -16,7 +17,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, read
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const PROFILE_AGENTS = ["claude-code", "codex", "opencode", "pi", "grok"] as const;
+export const PROFILE_AGENTS = ["claude-code", "codex", "opencode", "pi", "grok", "agy"] as const;
 export type ProfileAgent = (typeof PROFILE_AGENTS)[number];
 export type ProfileKind = "subscription" | "api";
 export const DEFAULT_PROFILE = "default";

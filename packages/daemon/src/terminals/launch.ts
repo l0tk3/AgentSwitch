@@ -7,6 +7,7 @@ import { profileEnvironment } from "./profileEnvironment.js";
 import { EFFORT, effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { GROK_HOOK_NODE, GROK_HOOK_SCRIPT } from "./grokHooks.js";
+import { AGY_HOME_VAR, agySettings } from "./agy.js";
 import { CodexCompanion } from "./codexTerminal.js";
 import { codexLayerArgs, codexNamesOwnProfile, codexTakesLayer } from "./codexLayer.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
@@ -63,6 +64,9 @@ export type LauncherOptions = {
   /** The Chatroom Kit's server is in Grok's config.toml (grokHooks.ts `ensureGrokKit`), looked for at each start in the
    *  terminal's `GROK_HOME` (`home`); absent or false: a Grok session has no room tools. */
   readonly grokKit?: (home?: string) => boolean;
+  /** Antigravity gets the Chat Room's tools where AgentSwitch's entry is in its MCP configuration (agy.ts
+   *  `ensureAgyMcp`), looked for as each of its terminals starts; else it goes without them. */
+  readonly agyMcp?: () => boolean;
   /** OpenCode's TUI attaches to a private server the service starts and watches (status, permission requests;
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
@@ -538,6 +542,28 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // The same session goes on (docs/terminal-v0.md §5); a fork is a new session with the whole history.
         if (req.resume) args.push("--resume", req.resume, ...(req.fork ? ["--fork-session"] : []));
         return { file, args, env, hooks: hooked };
+      }
+      case "agy": {
+        // No look for a new version of its own at start (user #460): it starts an updater with every launch.
+        env.AGY_CLI_DISABLE_AUTO_UPDATE = "true";
+        if (opts.trustedFolders) pretrust("agy", req.cwd, env, opts.trustedFolders());
+        // The Chat Room's tools: an entry of ours in its own MCP configuration (agy.ts), looked for now. Its servers
+        // get its own environment, the terminal's three variables with it.
+        opts.agyMcp?.();
+        // Settings of this one start, never saved: its status line is the hook program (status, the conversation it
+        // writes, its title, its model), and asking each time is stated — it starts in `auto` unless told.
+        const args = ["--settings", JSON.stringify(agySettings(req.mode, `${hookCommand} agy`))];
+        // A home other than `~/.gemini` (AgentSwitch's own variable: tests, probes): the program's own flag for it.
+        if (env[AGY_HOME_VAR]?.trim()) args.unshift(`--gemini_dir=${env[AGY_HOME_VAR]!.trim()}`);
+        // The level is part of the model's id; without a model, `--effort` (harness/efforts.ts). Neither is saved.
+        const named = effortArgs("agy", req.effort, req.model);
+        if (named.model) args.push("--model", named.model);
+        args.push(...named.args);
+        if (req.mode === "bypass") args.push("--dangerously-skip-permissions");
+        else if (req.mode === "auto") args.push("--mode", "auto");
+        // The same conversation goes on (docs/terminal-v0.md §5). It has no flag for a fork (`/fork` in its screen).
+        if (req.resume) args.push("--conversation", req.resume);
+        return { file, args, env, hooks: true };
       }
     }
   };
