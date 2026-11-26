@@ -121,6 +121,18 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (Add-Ons) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "logos" {
+                    // The agents' marks in the simple view's head (user #582) and the bar's view switch (user #583).
+                    let look = InterfaceLook.current.isClassic ? "classic" : "pixel"
+                    let sheet = VStack(alignment: .leading, spacing: 18) {
+                        HStack(spacing: 14) { ForEach(["claude-code", "codex", "opencode", "pi", "grok", "agy"], id: \.self) { AgentLogo(harness: $0, size: 38) } }
+                        HStack(spacing: 14) { ViewSwitch(simple: true) {}; ViewSwitch(simple: false) {} }
+                    }.padding(24)
+                    for (name, appearance) in [("logos-\(look)", NSAppearance(named: .aqua)), ("logos-\(look)-dark", NSAppearance(named: .darkAqua))] {
+                        try await renderSheet(sheet, model: model, appearance: appearance, to: directory.appendingPathComponent("\(name).png"))
+                    }
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "profiles" {
                     // A profile's own proxy (docs/profiles-v0.md §4): the sheet once it was applied and checked, and
                     // one whose proxy let nothing out.

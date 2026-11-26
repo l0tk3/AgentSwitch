@@ -243,10 +243,12 @@ struct MainBar: View {
                         // Both looks (user #486: seven icons in a row were a clutter; #565: the pixel look's the same
                         // way, in the same places): the side pane, one menu for what is done now and then — the editor,
                         // the other view, the two splits — and New Terminal.
+                        // The two views side by side, the one shown lit (user #583: used often enough to be in sight,
+                        // not in the menu).
+                        if !head.name.isEmpty { ViewSwitch(simple: head.simple, toggle: actions.toggleView).padding(.trailing, 6) }
                         if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: head.split ? "Side Pane" : recordSide ? "Hide Side Pane" : "Show Side Pane", enabled: !head.split, lit: recordSide && !head.split) { recordSide.toggle() } }
                         Menu {
                             if !head.name.isEmpty {
-                                Button(head.simple ? "Terminal View  ⌘⇧E" : "Simple View  ⌘⇧E", action: actions.toggleView)
                                 Button("Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
                                 Divider()
                             }
@@ -560,6 +562,52 @@ struct TerminalTitle: View {
 /// In the classic look (docs/ui-v0.md §8) the system's symbol at one size and weight for every button — 13 pt, regular,
 /// as a standard toolbar's — in a button 26 pt wide, so those side by side sit close (2026-10-04, user, of symbols sized
 /// by their sprites and 32 pt apart: 他们排列的应该更加紧凑一些).
+/// Simple and Terminal, side by side: the view the pane in focus shows lit; a click on the other switches (⌘⇧E). Classic:
+/// a two-part control on a soft ground; pixel: `[Simple|Terminal]`, the one shown in reverse.
+struct ViewSwitch: View {
+    let simple: Bool
+    let toggle: () -> Void
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        HStack(spacing: look.isClassic ? 2 : 0) {
+            part("Simple", symbol: "text.alignleft", on: simple)
+            part("Terminal", symbol: "terminal", on: !simple)
+        }
+        .padding(look.isClassic ? 2 : 0)
+        .background(RoundedRectangle(cornerRadius: look.isClassic ? Look.controlRadius : 0, style: .continuous).fill(look.isClassic ? Look.hover : Color.clear))
+        .overlay(Rectangle().strokeBorder(look.isClassic ? Color.clear : Look.ink, lineWidth: 1))
+        .fixedSize()
+    }
+
+    private func part(_ word: String, symbol: String, on: Bool) -> some View {
+        Button { if !on { toggle() } } label: {
+            Group {
+                if look.isClassic {
+                    HStack(spacing: 4) {
+                        Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+                        Text(word).font(.system(size: 12, weight: on ? .semibold : .regular))
+                    }
+                    .foregroundStyle(on ? Look.ink : Look.ink2)
+                    .padding(.horizontal, 8).frame(height: 20)
+                    .background(RoundedRectangle(cornerRadius: Look.controlRadius - 2, style: .continuous).fill(on ? Look.ground : Color.clear)
+                        .shadow(color: .black.opacity(on ? 0.08 : 0), radius: 1, y: 0.5))
+                } else {
+                    Text(word).font(.system(size: 11.5, weight: on ? .semibold : .regular, design: .monospaced))
+                        .foregroundStyle(on ? Look.ground : Look.ink2)
+                        .padding(.horizontal, 7).frame(height: 20)
+                        .background(on ? Look.ink : Color.clear)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(on ? "\(word) View" : "\(word) View  ⌘⇧E")
+        .accessibilityLabel("\(word) View")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
 struct ToolbarPixelButton: View {
     let rows: [String]
     let help: String

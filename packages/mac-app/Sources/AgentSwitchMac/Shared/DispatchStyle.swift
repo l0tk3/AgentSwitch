@@ -83,6 +83,15 @@ enum Look {
 
     /// The classic look's corners (§8.1): a control's or a row's, a card's or a floating box's, a bubble's or the
     /// input's, the content panel's.
+    /// The makers' own colours, for their marks only (`AgentLogo`, user #582): Claude's clay, Google's four.
+    static let brandClaude = Color(nsColor: .dynamic(light: 0xD97757, dark: 0xE08B6D, name: "AgentSwitchBrandClaude"))
+    static let brandGoogle: [Color] = [
+        Color(nsColor: .dynamic(light: 0xEA4335, dark: 0xF06A5E, name: "AgentSwitchBrandGoogleRed")),
+        Color(nsColor: .dynamic(light: 0xFBBC04, dark: 0xFCC934, name: "AgentSwitchBrandGoogleYellow")),
+        Color(nsColor: .dynamic(light: 0x34A853, dark: 0x5BB974, name: "AgentSwitchBrandGoogleGreen")),
+        Color(nsColor: .dynamic(light: 0x4285F4, dark: 0x669DF6, name: "AgentSwitchBrandGoogleBlue")),
+    ]
+
     static let controlRadius: CGFloat = 8
     static let cardRadius: CGFloat = 12
     static let bubbleRadius: CGFloat = 16
