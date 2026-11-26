@@ -46,7 +46,7 @@ struct SpeechVoiceView: View {
     @State private var voices = SpeechVoices.installed()
 
     var body: some View {
-        List {
+        LookForm {
             Section {
                 ForEach(voices, id: \.identifier) { voice in
                     HStack {

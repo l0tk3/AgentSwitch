@@ -109,15 +109,9 @@ struct RoomsTab: View {
         }
     }
 
-    /// A group's rows: on a standard grouped list's card in the classic look, on the ground in the pixel look.
-    @ViewBuilder private func card(_ rows: some View) -> some View {
-        if look.isClassic {
-            rows.grounded(Theme.panel, radius: Theme.Radius.card).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-                .padding(.horizontal, Theme.Space.l)
-        } else {
-            rows
-        }
-    }
+    /// A group's rows on a card that floats on the page: a grouped list's card in the classic look, a deck with a
+    /// frame and a hard shadow in the pixel look (docs/ui-v0.md §9.2, user #644).
+    private func card(_ rows: some View) -> some View { rows.deck() }
 
     /// What waits on the user's hand, a row each, then the rooms with a message for the user and nothing else waiting
     /// in them (as the Mac's `Mentions`).

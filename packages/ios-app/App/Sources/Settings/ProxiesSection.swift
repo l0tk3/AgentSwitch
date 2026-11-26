@@ -96,7 +96,7 @@ struct ProxyFormView: View {
     @State private var error: String?
 
     var body: some View {
-        Form {
+        LookForm {
             if let error { Section { ErrorText(message: $error).id(error) } }
             Section {
                 LabeledContent("Exit") { Text(exit ?? none).mono(13).textSelection(.enabled) }

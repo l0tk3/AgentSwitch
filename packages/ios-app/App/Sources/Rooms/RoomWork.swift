@@ -190,7 +190,7 @@ private struct RoomTaskAddPage: View {
 
     var body: some View {
         let seats = model.detail?.sessions ?? []
-        Form {
+        LookForm {
             Section(label: "Task") {
                 TextField("Title", text: $title).autocorrectionDisabled()
                 TextField("Detail", text: $detail, prompt: Text("可不填：要做到什么程度、注意什么"), axis: .vertical).lineLimit(2...6).autocorrectionDisabled()

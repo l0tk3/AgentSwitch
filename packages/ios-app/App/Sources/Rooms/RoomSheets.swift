@@ -125,7 +125,7 @@ private struct SeatCardPage: View {
 
     var body: some View {
         let seat = model.detail?.seat(handle)
-        Form {
+        LookForm {
             if let seat {
                 Section {
                     HStack(spacing: 12) {
@@ -338,7 +338,7 @@ struct RoomSessionsSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            LookForm {
                 if creating {
                     Section(label: "Room") {
                         TextField("Name", text: $name).autocorrectionDisabled()
@@ -551,7 +551,7 @@ struct RoomEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            LookForm {
                 Section(label: "Room") {
                     TextField("Name", text: $name).autocorrectionDisabled()
                     TextField("Topic", text: $topic, prompt: Text("一句话，进来的成员先读到"), axis: .vertical).lineLimit(1...3)

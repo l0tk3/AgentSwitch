@@ -137,7 +137,7 @@ struct ClashScreen: View {
 
     var body: some View {
         ScrollViewReader { reader in
-        Form {
+        LookForm {
             if let error = clash.error { Section { ErrorText(message: Binding(get: { clash.error }, set: { clash.error = $0 })).id(error) } }
             if let view = clash.view {
                 status(view)
@@ -470,7 +470,7 @@ private struct ClashNodesScreen: View {
     }
 
     var body: some View {
-        List {
+        LookForm {
             if !chosen.isEmpty {
                 Section {
                     ForEach(chosen, id: \.self) { node in
@@ -546,7 +546,7 @@ private struct ClashSubscriptionScreen: View {
     private var subscription: ClashSubscription? { clash.view?.subscriptions?.first { $0.id == id } }
 
     var body: some View {
-        Form {
+        LookForm {
             if let subscription {
                 Section {
                     LabeledContent("From") { Text(subscription.origin).mono(13).lineLimit(1) }
@@ -609,7 +609,7 @@ private struct ClashAllNodesScreen: View {
     private var canLeaveOut: Bool { clash.view?.ownRules ?? false }
 
     var body: some View {
-        List {
+        LookForm {
             Section {
                 ForEach(shown) { node in
                     Button { clash.run { try await $0.setClashNode(node.name, off: !node.off) } } label: {
@@ -682,7 +682,7 @@ private struct ClashTextScreen: View {
     }
 
     var body: some View {
-        Form {
+        LookForm {
             if let problem { Section { Text(problem).font(.footnote).foregroundStyle(Theme.failed) } }
             Section {
                 TextEditor(text: $text)
@@ -755,7 +755,7 @@ private struct ClashSourceSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            LookForm {
                 if let problem { Section { Text(problem).font(.footnote).foregroundStyle(Theme.failed) } }
                 Section {
                     TextField("Link", text: $link, prompt: Text("https://…"), axis: .vertical)

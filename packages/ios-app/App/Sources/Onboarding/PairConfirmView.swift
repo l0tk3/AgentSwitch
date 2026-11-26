@@ -29,7 +29,7 @@ struct PairConfirmView: View {
     }
 
     private func form(_ payload: PairingPayload) -> some View {
-        Form {
+        LookForm {
             Section("Mac") {
                 LabeledContent("Name", value: payload.name)
                 VStack(alignment: .leading, spacing: 4) {

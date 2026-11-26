@@ -36,7 +36,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollViewReader { reader in
-            Form {
+            LookForm {
                 if let current = model.profile {
                     Section {
                         NavigationLink(value: SettingsRoute.mac) { MacHeader() }

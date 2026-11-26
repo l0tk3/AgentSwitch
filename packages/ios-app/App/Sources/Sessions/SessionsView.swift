@@ -14,7 +14,7 @@ struct SessionsView: View {
     static let activePoll: Duration = .seconds(10)
 
     var body: some View {
-        List {
+        LookForm {
             if let error { Section { ErrorText(message: $error).id(error) } }
             if unsupported {
                 ContentUnavailableView("此 Mac 不支持查看编码会话", systemImage: "terminal",

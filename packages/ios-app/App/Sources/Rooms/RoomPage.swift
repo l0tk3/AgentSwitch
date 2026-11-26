@@ -448,8 +448,9 @@ private struct RoomMessageRow: View {
         }
     }
 
-    /// What a message says, with its files. In the classic look on a round block of its own, as wide as it is — the
-    /// user's own on a light tint of the accent (user #487, #498, as on the Mac); on the ground in the pixel look.
+    /// What a message says, with its files, on a block of its own as wide as it is (user #487, #498, #644, as on the
+    /// Mac): in the classic look round, the user's own on a light tint of the accent; in the pixel look square, a step
+    /// off the page, the user's own a step further (docs/ui-v0.md §9.2).
     @ViewBuilder private func said(_ m: RoomMessage, own: Bool) -> some View {
         let classic = look.isClassic
         VStack(alignment: .leading, spacing: 3) {
@@ -460,7 +461,6 @@ private struct RoomMessageRow: View {
                         Text(RoomWords.text(m.text, handles: handles, look: look))
                             .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
                             .lineLimit(long && !expanded ? Self.foldLines : nil)
-                            .frame(maxWidth: classic ? nil : .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                         if long {
@@ -473,9 +473,10 @@ private struct RoomMessageRow: View {
                     }
                     if !m.files.isEmpty, !m.deleted { RoomMessageFiles(room: detail.room.id, folder: detail.folder, paths: m.files, showInFiles: openFile) }
         }
-        .padding(.horizontal, classic ? 11 : 0).padding(.vertical, classic ? 7 : 0)
+        .padding(.horizontal, classic ? 11 : 10).padding(.vertical, classic ? 7 : 6)
         .background {
             if classic { RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(own ? Theme.signal.opacity(0.1) : Theme.panel) }
+            else { Rectangle().fill(own ? Theme.raised : Theme.panel) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

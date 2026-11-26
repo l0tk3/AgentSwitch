@@ -18,7 +18,7 @@ struct MacDetailsView: View {
     }
 
     private var form: some View {
-        Form {
+        LookForm {
             Section(label: "Connection") {
                 switch model.connection {
                 case .connected(let endpoint):

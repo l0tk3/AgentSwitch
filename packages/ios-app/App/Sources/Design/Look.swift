@@ -143,4 +143,59 @@ extension View {
 
     /// A ground, round by `radius` in the classic look.
     func grounded(_ color: Color, radius: CGFloat = 10) -> some View { modifier(Grounded(color: color, radius: radius)) }
+
+    /// A group of rows floating on the page (docs/ui-v0.md §9.2, user #644): in the pixel look a deck — its own ground a
+    /// step off the page's, a 1 pt frame, a solid hard shadow 3 pt down and right, no round corners, no blur; in the
+    /// classic look a grouped list's card. With the page's side margins.
+    func deck() -> some View { modifier(Deck()) }
+
+    /// A card in the content one step up (§9.2): in the pixel look a solid hard shadow 2 pt down and right under the
+    /// ground and frame it has; nothing in the classic look.
+    func lifted() -> some View { modifier(Lifted()) }
+}
+
+private struct Deck: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
+            content.background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, Theme.Space.l)
+        } else {
+            content
+                .background(Theme.deck)
+                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                .background(Rectangle().fill(Theme.pixelShadow).offset(x: 3, y: 3))
+                .padding(.leading, Theme.Space.l).padding(.trailing, Theme.Space.l - 3).padding(.bottom, 3)
+        }
+    }
+}
+
+private struct Lifted: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if look.isClassic { content } else { content.background(Rectangle().fill(Theme.pixelShadow).offset(x: 2, y: 2)) }
+    }
+}
+
+/// A form in the look (§9.2): the system's grouped cards in the classic look; in the pixel look square rows on a deck
+/// a step off the page — the system's inset cards are round, which the pixel look never is.
+struct LookForm<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        if look.isClassic {
+            Form { content }
+        } else {
+            List { Group { content }.listRowBackground(Theme.deck) }
+                .listStyle(.grouped)
+                // Off the screen's edges, as the classic card is: square, on a deck.
+                .contentMargins(.horizontal, Theme.Space.l, for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .background { Theme.base.ignoresSafeArea() }
+        }
+    }
 }
