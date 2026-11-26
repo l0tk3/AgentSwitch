@@ -160,9 +160,9 @@ enum DesignPreview {
                     // A profile's own proxy (docs/profiles-v0.md §4): the sheet once it was applied and checked, and
                     // one whose proxy let nothing out.
                     let dark = NSAppearance(named: .darkAqua)
-                    let checked = AgentProfile(id: "abc123def0", name: "cwork1", proxy: BrowserProxy(server: "http://proxy.example:8080", username: "me", sealed: true), exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"))
+                    let checked = AgentProfile(id: "abc123def0", name: "work", proxy: BrowserProxy(server: "http://proxy.example:8080", username: "me", sealed: true), exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"))
                     try await renderSheet(ProfileProxySheet(agent: .claude, profile: checked) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-proxy.png"))
-                    let down = AgentProfile(id: "abc123def0", name: "cwork1", proxy: BrowserProxy(server: "socks5://10.0.0.2:1080"))
+                    let down = AgentProfile(id: "abc123def0", name: "work", proxy: BrowserProxy(server: "socks5://10.0.0.2:1080"))
                     try await renderSheet(ProfileProxySheet(agent: .claude, profile: down, problem: "经这个代理连不出去（the proxy answered 502）。") { _ in }, model: model, appearance: dark,
                                           to: directory.appendingPathComponent("profile-proxy-down.png"))
                     // What a profile takes from `Default` (§3.8): the list, by kind and by item.
@@ -171,7 +171,7 @@ enum DesignPreview {
                     // The profiles' rows (§3.2): each with its colour before its name, `Default` with none.
                     let list = AgentProfiles(current: "abc123def0", profiles: [
                         AgentProfile(id: "default", name: "Default", account: "me@example.com"),
-                        AgentProfile(id: "abc123def0", name: "cwork1", account: "work@example.com", proxy: checked.proxy, exit: checked.exit, color: "violet"),
+                        AgentProfile(id: "abc123def0", name: "work", account: "work@example.com", proxy: checked.proxy, exit: checked.exit, color: "violet"),
                         AgentProfile(id: "abc123def1", name: "side", color: "sand"),
                         AgentProfile(id: "abc123def2", name: "lab", account: "lab@example.com", color: "mint"),
                         // A name and an account as long as they come: shown whole (2026-11-22).
@@ -218,6 +218,14 @@ enum DesignPreview {
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "clash" {
                     try await MainWindowPreview.renderClash(model: model, into: directory)
                     FileHandle.standardError.write(Data("design preview (Clash) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "showcase" {
+                    try await MainWindowPreview.renderShowcase(model: model, into: directory)
+                    RedactionDemo.current = RedactionDemo.make()
+                    try await renderSettings(.redaction, model: model, appearance: NSAppearance(named: .aqua), height: 880,
+                                             to: directory.appendingPathComponent("showcase-redaction-\(InterfaceLook.current.isClassic ? "classic" : "pixel").png"))
+                    FileHandle.standardError.write(Data("design preview (the README's windows) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "rooms" {
@@ -477,6 +485,21 @@ enum DesignPreview {
         view.layoutSubtreeIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw PreviewError("no bitmap for \(file.lastPathComponent)") }
         view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { throw PreviewError("no PNG for \(file.lastPathComponent)") }
+        try png.write(to: file)
+    }
+
+    /// The view drawn `pixelsWide` pixels across, whatever the screen's scale (the README's pictures, user #712: drawn
+    /// at the size they are shown, nothing scaled after).
+    static func write(_ view: NSView, to file: URL, pixelsWide: Int) throws {
+        view.layoutSubtreeIfNeeded()
+        let bounds = view.bounds
+        let high = Int((bounds.height * CGFloat(pixelsWide) / bounds.width).rounded())
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: high, bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { throw PreviewError("no bitmap for \(file.lastPathComponent)") }
+        rep.size = bounds.size
+        view.cacheDisplay(in: bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { throw PreviewError("no PNG for \(file.lastPathComponent)") }
         try png.write(to: file)
     }

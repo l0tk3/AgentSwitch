@@ -33,7 +33,7 @@ enum TerminalsPagePreview {
     private static let home = NSHomeDirectory()
     private static let longSession = "s-long"
     private static let longTitle = "把设置页拆成几个小页面，每页只放一类选项；先列出现在所有的选项和它们各自依赖的状态，再给出拆分方案，方案里要写清每一页的入口、返回方式和键盘操作，图标沿用现有的那一套，不要新画"
-    private static let project = "\(home)/Desktop/WorkSpace/Projects/AgentSwitch"
+    private static let project = "\(home)/Projects/AgentSwitch"
 
     static func render(into directory: URL) async throws {
         func file(_ name: String) -> URL { directory.appendingPathComponent("\(name).png") }
@@ -58,13 +58,13 @@ enum TerminalsPagePreview {
             model.showCreate(folder: project)
             model.profiles = ["claude-code": AgentProfiles(current: "abc123def0", profiles: [
                 AgentProfile(id: "default", name: "Default", account: "me@example.com"),
-                AgentProfile(id: "abc123def0", name: "cwork1", account: "work@example.com", color: "violet"),
+                AgentProfile(id: "abc123def0", name: "work", account: "work@example.com", color: "violet"),
                 AgentProfile(id: "abc123def1", name: "side", color: "sand")], creatable: true)]
         }
         try await shot(to: file("terminals-create-pane")) { model in
             model.split(.right)
             model.showCreate(folder: project)
-            model.createError = "文件夹不存在：~/Desktop/WorkSpace/Projects/Nowhere"
+            model.createError = "文件夹不存在：~/Projects/Nowhere"
         }
         // Grok picked (2026-11-11): its own models and its own levels, under its own word for them.
         try await shot(to: file("terminals-create-grok")) { model in
@@ -117,7 +117,7 @@ enum TerminalsPagePreview {
             model.syncPanes()
         }
         try await shot(to: file("terminals-rename")) { model in
-            model.collapsed = ["\(home)/Desktop/WorkSpace/Projects/MailLab"]
+            model.collapsed = ["\(home)/Projects/demo-app"]
             model.startRename("t1")
         }
         try await shot(to: file("terminals-closed")) { $0.sideClosed = true }
@@ -365,12 +365,12 @@ enum TerminalsPagePreview {
             TerminalInfo(id: "t1", harness: "claude-code", cwd: project, model: "claude-opus-5-5", mode: "auto", name: "修登录页的跳转", status: "working", cols: 104, rows: 33, createdAt: 10,
                          subagents: [TerminalSubagent(id: "a1", type: "Explore", name: "找登录入口", doing: "读 login.js"), TerminalSubagent(id: "a2", type: "general-purpose", name: "跑测试")])
                 // Under a profile with a proxy of its own (docs/profiles-v0.md §3.2): its lit dot while it runs.
-                .under(profile: "cwork1 · Tokyo 203.0.113.9", color: .violet),
+                .under(profile: "work · Tokyo 203.0.113.9", color: .violet),
             TerminalInfo(id: "t2", harness: "codex", cwd: "\(project)/packages/secret-gate", model: "gpt-5.5", mode: "manual", name: "网关的引用过期", status: "waiting", cols: 80, rows: 24, createdAt: 20,
                          permissions: [TerminalRequest(id: "r1", tool: "Bash", summary: "Bash: npm test")]),
-            TerminalInfo(id: "t3", harness: "opencode", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "解析退信", status: "idle", createdAt: 30),
+            TerminalInfo(id: "t3", harness: "opencode", cwd: "\(home)/Projects/demo-app", name: "修表单校验", status: "idle", createdAt: 30),
             // One that ended keeps no dot: the dot says what runs under the profile now.
-            TerminalInfo(id: "t4", harness: "claude-code", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "旧的导出", status: "exited", createdAt: 5, exitCode: 1).under(profile: "side", color: .sand),
+            TerminalInfo(id: "t4", harness: "claude-code", cwd: "\(home)/Projects/demo-app", name: "旧的导出", status: "exited", createdAt: 5, exitCode: 1).under(profile: "side", color: .sand),
             TerminalInfo(id: "t5", harness: "codex", cwd: project, model: "gpt-6-sol", mode: "manual", name: "查一处越界读", status: "idle", createdAt: 40, effort: "high", sets: true, daybreak: true),
             TerminalInfo(id: "t6", harness: "claude-code", cwd: project, model: "claude-opus-5-5", mode: "auto", name: "看一遍改动", status: "idle", createdAt: 50).under(profile: "side", color: .sand),
         ]
@@ -378,15 +378,15 @@ enum TerminalsPagePreview {
             session("s1", project, "完成未完成的部分 gate-next", ago: 0, active: true), session("s2", project, "简单看一下项目内容", "codex", ago: 13),
             session("s3", project, "discovery.ts 职责一句话", "opencode", ago: 300), session("s4", project, "登录超时排查", ago: 400), session("s5", project, "给健康检查加缓存", ago: 500),
             session("s6", "\(project)/packages/secret-gate", "Retrieving 6-digit one-time codes", "opencode", ago: 380),
-            session("s7", "\(home)/Desktop/WorkSpace/Projects/MailLab", "注意到项目中有一个打开的登录表单", ago: 150),
-            session("s8", "\(home)/Desktop/WorkSpace/Worktop", "我要学习计算机基础知识", ago: 1),
+            session("s7", "\(home)/Projects/demo-app", "给首页加暗色模式", ago: 150),
+            session("s8", "\(home)/Projects/notes", "整理周报模板", ago: 1),
             // One Codex session id with three records (the service lists each): three rows.
-            session("c1", "\(home)/Desktop/WorkSpace/Worktop", "企业申请需要先获得什么", "codex", ago: 500),
-            session("c1", "\(home)/Desktop/WorkSpace/Worktop", "监控核心温度的软件叫什么", "codex", ago: 570),
-            session("c1", "\(home)/Desktop/WorkSpace/Worktop", "威胁情报报告里的要点", "codex", ago: 580),
+            session("c1", "\(home)/Projects/notes", "润色 README 的英文", "codex", ago: 500),
+            session("c1", "\(home)/Projects/notes", "列出依赖的许可证", "codex", ago: 570),
+            session("c1", "\(home)/Projects/notes", "总结一篇论文的要点", "codex", ago: 580),
         ] + (long ? [session(longSession, project, longTitle, ago: 2)] : [])
         let gits = [project: FolderGit(branch: "main", changed: 42, ahead: 2), "\(project)/packages/secret-gate": FolderGit(branch: "main", changed: 5),
-                    "\(home)/Desktop/WorkSpace/Projects/MailLab": FolderGit(branch: "main")]
+                    "\(home)/Projects/demo-app": FolderGit(branch: "main")]
         let five = ["low", "medium", "high", "xhigh", "max"]
         let grok = ["low", "medium", "high", "xhigh"]
         var models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five),
@@ -407,6 +407,27 @@ enum TerminalsPagePreview {
     }
 
     /// `long`: among the sessions, one whose title is as long as the service gives them (120 characters).
+    /// The README's page (user #689): the record of `t1` with its side pane out — the context, the tasks, the browser
+    /// tab its agent uses, the changes — and the list beside it. What it set is put back by the function it returns.
+    static func stageShowcase(_ model: TerminalsModel, side: Bool = true) -> () -> Void {
+        UserDefaults.standard.set(side, forKey: "terminals.recordSide")
+        RecordBrowserWatch.previewTabs = TerminalBrowserTabs(browser: nil, tabs: [
+            BrowserTab(id: "b1", owner: BrowserOwner(kind: .terminal, id: "t1", label: "claude · AgentSwitch"), title: "Pull requests · agentswitch", url: "https://github.com/agentswitch/agentswitch/pulls", site: "github.com", status: .busy,
+                       action: BrowserAction(tool: "browser_click", description: "click \"Merge\""), viewport: BrowserViewport(width: 1280, height: 800)),
+            BrowserTab(id: "b2", owner: BrowserOwner(kind: .terminal, id: "t1", label: "claude · AgentSwitch"), title: "Sign in", url: "https://accounts.example.com/login", site: "accounts.example.com", status: .waiting,
+                       action: BrowserAction(tool: "browser_wait_for", description: "Waiting for the code")),
+        ])
+        RecordBrowserWatch.previewPicture = picture(wide: true)
+        model.select("t1")
+        stageRecord(model, working: true)
+        PaneRecord.previewOpenStep = nil
+        return {
+            UserDefaults.standard.removeObject(forKey: "terminals.recordSide")
+            RecordBrowserWatch.previewTabs = nil
+            RecordBrowserWatch.previewPicture = nil
+        }
+    }
+
     static func shot(to file: URL, light: Bool = false, long: Bool = false, onScreen: Bool = false, stage: (TerminalsModel) -> Void,
                              then: (@MainActor (TerminalsModel, NSView) async throws -> Void)? = nil) async throws {
         let model = demoModel(long: long)

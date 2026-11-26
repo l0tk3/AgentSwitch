@@ -73,12 +73,56 @@ enum MainWindowPreview {
         try await shot(model: model, page: .clash, system: NSAppearance(named: .aqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-light.png"))
     }
 
+    /// The real Terminals page in the window, for `renderShowcase` (the stand-in elsewhere).
+    @MainActor private static var showcaseTerminals: NSView?
+    @MainActor private static var showcasePixelsWide: Int?
+    private static let showcaseSize = NSSize(width: 1512, height: 945)
+    /// A MacBook's screen filled (user #715), drawn at twice its points: the full picture, the page scales it.
+    private static let showcasePixels = 3024
+
+    /// `-designPreviewOnly showcase` (the README, user #689): whole windows, Classic in the system's light and Pixel in
+    /// its dark, in the look in force — the Terminals page with a record and its side pane (`showcase-terminals`), a room at work
+    /// (`showcase-rooms`). The lights are the window's own, as AppKit draws them for a window not in front.
+    static func renderShowcase(model: AppModel, into directory: URL) async throws {
+        let look = InterfaceLook.current.isClassic ? "classic" : "pixel"
+        // Classic in the system's light, Pixel in its dark (user #708).
+        let light = NSAppearance(named: InterfaceLook.current.isClassic ? .aqua : .darkAqua)
+        let terminals = TerminalsPagePreview.demoModel()
+        let host = NSHostingView(rootView: TerminalsPageView(model: terminals))
+        host.sizingOptions = []
+        showcaseTerminals = host
+        defer { showcaseTerminals = nil }
+        let state = state(on: .terminals)
+        let browser = BrowserPageModel(service: { BrowserDemoService(empty: true) }, state: state, defaults: nil)
+        let (window, _) = makeWindow(model: model, state: state, page: .terminals, system: light, size: showcaseSize, browser: browser)
+        MainWindowController.dress(window, for: .terminals, system: light, record: true)
+        try await DesignPreview.settle()
+        let putBack = TerminalsPagePreview.stageShowcase(terminals)
+        defer { putBack() }
+        try await DesignPreview.settle()
+        try await DesignPreview.settle()
+        try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: directory.appendingPathComponent("showcase-terminals-\(look).png"), pixelsWide: showcasePixels)
+        terminals.stop()
+        browser.stop()
+        window.close()
+        RoomsDemo.instead = .showcase
+        defer { RoomsDemo.instead = nil }
+        showcasePixelsWide = showcasePixels
+        defer { showcasePixelsWide = nil }
+        try await shot(model: model, page: .rooms, system: light, size: showcaseSize, to: directory.appendingPathComponent("showcase-rooms-\(look).png"))
+    }
+
     /// `main-rooms`: the Chat Room page (docs/chatroom-v0.md §10) over a made-up room — its list, the timeline with a
     /// reply, a message for the user and receipts still open, and the members in their states; in the look in force
     /// (`-appearance classic` for the other).
     static func renderRooms(model: AppModel, into directory: URL) async throws {
         let name = InterfaceLook.current.isClassic ? "main-rooms-classic" : "main-rooms"
         try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 720), to: directory.appendingPathComponent("\(name).png"))
+        // The README's picture (user #675): a room at work, one notice, a screenshot a member sent.
+        RoomsDemo.instead = .showcase
+        try await shot(model: model, page: .rooms, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1180, height: 860), to: directory.appendingPathComponent("\(name)-showcase.png"))
+        try await shot(model: model, page: .rooms, system: NSAppearance(named: .aqua), size: NSSize(width: 1180, height: 860), to: directory.appendingPathComponent("\(name)-showcase-light.png"))
+        RoomsDemo.instead = nil
         // What floats over it (§9): the task list, the shared folder, and a member's card with what it is changing.
         for (sheet, card, tail) in [(RoomsModel.Sheet.new, nil, "new"), (.tasks, nil, "tasks"), (.files, nil, "files"), (.models, nil, "models"), (nil, "mac-app", "card"), (nil, "web", "card-ended")] as [(RoomsModel.Sheet?, String?, String)] {
             RoomsDemo.opens = sheet
@@ -131,7 +175,7 @@ enum MainWindowPreview {
     /// and a profile's own at the head of the list, the profile's on the page.
     static func renderBrowsers(model: AppModel, into directory: URL) async throws {
         try await shot(model: model, page: .browser, system: NSAppearance(named: .darkAqua), browser: BrowserDemoService(),
-                       browsers: [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", agent: "claude-code", exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"), running: true)],
+                       browsers: [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "work", agent: "claude-code", exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"), running: true)],
                        to: directory.appendingPathComponent("main-browser-profiles.png"))
     }
 
@@ -195,11 +239,19 @@ enum MainWindowPreview {
         head.tag = "1 Waiting"
         head.context = TerminalContext(harness: "claude-code", model: "claude-opus-5-5", mode: "bypass", cols: 139, rows: 46)
         // Under a profile with a proxy of its own (docs/profiles-v0.md §3.2, §4): its lit dot, its name and its exit.
-        head.context?.profile = "cwork1 · Tokyo 203.0.113.9"
+        head.context?.profile = "work · Tokyo 203.0.113.9"
         head.context?.profileColor = .violet
         head.context?.device = "56967b93c1a04e7d9f20b6a3e85d17c40a9be2f6713d58c4e09a1b7f3c6d2e85"
         // The stand-in page's list (TerminalPageStandIn).
         head.sideWidth = list ? 300 : 0
+        // The README's window (renderShowcase): the record of a session at work, in the system's light.
+        if showcaseTerminals != nil {
+            head.status = "working"
+            head.mark = .off
+            head.tag = ""
+            head.simple = true
+            head.light = true
+        }
         return head
     }
 
@@ -233,7 +285,11 @@ enum MainWindowPreview {
         }
         try await DesignPreview.settle()
         try await DesignPreview.settle()
-        try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: file)
+        if let wide = showcasePixelsWide {
+            try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: file, pixelsWide: wide)
+        } else {
+            try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: file)
+        }
         browser.stop()
         window.close()
     }
@@ -339,10 +395,10 @@ enum MainWindowPreview {
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
         let dispatch = NSHostingView(rootView: RoomsPage(state: state, desk: true).environment(model))
-        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
+        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: showcaseTerminals ?? NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
                                               .browser: BrowserPage.host(browser),
                                               .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model)),
-                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: .demo).environment(model))])
+                                              .rooms: NSHostingView(rootView: RoomsPage(state: state, demo: RoomsDemo.instead ?? .demo).environment(model))])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head(list: rail != .bare), model: model, content: container,
                                                                 actions: MainBarActions(), browser: browser))
         host.sizingOptions = []

@@ -153,6 +153,8 @@ struct RoomsDemo {
     @MainActor static var draft: String?
     /// What else is set on the made-up page before it is drawn (the drawer out, a task shown, a search).
     @MainActor static var setup: ((RoomsModel) -> Void)?
+    /// Another made-up room drawn in place of `demo` (`showcase`, for the README).
+    @MainActor static var instead: RoomsDemo?
     let rooms: [RoomSummary]
     let room: Room
 }
@@ -264,6 +266,7 @@ private struct NoticeBand: ViewModifier {
                 .lifted()
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
+                .padding(.bottom, 4)   // its shadow clear of the timeline that scrolls on under it
         }
     }
 }
