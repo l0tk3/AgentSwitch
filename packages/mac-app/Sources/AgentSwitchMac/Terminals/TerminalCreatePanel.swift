@@ -89,7 +89,8 @@ struct TerminalCreatePanel: View {
             // the space above the name is the same whether or not it says so (a line more made that tile taller than
             // the rest; user: notinstalled框太大了 排版崩了 应该和其他的一样大).
             VStack(alignment: .leading, spacing: 10) {
-                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.agents["pi"]!, pixel: 3, color: Look.ink, strength: on ? 1 : 0.75, shadow: !look.isClassic)
+                // The agent's own logo, as its program draws it (user #590), the same as the simple view's head.
+                AgentLogo(harness: id, size: 20, bare: true).opacity(installed ? (on ? 1 : 0.85) : 0.4)
                     .frame(height: 16, alignment: .leading)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name).font(look.isClassic ? .system(size: 13, weight: on ? .semibold : .regular) : .system(size: 12.5, design: .monospaced)).lineLimit(1)

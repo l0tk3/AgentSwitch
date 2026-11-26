@@ -1,92 +1,57 @@
 import AgentSwitchMacCore
+import AppKit
 import SwiftUI
 
-/// Each agent's mark beside its name in the simple view's head (user #582: 简略视图里能不能把各家agent的logo画上去).
-/// Drawn here, not shipped as pictures: in the classic look a simple drawing in the maker's colours on a soft tile —
-/// Claude Code's sunburst, Codex's six-petalled knot, OpenCode's block, pi's π, Grok's slashed ring, Antigravity's
-/// arch in Google's four colours; in the pixel look the agent's own pixel mark (`PixelArt.agents`), as its tile has.
+/// Each agent's logo beside its name in the simple view's head: the one its own command-line program draws on its
+/// start screen (`AgentLogoArt`, user #590: 图标统一放各家cli里放的那个图标), in its own colours, in both looks — on a
+/// soft rounded tile in the classic look, in a square frame in the pixel look.
 struct AgentLogo: View {
     let harness: String
     var size: CGFloat = 36
+    /// The art alone, no tile or frame under it (the new-terminal sheet's tiles).
+    var bare = false
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        if look.isClassic {
-            ZStack {
-                RoundedRectangle(cornerRadius: Look.cardRadius, style: .continuous).fill(tile)
-                Canvas { ctx, box in draw(&ctx, CGRect(origin: .zero, size: box).insetBy(dx: box.width * 0.2, dy: box.height * 0.2)) }
+        ZStack {
+            if bare {
+                EmptyView()
+            } else if look.isClassic {
+                RoundedRectangle(cornerRadius: Look.cardRadius, style: .continuous).fill(Look.hover)
+            } else {
+                Rectangle().strokeBorder(Look.line, lineWidth: 1)
             }
-            .frame(width: size, height: size)
-            .accessibilityLabel(TerminalListText.agentName(harness))
-        } else {
-            PixelSprite(rows: PixelArt.agents[harness] ?? PixelArt.agents["pi"]!, pixel: 3, color: Look.ink, strength: 1, shadow: true)
-                .frame(width: size, height: size)
-                .overlay(Rectangle().strokeBorder(Look.line, lineWidth: 1))
-                .accessibilityLabel(TerminalListText.agentName(harness))
+            Canvas { ctx, box in draw(&ctx, CGRect(origin: .zero, size: box).insetBy(dx: bare ? 0 : box.width * 0.18, dy: bare ? 0 : box.height * 0.18)) }
         }
-    }
-
-    private var ink: Color { Look.ink }
-
-    private var tile: Color {
-        switch harness {
-        case "claude-code": Look.brandClaude.opacity(0.16)
-        case "agy": Look.brandGoogle[3].opacity(0.13)
-        default: Look.hover
-        }
+        .frame(width: size, height: size)
+        .accessibilityLabel(TerminalListText.agentName(harness))
     }
 
     private func draw(_ ctx: inout GraphicsContext, _ r: CGRect) {
-        let c = CGPoint(x: r.midX, y: r.midY), s = r.width
-        switch harness {
-        case "claude-code":
-            // A sunburst: twelve rays, long and short in turn.
-            var p = Path()
-            for i in 0..<12 {
-                let a = Double(i) / 12 * 2 * .pi - .pi / 2, len = s * (i % 2 == 0 ? 0.5 : 0.36)
-                p.move(to: CGPoint(x: c.x + cos(a) * s * 0.08, y: c.y + sin(a) * s * 0.08))
-                p.addLine(to: CGPoint(x: c.x + cos(a) * len, y: c.y + sin(a) * len))
-            }
-            ctx.stroke(p, with: .color(Look.brandClaude), style: StrokeStyle(lineWidth: s * 0.11, lineCap: .round))
-        case "codex":
-            // A knot of six rounded links turned about the middle.
-            for i in 0..<6 {
-                let link = Path(roundedRect: CGRect(x: -s * 0.13, y: -s * 0.46, width: s * 0.26, height: s * 0.5), cornerRadius: s * 0.13)
-                let t = CGAffineTransform(translationX: c.x, y: c.y).rotated(by: Double(i) / 6 * 2 * .pi)
-                ctx.stroke(link.applying(t), with: .color(ink), lineWidth: s * 0.075)
-            }
-        case "opencode":
-            // A block with a hollow: the square of its pixel letters.
-            var p = Path(CGRect(x: c.x - s * 0.36, y: c.y - s * 0.44, width: s * 0.72, height: s * 0.88))
-            p.addRect(CGRect(x: c.x - s * 0.18, y: c.y - s * 0.26, width: s * 0.36, height: s * 0.52))
-            ctx.fill(p, with: .color(ink), style: FillStyle(eoFill: true))
-        case "grok":
-            // A ring broken by a slash.
-            // The ring in two halves, parted where the slash crosses it (at 135° and 315°, y down).
-            var ring = Path()
-            for (from, to) in [(160.0, 290.0), (340.0, 470.0)] {
-                for (i, deg) in stride(from: from, through: to, by: 5).enumerated() {
-                    let a = deg * .pi / 180, pt = CGPoint(x: c.x + cos(a) * s * 0.36, y: c.y + sin(a) * s * 0.36)
-                    if i == 0 { ring.move(to: pt) } else { ring.addLine(to: pt) }
-                }
-            }
-            ctx.stroke(ring, with: .color(ink), style: StrokeStyle(lineWidth: s * 0.1, lineCap: .round, lineJoin: .round))
-            var slash = Path()
-            slash.move(to: CGPoint(x: c.x - s * 0.5, y: c.y + s * 0.5))
-            slash.addLine(to: CGPoint(x: c.x + s * 0.5, y: c.y - s * 0.5))
-            ctx.stroke(slash, with: .color(ink), style: StrokeStyle(lineWidth: s * 0.1, lineCap: .round))
-        case "agy":
-            // An arch, its legs apart, in Google's four colours.
-            var arch = Path()
-            arch.move(to: CGPoint(x: c.x - s * 0.46, y: c.y + s * 0.44))
-            arch.addCurve(to: CGPoint(x: c.x + s * 0.46, y: c.y + s * 0.44),
-                          control1: CGPoint(x: c.x - s * 0.3, y: c.y - s * 0.75), control2: CGPoint(x: c.x + s * 0.3, y: c.y - s * 0.75))
-            let colours = Gradient(colors: Look.brandGoogle)
-            ctx.stroke(arch, with: .linearGradient(colours, startPoint: CGPoint(x: r.minX, y: r.maxY), endPoint: CGPoint(x: r.maxX, y: r.maxY)),
-                       style: StrokeStyle(lineWidth: s * 0.16, lineCap: .round))
-        default:
-            // pi: its letter.
-            ctx.draw(Text("π").font(.system(size: s * 0.95, weight: .semibold, design: .serif)).foregroundColor(ink), at: c)
+        guard let art = AgentLogoArt.art[harness] ?? AgentLogoArt.art["pi"] else { return }
+        let wide = art.rows.map(\.count).max() ?? 0, high = art.rows.count
+        guard wide > 0, high > 0 else { return }
+        let tall = CGFloat(AgentLogoArt.tall[harness] ?? 1)
+        let cell = min(r.width / CGFloat(wide), r.height / (CGFloat(high) * tall))
+        let left = r.midX - cell * CGFloat(wide) / 2, top = r.midY - cell * tall * CGFloat(high) / 2
+        var colours: [Character: Color] = [:]
+        for (key, hex) in art.colours {
+            guard let k = key.first else { continue }
+            colours[k] = hex == "ink" ? Look.ink : Self.colour(hex)
         }
+        for (y, row) in art.rows.enumerated() {
+            for (x, key) in row.enumerated() where key != "." {
+                // A hair over a cell, so neighbouring cells meet without a seam.
+                let box = CGRect(x: left + CGFloat(x) * cell, y: top + CGFloat(y) * cell * tall, width: cell + 0.3, height: cell * tall + 0.3)
+                ctx.fill(Path(box), with: .color(colours[key] ?? Look.ink))
+            }
+        }
+    }
+
+    /// `RRGGBB` as the program drew it.
+    private static func colour(_ hex: String) -> Color {
+        let v = UInt32(hex, radix: 16) ?? 0
+        let red = CGFloat((v >> 16) & 0xFF) / 255, green = CGFloat((v >> 8) & 0xFF) / 255, blue = CGFloat(v & 0xFF) / 255
+        return Color(nsColor: NSColor(srgbRed: red, green: green, blue: blue, alpha: 1))
     }
 }
