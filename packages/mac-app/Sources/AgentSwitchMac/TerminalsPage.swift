@@ -486,6 +486,8 @@ final class TerminalHead {
     /// The pane in focus shows its terminal's record (the simple view): the window takes the system's light or dark,
     /// its bars with it, and the bar's switch says the other view.
     var simple = false
+    /// The page is split in panes: the side pane is not offered there (too narrow beside a record, user #559).
+    var split = false
     /// The pane in focus has the simple view's look (a record, or a pane that waits as one): the window's and its bars'.
     var light = false
     /// The native screen's word on the terminal on screen: its grid as the service has it (`[cols, rows]`, nil before the

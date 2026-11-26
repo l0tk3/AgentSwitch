@@ -161,10 +161,7 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertTrue(RecordDisplay.changedFiles([items[0], items[2]]).isEmpty)
 
         // A pane too narrow has no side; a wide one gives it three tenths, within bounds.
-        XCTAssertNil(RecordLayout.side(pane: 519))
-        XCTAssertEqual(RecordLayout.side(pane: 560), 220)
-        XCTAssertEqual(RecordLayout.side(pane: 800), 272)
-        XCTAssertEqual(RecordLayout.side(pane: 979), 300)
+        XCTAssertNil(RecordLayout.side(pane: 979))
         XCTAssertEqual(RecordLayout.side(pane: 980), 300)
         XCTAssertEqual(RecordLayout.side(pane: 1200), 360)
         XCTAssertEqual(RecordLayout.side(pane: 1700), 440)

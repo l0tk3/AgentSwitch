@@ -243,7 +243,7 @@ struct MainBar: View {
                         if look.isClassic {
                             // Classic (user #486: seven icons in a row were a clutter): the side pane, one menu for what
                             // is done now and then — the editor, the other view, the two splits — and New Terminal.
-                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: recordSide ? "Hide Side Pane" : "Show Side Pane", lit: recordSide) { recordSide.toggle() } }
+                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: head.split ? "Side Pane" : recordSide ? "Hide Side Pane" : "Show Side Pane", enabled: !head.split, lit: recordSide && !head.split) { recordSide.toggle() } }
                             Menu {
                                 if !head.name.isEmpty {
                                     Button(head.simple ? "Terminal View  ⌘⇧E" : "Simple View  ⌘⇧E", action: actions.toggleView)
@@ -269,7 +269,7 @@ struct MainBar: View {
                             }
                             // The simple view's side pane (tasks, changed files), shown or hidden from the bar (user #477: no
                             // handy way to open and close it).
-                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: recordSide ? "Hide Side Pane" : "Show Side Pane", lit: recordSide) { recordSide.toggle() } }
+                            if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: head.split ? "Side Pane" : recordSide ? "Hide Side Pane" : "Show Side Pane", enabled: !head.split, lit: recordSide && !head.split) { recordSide.toggle() } }
                             // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
                             ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
                             ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }
