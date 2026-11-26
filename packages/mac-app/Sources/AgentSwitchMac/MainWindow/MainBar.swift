@@ -576,7 +576,7 @@ struct ViewSwitch: View {
         }
         .padding(look.isClassic ? 2 : 0)
         .background(RoundedRectangle(cornerRadius: look.isClassic ? Look.controlRadius : 0, style: .continuous).fill(look.isClassic ? Look.hover : Color.clear))
-        .overlay(Rectangle().strokeBorder(look.isClassic ? Color.clear : Look.ink, lineWidth: 1))
+        .overlay(Rectangle().strokeBorder(look.isClassic ? Color.clear : Look.line, lineWidth: 1))
         .fixedSize()
     }
 
@@ -593,10 +593,12 @@ struct ViewSwitch: View {
                     .background(RoundedRectangle(cornerRadius: Look.controlRadius - 2, style: .continuous).fill(on ? Look.ground : Color.clear)
                         .shadow(color: .black.opacity(on ? 0.08 : 0), radius: 1, y: 0.5))
                 } else {
-                    Text(word).font(.system(size: 11.5, weight: on ? .semibold : .regular, design: .monospaced))
-                        .foregroundStyle(on ? Look.ground : Look.ink2)
-                        .padding(.horizontal, 7).frame(height: 20)
-                        .background(on ? Look.ink : Color.clear)
+                    // Quiet beside the bar's icons (user #619: 太突兀): the view shown a step raised in the bar's own
+                    // greys, not reversed out in ink.
+                    Text(word).font(.system(size: 11, weight: on ? .medium : .regular, design: .monospaced))
+                        .foregroundStyle(on ? Look.ink : Look.faint)
+                        .padding(.horizontal, 6).frame(height: 18)
+                        .background(on ? Look.raised : Color.clear)
                 }
             }
             .contentShape(Rectangle())
