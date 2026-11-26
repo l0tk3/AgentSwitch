@@ -544,6 +544,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         return { file, args, env, hooks: hooked };
       }
       case "agy": {
+        // Through the model traffic gateway (docs/model-gate-v0.md): its CA is one more this Go program trusts —
+        // `AGY_CA_CERT` beside the system's roots (measured 2026-11-26; the generic `SSL_CERT_FILE` works too, but
+        // this is the variable it names). `HTTPS_PROXY` comes with the rest of the gate's environment.
+        if (req.gate) env.AGY_CA_CERT = req.gate.ca;
         // No look for a new version of its own at start (user #460): it starts an updater with every launch.
         env.AGY_CLI_DISABLE_AUTO_UPDATE = "true";
         if (opts.trustedFolders) pretrust("agy", req.cwd, env, opts.trustedFolders());

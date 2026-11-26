@@ -1000,9 +1000,7 @@ export class TerminalHost {
     // The model traffic gateway: the way out the terminal would have had (its profile's, or this service's own)
     // is the gateway's way on.
     const envProxy = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.all_proxy || process.env.ALL_PROXY || null;
-    // Not Antigravity's: it speaks Gemini's own format to Google's own hosts, which the gateway does not read
-    // (docs/terminal-v0.md §3 Antigravity) — it leaves this Mac as the profile says, past the gateway.
-    const gate = req.harness === "agy" ? null : await this.opts.modelGate?.open({ terminal: id, harness: req.harness, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
+    const gate = await this.opts.modelGate?.open({ terminal: id, harness: req.harness, profile: req.profile?.id ?? "", upstream: req.profile?.proxy ?? (envProxy && /^https?:/.test(envProxy) ? envProxy : null), ...(req.profile?.api?.baseUrl ? { baseUrl: req.profile.api.baseUrl } : {}) }).catch(() => null) ?? null;
     let plan: LaunchPlan;
     try {
       plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(gate ? { gate } : {}), ...(req.profile ? { ...(req.profile.isolated ? { isolated: true as const } : {}), ...(req.profile.home ? { configHome: req.profile.home } : {}), ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}), ...(req.profile.browserKey ? { browserKey: req.profile.browserKey } : {}), ...(req.profile.api ? { api: { name: req.profile.name, ...req.profile.api } } : {}), ...(req.profile.telemetryOff ? { telemetryOff: true as const } : {}) } : {}), ...(req.signIn ? { signIn: true as const } : {}), ...(req.ownProvider ? { ownProvider: true as const } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });

@@ -78,6 +78,11 @@ describe("an Antigravity terminal", () => {
     // server has the terminal from the environment agy hands it.
     expect(looked).toBe(1);
     expect(plain.env).toMatchObject({ AGENTSWITCH_TERMINAL_ID: "a1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "tok", AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:4711", AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
+    // Through the model traffic gateway: this Go program is given the gateway's CA by the name it reads, beside the
+    // proxy the rest of the gate's environment brings (docs/model-gate-v0.md).
+    expect(plain.env.AGY_CA_CERT).toBeUndefined();
+    const gated = launch({ id: "a8", harness: "agy", cwd: "/tmp", mode: "manual", hookToken: "tok", gate: { proxy: "http://s:t@127.0.0.1:9", ca: "/gate/ca.pem", bundle: "/gate/trust.pem" } });
+    expect(gated.env).toMatchObject({ AGY_CA_CERT: "/gate/ca.pem", HTTPS_PROXY: "http://s:t@127.0.0.1:9", https_proxy: "http://s:t@127.0.0.1:9" });
     // The level goes into the model's id: named beside `--effort`, the program takes neither.
     const chosen = launch({ id: "a2", harness: "agy", cwd: "/tmp", model: "gemini-4-hydrogen-high", effort: "low", mode: "auto", hookToken: "tok" });
     expect(JSON.parse(chosen.args[1]!)).toEqual({ statusLine: { type: "command", command: '"/n/node" "/h/hook.js" agy', enabled: true } });
@@ -119,6 +124,19 @@ describe("an Antigravity terminal", () => {
     // Nothing to refuse, nothing sent.
     expect(agyDenyRules(undefined)).toEqual([]);
     expect(agySettings("auto", null)).toEqual({});
+  });
+
+  it("goes through the model traffic gateway when it is on, like every other terminal", async () => {
+    const scopes: { terminal: string; harness?: string }[] = [];
+    let gate: unknown;
+    const host = new TerminalHost({
+      launcher: (req) => { gate = req.gate; return { file: process.execPath, args: [FAKE], env: { ...(process.env as Record<string, string>), FAKE_HOOK_SCRIPT: HOOK_SCRIPT, AGENTSWITCH_TERMINAL_ID: req.id, AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:9", AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken }, hooks: true }; },
+      modelGate: { open: async (scope) => { scopes.push(scope); return { proxy: "http://s:agy@127.0.0.1:9", ca: "/gate/ca.pem", bundle: "/gate/trust.pem" }; }, close: () => undefined },
+    });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "agy", cwd: tmpdir(), mode: "manual" });
+    expect(scopes[0]).toMatchObject({ terminal: info.id, harness: "agy" });
+    expect(gate).toEqual({ proxy: "http://s:agy@127.0.0.1:9", ca: "/gate/ca.pem", bundle: "/gate/trust.pem" });
   });
 
   it("its status line is read: what it does, whether it waits, how it asks, its title and model", () => {

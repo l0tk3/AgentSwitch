@@ -58,6 +58,36 @@ def test_streams_of_each_kind():
     assert args == "h_7kq3m"   # never completed: given as it came, before the chunk that finishes
 
 
+def test_cloud_code_streams_are_hidden_and_put_back():
+    # Antigravity CLI to daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse (measured
+    # 2026-11-26): a request wrapped in `request` with Gemini's `contents[].parts[].text`, and an event wrapped in
+    # `response` whose text is in `candidates[].content.parts[].text`.
+    p = (Pair("AGSW-REAL-秘密", "h_7kq3m9x2pd"),)
+    body = json.dumps({"request": {"contents": [{"role": "user", "parts": [{"text": "say AGSW-REAL-秘密"}]}],
+                                   "systemInstruction": {"role": "user", "parts": [{"text": "about AGSW-REAL-秘密"}]}},
+                       "model": "gemini-4-hydrogen-high"})
+    hidden = hide(body, p)
+    assert "AGSW" not in hidden and hidden.count("h_7kq3m9x2pd") == 2
+
+    sw = Swapper(p)
+    def ev(text):
+        return {"response": {"candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": text}]}}]}}
+    got = []
+    for piece in ["say h_7k", "q3m9", "x2pd now"]:
+        got += sw.event(ev(piece))
+    got += sw.event({"response": {"candidates": [{"index": 0, "finishReason": "STOP"}]}})   # no text: the held piece comes out
+    text = "".join(e["response"]["candidates"][0]["content"]["parts"][0]["text"]
+                   for e in got if e.get("response", {}).get("candidates") and e["response"]["candidates"][0].get("content"))
+    assert text == "say AGSW-REAL-秘密 now"
+
+    # A tool call's arguments come whole beside the text (its `args` is an object, not a delta string): put back too.
+    sw = Swapper(p)
+    out = sw.event({"response": {"candidates": [{"index": 0, "content": {"parts": [
+        {"text": "ok"}, {"functionCall": {"name": "run", "args": {"command": "echo h_7kq3m9x2pd"}}}]}}]}})
+    args = out[0]["response"]["candidates"][0]["content"]["parts"][1]["functionCall"]["args"]
+    assert args["command"] == "echo AGSW-REAL-秘密"
+
+
 def test_sse_bytes_split_anywhere():
     events = [{"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": p}} for p in ['{"c":"echo h_', "7kq3m9x2", 'pd"}']]
     raw = b"".join(b"event: content_block_delta\r\ndata: " + json.dumps(e).encode() + b"\r\n\r\n" for e in events) + b"data: [DONE]\n\n"

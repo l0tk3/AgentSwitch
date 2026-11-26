@@ -23,6 +23,8 @@ export const MODEL_HOSTS: readonly string[] = [
   "opencode.ai", "api.z.ai",
   // Grok Build (1.0.92): its chat goes to its own proxy of the API.
   "cli-chat-proxy.grok.com",
+  // Antigravity CLI (1.5.17): Google's Cloud Code calls for Gemini (docs/terminal-v0.md §3 Antigravity).
+  "cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com", "*.cloudcode-pa.googleapis.com",
 ];
 
 export type GateScope = { readonly terminal: string; readonly profile: string; readonly upstream: string | null; readonly baseUrl?: string };

@@ -143,6 +143,17 @@ class Swapper:
         out: list[tuple[Any, dict, str]] = []
         if not isinstance(o, dict):
             return out
+        resp = o.get("response") if isinstance(o.get("response"), dict) else o
+        if isinstance(resp.get("candidates"), list):                                 # Gemini / Cloud Code
+            for ci, c in enumerate(resp["candidates"]):
+                if not isinstance(c, dict):
+                    continue
+                content = c.get("content") if isinstance(c.get("content"), dict) else {}
+                parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+                for pi, part in enumerate(parts):
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        out.append((("g", c.get("index", ci), pi), part, "text"))
+            return out
         t = o.get("type") if isinstance(o.get("type"), str) else ""
         if t == "content_block_delta" and isinstance(o.get("delta"), dict):           # Anthropic Messages
             for f in ("text", "partial_json", "thinking"):
@@ -186,6 +197,10 @@ class Swapper:
             if held:
                 self.carry[key] = held
                 self.tmpl[key] = json.loads(json.dumps(o))
+        # Gemini / Cloud Code: a tool call's arguments and a tool result come whole beside the streamed text (its
+        # `functionCall.args` is an object, not a delta string), so the rest of the event is put back too.
+        if isinstance(o.get("response"), dict) or isinstance(o.get("candidates"), list):
+            o = self.walk(o)
         return out + [o]
 
     def flush(self) -> list[Any]:
