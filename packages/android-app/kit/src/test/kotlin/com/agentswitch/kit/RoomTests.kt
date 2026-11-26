@@ -165,6 +165,13 @@ class RoomTests {
     }
 
     @Test
+    fun testAsideMessages() {
+        // A member's /btw answer (docs/chatroom-v0.md §13) is marked; one from before the mark, or without it, is not.
+        assertTrue(KitJson.decodeFromString(RoomMessage.serializer(), """{"seq":4,"from":"api","to":["you"],"replyTo":3,"text":"〔快速回答 · /btw〕在改","at":1,"expects":"none","aside":true}""").aside)
+        assertFalse(KitJson.decodeFromString(RoomMessage.serializer(), """{"seq":4,"from":"api","text":"x"}""").aside)
+    }
+
+    @Test
     fun testDeletedMessagesAndFolding() {
         val gone = KitJson.decodeFromString(RoomMessage.serializer(), """{"seq":3,"from":"you","to":[],"text":"","at":1,"deleted":{"at":2,"by":"you"}}""")
         assertTrue(gone.deleted)

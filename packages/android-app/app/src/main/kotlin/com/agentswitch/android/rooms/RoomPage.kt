@@ -97,10 +97,10 @@ import com.agentswitch.kit.api.RoomMessage
 import com.agentswitch.kit.api.RoomReaders
 import com.agentswitch.kit.api.RoomRow
 import com.agentswitch.kit.api.RoomSeat
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.agentswitch.kit.api.RoomTask
 import com.agentswitch.kit.api.RoomTaskState
 import com.agentswitch.kit.api.RoomText
-import com.agentswitch.kit.api.roundsSeen
 import com.agentswitch.kit.api.updateRoom
 import java.time.Instant
 import java.time.LocalDate
@@ -283,11 +283,6 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
                 },
             )
             if (detail != null && detail.room.paused) PausedBanner { act { it.updateRoom(id, paused = false) } }
-            // The sessions have gone back and forth among themselves (§7): the user is told; nothing was stopped.
-            val rounds = detail?.room?.rounds
-            if (detail != null && rounds != null && !detail.room.paused) {
-                RoundsNotice(rounds, ok = { act { it.roundsSeen(id) } }, pause = { act { it.updateRoom(id, paused = true) } })
-            }
             // A task that can not go on says what it waits for, where its messages are read.
             if (task != null && task.state == RoomTaskState.Blocked) BlockedNotice(task) { tasks(opening = task.n) }
             ErrorText(model.error, { model.error = null }, Modifier.padding(horizontal = Theme.Space.l, vertical = 6.dp))
@@ -297,7 +292,8 @@ fun RoomPage(id: String, openTask: Int? = null, openSeq: Int? = null, openCard: 
                     // A fresh list for each view: a task picked opens at its newest message.
                     key(model.taskFilter) {
                         Timeline(
-                            detail, model, openCard = { members(it) }, reply = { model.replyTo = it; runCatching { focus.requestFocus() } },
+                            // The user's own face opens the choice of their avatar (the Mac's, user #495); another's, its card.
+                            detail, model, openCard = { if (it == RoomSeat.you) nav.present("roomavatar:$id:you") { RoomAvatarSheet(model, RoomSeat.you) } else members(it) }, reply = { model.replyTo = it; runCatching { focus.requestFocus() } },
                             mention = ::mention, showMenu = { menu = it }, jump = ::jump, older = { scope.launch { model.loadOlder(app.api) } },
                         )
                     }
@@ -339,23 +335,6 @@ private fun PausedBanner(resume: () -> Unit) {
             SeatStateMark(com.agentswitch.kit.api.SeatState.Waiting)
             Text("房间已暂停。消息照写，不投递。", Modifier.weight(1f), color = Theme.ink, style = plain(13))
             SquareButton("Resume", resume, prominent = true, expand = false)
-        }
-        HairRule()
-    }
-}
-
-/**
- * The sessions have sent one another this many messages with no word from the user (§7; 2026-11-22, user: 多轮没我的参与
- * 就提醒我一下就行不用中断他们): `OK` counts from here again, `Pause` is the user's to stop them.
- */
-@Composable
-private fun RoundsNotice(rounds: Int, ok: () -> Unit, pause: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Theme.waiting.copy(alpha = 0.14f))) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SeatStateMark(com.agentswitch.kit.api.SeatState.Waiting)
-            Text("会话之间已连续往返 $rounds 条，没有你的参与。它们没有被打断。", Modifier.weight(1f), color = Theme.ink, style = plain(13))
-            SquareButton("OK", ok, prominent = true, expand = false)
-            SquareButton("Pause", pause, expand = false)
         }
         HairRule()
     }
@@ -662,27 +641,36 @@ private fun MessageRow(
                     ?: m.replyTo?.let { n -> QuoteGone(n) { jump(n) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (row.continues) Spacer(Modifier.size(faceSide, 1.dp))
-                    else RoomAvatarView(seat, handle = m.from, modifier = Modifier.padding(top = 2.dp).clickable(m.from != RoomSeat.you, role = Role.Button) { openCard(m.from) }, you = m.from == RoomSeat.you, side = faceSide)
+                    else RoomAvatarView(seat, handle = m.from, modifier = Modifier.padding(top = 2.dp).clickable(role = Role.Button) { openCard(m.from) }, you = m.from == RoomSeat.you, side = faceSide)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         // Who and when, nothing more (2026-11-22, user: 聊天中的信息展示能不能精简一些): the agent is the picture
                         // beside the name; the model, the folder and the mode are on the card.
                         if (!row.continues) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                 Text(
-                                    RoomWords.who(m.from), Modifier.weight(1f, fill = false).clickable(m.from != RoomSeat.you, role = Role.Button) { openCard(m.from) },
+                                    RoomWords.who(m.from), Modifier.weight(1f, fill = false).clickable(role = Role.Button) { openCard(m.from) },
                                     color = Theme.ink, style = if (classic) plain(15, FontWeight.SemiBold) else mono(14, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 )
                                 seat?.card?.agent?.takeIf { it.isNotEmpty() }?.let { RoomAgentMark(it) }
                                 if (showTask) m.task?.let { n -> TaskTag(n) { model.taskFilter = n } }
                                 Text(RoomWords.time(m.at), color = Theme.inkDim, style = mono(11))
+                                if (m.aside) AsideTag()
                             }
                         }
+                        // Classic (the Mac's, user #487: 每个人的消息分界区分度太低): what a message says, with its files, on a
+                        // round block of its own — the user's own on the accent's light tint (#498).
+                        Column(
+                            if (classic) Modifier.padding(top = if (row.continues) 0.dp else 2.dp)
+                                .background(if (m.from == RoomSeat.you) Theme.signal.copy(alpha = 0.07f) else Theme.panel, RoundedCornerShape(Theme.Radius.card))
+                                .padding(horizontal = 11.dp, vertical = 7.dp) else Modifier,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
                         if (m.deleted) {
                             Text("这条消息已删除", color = Theme.inkDim, style = plain(14).copy(fontStyle = FontStyle.Italic))
                         } else {
                             Text(
                                 RoomWords.text(m.text, handles, classic, Theme.ink, Theme.base, Theme.signal, Theme.code, LocalOpenLink.current),
-                                Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
+                                if (classic) Modifier else Modifier.fillMaxWidth(), color = Theme.ink, style = plain(15).copy(lineHeight = 21.sp),
                                 maxLines = if (long && !expanded) RoomText.foldLines else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis,
                             )
                             if (long) Text(
@@ -692,6 +680,7 @@ private fun MessageRow(
                             )
                             // The files it comes with (they are on the Mac): a picture shown, another file as a card; a tap opens one.
                             MessageFiles(model, m.files)
+                        }
                         }
                         val readers = detail.readers(m)
                         val poke = if (m.from == RoomSeat.you && model.waitingFor(m.seq).isNotEmpty()) m.seq else null
@@ -794,7 +783,7 @@ private fun RoomWriter(model: RoomPageModel, detail: RoomDetail, focus: FocusReq
                 RoomPhotosButton(model) { preparing = it }
                 Box(Modifier.weight(1f).padding(vertical = 9.dp)) {
                     PlainField(
-                        model.draft, { model.draft = it }, Modifier.fillMaxWidth().heightIn(max = 140.dp).focusRequester(focus),
+                        model.draft, { model.draft = it }, Modifier.fillMaxWidth().heightIn(max = 140.dp).then(rememberRoomPaste(model) { preparing = it }).focusRequester(focus),
                         // The dispatch desk: what the user says is for the dispatch, no `@` needed.
                         placeholder = if (detail.room.desk && model.taskFilter == null) "跟调度说要做什么…" else "发消息到 $where…", singleLine = false,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
@@ -835,6 +824,19 @@ private fun MentionPicker(offers: List<String>, seats: List<RoomSeat>, pick: (St
             if (i != offers.size - 1) HairRule()
         }
     }
+}
+
+/** A member's quick answer through its own `/btw` (docs/chatroom-v0.md §13; the Mac's `RoomAsideLabel`): `Aside`, drawn
+ *  as a task's tag is. */
+@Composable
+internal fun AsideTag() {
+    val classic = LocalLook.current.isClassic
+    Text(
+        "Aside",
+        Modifier.grounded(if (classic) Theme.panel else Color.Transparent, 4.dp).framed(Theme.line, if (classic) 4.dp else 0.dp)
+            .padding(horizontal = 4.dp, vertical = 0.dp),
+        color = Theme.secondaryInk, style = mono(10), maxLines = 1, textAlign = TextAlign.Center,
+    )
 }
 
 /** A message's task in `# 全部` (the design's small tag): `T3`; a tap shows that task's messages. */

@@ -3,6 +3,7 @@ package com.agentswitch.android.rooms
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,14 +84,21 @@ fun RoomsTab() {
         open(id, at)
     }
 
+    val folds = remember { RoomFolds(model.settings) }
+    // What waits on the user, for `Mentions`: read while the list is on screen (as the Mac's list does).
+    LaunchedEffect(model.api) {
+        while (true) {
+            if (store.attention == null || store.attentionDue()) store.refreshAttention(model.api)
+            kotlinx.coroutines.delay(RoomsStore.pollIntervalMs)
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(Theme.base)) {
         NavBar(
             "Rooms",
             subtitle = { MacTabSubtitle() },
             trailing = {
                 val can = store.list != null && !store.unsupported
-                // 等你处理 (2026-11-24 已定 3): its own entry, an inbox with a count, not at the list's bottom.
-                if (can) AttentionEntry(store.attentionCount) { nav.push("roomattention") { RoomAttentionPage() } }
                 if (classic) {
                     Box(
                         Modifier.clickable(can, role = Role.Button, onClickLabel = "New") { nav.present("roomnew") { RoomSessionsSheet(RoomSessionsPurpose.Create) } }.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -121,24 +129,111 @@ fun RoomsTab() {
                             }
                         }
                     }
-                    itemsIndexed(rooms, key = { _, r -> r.id }) { index, room ->
-                        val first = index == 0
-                        val last = index == rooms.size - 1
-                        // The classic look: a standard grouped list's card, round at its two ends.
-                        val card = if (classic) {
-                            Modifier.padding(horizontal = Theme.Space.l).clip(
-                                RoundedCornerShape(
-                                    topStart = if (first) 12.dp else 0.dp, topEnd = if (first) 12.dp else 0.dp,
-                                    bottomStart = if (last) 12.dp else 0.dp, bottomEnd = if (last) 12.dp else 0.dp,
-                                ),
-                            ).background(Theme.panel)
-                        } else Modifier
-                        RoomListRow(room, index, last, card.clickable { open(room.id) })
+                    // Three groups that fold (the Mac's, user #488, #492): what waits on the user's hand — 等你处理's
+                    // list, a row each —, the dispatch desk, and the channels.
+                    val mentions = mentionsOf(store.attention.orEmpty(), rooms)
+                    if (mentions.isNotEmpty()) {
+                        item("g:mentions") { RoomGroupHead("Mentions", mentions.size, hot = true, folded = folds.mentions) { folds.mentions = !folds.mentions } }
+                        if (!folds.mentions) itemsIndexed(mentions, key = { _, m -> "m:${m.id}" }) { index, m ->
+                            MentionRow(m, groupCard(index, mentions.size)) {
+                                val item = m.item
+                                if (item != null) open(item.room, RoomOpening(task = item.task, seq = item.seq, card = item.card))
+                                else open(m.room)
+                            }
+                        }
+                    }
+                    val desks = rooms.filter { it.desk }
+                    if (desks.isNotEmpty()) {
+                        item("g:dispatch") { RoomGroupHead("Dispatch", desks.sumOf { it.unread }, hot = desks.any { it.forYou && it.unread > 0 }, folded = folds.dispatch) { folds.dispatch = !folds.dispatch } }
+                        if (!folds.dispatch) itemsIndexed(desks, key = { _, r -> r.id }) { index, room ->
+                            RoomListRow(room, index, index == desks.size - 1, groupCard(index, desks.size).clickable { open(room.id) })
+                        }
+                    }
+                    val topics = rooms.filter { !it.desk }
+                    if (topics.isNotEmpty()) {
+                        item("g:topics") { RoomGroupHead("Topics", topics.sumOf { it.unread }, hot = topics.any { it.forYou && it.unread > 0 }, folded = folds.topics) { folds.topics = !folds.topics } }
+                        if (!folds.topics) itemsIndexed(topics, key = { _, r -> r.id }) { index, room ->
+                            RoomListRow(room, index, index == topics.size - 1, groupCard(index, topics.size).clickable { open(room.id) })
+                        }
                     }
                     item("end") { Spacer(Modifier.padding(bottom = Theme.Space.m)) }
                 }
             }
         }
+    }
+}
+
+/** Which of the list's groups are folded, as this phone left them. */
+private class RoomFolds(private val settings: com.agentswitch.android.AppSettings?) {
+    private fun kept(key: String) = mutableStateOf(settings?.bool(key, false) ?: false)
+    private val m = kept("rooms.fold.mentions")
+    private val d = kept("rooms.fold.dispatch")
+    private val t = kept("rooms.fold.topics")
+    var mentions: Boolean get() = m.value; set(v) { m.value = v; settings?.putBool("rooms.fold.mentions", v) }
+    var dispatch: Boolean get() = d.value; set(v) { d.value = v; settings?.putBool("rooms.fold.dispatch", v) }
+    var topics: Boolean get() = t.value; set(v) { t.value = v; settings?.putBool("rooms.fold.topics", v) }
+}
+
+/** A row of `Mentions`: what waits on the user in a channel (an item of 等你处理), or a channel with a message for the
+ *  user and nothing else waiting there. */
+private data class Mention(val id: String, val room: String, val roomName: String, val line: String, val urgent: Boolean, val item: com.agentswitch.kit.api.RoomAttentionItem?)
+
+private fun mentionsOf(attention: List<com.agentswitch.kit.api.RoomAttentionItem>, rooms: List<RoomSummary>): List<Mention> {
+    val waiting = attention.map { Mention("${it.room}:${it.kind}:${it.handle}:${it.task}:${it.seq}", it.room, it.roomName.ifEmpty { it.room }, it.line, it.urgent, it) }
+    val held = attention.map { it.room }.toSet()
+    val said = rooms.filter { it.forYou && it.unread > 0 && it.id !in held }.map { Mention("said|${it.id}", it.id, it.name, it.lastLine, false, null) }
+    return waiting + said
+}
+
+/** The classic look: each group a standard grouped list's card, round at its two ends. */
+@Composable
+private fun groupCard(index: Int, count: Int): Modifier {
+    if (!LocalLook.current.isClassic) return Modifier
+    val first = index == 0
+    val last = index == count - 1
+    return Modifier.padding(horizontal = Theme.Space.l).clip(
+        RoundedCornerShape(
+            topStart = if (first) 12.dp else 0.dp, topEnd = if (first) 12.dp else 0.dp,
+            bottomStart = if (last) 12.dp else 0.dp, bottomEnd = if (last) 12.dp else 0.dp,
+        ),
+    ).background(Theme.panel)
+}
+
+/** A group's head: the mark that folds it, its name, how much is new in it — amber when some of it is for the user. */
+@Composable
+private fun RoomGroupHead(title: String, count: Int, hot: Boolean, folded: Boolean, toggle: () -> Unit) {
+    val classic = LocalLook.current.isClassic
+    Row(
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = if (folded) "Expand" else "Collapse", onClick = toggle)
+            .padding(horizontal = Theme.Space.l).padding(top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        com.agentswitch.android.terminals.LookGlyph(if (folded) "▸" else "▾", if (folded) com.agentswitch.android.terminals.LookSymbol.ChevronRight else com.agentswitch.android.terminals.LookSymbol.ChevronDown, Modifier.width(12.dp), color = Theme.inkDim, size = 12)
+        com.agentswitch.android.design.SectionLabel(title, Modifier.weight(1f))
+        if (count > 0) {
+            if (classic) {
+                Box(
+                    Modifier.defaultMinSize(minWidth = 18.dp, minHeight = 18.dp).background(if (hot) Theme.waiting else Theme.raised, CircleShape).padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(count.toString(), color = if (hot) Color.White else Theme.secondaryInk, style = plain(11, FontWeight.Bold), maxLines = 1) }
+            } else Text("[$count]", color = if (hot) Theme.waiting else Theme.secondaryInk, style = mono(12), maxLines = 1)
+        }
+    }
+}
+
+/** A row of `Mentions`: `@`, the channel, and under it who waits and for what. */
+@Composable
+private fun MentionRow(m: Mention, modifier: Modifier, open: () -> Unit) {
+    val classic = LocalLook.current.isClassic
+    Column(modifier.fillMaxWidth().clickable(role = Role.Button, onClick = open)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Theme.Space.l, vertical = 11.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("@", Modifier.width(16.dp), color = Theme.waiting, style = if (classic) plain(16) else mono(15), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(m.roomName, color = Theme.ink, style = plain(15, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(m.line, color = if (m.urgent) Theme.waiting else Theme.secondaryInk, style = plain(13), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        HairRule(Modifier.padding(start = if (classic) 42.dp else 0.dp))
     }
 }
 
@@ -156,7 +251,6 @@ private fun RoomListRow(room: RoomSummary, index: Int, last: Boolean, modifier: 
                 else if (!classic) Text("%02d".format(index + 1), color = Theme.inkDim, style = mono(14))
                 Text(room.name, Modifier.weight(1f), color = Theme.ink, style = plain(15, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // The sessions have been talking among themselves (§7): told, not stopped. Amber: it is for the user to look.
-                room.rounds?.let { Text("$it Rounds", color = Theme.waiting, style = mono(11), maxLines = 1) }
                 if (room.paused) Text("Paused", color = Theme.inkDim, style = mono(11), maxLines = 1)
                 if (room.desk && room.name != "调度台") DeskBadge()
                 if (room.unread > 0) UnreadCount(room.unread, room.forYou)

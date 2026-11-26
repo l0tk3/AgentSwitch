@@ -116,7 +116,15 @@ private class Kept(private val key: String, default: String, private val write: 
  * opens takes the size. A sheet: present it with `LocalNav`; `started` is given the new terminal once the sheet is gone.
  */
 @Composable
-fun NewTerminalSheet(started: (TerminalInfo) -> Unit) {
+fun NewTerminalSheet(started: (TerminalInfo) -> Unit) = NewTerminalSheet(started, forRoom = null)
+
+/**
+ * The same sheet for a session a channel will seat (New Room, Add Sessions; the Mac's, user #504): `forRoom` is given
+ * what was chosen instead of a terminal being started, and the session runs with permissions bypassed, as one an admin
+ * brings in — so how it asks is not offered.
+ */
+@Composable
+fun NewTerminalSheet(started: (TerminalInfo) -> Unit, forRoom: ((NewTerminalRequest) -> Unit)?) {
     val model = LocalAppModel.current
     val settings = LocalSettings.current
     val back = rememberBack()
@@ -180,6 +188,11 @@ fun NewTerminalSheet(started: (TerminalInfo) -> Unit) {
     }
 
     fun start() {
+        forRoom?.let { take ->
+            take(NewTerminalRequest(harness = agent, cwd = folder.trim(), model = modelId.ifEmpty { null }, effort = effortId.ifEmpty { null }, mode = "bypass", profile = chosenProfile))
+            back()
+            return
+        }
         val api = model.api ?: return
         scope.launch {
             starting = true
@@ -227,7 +240,7 @@ fun NewTerminalSheet(started: (TerminalInfo) -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Theme.base).windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
     ) {
-        NavBar("New Terminal", leading = { BarWord("Cancel", back) })
+        NavBar(if (forRoom != null) "New Session" else "New Terminal", leading = { BarWord("Cancel", back) })
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Theme.Space.l),
             verticalArrangement = Arrangement.spacedBy(Theme.Space.xl),
@@ -287,7 +300,7 @@ fun NewTerminalSheet(started: (TerminalInfo) -> Unit) {
                     )
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(Theme.Space.s)) {
+            if (forRoom == null) Column(verticalArrangement = Arrangement.spacedBy(Theme.Space.s)) {
                 SectionLabel("Permissions")
                 // One of three: `< >` / `<x>`; a segmented control's look in the classic one.
                 Row(
@@ -318,7 +331,7 @@ fun NewTerminalSheet(started: (TerminalInfo) -> Unit) {
             }
             error?.let { Text(it, color = Theme.failed, style = plain(13)) }
             val canStart = !starting && agent in installed && folder.trim().isNotEmpty() && model.api != null
-            if (starting) StartingButton() else SquareButton("Start", onClick = ::start, prominent = true, enabled = canStart)
+            if (starting) StartingButton() else SquareButton(if (forRoom != null) "Add" else "Start", onClick = ::start, prominent = true, enabled = canStart)
         }
     }
 }

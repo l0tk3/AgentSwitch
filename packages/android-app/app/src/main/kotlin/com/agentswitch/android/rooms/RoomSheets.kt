@@ -1,5 +1,6 @@
 package com.agentswitch.android.rooms
 
+import com.agentswitch.kit.api.createTerminal
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -332,6 +333,8 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
     var name by remember { mutableStateOf("") }
     var topic by remember { mutableStateOf("") }
     var picked by remember { mutableStateOf(setOf<String>()) }
+    // Sessions to start and seat with it (the Mac's, user #504): each an agent in a folder, under a profile.
+    var fresh by remember { mutableStateOf(listOf<com.agentswitch.kit.api.NewTerminalRequest>()) }
     // The search over the sessions to pick: by name, agent, model, profile and folder (RoomSessionSearch).
     var query by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
@@ -340,7 +343,22 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
     val terminals = app.terminals.terminals.filter { it.isRunning && it.id !in seated }.sortedByDescending { maxOf(it.lastOutputAt, it.createdAt) }
     // The ones the search leaves; picked ones the search hides stay picked.
     val shown = RoomSessionSearch.filter(terminals, query)
-    val ready = !working && (if (creating) name.isNotBlank() else picked.isNotEmpty())
+    val ready = !working && (if (creating) name.isNotBlank() else picked.isNotEmpty() || fresh.isNotEmpty())
+
+    /** The sessions asked for, started and seated in `room`; what went wrong with any of them, in words. */
+    suspend fun start(api: com.agentswitch.kit.api.AgentSwitchAPI, room: String): List<String> {
+        val problems = ArrayList<String>()
+        val asked = fresh.size
+        for (one in fresh) {
+            try {
+                val made = api.createTerminal(one)
+                api.seat(made.id, room)
+                fresh = fresh - one
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { problems += "${one.cwd}：${e.message ?: e.javaClass.simpleName}" }
+        }
+        if (problems.size < asked) app.refreshTerminals()
+        return problems
+    }
 
     LaunchedEffect(Unit) { app.refreshTerminals() }
 
@@ -352,9 +370,10 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
                 when (purpose) {
                     is RoomSessionsPurpose.Create -> {
                         val made = api.createRoom(name.trim(), topic.trim(), terminals.map { it.id }.filter { it in picked })
+                        val problems = made.problems + start(api, made.room.id)
                         app.rooms.refresh(api)
-                        // The room is made; a session that could not be seated is said, not lost.
-                        if (made.problems.isNotEmpty()) app.banner = made.problems.joinToString("\n")
+                        // The room is made; a session that could not be started or seated is said, not lost.
+                        if (problems.isNotEmpty()) app.banner = problems.joinToString("\n")
                         nav.pop()
                         onDone(made.room.id)
                         app.openRoomRequest = made.room.id
@@ -364,6 +383,7 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
                         for (id in terminals.map { it.id }.filter { it in picked }) {
                             try { api.seat(id, purpose.room); picked = picked - id } catch (e: CancellationException) { throw e } catch (e: Exception) { problems += e.message ?: e.javaClass.simpleName }
                         }
+                        problems += start(api, purpose.room)
                         onDone(purpose.room)
                         if (problems.isEmpty()) nav.pop() else error = problems.joinToString("\n")
                     }
@@ -381,9 +401,23 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
     FormPage(
         if (creating) "New Room" else "Add Sessions",
         leading = { BarWord("Cancel", { nav.pop() }, color = agentInk) },
-        trailing = { BarWord(if (creating) "Create" else if (picked.size > 1) "Add ${picked.size}" else "Add", { go() }, enabled = ready, color = agentInk) },
+        trailing = { BarWord(if (creating) "Create" else if (picked.size + fresh.size > 1) "Add ${picked.size + fresh.size}" else "Add", { go() }, enabled = ready, color = agentInk) },
     ) {
         if (creating) RoomNameFields(name, { name = it }, topic, { topic = it })
+        // New sessions, started with it: an agent in a folder each; `New Session` adds one more.
+        FormSection("New Sessions") {
+            fresh.forEachIndexed { i, one ->
+                FormRow(first = i == 0) {
+                    RoomAgentMark(one.harness)
+                    Text(one.cwd, Modifier.weight(1f), color = Theme.ink, style = mono(14), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                    Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "Remove") { fresh = fresh - one }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(17))
+                }
+            }
+            FormRow(first = fresh.isEmpty(), onClick = { nav.present("roomnewsession") { com.agentswitch.android.terminals.NewTerminalSheet(started = {}, forRoom = { fresh = fresh + it }) } }) {
+                Text("New Session", Modifier.weight(1f), color = agentInk, style = plain(16))
+                Text("›", color = Theme.inkDim, style = plain(18))
+            }
+        }
         FormSection("Running Sessions", footer = "进了房间的会话可以收发房间消息；只有 @ 才唤醒它。") {
             if (terminals.isNotEmpty()) {
                 FormRow(first = true) {

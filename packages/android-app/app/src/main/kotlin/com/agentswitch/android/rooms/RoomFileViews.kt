@@ -1,5 +1,8 @@
 package com.agentswitch.android.rooms
 
+import androidx.compose.foundation.content.hasMediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
@@ -475,6 +478,46 @@ private fun pickedPicture(context: Context, uri: Uri, stem: String): Pair<String
  * The button beside a room's box that opens the system's photo picker (no permission asked), and what it picks made
  * ready and put above the box. `preparing`: told while the picked pictures are read.
  */
+/**
+ * The room's writer takes a picture the keyboard offers (Gboard's clipboard, a screenshot's suggestion) as the terminal's
+ * reply box does (`ReplyBox`): one of the message's files, never its text. Read off the main thread, as the Photos
+ * button's are.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun rememberRoomPaste(model: RoomPageModel, preparing: (Boolean) -> Unit): Modifier {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val busy by androidx.compose.runtime.rememberUpdatedState(preparing)
+    return Modifier.contentReceiver(object : androidx.compose.foundation.content.ReceiveContentListener {
+        override fun onReceive(transferableContent: androidx.compose.foundation.content.TransferableContent): androidx.compose.foundation.content.TransferableContent? {
+            if (!transferableContent.hasMediaType(androidx.compose.foundation.content.MediaType.Image)) return transferableContent
+            val uris = ArrayList<android.net.Uri>()
+            val rest = transferableContent.consume { item: android.content.ClipData.Item -> item.uri?.let { uris.add(it) } != null }
+            if (uris.isEmpty()) return rest
+            val room = model.attachmentRoom
+            if (room <= 0) { model.error = "一条消息最多带 ${RoomFilePath.maxPerMessage} 个文件。"; return rest }
+            scope.launch {
+                busy(true)
+                try {
+                    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+                    val read = withContext(Dispatchers.IO) {
+                        uris.take(room).mapIndexedNotNull { i, uri ->
+                            com.agentswitch.android.terminals.readPicture(context, uri, if (uris.size == 1) "pasted-$stamp" else "pasted-$stamp-${i + 1}")?.let { it.name to it.data }
+                        }
+                    }
+                    model.error = null
+                    model.attach(read) { data -> ImagePrep.decode(data, 168) }
+                    if (read.size < uris.size) model.error = "有 ${uris.size - read.size} 张图片无法读取或超出数量，没有添加。"
+                } finally {
+                    busy(false)
+                }
+            }
+            return rest
+        }
+    })
+}
+
 @Composable
 fun RoomPhotosButton(model: RoomPageModel, preparing: (Boolean) -> Unit) {
     val context = LocalContext.current

@@ -198,6 +198,9 @@ data class RoomMessage(
     val expects: String? = null,
     /** `{at, by}` when the user deleted it (user #278): its text is empty and its files gone; its place stays. */
     @SerialName("deleted") private val deletion: JsonElement? = null,
+    /** A member's quick answer through its own `/btw` while the user's message waits for its main line
+     *  (docs/chatroom-v0.md §13): a small `Aside` beside its name. */
+    val aside: Boolean = false,
 ) {
     /** Deleted by the user: drawn as 「这条消息已删除」 in its place. */
     val deleted: Boolean get() = deletion != null && deletion !is JsonNull

@@ -102,8 +102,10 @@ fun RoomFaceView(face: RoomFace?, modifier: Modifier = Modifier, you: Boolean = 
  */
 @Composable
 fun RoomAvatarView(seat: RoomSeat?, modifier: Modifier = Modifier, you: Boolean = false, side: Dp = 26.dp, handle: String = seat?.handle ?: "") {
-    if (you || seat?.isUser == true) { RoomFaceView(null, modifier, you = true, side = side); return }
-    if (LocalLook.current.isClassic) {
+    // The user's own: `YOU`, until they choose one for this look (the Mac's, user #495).
+    val classicLook = LocalLook.current.isClassic
+    if ((you || seat?.isUser == true) && (if (classicLook) seat?.avatar?.classic == null else seat?.avatar?.pixel == null)) { RoomFaceView(null, modifier, you = true, side = side); return }
+    if (classicLook) {
         val chosen = seat?.avatar?.classic?.takeIf { it.emoji.isNotEmpty() }
         ClassicAvatarView(chosen?.emoji, chosen?.bg ?: (seat?.face ?: RoomFace(color = RoomAvatarArt.faceColor(handle))).color, handle, modifier, side)
     } else {
@@ -118,12 +120,14 @@ fun RoomAvatarView(seat: RoomSeat?, modifier: Modifier = Modifier, you: Boolean 
 fun ClassicAvatarView(emoji: String?, bg: Int, handle: String, modifier: Modifier = Modifier, side: Dp = 26.dp) {
     val ground = colorOf(RoomFace(color = bg).rgb(Theme.isDark))
     Box(
-        modifier.size(side).background(if (emoji != null) ground.copy(alpha = 0.35f) else ground, androidx.compose.foundation.shape.CircleShape)
+        // None chosen (the Mac's B, user #494): its initials in its colour on a light wash of the same — a solid disc
+        // under white letters was heavy with several in a row.
+        modifier.size(side).background(ground.copy(alpha = if (emoji != null) 0.35f else 0.2f), androidx.compose.foundation.shape.CircleShape)
             .semantics { contentDescription = "@$handle" },
         contentAlignment = Alignment.Center,
     ) {
         if (emoji != null) Text(emoji, fontSize = (side.value * 0.58f).sp, maxLines = 1, lineHeight = (side.value * 0.7f).sp)
-        else Text(com.agentswitch.kit.api.RoomAvatar.initials(handle), color = Color.White, fontSize = (side.value * 0.4f).sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        else Text(com.agentswitch.kit.api.RoomAvatar.initials(handle), color = ground, fontSize = (side.value * 0.4f).sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
