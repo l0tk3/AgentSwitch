@@ -266,7 +266,6 @@ final class RoomTests: XCTestCase {
         let room = try JSONDecoder().decode(RoomDetail.self, from: Data(json.utf8))
         XCTAssertEqual(room.room.rounds, 7)
         XCTAssertEqual(room.room.roundsLimit, 6)
-        XCTAssertTrue(RoomInfo.roundsSays(7).contains("7"))
         // Only a seat whose session goes on without the Kit needs the user: not the user, not one with it, not one
         // that is over or has left.
         XCTAssertEqual(room.seats.filter(\.needsResume).map(\.handle), ["old"])
@@ -288,7 +287,7 @@ final class RoomTests: XCTestCase {
         XCTAssertTrue(try JSONDecoder().decode(RoomList.self, from: Data(Self.list.utf8)).needsYou)   // a message names the user
     }
 
-    func testRoundsAndNotesCallsAreAsTheServiceTakesThem() async throws {
+    func testNotesCallsAreAsTheServiceTakesThem() async throws {
         let transport = FakeTransport { req, _ in
             let path = req.url?.path ?? ""
             if path.hasSuffix("/notes") {
@@ -298,14 +297,19 @@ final class RoomTests: XCTestCase {
             return (Data(#"{"ok":true}"#.utf8), httpResponse(req.url, status: 200))
         }
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        try await api.roundsSeen("a1b2c3d4e5")
         let notes = try await api.setRoomNotes("a1b2c3d4e5", text: "约定")
         XCTAssertEqual(notes, RoomNotes(text: "约定", at: 5, by: "you"))
         let none = try await api.setRoomNotes("a1b2c3d4e5", text: "")
         XCTAssertNil(none)
-        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["POST /rooms/a1b2c3d4e5/rounds/ok", "PUT /rooms/a1b2c3d4e5/notes", "PUT /rooms/a1b2c3d4e5/notes"])
-        let sent = try XCTUnwrap(transport.requests[1].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["PUT /rooms/a1b2c3d4e5/notes", "PUT /rooms/a1b2c3d4e5/notes"])
+        let sent = try XCTUnwrap(transport.requests[0].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
         XCTAssertEqual(sent as NSDictionary, ["text": "约定"])
+    }
+
+    func testAMembersAnswerBesideItsTurnIsMarkedAside() throws {
+        let m = try JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":5,"from":"daemon","to":["you"],"replyTo":4,"text":"〔快速回答 · /btw〕做到一半","at":1,"aside":true}"#.utf8))
+        XCTAssertTrue(m.aside)
+        XCTAssertFalse(try JSONDecoder().decode(RoomMessage.self, from: Data(#"{"seq":6,"from":"daemon","text":"x","at":1}"#.utf8)).aside)
     }
 
     func testAMacWithoutChatRoomIsSaidSo() async {

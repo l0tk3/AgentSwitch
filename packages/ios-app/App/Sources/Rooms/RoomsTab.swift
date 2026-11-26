@@ -4,12 +4,17 @@ import SwiftUI
 /// The `Rooms` tab (docs/chatroom-v0.md §10; 2026-11-22, user: 空出来的放这个chatroom): the rooms on the Mac shown, the
 /// one talked in last first — its name, who said the last thing and what, how many messages are not seen yet (amber
 /// when one of them names the user) — and from each its page. `New` makes one. The list is read by the tabs' root
-/// (MainTabs), often while this tab is on screen.
+/// (MainTabs), often while this tab is on screen. In three groups that fold, as on the Mac (user #488, #492, #625):
+/// `Mentions` (what waits on the user's hand, a row each — the 等你处理 entry that was in the bar —, then the rooms
+/// with a message for the user and nothing else waiting in them), `Dispatch` (the desk), `Topics`.
 struct RoomsTab: View {
     @Environment(AppModel.self) private var model
     @Environment(\.interfaceLook) private var look
     @State private var path: [RoomRoute] = []
     @State private var creating = false
+    @AppStorage("rooms.fold.mentions") private var mentionsFolded = false
+    @AppStorage("rooms.fold.dispatch") private var dispatchFolded = false
+    @AppStorage("rooms.fold.topics") private var topicsFolded = false
 
     var body: some View {
         let store = model.rooms
@@ -29,7 +34,7 @@ struct RoomsTab: View {
                         Text("尚无房间。点 New 新建一个，把正在运行的会话拉进来。").font(.footnote).foregroundStyle(.secondary)
                             .padding(.horizontal, Theme.Space.l).padding(.top, 40)
                     }
-                    rows(store.rooms)
+                    groups(store)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, Theme.Space.m)
@@ -40,12 +45,6 @@ struct RoomsTab: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { MacTabTitle(title: "Rooms") }
-                // 等你处理 (user #191): its own entry at the top, with how many things wait.
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { path.append(.attention) } label: { attentionLabel(store.attentionCount) }
-                        .accessibilityLabel(store.attentionCount > 0 ? "等你处理 \(store.attentionCount)" : "等你处理")
-                        .disabled(store.list == nil || store.unsupported)
-                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { creating = true } label: {
                         if look.isClassic { Image(systemName: "plus") } else { Text("New").mono(15, weight: .medium) }
@@ -78,22 +77,59 @@ struct RoomsTab: View {
     }
 
     @ViewBuilder
+    private func groups(_ store: RoomsStore) -> some View {
+        let mentions = Self.mentions(store)
+        let desks = store.rooms.filter(\.desk), topics = store.rooms.filter { !$0.desk }
+        if !mentions.isEmpty {
+            RoomGroupHead(title: "Mentions", count: mentions.count, hot: true, folded: $mentionsFolded)
+            if !mentionsFolded {
+                card(VStack(spacing: 0) {
+                    ForEach(Array(mentions.enumerated()), id: \.element.id) { i, item in
+                        Button { path.append(item.route) } label: { RoomMentionRow(item: item, last: i == mentions.count - 1) }.buttonStyle(.plain)
+                    }
+                })
+            }
+        }
+        if !desks.isEmpty {
+            RoomGroupHead(title: "Dispatch", count: desks.reduce(0) { $0 + $1.unread }, hot: desks.contains(where: \.forYou), folded: $dispatchFolded)
+            if !dispatchFolded { card(rows(desks)) }
+        }
+        if !topics.isEmpty {
+            RoomGroupHead(title: "Topics", count: topics.reduce(0) { $0 + $1.unread }, hot: topics.contains(where: \.forYou), folded: $topicsFolded)
+            if !topicsFolded { card(rows(topics)) }
+        }
+    }
+
     private func rows(_ rooms: [RoomSummary]) -> some View {
-        let list = VStack(spacing: 0) {
-            // The desk has its mark, not a number: the rooms are counted after it.
-            let skip = rooms.first?.desk == true ? 1 : 0
+        VStack(spacing: 0) {
             ForEach(Array(rooms.enumerated()), id: \.element.id) { index, room in
-                NavigationLink(value: RoomRoute.room(room.id)) { RoomListRow(room: room, index: index - skip, last: index == rooms.count - 1) }
+                NavigationLink(value: RoomRoute.room(room.id)) { RoomListRow(room: room, index: index, last: index == rooms.count - 1) }
                     .buttonStyle(.plain)
             }
         }
+    }
+
+    /// A group's rows: on a standard grouped list's card in the classic look, on the ground in the pixel look.
+    @ViewBuilder private func card(_ rows: some View) -> some View {
         if look.isClassic {
-            // A standard grouped list's card.
-            list.grounded(Theme.panel, radius: Theme.Radius.card).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-                .padding(.horizontal, Theme.Space.l).opacity(rooms.isEmpty ? 0 : 1)
+            rows.grounded(Theme.panel, radius: Theme.Radius.card).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                .padding(.horizontal, Theme.Space.l)
         } else {
-            list
+            rows
         }
+    }
+
+    /// What waits on the user's hand, a row each, then the rooms with a message for the user and nothing else waiting
+    /// in them (as the Mac's `Mentions`).
+    static func mentions(_ store: RoomsStore) -> [RoomMentionItem] {
+        let waiting = store.attention.filter { $0.kind != .rounds }.map { item in
+            RoomMentionItem(id: item.id, roomId: item.room, room: item.roomName, line: item.line, urgent: item.urgent, route: .room(item.room, RoomAttentionPage.where(item)))
+        }
+        let held = Set(waiting.map(\.roomId))
+        let said = store.rooms.filter { $0.forYou && $0.unread > 0 && !held.contains($0.id) }.map { room in
+            RoomMentionItem(id: "said|\(room.id)", roomId: room.id, room: room.name, line: room.lastLine, urgent: false, route: .room(room.id))
+        }
+        return waiting + said
     }
 
     /// The sample screens' room; nil with a real Mac.
@@ -112,20 +148,74 @@ struct RoomsTab: View {
         model.openRoomAt = nil
         path = [.room(id, at)]
     }
+}
 
-    /// The inbox's mark and, when something waits, how many — amber (what waits for you).
-    @ViewBuilder private func attentionLabel(_ n: Int) -> some View {
-        HStack(spacing: 3) {
-            if look.isClassic { Image(systemName: n > 0 ? "tray.full" : "tray") } else { Text("等你").mono(14, weight: .medium) }
-            if n > 0 {
-                if look.isClassic {
-                    Text("\(n)").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                        .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18).background(Theme.waiting, in: Capsule())
-                } else {
-                    Text("[\(n)]").mono(13, weight: .medium).foregroundStyle(Theme.waiting)
+/// A row of `Mentions`: the room, and under it who waits and for what.
+struct RoomMentionItem: Identifiable {
+    let id: String
+    let roomId: String
+    let room: String
+    let line: String
+    let urgent: Bool
+    let route: RoomRoute
+}
+
+/// A group's head in the room list: its name, how much is new in it (amber when something there is for the user), and
+/// the mark that folds it.
+private struct RoomGroupHead: View {
+    let title: String
+    let count: Int
+    let hot: Bool
+    @Binding var folded: Bool
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Button { withAnimation(.easeOut(duration: 0.15)) { folded.toggle() } } label: {
+            HStack(spacing: 6) {
+                LookGlyph.fold(open: !folded, size: 11).foregroundStyle(.secondary).frame(width: 12)
+                SectionLabel(title)
+                Spacer(minLength: 4)
+                if count > 0 {
+                    if look.isClassic {
+                        Text("\(count)").font(.system(size: 11, weight: .bold)).foregroundStyle(hot ? Color.white : Theme.ink)
+                            .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18).background(hot ? Theme.waiting : Theme.panel, in: Capsule())
+                    } else {
+                        Text("[\(count)]").mono(12).foregroundStyle(hot ? Theme.waiting : Theme.secondaryInk)
+                    }
                 }
             }
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.top, Theme.Space.m).padding(.bottom, Theme.Space.s)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title)\(count > 0 ? " \(count)" : "")")
+        .accessibilityHint(folded ? "Expand" : "Collapse")
+    }
+}
+
+/// A row of `Mentions`: `@`, the room, and what waits.
+private struct RoomMentionRow: View {
+    let item: RoomMentionItem
+    let last: Bool
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("@").font(.system(size: 15, weight: .semibold, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Theme.waiting).frame(width: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.room).font(.system(size: 15.5, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(item.line).font(.system(size: 13.5)).foregroundStyle(item.urgent ? Theme.waiting : .secondary).lineLimit(2)
+            }
+            Spacer(minLength: 6)
+            LookGlyph.onward().foregroundStyle(Theme.inkDim)
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) { if !(look.isClassic && last) { HairRule().padding(.leading, look.isClassic ? Theme.Space.l : 0) } }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -148,9 +238,6 @@ private struct RoomListRow: View {
                 if room.desk { RoomDeskTag() }
                 Spacer(minLength: 6)
                 if room.paused { Text("Paused").mono(11).foregroundStyle(Theme.inkDim) }
-                // Sessions talking among themselves with no word from the user (§7): told here too, in amber — it
-                // waits for the user's look, and stops nothing.
-                else if let n = room.rounds { Text("\(n) Rounds").mono(11).foregroundStyle(Theme.waiting).accessibilityLabel("\(n) rounds without you") }
                 if room.attention > 0 { Text("⚠ \(room.attention)").mono(11).foregroundStyle(Theme.waiting).accessibilityLabel("\(room.attention) 件事等你处理") }
                 if room.unread > 0 { count }
             }

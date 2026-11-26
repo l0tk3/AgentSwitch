@@ -313,6 +313,15 @@ struct RoomSessionsSheet: View {
     @State private var query = ""
     @State private var working = false
     @State private var error: String?
+    /// Sessions to start and seat with it (user #504, as the Mac's sheet): where, which agent, under which profile.
+    @State private var fresh: [NewSession] = []
+
+    struct NewSession: Identifiable, Equatable {
+        let id = UUID()
+        var folder: String
+        var agent: String
+        var profile: String?
+    }
 
     private var creating: Bool { if case .create = purpose { return true } else { return false } }
 
@@ -327,7 +336,7 @@ struct RoomSessionsSheet: View {
     private var shown: [TerminalInfo] { RoomSessionSearch.filter(terminals, query: query) }
 
     private var ready: Bool {
-        !working && (creating ? !name.trimmingCharacters(in: .whitespaces).isEmpty : !picked.isEmpty)
+        !working && (creating ? !name.trimmingCharacters(in: .whitespaces).isEmpty : !picked.isEmpty || !starting.isEmpty)
     }
 
     var body: some View {
@@ -350,9 +359,8 @@ struct RoomSessionsSheet: View {
                     }
                 } header: {
                     SectionLabel("Running Sessions")
-                } footer: {
-                    Text("进了房间的会话可以收发房间消息；只有 @ 才唤醒它。")
                 }
+                newSessions
                 if let error { Section { Text(error).font(.footnote).foregroundStyle(Theme.failed) } }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -364,7 +372,8 @@ struct RoomSessionsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await go() } } label: {
-                        let word = creating ? "Create" : picked.count > 1 ? "Add \(picked.count)" : "Add"
+                        let n = picked.count + starting.count
+                        let word = creating ? "Create" : n > 1 ? "Add \(n)" : "Add"
                         if look.isClassic { Text(word).fontWeight(.semibold) } else { Text(word).mono(15, weight: .medium) }
                     }
                     .tint(look.isClassic ? Theme.signal : Theme.ink)
@@ -374,6 +383,95 @@ struct RoomSessionsSheet: View {
         }
         .presentationDetents(creating ? [.large] : [.medium, .large])
         .task { await app.refreshTerminals() }
+        #if DEBUG
+        // `roomnew`: one new session asked for, as the sample shows it.
+        .onAppear { if DemoRooms.isDemo, DemoRooms.screen == "roomnew", fresh.isEmpty { addFresh() } }
+        #endif
+    }
+
+    /// The new sessions asked for that say where to start.
+    private var starting: [NewSession] { fresh.filter { !$0.folder.trimmingCharacters(in: .whitespaces).isEmpty } }
+
+    /// Agents on the Mac, by the new terminal sheet's names and order.
+    private var agents: [(id: String, name: String)] {
+        let installed = Set(app.terminals.list?.agents ?? [])
+        return NewTerminalSheet.agents.filter { installed.contains($0.id) }
+    }
+
+    /// `New Sessions`: each a folder, an agent and (where it has more than the Mac's own) a profile; started with
+    /// permissions bypassed and seated here, as a session an admin brings in. `Add Another` asks for one more.
+    @ViewBuilder private var newSessions: some View {
+        Section {
+            ForEach($fresh) { $one in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        TextField("Folder", text: $one.folder, prompt: Text("~/Projects/app"))
+                            .code(14).autocorrectionDisabled().textInputAutocapitalization(.never)
+                        Menu {
+                            ForEach(app.terminals.recentFolders.prefix(12).map(MacPath.tilde), id: \.self) { f in Button(f) { one.folder = f } }
+                        } label: { LookGlyph(glyph: "▾", symbol: "folder", size: 15).foregroundStyle(look.isClassic ? Theme.signal : Theme.ink) }
+                        .accessibilityLabel("Recent Folders")
+                        Button { fresh.removeAll { $0.id == one.id } } label: { LookGlyph(glyph: "×", symbol: "minus.circle.fill", size: 16) }
+                            .buttonStyle(.plain).foregroundStyle(Theme.failed).accessibilityLabel("Remove")
+                    }
+                    HStack(spacing: 14) {
+                        Menu {
+                            ForEach(agents, id: \.id) { a in Button(a.name) { one.agent = a.id; one.profile = nil } }
+                        } label: {
+                            HStack(spacing: 6) {
+                                AgentLogo(harness: one.agent, size: 16)
+                                Text(agents.first { $0.id == one.agent }?.name ?? one.agent).foregroundStyle(Theme.ink)
+                                LookGlyph(glyph: "▾", symbol: "chevron.up.chevron.down", size: 11).foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityLabel("Agent")
+                        if let choices = app.terminals.profiles[one.agent], choices.several {
+                            let chosen = one.profile ?? choices.offered?.id
+                            Menu {
+                                ForEach(choices.profiles) { p in Button(p.name) { one.profile = p.id } }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(choices.profiles.first { $0.id == chosen }?.name ?? "Default").foregroundStyle(Theme.ink)
+                                    LookGlyph(glyph: "▾", symbol: "chevron.up.chevron.down", size: 11).foregroundStyle(.secondary)
+                                }
+                            }
+                            .accessibilityLabel("Profile")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .mono(13)
+                }
+                .padding(.vertical, 2)
+            }
+            Button { addFresh() } label: {
+                if look.isClassic { Label("Add Another", systemImage: "plus.circle") } else { Text("+ Add Another").mono(14) }
+            }
+            .tint(look.isClassic ? Theme.signal : Theme.ink)
+            .disabled(agents.isEmpty)
+        } header: {
+            SectionLabel("New Sessions")
+        }
+    }
+
+    private func addFresh() {
+        let agent = fresh.last?.agent ?? agents.first?.id ?? "claude-code"
+        let folder = fresh.last?.folder ?? app.terminals.recentFolders.first.map(MacPath.tilde) ?? ""
+        fresh.append(NewSession(folder: folder, agent: agent, profile: fresh.last?.agent == agent ? fresh.last?.profile : nil))
+    }
+
+    /// The new sessions started and seated in `room`; what went wrong with any of them, in words.
+    private func start(in room: String, api: AgentSwitchAPI) async -> [String] {
+        var problems: [String] = []
+        for one in starting {
+            do {
+                let profile = one.profile ?? app.terminals.profiles[one.agent].flatMap { $0.several ? $0.offered?.id : nil }
+                let made = try await api.createTerminal(NewTerminalRequest(harness: one.agent, cwd: one.folder.trimmingCharacters(in: .whitespaces), mode: "bypass", profile: profile))
+                _ = try await api.seat(made.id, in: room)
+                fresh.removeAll { $0.id == one.id }
+            } catch { problems.append("\(one.folder)：\(error.localizedDescription)") }
+        }
+        if !problems.isEmpty { await app.refreshTerminals() }
+        return problems
     }
 
     /// `/ Search`, as on the Terminals page.
@@ -423,9 +521,10 @@ struct RoomSessionsSheet: View {
             case .create:
                 let made = try await api.createRoom(name: name.trimmingCharacters(in: .whitespaces), topic: topic.trimmingCharacters(in: .whitespacesAndNewlines),
                                                     terminals: terminals.map(\.id).filter(picked.contains))
+                let problems = made.problems + (await start(in: made.room.id, api: api))
                 await app.rooms.refresh(api)
                 // The room is made; a session that could not be seated is said on the Rooms page, not lost.
-                if !made.problems.isEmpty { app.banner = made.problems.joined(separator: "\n") }
+                if !problems.isEmpty { app.banner = problems.joined(separator: "\n") }
                 dismiss()
                 done(made.room.id)
             case .add(let room, _):
@@ -433,6 +532,7 @@ struct RoomSessionsSheet: View {
                 for id in terminals.map(\.id) where picked.contains(id) {
                     do { try await api.seat(id, in: room); picked.remove(id) } catch { problems.append(error.localizedDescription) }
                 }
+                problems += await start(in: room, api: api)
                 done(room)
                 if problems.isEmpty { dismiss() } else { error = problems.joined(separator: "\n") }
             }

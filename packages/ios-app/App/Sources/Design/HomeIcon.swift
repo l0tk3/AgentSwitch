@@ -18,6 +18,10 @@ enum HomeIcon {
         let app = UIApplication.shared
         let wanted = name(for: look)
         guard app.supportsAlternateIcons, app.alternateIconName != wanted else { return }
+        #if DEBUG
+        // The sample screens (`-uiDemo YES`) leave the icon as it is: the system's notice would stand over the picture.
+        if UserDefaults.standard.bool(forKey: "uiDemo") { return }
+        #endif
         Task {
             do {
                 try await app.setAlternateIconName(wanted)

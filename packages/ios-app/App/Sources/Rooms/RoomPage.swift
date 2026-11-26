@@ -15,6 +15,8 @@ struct RoomPage: View {
     @State private var model: RoomPageModel
     /// The members sheet; with a handle, that member's card first.
     @State private var members: MembersRequest?
+    /// Choosing the user's own avatar (their face in the timeline tapped).
+    @State private var ownAvatar = false
     @State private var adding = false
     @State private var editing = false
     @State private var confirmDelete = false
@@ -59,7 +61,8 @@ struct RoomPage: View {
         let detail = model.detail
         VStack(spacing: 0) {
             HairRule()
-            if let detail, detail.room.paused { pausedBanner } else if let n = detail?.room.rounds { roundsBanner(n) }
+            // No word any more of sessions going back and forth without the user (§7, user #575): the Mac says none.
+            if let detail, detail.room.paused { pausedBanner }
             if let error = model.error {
                 ErrorText(message: Binding(get: { model.error }, set: { model.error = $0 }))
                     .padding(.horizontal, Theme.Space.l).padding(.vertical, 6).id(error)
@@ -130,6 +133,8 @@ struct RoomPage: View {
         // Deleted, here or from another screen: back to the list.
         .onChange(of: model.gone) { _, gone in if gone { Task { await app.rooms.refresh(app.api) }; dismiss() } }
         .onDisappear { Task { await app.rooms.refresh(app.api) } }
+        // The user's own avatar, one for every room (user #495).
+        .sheet(isPresented: $ownAvatar) { RoomAvatarPicker(model: model, handle: RoomSeat.you).followsLook() }
         .sheet(item: $members) { asked in
             RoomMembersSheet(model: model, opening: asked.card, add: { adding = true }, mention: { mention($0) }).followsLook()
         }
@@ -243,28 +248,6 @@ struct RoomPage: View {
         .overlay(alignment: .bottom) { HairRule() }
     }
 
-    /// Sessions have gone back and forth this many times with no word from the user (§7; 2026-11-22, user: 多轮没我的
-    /// 参与就提醒我一下就行不用中断他们): told, with `OK` to count again from here and `Pause` to stop the handing over.
-    private func roundsBanner(_ n: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                SeatStateMark(state: .waiting)
-                Text(RoomInfo.roundsSays(n)).font(.system(size: 13)).foregroundStyle(Theme.ink).frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-            }
-            HStack(spacing: Theme.Space.s) {
-                Spacer(minLength: 0)
-                Button { Task { await model.run(app.api) { try await $0.updateRoom(model.id, paused: true) } } } label: { ButtonWord("Pause") }
-                    .buttonStyle(SquareButtonStyle(expand: false))
-                Button { Task { await model.run(app.api) { try await $0.roundsSeen(model.id) } } } label: { ButtonWord("OK") }
-                    .buttonStyle(SquareButtonStyle(prominent: true, expand: false))
-            }
-        }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, 8)
-        .background(Theme.waiting.opacity(0.14))
-        .overlay(alignment: .bottom) { HairRule() }
-    }
-
     private func timeline(_ detail: RoomDetail) -> some View {
         let messages = model.shown
         let rows = RoomRow.rows(messages)
@@ -291,7 +274,7 @@ struct RoomPage: View {
                                        forMe: row.message.to.contains(RoomSeat.you) && row.message.seq > (model.seenAtOpen ?? .max),
                                        tagTask: model.taskFilter == nil,
                                        flashing: flash == row.id,
-                                       openCard: { members = MembersRequest(card: $0) },
+                                       openCard: { if $0 == RoomSeat.you { ownAvatar = true } else { members = MembersRequest(card: $0) } },
                                        reply: { model.replyTo = row.message.seq; writing = true },
                                        mention: { mention($0) },
                                        openFile: { showFile($0) },
@@ -433,36 +416,21 @@ private struct RoomMessageRow: View {
                 if row.continues {
                     Color.clear.frame(width: Self.faceSide, height: 1)
                 } else {
+                    // The user's own face opens the choice of their avatar (user #495); a member's, its card.
                     Button { openCard(m.from) } label: { RoomFaceView(seat: seat, handle: m.from, side: Self.faceSide) }
-                        .buttonStyle(.plain).allowsHitTesting(m.from != RoomSeat.you).padding(.top, 2)
+                        .buttonStyle(.plain).padding(.top, 2)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     if !row.continues { head(m, seat) }
+                    // Under the same name as the message before it: its `Aside` stands on a line of its own.
+                    if row.continues, m.aside { asideTag }
                     if let n = m.replyTo { quote(n) }
-                    if m.deleted {
-                        Text("这条消息已删除").font(.system(size: 14)).italic().foregroundStyle(Theme.inkDim)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        let long = RoomMessage.isLong(m.text, lines: Self.foldLines)
-                        Text(RoomWords.text(m.text, handles: handles, look: look))
-                            .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
-                            .lineLimit(long && !expanded ? Self.foldLines : nil)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                        if long {
-                            Button { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } } label: {
-                                Text(expanded ? "收起" : "展开全文").font(.system(size: 13)).foregroundStyle(Theme.signal)
-                                    .padding(.vertical, 2).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    if !m.files.isEmpty, !m.deleted { RoomMessageFiles(room: detail.room.id, folder: detail.folder, paths: m.files, showInFiles: openFile) }
+                    said(m, own: m.from == RoomSeat.you)
                     readers(m)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, row.continues ? 2 : 12)
+            .padding(.top, row.continues ? (look.isClassic ? 3 : 2) : 12)
             .padding(.bottom, 2)
             .background(flashing ? Theme.signal.opacity(0.14) : forMe && look.isClassic ? Theme.waiting.opacity(0.09) : Color.clear)
             .overlay(alignment: .leading) { if forMe { Theme.waiting.frame(width: 3) } }
@@ -478,6 +446,38 @@ private struct RoomMessageRow: View {
                 }
             }
         }
+    }
+
+    /// What a message says, with its files. In the classic look on a round block of its own, as wide as it is — the
+    /// user's own on a light tint of the accent (user #487, #498, as on the Mac); on the ground in the pixel look.
+    @ViewBuilder private func said(_ m: RoomMessage, own: Bool) -> some View {
+        let classic = look.isClassic
+        VStack(alignment: .leading, spacing: 3) {
+                    if m.deleted {
+                        Text("这条消息已删除").font(.system(size: 14)).italic().foregroundStyle(Theme.inkDim)
+                    } else {
+                        let long = RoomMessage.isLong(m.text, lines: Self.foldLines)
+                        Text(RoomWords.text(m.text, handles: handles, look: look))
+                            .font(.system(size: 15)).foregroundStyle(Theme.ink).lineSpacing(3)
+                            .lineLimit(long && !expanded ? Self.foldLines : nil)
+                            .frame(maxWidth: classic ? nil : .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        if long {
+                            Button { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } } label: {
+                                Text(expanded ? "收起" : "展开全文").font(.system(size: 13)).foregroundStyle(Theme.signal)
+                                    .padding(.vertical, 2).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    if !m.files.isEmpty, !m.deleted { RoomMessageFiles(room: detail.room.id, folder: detail.folder, paths: m.files, showInFiles: openFile) }
+        }
+        .padding(.horizontal, classic ? 11 : 0).padding(.vertical, classic ? 7 : 0)
+        .background {
+            if classic { RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(own ? Theme.signal.opacity(0.1) : Theme.panel) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// A line across with the day in it: `今天`, `昨天`, `11月24日`.
@@ -500,11 +500,25 @@ private struct RoomMessageRow: View {
                 Text(RoomWords.who(m.from)).font(.system(size: look.isClassic ? 15 : 14, weight: .semibold, design: look.isClassic ? .default : .monospaced))
                     .foregroundStyle(nameColor(seat)).lineLimit(1)
             }
-            .buttonStyle(.plain).allowsHitTesting(m.from != RoomSeat.you)
+            .buttonStyle(.plain)
             if let agent = seat?.card?.agent, !agent.isEmpty { RoomAgentMark(agent: agent) }
+            // Its answer beside its turn (`/btw`, docs/chatroom-v0.md §13).
+            if m.aside { asideTag }
             if tagTask, let n = m.task { taskTag(n) }
             Text(RoomWords.time(m.date)).mono(11.5).foregroundStyle(Theme.inkDim)
         }
+    }
+
+    private var asideTag: some View {
+        Group {
+            if look.isClassic {
+                Text("Aside").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.secondaryInk)
+                    .padding(.horizontal, 6).padding(.vertical, 1.5).background(Theme.panel, in: Capsule())
+            } else {
+                Text("[Aside]").mono(10.5, weight: .medium).foregroundStyle(Theme.secondaryInk)
+            }
+        }
+        .accessibilityLabel("Aside")
     }
 
     /// The name in the face's colour in the classic look (as a chat's names are); ink in the pixel one.

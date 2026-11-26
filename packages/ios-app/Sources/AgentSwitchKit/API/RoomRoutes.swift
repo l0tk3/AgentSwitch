@@ -218,11 +218,6 @@ extension AgentSwitchAPI {
         try await perform("DELETE", ["rooms", room, "messages", String(seq)], query: tell ? [URLQueryItem(name: "tell", value: "1")] : [], body: nil)
     }
 
-    /// The user has seen the sessions' rounds go by (`OK`): counted from here again. Nothing was stopped.
-    public func roundsSeen(_ room: String) async throws {
-        let _: Done = try await post(["rooms", room, "rounds", "ok"], body: Nothing())
-    }
-
     /// The pinned notes, whole, in place of what was there; nil: they are empty now.
     @discardableResult
     public func setRoomNotes(_ room: String, text: String) async throws -> RoomNotes? {

@@ -226,6 +226,8 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
     public let expects: String?
     /// Deleted by the user (user #278): its words and files are gone; drawn as 「这条消息已删除」 in its place.
     public let deleted: Bool
+    /// A member's answer beside its turn (its own `/btw`, docs/chatroom-v0.md §13): marked `Aside` by its name.
+    public let aside: Bool
 
     public var id: Int { seq }
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
@@ -244,9 +246,10 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains((fileName(path) as NSString).pathExtension.lowercased())
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, expects, deleted }
+    private enum CodingKeys: String, CodingKey { case seq, from, to, replyTo, text, at, files, task, expects, deleted, aside }
 
-    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, expects: String? = nil, deleted: Bool = false) {
+    public init(seq: Int, from: String, to: [String] = [], replyTo: Int? = nil, text: String, at: Int64 = 0, files: [String] = [], task: Int? = nil, expects: String? = nil, deleted: Bool = false, aside: Bool = false) {
+        self.aside = aside
         self.expects = expects
         self.deleted = deleted
         self.files = files
@@ -271,6 +274,7 @@ public struct RoomMessage: Decodable, Sendable, Hashable, Identifiable {
         task = (try? c.decodeIfPresent(Int.self, forKey: .task)).flatMap { $0 }
         expects = (try? c.decodeIfPresent(String.self, forKey: .expects)).flatMap { $0 }
         deleted = c.contains(.deleted) && !((try? c.decodeNil(forKey: .deleted)) ?? true)
+        aside = (try? c.decodeIfPresent(Bool.self, forKey: .aside)) == true
     }
 
     /// Folded in the timeline (user #280): more than `lines` lines, or more characters than that many wide lines hold.
@@ -561,9 +565,6 @@ public struct RoomInfo: Decodable, Sendable, Hashable, Identifiable {
     /// The dispatch desk (调度台): the user and the dispatch session; what the user says there is for the dispatch,
     /// with no `@`.
     public let desk: Bool
-
-    /// The notice's sentence.
-    public static func roundsSays(_ n: Int) -> String { "会话之间已经连续往返 \(n) 次，没有你参与。它们仍在继续，没有被打断。" }
 
     private enum CodingKeys: String, CodingKey { case id, name, topic, paused, createdAt, lastSeq, readSeq, rounds, roundsLimit, desk }
 

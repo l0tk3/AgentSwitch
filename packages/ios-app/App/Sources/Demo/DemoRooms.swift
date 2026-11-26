@@ -74,7 +74,7 @@ enum DemoRooms {
           {"seq":36,"from":"you","to":["web","gate","ios-app"],"text":"@web @gate @ios-app 文档里的地址也要跟着改","at":\(now - 900_000),"files":["/Users/me/Projects/AgentSwitch/docs/clash-v0.md","/Users/me/Projects/AgentSwitch/packages/daemon/src/clash/phone.ts"]},
           {"seq":37,"from":"ios-app","to":["you"],"replyTo":36,"text":"@you 订阅页的字段名还没定，`links` 是数组还是对象？定了我接着做。","at":\(now - 600_000),"task":4,"expects":"answer"},
           {"seq":38,"from":"daemon","to":["android","ios-app"],"text":"@android @ios-app `PROCESS-NAME` 的规则手机上都去掉了，重新拉一次配置。","at":\(now - 300_000),"task":3},
-          {"seq":39,"from":"daemon","to":["you"],"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000),"files":["\(folder)/mihomo-check.md","\(folder)/shots/clash-rules.png"],"task":3}],
+          {"seq":39,"from":"daemon","to":["you"],"aside":true,"text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000),"files":["\(folder)/mihomo-check.md","\(folder)/shots/clash-rules.png"],"task":3}],
          "receipts":{"36":{"web":"ended","gate":"queued"},"38":{"android":"queued","ios-app":"delivered"}},
          "reads":{"31":["daemon"],"36":["ios-app"],"38":["ios-app"]},
          "taskStats":{"1":{"wakes":4,"chars":8210,"posts":6,"calls":19},"2":{"wakes":3,"chars":5120,"posts":4,"calls":12},"4":{"wakes":5,"chars":23400,"posts":7,"calls":41}},

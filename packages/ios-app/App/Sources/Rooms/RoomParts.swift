@@ -6,7 +6,8 @@ import SwiftUI
 
 /// A member's face as the look draws it (2026-11-24, avatars): the pixel look its pixel avatar — a 5 × 5 face or a
 /// 16 × 16 character — or, unchosen, the seat's face; the classic look its emoji on its colour or, unchosen, its
-/// initials on the face's colour. The user is a fixed `YOU`.
+/// initials in the face's colour on a light wash of it (user #494, B). The user is `YOU` until they choose one of their
+/// own for the look (user #495).
 struct RoomFaceView: View {
     let face: RoomFace?
     var you = false
@@ -34,7 +35,7 @@ struct RoomFaceView: View {
     }
 
     var body: some View {
-        if you { youMark }
+        if you, look.isClassic ? avatar?.classic == nil : avatar?.pixel == nil { youMark }
         else if look.isClassic {
             if let classic = avatar?.classic { emoji(classic) } else if let handle { initials(handle) } else { pattern(face ?? Self.fallback) }
         } else {
@@ -65,12 +66,13 @@ struct RoomFaceView: View {
 
     private func initials(_ handle: String) -> some View {
         let f = face ?? Self.fallback
+        let color = Color(light: f.rgb(dark: false), dark: f.rgb(dark: true))
         return Text(RoomAvatar.initials(handle))
-            .font(.system(size: side * 0.4, weight: .semibold))
-            .foregroundStyle(.white)
+            .font(.system(size: side * 0.4, weight: .bold))
+            .foregroundStyle(color)
             .minimumScaleFactor(0.5)
             .frame(width: side, height: side)
-            .background(Circle().fill(Color(light: f.rgb(dark: false), dark: f.rgb(dark: true))))
+            .background(Circle().fill(color.opacity(0.2)))
             .accessibilityHidden(true)
     }
 
