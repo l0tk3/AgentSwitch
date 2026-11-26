@@ -158,6 +158,8 @@ extension SeatState {
 /// folder of the Terminals page's top bar, and the dithered key of a seat that only waits.
 enum RoomArt {
     static let people = ["..##...##", "..##...##", ".####.###", ".####.###"]
+    /// A lens on its handle: search, in the bar beside the people (the character `⌕` stood smaller than its neighbours).
+    static let search = [".####...", "#....#..", "#....#..", "#....#..", "#....#..", ".####...", ".....##.", "......##"]
     static let reply = ["..#....", ".##....", "#######", ".##...#", "..#...#"]
     static let files = ["####.....", "#...#####", "#.......#", "#.......#", "#.......#", "#.......#", "#########"]
     static let dither = ["#.#.", ".#.#", "#.#.", ".#.#"]

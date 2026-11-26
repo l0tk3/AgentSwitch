@@ -88,14 +88,14 @@ struct RoomPage: View {
             ToolbarItem(placement: .principal) { titleButton(detail) }
             ToolbarItem(placement: .primaryAction) {
                 Button { searching = true } label: {
-                    if look.isClassic { Image(systemName: "magnifyingglass") } else { Text("⌕").font(.system(size: 19, weight: .medium, design: .monospaced)).foregroundStyle(Theme.ink) }
+                    if look.isClassic { Image(systemName: "magnifyingglass") } else { PixelSprite(rows: RoomArt.search, pixel: 2, color: Theme.ink) }
                 }
                 .accessibilityLabel("搜索")
                 .disabled(detail == nil)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { members = MembersRequest() } label: {
-                    if look.isClassic { Image(systemName: "person.2") } else { PixelSprite(rows: RoomArt.people, pixel: 2, color: Theme.ink) }
+                    if look.isClassic { Image(systemName: "person.2") } else { PixelSprite(rows: RoomArt.people, pixel: 2.5, color: Theme.ink) }
                 }
                 .accessibilityLabel("Members")
                 .disabled(detail == nil)

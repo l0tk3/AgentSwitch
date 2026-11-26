@@ -182,15 +182,14 @@ private struct SeatCardPage: View {
                         }))
                         .disabled(seat.byAgent || busy)
                     } footer: {
-                        Text(seat.byAgent ? "由别的会话拉起来的会话不能再拉人。" : "打开后，这个会话可以新建房间、拉会话进来，并读取拉人要用的清单。")
+                        // Why the switch is off for good: a state, said; what it does is in the docs (design-rules §5.2).
+                        if seat.byAgent { Text("由别的会话拉起来的会话不能再拉人。") }
                     }
                     // Its avatars (2026-11-24): one for each look, its session's in every room.
                     Section {
                         Button("Avatar") { pickingAvatar = true }
                         Button("Reset", role: .destructive) { confirmResetAvatar = true }
                             .disabled(busy || seat.avatar == nil || seat.avatar == RoomAvatar())
-                    } footer: {
-                        Text("像素风格用像素头像，Classic 风格用 Emoji 头像。头像跟着会话走，它在每个房间里都一样。")
                     }
                     Section {
                         Button("Mention") { mention(handle) }
@@ -218,9 +217,7 @@ private struct SeatCardPage: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                     } footer: {
-                        if let said { Text(said).foregroundStyle(Theme.waiting) } else {
-                            Text(seat.state == .exited ? "会话已经结束：恢复会用同一个会话、同一个目录接着来，席位不变。" : "禁言：还能读、还能干活，但不能发消息。踢出：移出房间，会话继续运行。结束：移出房间并关掉它的终端，对话记录留着。")
-                        }
+                        if let said { Text(said).foregroundStyle(Theme.waiting) } else if seat.state == .exited { Text("会话已经结束。") }
                     }
                 }
             } else {

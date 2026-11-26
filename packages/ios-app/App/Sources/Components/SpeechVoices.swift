@@ -71,8 +71,6 @@ struct SpeechVoiceView: View {
                             .accessibilityLabel("试听 \(voice.name)")
                     }
                 }
-            } footer: {
-                Text("轻点声音以选择并试听。")
             }
             Section {
                 if SpeechVoices.onlyCompact {

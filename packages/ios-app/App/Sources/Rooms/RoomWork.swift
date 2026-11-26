@@ -200,8 +200,6 @@ private struct RoomTaskAddPage: View {
                     Text("Nobody").tag(String?.none)
                     ForEach(seats) { seat in Text("@\(seat.handle)").tag(String?.some(seat.handle)) }
                 }
-            } footer: {
-                Text("任务先放在 To Do 里；不指定的话，成员可以自己领。")
             }
             if let error = model.error { Section { Text(error).font(.footnote).foregroundStyle(Theme.failed) } }
         }

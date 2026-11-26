@@ -13,7 +13,8 @@ enum SettingsRoute: Hashable {
 
 /// The Settings tab (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top; the look (Appearance, docs/ui-v0.md
 /// §8); the proxies (Clash, the browser's, each profile's; docs/clash-v0.md §9); sounds and reading; the Mac app's new
-/// version; the Face ID lock; re-pairing. Rows carry no icons; footers are one sentence. Pull to refresh re-reads the
+/// version; the Face ID lock; re-pairing. Rows carry no icons; no footer explains a row (docs/design-rules.md §5.2),
+/// only what reports a state or a problem. Pull to refresh re-reads the
 /// proxies.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
@@ -46,8 +47,6 @@ struct SettingsView: View {
                             .foregroundStyle(.primary)
                         }
                         Button("Add Mac") { addingMac = true }
-                    } footer: {
-                        if model.macs.servers.count > 1 { Text("同一时间只连接一台 Mac。") }
                     }
                 }
                 AppearanceSection()
@@ -60,13 +59,9 @@ struct SettingsView: View {
                     if let error = lock.lastError { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
                 } header: {
                     SectionLabel("Security")
-                } footer: {
-                    Text("设备丢失时，可在 Mac 上移除此设备。")
                 }
                 Section {
                     Button("Remove This Mac", role: .destructive) { confirmForget = true }
-                } footer: {
-                    Text("删除此 iPhone 与这台 Mac 的配对。")
                 }
             }
             #if DEBUG
@@ -145,8 +140,6 @@ private struct AppearanceSection: View {
             }
         } header: {
             SectionLabel("Appearance")
-        } footer: {
-            Text("只换外观：图标、字体、按钮和提示的写法。功能、位置和操作不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Text Size 调整简略视图里对话文字的大小；终端里的字用两指捏合缩放。")
         }
     }
 }
@@ -204,8 +197,6 @@ private struct FeedbackSection: View {
             }
         } header: {
             SectionLabel("Alerts & Voice")
-        } footer: {
-            Text("Read Aloud 开启时自动朗读回复和终端的提醒；Live Activity 显示在锁定屏幕和灵动岛上。")
         }
         .onAppear { liveOn = model.live.enabled }
     }

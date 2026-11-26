@@ -76,8 +76,6 @@ struct ProxiesSection: View {
             }
         } header: {
             SectionLabel("Proxies")
-        } footer: {
-            Text("Clash 为 Claude 和 OpenAI 单独选节点；浏览器和每个配置可以各有自己的代理。右边是它现在从哪里出去。")
         }
     }
 }
