@@ -119,6 +119,7 @@ Reply to: #39
 - 每个终端启动时配一个很小的工具服务（`terminals/roomKitClient.ts`，MCP，名字 `chatroom`）。它自己什么都不存：有哪些工具、每次调用回什么，都拿这个终端自己的钩子令牌去问服务。
 - 会话不在任何房间里时它一个工具都不列，不占上下文；入座、离座时通知 agent 重新列。
 - 四家都配了（2026-11-23）：Claude Code 写在它的 `--mcp-config` 里；Codex 用 `-c mcp_servers.chatroom…`，终端的三个变量按名字转交（`env_vars`），令牌不上命令行，并且同样写进 AgentSwitch 自己那层配置（否则 Codex 给会话起名的隐藏线程起不来，见 `codexLayer.ts`）；OpenCode 写在它这个终端自己的配置里；pi 没有固定的配置入口，由 AgentSwitch 的扩展在会话入座时注册（`pi.registerMcpServer`，1.6 起）、离座时撤掉。
+- Grok（2026-11-26）：它只从自己的 `config.toml` 读工具服务，不能只给一次启动传。所以和它的钩子文件一样，服务在 Grok 的目录里放一段自己的配置：`[mcp_servers.chatroom]`，命令是本服务的 node 加 `roomKitClient` 和 `--quiet-outside`；终端的三个变量写成 `${AGENTSWITCH_TERMINAL_ID:-}` 这样的引用，Grok 读配置时从它启动的环境里填进去，令牌不落盘。在 AgentSwitch 终端之外启动的 Grok 也会起这个服务，但它一个工具都不给（`--quiet-outside`）。`AGENTSWITCH_GROK_MCP=0` 不写这段。实测（1.0.92，`grok mcp doctor chatroom`）：服务起得来、握手成功、列出工具。Grok 启动时列一次工具（归入 `LISTS_ONCE`，工具始终都在）；休息时的来信在它的 `Stop` 钩子里以 `{"decision":"block","reason"}` 交给它（同 Codex），空闲时打字送入。
 - **开了“拉会话”的会话多七个工具**：`rooms`、`room_create`、`room_add`、`profiles`、`models`、`sessions`、`profile_check`。清单是向本服务自己的接口要的（和界面走同一套规则），裁到 agent 可以知道的部分。一个会话最多拉起 4 个；拉起（新开或恢复）的会话不指定权限模式时默认 bypass（2026-11-24，用户：原先是 manual，且自己不是 bypass 的不能开 bypass，这条限制去掉了）。
 - 人人都有的另有 `room_notes`（置顶笔记，§9）。
 
