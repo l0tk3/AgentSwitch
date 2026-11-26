@@ -9,7 +9,13 @@ private let presentationLog = Logger(subsystem: "com.agentswitch.mac", category:
 struct AgentSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
-    init() { SoftType.apply() }
+    init() {
+        SoftType.apply()
+        // Every scroll view in the app: a thin bar over the content, there while scrolling — the app's own answer to
+        // the system's "Show scroll bars", so that "Always" does not put a wide grey track beside every list
+        // (user #487: 全都更改到简洁模式中的那种样式). Read by AppKit when a scroll view is made.
+        UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
+    }
 
     var body: some Scene {
         // Hidden while this copy only waits on a newly installed one (AppModel.installUpdate).

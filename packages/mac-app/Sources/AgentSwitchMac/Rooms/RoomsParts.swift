@@ -232,6 +232,9 @@ struct RoomMessageRow: View {
             VStack(alignment: .leading, spacing: classic ? 3 : 2) {
                 if let quoted { quote(quoted).padding(.bottom, classic ? 3 : 0) }
                 if !row.continues { head(seat) }
+                // Classic (user #487: 每个人的消息分界区分度太低): what a message says, with its files, on a round block of
+                // its own, as wide as it is — the user's own on the accent's tint.
+                VStack(alignment: .leading, spacing: classic ? 3 : 2) {
                 if message.deleted {
                     Text("这条消息已删除").font(.system(size: Look.scaled(13))).italic().foregroundStyle(Look.faint)
                 } else {
@@ -255,14 +258,19 @@ struct RoomMessageRow: View {
                     }
                 }
                 if !message.files.isEmpty, !message.deleted { files }
+                }
+                .padding(.horizontal, classic ? 11 : 0).padding(.vertical, classic ? 7 : 0)
+                .background(RoundedRectangle(cornerRadius: classic ? Look.cardRadius : 0, style: .continuous)
+                    .fill(!classic ? Color.clear : seat?.isUser == true ? Color.signal.opacity(0.13) : Look.panel))
+                .padding(.top, classic && !row.continues ? 2 : 0)
                 failures
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, classic ? 18 : 14)
-        .padding(.top, row.continues ? 1 : classic ? 7 : 9)
-        .padding(.bottom, classic ? 4 : 3)
-        .background(actions.lit ? Color.signal.opacity(0.14) : row.forYou && look.isClassic ? Color.waiting.opacity(0.07) : hovering ? Look.hover.opacity(classic ? 0.5 : 1) : Color.clear)
+        .padding(.top, row.continues ? (classic ? 2 : 1) : classic ? 7 : 9)
+        .padding(.bottom, classic ? 2 : 3)
+        .background(actions.lit ? Color.signal.opacity(0.14) : row.forYou && look.isClassic ? Color.waiting.opacity(0.07) : hovering && !classic ? Look.hover : Color.clear)
         .padding(.top, !row.continues && classic ? 4 : 0)
         // For the user and not yet seen: amber, the colour of what waits for you.
         .overlay(alignment: .leading) { if row.forYou { Rectangle().fill(Color.waiting).frame(width: 3) } }
