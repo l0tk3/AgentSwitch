@@ -106,7 +106,7 @@ import { removeOwnBrowserFiles, sharedBrowser, sweepOwnBrowserFiles } from "./br
 import { newEngineKit } from "./browser/engine/setup.js";
 import { stdioServePorts } from "./harness/opencodeStdio.js";
 
-export const VERSION = "0.4.2";
+export const VERSION = "1.0.0";
 export const DEFAULT_PORT = 4711;
 /** How often Clash Integration looks whether its subscription is due to be fetched again. */
 /** This Mac's addresses are looked up again this often for the phones' Clash address (§12). */

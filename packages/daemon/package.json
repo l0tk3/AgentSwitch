@@ -1,6 +1,6 @@
 {
   "name": "agentswitch-daemon",
-  "version": "0.4.2",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "AgentSwitch daemon: terminals, Chat Room, the shared browser, profiles and the nodes' mesh",

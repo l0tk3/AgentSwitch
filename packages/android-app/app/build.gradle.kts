@@ -29,8 +29,8 @@ android {
         applicationId = "com.agentswitch.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.4.2"
+        versionCode = 7
+        versionName = "1.0.0"
         // The libraries that carry machine code (the terminal emulator) for the phones there are —
         // 64-bit ARM — and for an emulator on an Intel machine; the 32-bit ones would only make the package larger.
         ndk {
