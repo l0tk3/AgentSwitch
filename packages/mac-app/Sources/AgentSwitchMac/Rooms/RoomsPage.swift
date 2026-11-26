@@ -287,12 +287,13 @@ private struct RoomsList: View {
                         RoomGroupHead(title: "Mentions", count: mentionCount, hot: true, folded: $mentionsFolded)
                         if !mentionsFolded { ForEach(mentions) { item in RoomMentionRow(item: item) { item.open(model) } } }
                     }
-                    let desks = model.rooms.filter(\.desk)
+                    // The desk first, then the rooms the dispatch made (user #500).
+                    let desks = model.rooms.filter(\.desk) + model.rooms.filter { $0.byDesk && !$0.desk }
                     if !desks.isEmpty {
                         RoomGroupHead(title: "Dispatch", count: desks.reduce(0) { $0 + $1.unread }, hot: desks.contains { $0.forYou }, folded: $dispatchFolded)
                         if !dispatchFolded { rows(desks) }
                     }
-                    let topics = model.rooms.filter { !$0.desk }
+                    let topics = model.rooms.filter { !$0.desk && !$0.byDesk }
                     RoomGroupHead(title: "Topics", count: topics.reduce(0) { $0 + $1.unread }, hot: topics.contains { $0.forYou }, folded: $topicsFolded)
                     if !topicsFolded { rows(topics) }
                 }

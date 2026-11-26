@@ -183,6 +183,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     return {
       id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt,
       ...(room.desk ? { desk: true } : {}),
+      ...(room.byDesk ? { byDesk: true } : {}),
       members: seats.length,
       // The sessions seated here: a screen that offers sessions to seat says which rooms each already sits in
       // (it may sit in several).

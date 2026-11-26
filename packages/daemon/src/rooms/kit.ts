@@ -426,7 +426,9 @@ export class RoomKit {
         const live = this.o.seat(terminal);
         const { mode: _mode, node: _node, ...was } = live?.card ?? { ...me.seat.was!, mode: null, node: null };
         const topic = str(args.topic);
-        const room = this.o.store.create({ name: typeof args.name === "string" ? args.name : "", ...(topic ? { topic } : {}), by: me.seat.handle });
+        const room = this.o.store.create({ name: typeof args.name === "string" ? args.name : "", ...(topic ? { topic } : {}), by: me.seat.handle,
+          // The dispatch's own rooms are listed with its desk (user #500).
+          byDesk: this.o.store.roomsOf(terminal).some((s) => s.room.desk === true) });
         const seat = this.o.store.seat(room.id, { terminal, was, canAdd: true, by: me.seat.handle });
         this.o.changed?.(room.id);
         const made = `Room "${room.name}" (${room.id}) made; you sit in it as @${seat.handle}. The user is a member (@you).`;

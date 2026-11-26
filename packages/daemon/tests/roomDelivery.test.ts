@@ -297,6 +297,11 @@ describe("bringing sessions in (Admin)", () => {
     // The desk is not dissolved, by an admin or the user.
     const desk = store.create({ name: "调度台", desk: true });
     expect(() => store.remove(desk.id)).toThrow("调度台不能解散");
+    // A room the dispatch makes is marked as its own (listed under Dispatch); one another admin makes is not.
+    expect(other.byDesk).toBeUndefined();
+    store.seat(desk.id, { terminal: "t1", was: { agent: "claude-code", name: "daemon", cwd: "/w/d", model: null, profile: null }, canAdd: true, by: "you" });
+    await kit.call("t1", "room_admin", { action: "create", name: "查登录超时" });
+    expect(store.list().find((r) => r.name === "查登录超时")!.byDesk).toBe(true);
   });
 
   it("has the organizing tools only with the switch on, and refuses a call the moment it is off", async () => {

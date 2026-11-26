@@ -472,10 +472,12 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
     public let attention: Int
     /// The dispatch desk (调度台): the user and the dispatch session; listed first.
     public let desk: Bool
+    /// Made by the dispatch: listed with its desk, under Dispatch (user #500).
+    public let byDesk: Bool
     /// How many of its sessions are at work now (user #269); 0 from a service that does not say.
     public let working: Int
 
-    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention, desk, working }
+    private enum CodingKeys: String, CodingKey { case id, name, topic, paused, members, last, unread, forYou, rounds, terminals, attention, desk, byDesk, working }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -491,6 +493,7 @@ public struct RoomSummary: Decodable, Equatable, Sendable, Identifiable {
         terminals = (try? c.decodeIfPresent([String].self, forKey: .terminals)) ?? []
         attention = (try? c.decodeIfPresent(Int.self, forKey: .attention)) ?? 0
         desk = (try? c.decodeIfPresent(Bool.self, forKey: .desk)) ?? false
+        byDesk = (try? c.decodeIfPresent(Bool.self, forKey: .byDesk)) ?? false
         working = (try? c.decodeIfPresent(Int.self, forKey: .working)) ?? 0
     }
 

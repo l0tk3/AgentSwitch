@@ -173,6 +173,8 @@ export type Room = {
   /** The dispatch desk (调度台, 2026-11-24): the one room of the user and the dispatch session. Listed first; what the
    *  user says there is for the dispatch whether or not it is named. */
   readonly desk?: true;
+  /** Made by the dispatch (user #500): listed with the desk, under Dispatch. */
+  readonly byDesk?: true;
   readonly seats: readonly Seat[];
   /** The last message's number; 0 before the first. */
   readonly lastSeq: number;
@@ -427,7 +429,7 @@ export class RoomStore {
   /** Whether a terminal's session may bring sessions in: its switch is on in a room it sits in (§6). */
   mayAdd(terminal: string): boolean { return this.roomsOf(terminal).some((s) => s.seat.canAdd); }
 
-  create(o: { readonly name: string; readonly topic?: string; readonly by?: string; readonly desk?: boolean }): Room {
+  create(o: { readonly name: string; readonly topic?: string; readonly by?: string; readonly desk?: boolean; readonly byDesk?: boolean }): Room {
     if (this.all().size >= MAX_ROOMS) throw new RoomError(409, `房间最多 ${MAX_ROOMS} 个，先删掉不用的`);
     const name = clean(o.name, MAX_NAME);
     if (!name) throw new RoomError(400, "房间要有名字");
@@ -435,7 +437,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, ...(o.desk ? { desk: true as const } : {}), seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, taskStats: {}, reads: {}, readsFrom: 0, renames: {}, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, ...(o.desk ? { desk: true as const } : {}), ...(o.byDesk ? { byDesk: true as const } : {}), seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, tasks: [], lastTask: 0, claims: [], stats: {}, taskStats: {}, reads: {}, readsFrom: 0, renames: {}, receipts: {} };
     this.save(room);
     return room;
   }
@@ -1144,7 +1146,7 @@ function roomFrom(v: unknown): Room | null {
   }
   return {
     id: o.id, name: o.name, topic: str(o.topic) ? o.topic : "", createdAt: num(o.createdAt) ? o.createdAt : 0, createdBy: str(o.createdBy) ? o.createdBy : YOU,
-    paused: o.paused === true, ...(o.desk === true ? { desk: true as const } : {}), seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
+    paused: o.paused === true, ...(o.desk === true ? { desk: true as const } : {}), ...(o.byDesk === true ? { byDesk: true as const } : {}), seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
     notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
     tasks, lastTask: Math.max(num(o.lastTask) ? o.lastTask : 0, ...tasks.map((t) => t.n)), claims, stats, taskStats: statsFrom(o.taskStats), readsFrom: num(o.readsFrom) ? o.readsFrom : (num(o.lastSeq) ? o.lastSeq : 0), reads: Object.fromEntries(Object.entries((o.reads ?? {}) as Record<string, unknown>).filter(([seq, v]) => /^\d+$/.test(seq) && Array.isArray(v)).map(([seq, v]) => [seq, (v as unknown[]).filter(str)])), renames: Object.fromEntries(Object.entries((o.renames ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => str(e[1]))),
