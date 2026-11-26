@@ -216,21 +216,28 @@ struct RoomMessageRow: View {
 
     var body: some View {
         let seat = room.seat(message.from)
-        HStack(alignment: .top, spacing: 12) {
+        let classic = look.isClassic
+        // Classic (user #467, beside a Discord channel): a larger round face level with the name, the quoted line
+        // above both with a hook down to the face, more air between speakers.
+        let face: CGFloat = classic ? 36 : 26
+        let quoted = message.replyTo.flatMap { n in room.messages.first { $0.seq == n } }
+        HStack(alignment: .top, spacing: classic ? 14 : 12) {
             if row.continues {
-                Color.clear.frame(width: 26, height: 1)
+                Color.clear.frame(width: face, height: 1)
             } else {
-                Button { actions.card(message.from) } label: { RoomFaceView(seat: seat) }.buttonStyle(.plain).padding(.top, 1)
+                Button { actions.card(message.from) } label: { RoomFaceView(seat: seat, side: face, cell: classic ? 6 : 4) }.buttonStyle(.plain)
+                    .padding(.top, classic ? (quoted == nil ? 2 : 24) : 1)
+                    .overlay(alignment: .topLeading) { if classic, quoted != nil { ReplyHook().stroke(Look.faint, lineWidth: 1.5).frame(width: 26, height: 12).offset(x: face / 2, y: 9) } }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                if let quoted = message.replyTo.flatMap({ n in room.messages.first { $0.seq == n } }) { quote(quoted) }
+            VStack(alignment: .leading, spacing: classic ? 3 : 2) {
+                if let quoted { quote(quoted).padding(.bottom, classic ? 3 : 0) }
                 if !row.continues { head(seat) }
                 if message.deleted {
                     Text("这条消息已删除").font(.system(size: Look.scaled(13))).italic().foregroundStyle(Look.faint)
                 } else {
-                    Text(RoomRich.text(message.text, handles: handles, look: look))
-                        .font(.system(size: Look.scaled(13.5)))
-                        .lineSpacing(4)
+                    Text(RoomRich.text(message.text, handles: handles, look: look, size: classic ? 14 : 13.5))
+                        .font(.system(size: Look.scaled(classic ? 14 : 13.5)))
+                        .lineSpacing(classic ? 5 : 4)
                         .foregroundStyle(Look.ink)
                         .textSelection(.enabled)
                         .lineLimit(long && !expanded ? Self.foldLines : nil)
@@ -252,10 +259,11 @@ struct RoomMessageRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, row.continues ? 1 : 9)
-        .padding(.bottom, 3)
-        .background(actions.lit ? Color.signal.opacity(0.14) : row.forYou && look.isClassic ? Color.waiting.opacity(0.09) : hovering ? Look.hover : Color.clear)
+        .padding(.horizontal, classic ? 18 : 14)
+        .padding(.top, row.continues ? 1 : classic ? 10 : 9)
+        .padding(.bottom, classic ? 5 : 3)
+        .background(actions.lit ? Color.signal.opacity(0.14) : row.forYou && look.isClassic ? Color.waiting.opacity(0.07) : hovering ? Look.hover.opacity(classic ? 0.5 : 1) : Color.clear)
+        .padding(.top, !row.continues && classic ? 8 : 0)
         // For the user and not yet seen: amber, the colour of what waits for you.
         .overlay(alignment: .leading) { if row.forYou { Rectangle().fill(Color.waiting).frame(width: 3) } }
         .overlay(alignment: .bottomTrailing) { readCount.padding(.trailing, 14).padding(.bottom, 3) }
@@ -290,7 +298,7 @@ struct RoomMessageRow: View {
     private func head(_ seat: RoomSeat?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Button { actions.card(message.from) } label: {
-                Text(seat?.isUser == true ? "You" : message.from).mono(13, weight: .semibold).foregroundStyle(Look.ink)
+                Text(seat?.isUser == true ? "You" : message.from).mono(look.isClassic ? 14.5 : 13, weight: .semibold).foregroundStyle(Look.ink)
             }
             .buttonStyle(.plain)
             if let agent = seat?.card?.agent { AgentSprite(harness: agent).scaleEffect(0.8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
@@ -306,7 +314,7 @@ struct RoomMessageRow: View {
         Button { actions.jump(quoted.seq) } label: {
             HStack(spacing: 6) {
                 if look.isClassic {
-                    Rectangle().fill(Look.line).frame(width: 2, height: 13)
+                    EmptyView()
                 } else {
                     Text("┌─").code(12).foregroundStyle(Look.faint)
                 }
@@ -425,6 +433,18 @@ struct RoomMessageRow: View {
     }
 }
 
+/// From the middle of the face up and over to the quoted line: a reply's hook.
+private struct ReplyHook: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + 6))
+        p.addQuadCurve(to: CGPoint(x: r.minX + 6, y: r.minY), control: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        return p
+    }
+}
+
 enum RoomRich {
     /// A message's text as it is drawn: code in fixed-width letters on a wash, an `@name` bold in the pixel look and in
     /// the accent in the classic one — never a status colour — and the user's own name alone on a ground.
@@ -444,16 +464,17 @@ enum RoomRich {
                 out += markdown(s, lineStart: lineStart, size: size)
             case .code(let s):
                 var run = AttributedString(s)
-                run.font = .system(size: size - 1, design: .monospaced)
+                run.font = .system(size: size * 0.88, design: .monospaced)
                 run.backgroundColor = Look.code
                 out += run
             case .mention(let name):
                 var run = AttributedString("@\(name)")
                 let me = name == Room.you
                 if look.isClassic {
+                    // A soft tint behind every name, a little stronger behind the user's own: a solid block was loud.
                     run.font = .system(size: size, weight: .medium)
-                    run.foregroundColor = me ? .white : Color.signal
-                    if me { run.backgroundColor = Color.signal }
+                    run.foregroundColor = Color.signal
+                    run.backgroundColor = Color.signal.opacity(me ? 0.22 : 0.12)
                 } else {
                     run.font = .system(size: size - 0.5, weight: .semibold, design: .monospaced)
                     run.foregroundColor = me ? Look.ground : Look.ink
@@ -472,7 +493,12 @@ enum RoomRich {
         var out = AttributedString()
         let lines = s.components(separatedBy: "\n")
         for (i, raw) in lines.enumerated() {
-            if i > 0 { out += AttributedString("\n") }
+            if i > 0 {
+                // An empty line between paragraphs is half a line high, not a whole one.
+                var br = AttributedString("\n")
+                if raw.isEmpty { br.font = .system(size: size * 0.45) }
+                out += br
+            }
             var line = Substring(raw)
             var heading = false
             if i > 0 || lineStart {
@@ -493,7 +519,7 @@ enum RoomRich {
                 run[r.range.lowerBound..<end].link = URL(string: address)
             }
             for r in run.runs where r.inlinePresentationIntent?.contains(.code) == true {
-                run[r.range].font = .system(size: size - 1, design: .monospaced)
+                run[r.range].font = .system(size: size * 0.88, design: .monospaced)
                 run[r.range].backgroundColor = Look.code
             }
             if heading { run.font = .system(size: size, weight: .semibold) }

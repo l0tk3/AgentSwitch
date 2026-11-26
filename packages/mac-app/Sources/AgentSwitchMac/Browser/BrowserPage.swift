@@ -39,7 +39,9 @@ struct BrowserPage: View {
                 main
             }
         }
-        .background(Color.black)
+        // Classic: the page's own ground, light or dark; a black one stood behind the list's round corners and under
+        // an empty page in the light look (user #468).
+        .background(look.isClassic ? Look.ground : Color.black)
     }
 
     private func column(width: Double, pageWidth: Double) -> some View {
@@ -95,7 +97,7 @@ struct BrowserPage: View {
         ZStack {
             BrowserScreenHost(view: model.screen)
             if model.current == nil {
-                Color.black
+                (look.isClassic ? Look.ground : Color.black)
                 empty
             } else if !model.hasFrame, !model.windows {
                 BrailleSpinner().accessibilityLabel("Loading")
