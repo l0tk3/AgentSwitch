@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+    <marker id="dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7">
+      <circle cx="5" cy="5" r="4" fill="#3B82F6"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="600" rx="24" fill="#F7F8FA"/>
+
+  <text x="600" y="92" font-size="22" font-weight="600" fill="#111827" text-anchor="middle">Every machine is a node — use any of them from any of them</text>
+  <text x="600" y="124" font-size="15" fill="#6B7280" text-anchor="middle">the main window shows another Mac's or a Linux server's terminals and chat rooms as its own</text>
+
+  <!-- the links: every node paired with every other, phones on the same links -->
+  <g stroke="#3B82F6" stroke-width="2.5" fill="none" stroke-linecap="round">
+    <line x1="220" y1="332" x2="220" y2="392"/>
+    <line x1="600" y1="332" x2="600" y2="392"/>
+    <line x1="980" y1="332" x2="980" y2="392"/>
+    <line x1="220" y1="392" x2="980" y2="392"/>
+  </g>
+  <rect x="470" y="380" width="260" height="24" rx="12" fill="#F7F8FA"/>
+  <text x="600" y="397" font-size="14" fill="#3B82F6" text-anchor="middle">paired with each other</text>
+  <!-- nodes -->
+  <g filter="url(#sh)">
+    <rect x="90" y="168" width="260" height="164" rx="18" fill="#fff" stroke="#E3E6EB"/>
+    <rect x="470" y="168" width="260" height="164" rx="18" fill="#fff" stroke="#E3E6EB"/>
+    <rect x="850" y="168" width="260" height="164" rx="18" fill="#fff" stroke="#E3E6EB"/>
+  </g>
+  <g font-size="20" font-weight="600" fill="#111827">
+    <text x="114" y="206">MacBook</text>
+    <text x="494" y="206">Mac mini</text>
+    <text x="874" y="206">Linux server</text>
+  </g>
+  <g font-size="14" fill="#6B7280">
+    <text x="114" y="230">window · menu bar</text>
+    <text x="494" y="230">window · menu bar</text>
+    <text x="874" y="230">no window · systemd</text>
+  </g>
+  <g font-size="13.5" fill="#374151">
+    <rect x="114" y="248" width="212" height="30" rx="8" fill="#F1F3F6"/><text x="126" y="268">Claude Code · Codex · pi</text>
+    <rect x="114" y="286" width="212" height="30" rx="8" fill="#F1F3F6"/><text x="126" y="306">terminals · chat rooms</text>
+    <rect x="494" y="248" width="212" height="30" rx="8" fill="#F1F3F6"/><text x="506" y="268">Claude Code · OpenCode</text>
+    <rect x="494" y="286" width="212" height="30" rx="8" fill="#F1F3F6"/><text x="506" y="306">terminals · chat rooms</text>
+    <rect x="874" y="248" width="212" height="30" rx="8" fill="#F1F3F6"/><text x="886" y="268">Claude Code · Grok</text>
+    <rect x="874" y="286" width="212" height="30" rx="8" fill="#F1F3F6"/><text x="886" y="306">terminals · chat rooms</text>
+  </g>
+
+  <!-- phones -->
+  <g stroke="#9CA3AF" stroke-width="2" stroke-dasharray="6 6" fill="none">
+    <line x1="440" y1="396" x2="440" y2="452"/>
+    <line x1="760" y1="396" x2="760" y2="452"/>
+  </g>
+  <g filter="url(#sh)">
+    <rect x="388" y="452" width="104" height="120" rx="22" fill="#fff" stroke="#E3E6EB"/>
+    <rect x="708" y="452" width="104" height="120" rx="22" fill="#fff" stroke="#E3E6EB"/>
+  </g>
+  <rect x="424" y="462" width="32" height="8" rx="4" fill="#111827"/>
+  <circle cx="760" cy="466" r="4" fill="#111827"/>
+  <g font-size="17" font-weight="600" fill="#111827" text-anchor="middle">
+    <text x="440" y="522">iPhone</text>
+    <text x="760" y="522">Android</text>
+  </g>
+  <g font-size="13" fill="#6B7280" text-anchor="middle">
+    
+    
+  </g>
+  <text x="600" y="514" font-size="14" fill="#6B7280" text-anchor="middle">reach any machine</text>
+  <text x="600" y="536" font-size="13" fill="#9CA3AF" text-anchor="middle">HTTPS, pinned certificate</text>
+</svg>
