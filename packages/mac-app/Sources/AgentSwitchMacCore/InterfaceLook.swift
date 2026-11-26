@@ -14,8 +14,11 @@ public enum InterfaceLook: String, CaseIterable, Sendable {
     /// The look kept under `key`: what is not one of the two is the default.
     public static func load(_ raw: String?) -> InterfaceLook { raw.flatMap(InterfaceLook.init(rawValue:)) ?? .pixel }
 
-    /// The look in force now, read where it is kept: the colours ask at every draw, off the main thread too.
-    public static var current: InterfaceLook { load(UserDefaults.standard.string(forKey: key)) }
+    /// The look in force now, read where it is kept: the colours ask at every draw, off the main thread too. Kept once
+    /// read and read again when the defaults change (any change in this process posts `didChangeNotification` at
+    /// once): a profile of the app at rest found every colour asking the defaults, a fair part of its drawing time
+    /// (user #604).
+    public static var current: InterfaceLook { LookCache.shared.value }
 
     /// The setting's two words.
     public var label: String {
@@ -90,4 +93,28 @@ public extension PixelArt {
         (toolbarSplitRight, "rectangle.split.2x1"), (toolbarSplitDown, "rectangle.split.1x2"), (toolbarSide, "sidebar.right"),
         (menuPair, "qrcode"), (menuRestart, "arrow.triangle.2.circlepath"), (menuQuit, "power"),
     ]
+}
+
+/// `InterfaceLook.current`, kept.
+private final class LookCache: @unchecked Sendable {
+    static let shared = LookCache()
+    private let lock = NSLock()
+    private var kept: InterfaceLook?
+    private var observer: NSObjectProtocol?
+
+    private init() {
+        observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.forget()
+        }
+    }
+
+    var value: InterfaceLook {
+        lock.lock(); defer { lock.unlock() }
+        if let kept { return kept }
+        let read = InterfaceLook.load(UserDefaults.standard.string(forKey: InterfaceLook.key))
+        kept = read
+        return read
+    }
+
+    private func forget() { lock.lock(); kept = nil; lock.unlock() }
 }
