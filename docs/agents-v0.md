@@ -188,3 +188,18 @@
 - 对方的应用没开、或者版本还没有这一节：页面上说明，不显示空白。
 
 做了的：`AgentsBoard.swift`、`AppModel+Agents.swift`（`agentsBoard`、`performAgents`、`shareAgents`）、`AgentsView.swift` 改为画一份 board、`api/agentsBoard.ts`。**没验证**：真的对另一个节点操作——需要那个节点也装上带这一节的版本。
+
+## 13. Grok 和 Antigravity（2026-11-26，用户 #562）
+
+用户：设置 › Agents 里要么没有 Grok 要么没有 agy。这一页原来只列 `AgentCLI` 的四个（Claude Code、Codex、OpenCode、pi）；Grok 和 agy 能开终端、有会话，却没有在这一页。
+
+- **不把它们加进 `AgentCLI`**：那个枚举牵着安装、版本库、删除和 20 多处 switch（Mac 与 iOS）。另做了一个轻的 `AgentExtra`（`AgentSwitchMacCore/Agents/AgentExtras.swift`），只做这一页要的三件事：它在哪、它是什么版本、它自己的更新。
+- **排法和其他 agent 一样**：一组一行，`Stable 1.0.92` 下面是 `grok · ~/.grok/bin`，右边是 `Update → 1.0.93`（有新版本时）、`Up to Date`，或者（agy）一个 `Update`。
+- **在哪**：先看环境变量 `GROK_BIN` / `AGY_BIN`，再看新终端用的 PATH，最后看它们自己的安装位置 `~/.grok/bin/grok` / `~/.local/bin/agy`。
+- **版本**：当前版本问程序自己（`--version`，不碰模型）。最新版本：
+  - Grok 自己能报：`grok update --check --json` 给出 `{"currentVersion":"1.0.92","latestVersion":"1.0.93","updateAvailable":true,…}`。这句话是一次网络请求，所以和各家一样最多十二小时问一次，或者按页头的 `Check Now`/`Refresh` 立刻问；问不到时保留上次的号并说明。
+  - agy 不给查（`agy update --help` 只有 `Usage of update:`），所以不显示最新版本，只给 `Update`。
+- **更新**：跑程序自己的 `grok update` / `agy update`，用新终端那条登录 shell 的 PATH；输出写进这个 agent 的日志（`<logs>/agent-grok.log`、`agent-agy.log`），一行一个阶段（`Updating`），失败留在那一行上，`Show Log` 打开日志、`OK` 收起。一次只跑一个。
+- **没做**：没装时只显示 `Not Installed`、不给按钮（不替用户装）；不做 Beta、指定版本、删除；也不把它们的版本放进 AgentSwitch 的版本库。
+- **别的节点的屏幕**：这一份也在 `AgentsBoard` 里（`extras`、`extraJobs`），按钮带 `extra: "grok" | "agy"`；服务只是照原样转交，`api/agentsBoard.ts` 的按钮表加了这两个 id。旧版本的应用交来的 board 没有这两个字段，读出来是空的。
+- **验证**：Mac 的 `AgentExtrasTests` 用临时目录里的假程序测了：按 PATH、变量、自己的安装位置找到；`--version` 读出；Grok 的 `update --check --json` 读最新、失败时保留上次并说明；`update` 真的跑、输出进日志、退出码非零会失败并说；没装时什么都不给。`swift test` 全量、daemon 的 `agentsBoard.test.ts` 通过。出的图：`-designPreviewOnly agents`（像素与 `-appearance classic` 各一套）里的 `settings-agents-extras*`。**没有验证**：真的跑一次 `grok update` / `agy update`（会改用户装的版本，按要求没跑）；装好的应用里点过；真的对另一个节点操作。

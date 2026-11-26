@@ -46,9 +46,10 @@ describe("a node's Agents page for another node's screen", () => {
   it("refuses what is not one of the page's buttons, and keeps the app's side to this Mac", async () => {
     const { call, remote } = made();
     await call("PUT", "/agents/board", { agents: [] });
-    // The four agents by the names the Mac app sends.
+    // The four agents by the names the Mac app sends, and Grok's and Antigravity's rows by theirs (agents-v0 §13).
     for (const agent of ["claude-code", "codex", "opencode", "pi"]) expect((await call("POST", "/agents/actions", { kind: "clean", agent }, remote)).status).toBe(202);
-    for (const bad of [{ kind: "run", agent: "codex" }, { kind: "install", agent: "bash" }, { kind: "update", agent: "codex", version: "1; rm -rf /" }, { kind: "use", extra: 1 }]) {
+    for (const extra of ["grok", "agy"]) expect((await call("POST", "/agents/actions", { kind: "update", extra }, remote)).status).toBe(202);
+    for (const bad of [{ kind: "run", agent: "codex" }, { kind: "install", agent: "bash" }, { kind: "update", agent: "codex", version: "1; rm -rf /" }, { kind: "update", extra: "bash" }, { kind: "use", extra: 1 }]) {
       expect((await call("POST", "/agents/actions", bad, remote)).status).toBe(400);
     }
     expect((await call("PUT", "/agents/board", { agents: [] }, remote)).status).toBe(403);

@@ -126,6 +126,23 @@ enum DemoData {
         ]
     }
 
+    /// Grok and Antigravity (agents-v0 §13): Grok a little behind what it says is newest, Antigravity on what it has
+    /// (it does not say); on a fresh Mac neither is installed.
+    static func agentExtras(home: String, fresh: Bool = false, full: Bool = false) -> [AgentExtra] {
+        if fresh {
+            return [
+                AgentExtra(id: "grok", title: "Grok", command: "grok", canCheck: true),
+                AgentExtra(id: "agy", title: "Antigravity", command: "agy", canCheck: false),
+            ]
+        }
+        return [
+            AgentExtra(id: "grok", title: "Grok", command: "grok", binary: "\(home)/.grok/bin/grok",
+                       version: full ? "1.0.90" : "1.0.92", latest: "1.0.93", canCheck: true),
+            AgentExtra(id: "agy", title: "Antigravity", command: "agy", binary: "\(home)/.local/bin/agy",
+                       version: full ? "1.5.16" : "1.5.17", canCheck: false),
+        ]
+    }
+
     static let agentReleases = AgentReleaseInfo(channels: [
         "claude-code": AgentChannels(stable: "2.1.285", beta: "2.1.291"), "codex": AgentChannels(stable: "0.160.1", beta: "0.162.0-alpha.16"),
         "opencode": AgentChannels(stable: "2.0.24", beta: "0.0.0-beta-19507"), "pi": AgentChannels(stable: "1.0.4"),

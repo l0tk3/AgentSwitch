@@ -22,9 +22,15 @@ public struct AgentsBoard: Codable, Equatable, Sendable {
     public var pathNotes: [String]
     /// What uninstalling each vendor's own install would remove, by the agent's name.
     public var uninstallPaths: [String: [String]]
+    /// Grok and Antigravity (docs/agents-v0.md §13): what their own programs say of themselves. Absent on a board sent
+    /// by an app of before this.
+    public var extras: [AgentExtra]?
+    /// Their updaters at work, by their id.
+    public var extraJobs: [String: AgentExtraJob]?
 
     public init(home: String, store: String, storeExists: Bool, agents: [AgentReport], releases: AgentReleaseInfo?, checking: Bool, use: [String: String],
-                applied: [String: String], running: Bool, jobs: [String: AgentJob], pathNotes: [String], uninstallPaths: [String: [String]]) {
+                applied: [String: String], running: Bool, jobs: [String: AgentJob], pathNotes: [String], uninstallPaths: [String: [String]],
+                extras: [AgentExtra]? = nil, extraJobs: [String: AgentExtraJob]? = nil) {
         self.home = home
         self.store = store
         self.storeExists = storeExists
@@ -37,12 +43,14 @@ public struct AgentsBoard: Codable, Equatable, Sendable {
         self.jobs = jobs
         self.pathNotes = pathNotes
         self.uninstallPaths = uninstallPaths
+        self.extras = extras
+        self.extraJobs = extraJobs
     }
 
     public func inUse(_ report: AgentReport) -> AgentInstall? { AgentSelection.chosen(report, saved: use[report.agent.rawValue]) }
     public func job(_ agent: AgentCLI) -> AgentJob? { jobs[agent.rawValue] }
     public func newer(for install: AgentInstall) -> String? { AgentUpdates.newer(for: install, channels: releases?.channels(install.agent)) }
-    public var updateCount: Int { AgentUpdates.count(agents, info: releases) }
+    public var updateCount: Int { AgentUpdates.count(agents, info: releases) + (extras ?? []).filter { $0.newer != nil }.count }
     public func applied(_ agent: AgentCLI) -> String? { applied[agent.rawValue] }
 
     /// The agents the service runs another program for than the one now chosen.
@@ -69,14 +77,18 @@ public struct AgentsAction: Codable, Equatable, Sendable {
     public var version: String?
     /// The row a new install shows on.
     public var row: String?
+    /// Grok's or Antigravity's id (`grok`, `agy`): the button is about one of those (docs/agents-v0.md §13).
+    public var extra: String?
 
-    public init(_ kind: Kind, agent: AgentCLI? = nil, key: String? = nil, source: AgentSource? = nil, version: String? = nil, row: String? = nil) {
+    public init(_ kind: Kind, agent: AgentCLI? = nil, key: String? = nil, source: AgentSource? = nil, version: String? = nil, row: String? = nil,
+                extra: String? = nil) {
         self.kind = kind
         self.agent = agent
         self.key = key
         self.source = source
         self.version = version
         self.row = row
+        self.extra = extra
     }
 }
 

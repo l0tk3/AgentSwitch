@@ -268,11 +268,14 @@ enum DesignPreview {
         try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents"))
         model.loadDemoAgents(fresh: true)
         try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents-fresh"))
+        // The two that are not installed come at the foot of the page: a taller picture shows them (agents-v0 §13).
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 1400, to: file("settings-agents-extras-fresh"))
         // Everything installed; OpenCode's folder is not on the shell's PATH, so the foot of the page says what to add.
         model.loadDemoAgents(full: true)
         let home = model.paths.userHome.path
         model.setDemoShellPath("/opt/homebrew/bin:\(home)/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
         try await renderSettings(.agents, model: model, appearance: appearance, height: 1320, to: file("settings-agents-full"))
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 1700, to: file("settings-agents-extras"))
         model.setDemoShellPath(DemoData.path(home: home))
         // Jobs on their rows: a beta on its way, a pinned version being checked, a download that did not match.
         model.loadDemoAgents()
@@ -283,8 +286,12 @@ enum DesignPreview {
                                  error: "下载的文件与官方校验值不符，已丢弃。未做任何更改。"),
             "pi": AgentJob(agent: .pi, row: "stable", source: .stable, version: "1.0.4", phase: .updating),
         ]
+        // Grok's own updater at work (agents-v0 §13).
+        model.agentExtraJobs = ["grok": AgentExtraJob(id: "grok", phase: .updating)]
         try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents-jobs"))
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 1700, to: file("settings-agents-extras-jobs"))
         model.agentJobs = [:]
+        model.agentExtraJobs = [:]
         // A fresh Mac: the checklist and the wizard's first step offer `Install` on a missing executor's row; here
         // Codex's is on its way (agents-v0 §8).
         model.loadDemo(fresh: true)

@@ -23,6 +23,8 @@ const Action = z.object({
   source: z.enum(["stable", "beta", "pinned", "app", "other"]).optional(),
   version: z.string().regex(/^[0-9A-Za-z.+_-]{1,64}$/).optional(),
   row: z.string().min(1).max(600).optional(),
+  // Grok and Antigravity (docs/agents-v0.md §13): the row's own id, where the page names no AgentCLI.
+  extra: z.enum(["grok", "agy"]).optional(),
 }).strict();
 type Action = z.infer<typeof Action>;
 

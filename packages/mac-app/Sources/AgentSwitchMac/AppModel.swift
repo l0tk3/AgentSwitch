@@ -66,6 +66,12 @@ final class AppModel {
     /// An install, update or delete under way, by the agent's raw value: one at a time per agent.
     var agentJobs: [String: AgentJob] = [:]
     @ObservationIgnored var agentTasks: [String: Task<Void, Never>] = [:]
+    /// Grok and Antigravity (docs/agents-v0.md §13): what their own programs say of themselves, and whose updater is
+    /// at work.
+    var agentExtras: [AgentExtra] = []
+    var agentExtraJobs: [String: AgentExtraJob] = [:]
+    @ObservationIgnored var agentExtraTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var agentExtrasChecked: Date?
     @ObservationIgnored var agentWatch: Task<Void, Never>?
     /// This Mac's board handed to its service for the other nodes' screens, and what they ask taken from it.
     @ObservationIgnored var agentsShare: Task<Void, Never>?

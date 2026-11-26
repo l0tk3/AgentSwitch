@@ -123,6 +123,12 @@ struct AgentsView: View {
                 AgentSection(board: board, report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
                              restart: { confirmRestart = true })
             }
+            // Grok and Antigravity (docs/agents-v0.md §13): what their own programs say, and their own updaters.
+            ForEach(board.extras ?? []) { extra in
+                AgentExtraSection(extra: extra, job: board.extraJobs?[extra.id]) {
+                    act(AgentsAction(.update, extra: extra.id))
+                }
+            }
             }
 
             if !profilesOnly {
@@ -1024,6 +1030,81 @@ private struct AgentSection: View {
         }
         guard report.agent == .pi else { return nil }
         return report.install("stable") == nil ? "pi 没有测试通道。需要 Node.js 22.19 或更新的版本。" : "pi 没有测试通道。"
+    }
+}
+
+/// Grok's or Antigravity's group (docs/agents-v0.md §13): `Stable 1.0.92` over `grok · ~/.grok/bin`, and on the right
+/// what its own updater can do — `Update → 1.0.93` when Grok says there is one, `Update` for Antigravity (it does not
+/// say), `Up to Date` when there is not; `Not Installed` with no button.
+private struct AgentExtraSection: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.agentsAct) private var act
+    let extra: AgentExtra
+    let job: AgentExtraJob?
+    let update: () -> Void
+
+    private var detail: String {
+        guard let binary = extra.binary else { return extra.command }
+        let folder = DisplayPath.short((binary as NSString).deletingLastPathComponent, home: model.paths.userHome.path)
+        return "\(extra.command) · \(folder)"
+    }
+
+    var body: some View {
+        Section {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "circle").font(.system(size: 14)).foregroundStyle(.secondary).opacity(0.3)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Stable")
+                        Text(extra.version ?? (extra.installed ? "…" : "Not Installed")).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Text(detail).font(.caption.monospaced()).foregroundStyle(extra.installed ? .secondary : .tertiary)
+                        .lineLimit(1).truncationMode(.middle).help(extra.binary ?? extra.command)
+                    if let problem = extra.problem { Text(problem).font(.caption).foregroundStyle(Color.waiting) }
+                }
+                Spacer(minLength: 12)
+                if let job {
+                    ExtraJobProgress(job: job)
+                } else if extra.installed {
+                    if let newer = extra.newer {
+                        Button("Update → \(newer)", action: update).controlSize(.small)
+                    } else if extra.canCheck {
+                        HStack(spacing: 5) {
+                            StatusDot(level: .ok)
+                            Text("Up to Date").mono(12).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button("Update", action: update).controlSize(.small)
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        } header: {
+            SectionLabel(extra.title)
+        }
+    }
+}
+
+/// Their updater on its row: what it is doing, or why it stopped, with the log of what it did.
+private struct ExtraJobProgress: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.agentsAct) private var act
+    let job: AgentExtraJob
+
+    var body: some View {
+        if let error = job.error {
+            HStack(spacing: 8) {
+                Text(error).font(.caption).foregroundStyle(Color.failed).lineLimit(3).multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 280, alignment: .trailing).textSelection(.enabled)
+                if act.local { Button("Show Log") { NSWorkspace.shared.open(model.agentExtraLogFile(job.id)) }.controlSize(.small) }
+                Button("OK") { act.run(AgentsAction(.dismiss, extra: job.id)) }.controlSize(.small)
+            }
+        } else {
+            HStack(spacing: 8) {
+                Text(AgentText.phase(job.phase)).mono(12).foregroundStyle(.secondary)
+                ProgressView().controlSize(.small)
+            }
+        }
     }
 }
 

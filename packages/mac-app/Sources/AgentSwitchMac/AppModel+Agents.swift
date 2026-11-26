@@ -43,6 +43,7 @@ extension AppModel {
             agents = await AgentInventory.withSizes(versioned)
             agentsScanned = Date()
             agentsScanning = false
+            refreshAgentExtras()
             if agentsRescan {
                 agentsRescan = false
                 refreshAgents(force: true)
@@ -74,9 +75,33 @@ extension AppModel {
         agentWatch = Task {
             while !Task.isCancelled {
                 checkAgentUpdates()
+                refreshAgentExtras()
                 try? await Task.sleep(for: .seconds(3600))
             }
         }
+    }
+
+    /// Grok's and Antigravity's own programs (docs/agents-v0.md §13): where their commands are and what they say. What
+    /// Grok says the newest is is a call of its own, asked at most every twelve hours, or now when asked.
+    func refreshAgentExtras(force: Bool = false) {
+        guard !isDemo else { return }
+        let home = paths.userHome.path, path = config.get().path, env = baseEnvironment, before = agentExtras
+        Task {
+            agentExtras = await AgentExtras.scan(home: home, path: path, environment: env, before: before)
+            if force || agentExtrasChecked == nil || Date().timeIntervalSince(agentExtrasChecked!) >= 12 * 3600 { await checkAgentExtras() }
+        }
+    }
+
+    /// What Grok says the newest version is, asked of Grok itself (Antigravity does not say).
+    func checkAgentExtras() async {
+        guard !isDemo else { return }
+        let path = config.get().path, env = baseEnvironment
+        var extras = agentExtras
+        for i in extras.indices where extras[i].canCheck && extras[i].binary != nil {
+            extras[i] = await AgentExtras.check(extras[i], environment: env, path: path)
+        }
+        agentExtras = extras
+        agentExtrasChecked = Date()
     }
 
     /// The install AgentSwitch runs for this agent: the saved choice while it is there, else the vendor's own.
@@ -252,6 +277,46 @@ extension AppModel {
         if agentJobs[agent.rawValue]?.failed == true { agentJobs[agent.rawValue] = nil }
     }
 
+    // MARK: Grok and Antigravity (agents-v0 §13)
+
+    /// The agent's last operation, one file each.
+    func agentExtraLogFile(_ id: String) -> URL { paths.logsDir.appendingPathComponent("agent-\(id).log") }
+
+    /// `Update`: the program's own updater at work on the row, its phases reaching the row, what it did to its log, a
+    /// failure staying until it is read. One at a time for each.
+    func updateAgentExtra(_ extra: AgentExtra) {
+        guard !isDemo, agentExtraTasks[extra.id] == nil else { return }
+        let path = config.get().path, env = baseEnvironment
+        agentExtraJobs[extra.id] = AgentExtraJob(id: extra.id)
+        let gate = AgentProgressGate()
+        let log = AgentLog(file: agentExtraLogFile(extra.id), title: "Update \(extra.title) \(extra.version ?? "")")
+        agentExtraTasks[extra.id] = Task {
+            do {
+                try await AgentExtras.update(extra, environment: env, path: path, log: { log.add($0) }, report: { phase in
+                    guard gate.pass(phase) else { return }
+                    Task { @MainActor [weak self] in self?.agentExtraProgress(extra.id, phase) }
+                })
+                log.add("done")
+                agentExtraJobs[extra.id] = nil
+            } catch {
+                log.add("failed: \(error.localizedDescription)")
+                agentExtraJobs[extra.id]?.error = error.localizedDescription
+            }
+            agentExtraTasks[extra.id] = nil
+            refreshAgentExtras(force: true)
+        }
+    }
+
+    private func agentExtraProgress(_ id: String, _ phase: AgentStore.Phase) {
+        guard agentExtraTasks[id] != nil, agentExtraJobs[id]?.failed == false else { return }
+        agentExtraJobs[id]?.phase = phase
+    }
+
+    /// A failed updater's line, read and put away.
+    func dismissAgentExtraJob(_ id: String) {
+        if agentExtraJobs[id]?.failed == true { agentExtraJobs[id] = nil }
+    }
+
     /// Something was installed or deleted: the page reads the Mac again, and the next start of the service gets what
     /// is now chosen (a deleted choice falls back, agents-v0 §3).
     private func agentsChanged() {
@@ -265,7 +330,7 @@ extension AppModel {
     var agentPathNotes: [String] { AgentText.pathNotes(agents, layout: agentLayout, path: loginPath?.shell) }
 
     /// The number beside `Agents` in the sidebar.
-    var agentUpdateCount: Int { AgentUpdates.count(agents, info: agentReleases) }
+    var agentUpdateCount: Int { AgentUpdates.count(agents, info: agentReleases) + agentExtras.filter { $0.newer != nil }.count }
 
     func newerVersion(for install: AgentInstall) -> String? {
         AgentUpdates.newer(for: install, channels: agentReleases?.channels(install.agent))
@@ -282,17 +347,28 @@ extension AppModel {
         for (agent, binary) in agentsApplied { applied[agent.rawValue] = binary }
         return AgentsBoard(home: self.paths.userHome.path, store: layout.store, storeExists: FileManager.default.fileExists(atPath: layout.store),
                            agents: agents, releases: agentReleases, checking: agentsChecking, use: agentUse, applied: applied,
-                           running: daemonState.isRunning, jobs: agentJobs, pathNotes: agentPathNotes, uninstallPaths: paths)
+                           running: daemonState.isRunning, jobs: agentJobs, pathNotes: agentPathNotes, uninstallPaths: paths,
+                           extras: agentExtras, extraJobs: agentExtraJobs)
     }
 
     /// One of the page's buttons, pressed here or on another node's screen. What names an install that is not there
     /// any more does nothing: the board it was pressed on was an old one.
     func performAgents(_ action: AgentsAction) {
+        // Grok's and Antigravity's rows (agents-v0 §13): their own id names them.
+        if let id = action.extra, let extra = agentExtras.first(where: { $0.id == id }) {
+            switch action.kind {
+            case .check: refreshAgentExtras(force: true)
+            case .update: updateAgentExtra(extra)
+            case .dismiss: dismissAgentExtraJob(id)
+            default: break
+            }
+            return
+        }
         let report = action.agent.flatMap { agent in agents.first { $0.agent == agent } }
         let install = action.key.flatMap { report?.install($0) }
         switch action.kind {
-        case .refresh: refreshAgents(force: true)
-        case .check: refreshAgents(force: true); checkAgentUpdates(force: true)
+        case .refresh: refreshAgents(force: true); refreshAgentExtras()
+        case .check: refreshAgents(force: true); checkAgentUpdates(force: true); refreshAgentExtras(force: true)
         case .use: if let agent = action.agent, let install { useAgent(agent, install: install) }
         case .install:
             if let agent = action.agent, let source = action.source, source == .stable || source == .beta || source == .pinned {
@@ -334,6 +410,8 @@ extension AppModel {
         let home = paths.userHome.path
         agents = fresh ? AgentCLI.allCases.map { AgentReport(agent: $0, installs: []) } : full ? DemoData.agentsFull(home: home) : DemoData.agents(home: home)
         agentReleases = DemoData.agentReleases
+        agentExtras = DemoData.agentExtras(home: home, fresh: fresh, full: full)
+        agentExtraJobs = [:]
         // Everything installed: Codex's beta was chosen after the service started, so the page asks for a restart.
         agentsApplied = AgentSelection.binaries(agents, saved: [:])
         agentUse = full ? ["codex": "beta"] : [:]
