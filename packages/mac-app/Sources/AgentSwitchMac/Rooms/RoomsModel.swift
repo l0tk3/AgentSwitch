@@ -35,9 +35,12 @@ final class RoomsModel {
     var selected: String? {
         didSet {
             guard selected != oldValue else { return }
-            room = nil
+            // The channel as it was last seen is shown at once, and asked for now — not at the page's next look, a
+            // second and a half of an empty page later (user #532: 切换channel的时候会白屏加载一小段时间).
+            let had = selected.flatMap { kept[$0] }
+            room = had?.room
             rows = []
-            roomVersion = nil
+            roomVersion = had?.version
             replyTo = nil
             files = []
             card = nil
@@ -48,8 +51,12 @@ final class RoomsModel {
             taskSeen = [:]
             taskBase = nil
             if let selected, pinned == nil { UserDefaults.standard.set(selected, forKey: "roomsSelected") }
+            if let had { rows = RoomRow.rows(had.room, task: nil); seen(had.room) }
+            if selected != nil, !demo { Task { await loadRoom() } }
         }
     }
+    /// The channels read since the page opened, each as it was last answered (with the version to ask after).
+    @ObservationIgnored private var kept: [String: (room: Room, version: String?)] = [:]
 
     // writing
     var draft = "" { didSet { if draft != oldValue { typed(); tokensChanged() } } }
@@ -258,6 +265,7 @@ final class RoomsModel {
 
     /// The node changed: nothing of the one before stays.
     func reset() {
+        kept = [:]
         rooms = []
         pictures = [:]
         asked = []
@@ -307,9 +315,15 @@ final class RoomsModel {
         await lookRedact()
         await loadList()
         if attentionCount > 0 || !attention.isEmpty { await loadAttention() }
-        guard let id = selected else { return }
+        await loadRoom()
+    }
+
+    /// The channel chosen, alone: what changed in it since it was last answered.
+    func loadRoom() async {
+        guard !demo, let id = selected else { return }
         do {
             if let answer = try await client().room(id, version: roomVersion) {
+                kept[id] = (answer.value, answer.version)
                 guard id == selected else { return }
                 roomVersion = answer.version
                 room = answer.value
