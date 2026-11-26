@@ -4,68 +4,53 @@ Run and watch your AI coding agents — **Claude Code, Codex, OpenCode, pi, Grok
 iPhone app and an Android app. Sessions stay the agents' own: stop using AgentSwitch and carry on in the CLI.
 
 <p align="center">
-  <img src="docs/readme/mac-terminals.jpg" width="100%" alt="Terminals on the Mac">
-</p>
-<p align="center">
-  <img src="docs/readme/phone-terminals.jpg" width="19%" alt="iPhone: Terminals">
-  <img src="docs/readme/phone-simple.jpg" width="19%" alt="iPhone: a session in the simple view">
-  <img src="docs/readme/phone-rooms.jpg" width="19%" alt="iPhone: Rooms">
-  <img src="docs/readme/phone-room.jpg" width="19%" alt="iPhone: a chat room">
-  <img src="docs/readme/phone-browser.jpg" width="19%" alt="iPhone: the shared browser">
+  <img src="docs/readme/mac-terminals.png" width="100%" alt="The Mac's main window: sessions by folder, one in the simple view, its context, tasks, browser tab and changes beside it">
 </p>
 
-## Features
+## What it does
 
-| | what it does | Mac | iPhone | Android |
-|---|---|---|---|---|
-| **Terminals** | The six agents' CLIs in terminals the service holds, open on every device at once. Split panes, folder tree, Files. | `Terminals` | tab | tab |
-| **Simple view** | A session as a conversation: answers, folded tool calls, changes, approval cards; context and 5h / 7d use; a side pane with tasks and the agent's browser tab. | `Terminals` | tab | tab |
-| **Chat Room** | Sessions of any agent, on any machine, in one channel: `@` each other, share tasks and files, ask you when needed. | `Chat Room` | `Rooms` | `Rooms` |
-| **Dispatch** | A standing session that takes a request, opens rooms and starts the sessions it needs. | `Dispatch` | tab | tab |
-| **Browser** | One shared browser (Camoufox) for you and the agents; take a tab over, hand it back. | `Browser` | tab | tab |
-| **Redaction** | Your words (plain or regex) become placeholders before model traffic leaves the Mac, and words again on the way back. | Settings | — | — |
-| **Profiles** | Several sign-ins per agent, each with its own proxy and browser. | Settings | ✓ | ✓ |
-| **Clash** | Separate node groups for Claude, OpenAI, Grok and Antigravity on top of your subscription. | `Clash` | Settings | Settings |
-| **Passwords** | A password book behind Touch ID. | ⌘⇧L | — | — |
-| **Agents, Add-Ons** | Install and update the CLIs; manage their MCP servers, skills and plugins. | Settings | — | — |
-| **Nodes** | Macs and Linux machines paired with each other; phones reach any of them. | Settings | ✓ | ✓ |
+- **Chat Room** — sessions of any agent work together in one channel: they `@` each other, hand
+  over tasks, share files, and come to you only when they need a decision. Dispatch, a standing session, can open
+  rooms and start the sessions a job needs.
+- **Redaction gateway** — before a terminal's traffic reaches the model, your words (plain or regex; your user name
+  by default) become placeholders, and turn back into words in the reply. The provider never sees them, the agent
+  works as usual, nothing in your own config changes. Before/after logs for chosen sessions.
+- **Many machines** — Macs and Linux servers pair with each other; the Mac's window opens the terminals and chat
+  rooms of any of them as its own. A Linux server (x86_64 or aarch64, systemd) runs the same service without a
+  window (`packages/linux/README.md`).
+- **From your phone** — iPhone and Android reach any paired machine: answer approvals, read and reply to sessions,
+  follow the rooms, watch the shared browser.
+- **Sessions in one place** — every session of the six agents, by folder, running or recent, searchable; continue
+  one, or continue it under another profile. A session is the agent's own, in its own files: go back to its CLI any
+  time.
+- **Terminals and the simple view** — the six agents' own CLIs in terminals the service holds; each session also
+  reads as a conversation, with its context, 5h / 7d use, tasks and the browser tab its agent is using.
 
-Also: a Live Activity on the iPhone, a menu bar card and full menus on the Mac, and two looks — `Pixel` and `Classic`.
+Also: a shared browser for you and the agents, several sign-ins per agent (profiles), Clash node groups per
+provider, and two looks — `Classic` and `Pixel`.
 
 <p align="center">
-  <img src="docs/readme/mac-rooms.jpg" width="100%" alt="Chat Room on the Mac">
+  <img src="docs/readme/mac-rooms.png" width="100%" alt="Chat Room on the Mac: sessions of four agents working on one change">
 </p>
 <p align="center">
-  <img src="docs/readme/mac-simple.jpg" width="100%" alt="The simple view with its side pane">
+  <img src="docs/readme/mac-redaction.png" width="80%" alt="Settings › Redaction: replacement words, regular expressions, logs">
 </p>
 <p align="center">
-  <img src="docs/readme/mac-browser.jpg" width="100%" alt="The shared browser">
+  <img src="docs/readme/nodes.svg" width="100%" alt="Two Macs and a Linux server paired with each other, each with its terminals and chat rooms; an iPhone and an Android phone reaching any of them">
 </p>
 <p align="center">
-  <img src="docs/readme/mac-redaction.jpg" width="49%" alt="Settings › Redaction">
-  <img src="docs/readme/mac-addons.jpg" width="49%" alt="Settings › Add-Ons">
-</p>
-<p align="center">
-  <img src="docs/readme/mac-clash.jpg" width="100%" alt="Clash">
+  <img src="docs/readme/phone-simple.png" width="45%" alt="iPhone: a session waiting for approval">
 </p>
 
 ## Two looks
 
-`Pixel` (above) and `Classic` (below), switched in Settings on each device. Same screens, same controls.
+`Classic` (above) and `Pixel` (below), switched in Settings on each device. Same screens, same controls.
 
 <p align="center">
-  <img src="docs/readme/mac-terminals-classic.jpg" width="100%" alt="Terminals, Classic">
+  <img src="docs/readme/mac-terminals-pixel.png" width="100%" alt="The Mac's main window in the Pixel look">
 </p>
 <p align="center">
-  <img src="docs/readme/mac-rooms-classic.jpg" width="49%" alt="Chat Room, Classic">
-  <img src="docs/readme/mac-simple-classic.jpg" width="49%" alt="Simple view, Classic">
-</p>
-<p align="center">
-  <img src="docs/readme/phone-terminals-classic.jpg" width="19%" alt="iPhone, Classic: Terminals">
-  <img src="docs/readme/phone-simple-classic.jpg" width="19%" alt="iPhone, Classic: simple view">
-  <img src="docs/readme/phone-rooms-classic.jpg" width="19%" alt="iPhone, Classic: Rooms">
-  <img src="docs/readme/phone-room-classic.jpg" width="19%" alt="iPhone, Classic: a chat room">
-  <img src="docs/readme/phone-browser-classic.jpg" width="19%" alt="iPhone, Classic: browser">
+  <img src="docs/readme/phone-simple-pixel.png" width="45%" alt="iPhone: a session in the Pixel look">
 </p>
 
 ## How it fits together
@@ -75,7 +60,7 @@ iPhone · Android ──HTTPS, pinned certificate──▶ ┐
 Mac app ──────────HTTP, 127.0.0.1─────────────▶ agentswitchd ──▶ the six agents
 other Macs, Linux nodes ◀──── paired ─────────▶ ┘   ├─ terminals, chat rooms, Dispatch
                                                     ├─ the shared browser
-                                                    └─ model gateway, password vault
+                                                    └─ the redaction gateway
 ```
 
 Phones pair once by QR code and reach only a fixed list of routes (`packages/daemon/src/remote/routes.ts`).
