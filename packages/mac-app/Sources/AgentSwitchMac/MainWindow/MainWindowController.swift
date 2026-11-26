@@ -648,6 +648,24 @@ final class MainWindowController: NSObject {
         }
     }
 
+    /// The app's menus (AppMenus.swift, user #584): what the bar, the rail and the window's keys already do, asked for
+    /// from the menu bar — the window opened first when it is not.
+    func menu(_ command: AppMenuCommand) {
+        switch command {
+        case .page(let page): show(page)
+        case .nextPage: show(state.page.next)
+        case .previousPage: show(state.page.previous)
+        case .newTerminal: newTerminal()
+        case .newChannel: show(.rooms); state.askNewRoom()
+        case .passwords: perform(.passwords)
+        case .files: show(); perform(.files)
+        case .toggleRail: show(); state.toggleRail()
+        case .toggleView: show(.terminals); barActions.toggleView()
+        case .split(let side): show(.terminals); barActions.split(side)
+        case .newTab: show(.browser); browser?.composeNew()
+        }
+    }
+
     /// ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z on Dispatch and in the window's sheets, to the field in focus: a menu bar app has no Edit
     /// menu to send them (the terminal page has its own, TerminalWebView).
     private func edit(_ press: MainShortcut.Press, in target: NSWindow) -> Bool {

@@ -107,6 +107,29 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (nodes) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "menus" {
+                    // The menus across the top of the screen (AppMenus.swift, user #584), as AppKit holds them: a line an
+                    // item — its title, its key, dimmed or not — for the page the main window opens on.
+                    model.loadDemo()
+                    try await settle()
+                    func lines(_ menu: NSMenu, _ depth: Int) -> [String] {
+                        menu.update()
+                        return menu.items.flatMap { item -> [String] in
+                            if item.isSeparatorItem { return [String(repeating: "  ", count: depth) + "—"] }
+                            var mods = ""
+                            let m = item.keyEquivalentModifierMask
+                            if m.contains(.control) { mods += "⌃" }; if m.contains(.option) { mods += "⌥" }
+                            if m.contains(.shift) { mods += "⇧" }; if m.contains(.command) { mods += "⌘" }
+                            let key = item.keyEquivalent == "\t" ? "⇥" : item.keyEquivalent.uppercased()
+                            let line = String(repeating: "  ", count: depth) + item.title + (key.isEmpty ? "" : "  \(mods)\(key)") + (item.isEnabled ? "" : "  (dimmed)")
+                            return [line] + (item.submenu.map { lines($0, depth + 1) } ?? [])
+                        }
+                    }
+                    let text = lines(NSApp.mainMenu ?? NSMenu(), 0).joined(separator: "\n") + "\n"
+                    try text.write(to: directory.appendingPathComponent("menus.txt"), atomically: true, encoding: .utf8)
+                    FileHandle.standardError.write(Data("design preview (menus) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "addons" {
                     // Settings › Add-Ons over DemoData's profiles: every profile at once, each add-on with how many have it.
                     for (name, appearance) in [("settings-addons-dark", NSAppearance(named: .darkAqua)), ("settings-addons", NSAppearance(named: .aqua))] {

@@ -394,3 +394,16 @@ Mac 图标栏与侧边导航（rail）的每个图标都是 `ShadedSprite` 明�
   - 画法：像素外观仍是 `ShadedMarkPaint`（状态色给标题栏，跑动块是白的）；经典外观 Mac 是 `ClassicMark`（叠窗）与 `ClassicLanes`（Dispatch 页），iPhone 的叠窗画在 `LiveLook.drawClassicMark`（实时活动的小组件和应用共用），网页是 `ui/lib/look.js` 的 `mark(state, size)`。
 - **演示页**：`docs/design/concepts/stack-icon.html`（两个应用图标、各状态的标记放大图、放进菜单栏 / 灵动岛 / 锁屏卡片的真实渲染）。
 
+
+## 11. 屏幕顶上的菜单（2026-11-26，用户 #584：这个功能栏里应该做一些真东西进去）
+
+应用在前台时，屏幕顶上的菜单原来只有 SwiftUI 默认给的那几项（Edit / View / Window / Help）。现在照常见 Mac 应用的样子，把应用里已有的操作放进去，带上它们原来的快捷键。不加新功能，也不发明新的快捷键。代码在 `Sources/AgentSwitchMac/AppMenus.swift`（应用场景上的 `.commands`），菜单动作经 `MainWindowController.menu(_:)` 交给栏、侧栏和窗口自己原有的动作；窗口还没开时先打开。
+
+- **AgentSwitch**：About（系统的）、`Check for Updates…`（打开 设置 › General 的更新一节）、`Settings…` ⌘,、Hide / Quit（系统的，Quit 照旧先问）。
+- **File**：`New Terminal` ⌘T、`New Channel`、`New Tab`（Browser 页的新标签）、系统的 `Close` ⌘W 与 `Close All`。
+- **Edit**：系统的，不动。
+- **View**：`Simple View / Terminal View` ⌘⇧E、`Hide/Show Side Pane`、`Split Right` ⌘D、`Split Down` ⌘⇧D（这四项只在 Terminals 页可用，别的页变灰）、`Show or Hide Files` ⌘⇧F、`Hide/Show Rail` ⌥⌘B、`Appearance`（Pixel / Classic）、`Text Size`（Bigger / Smaller / Actual Size，没有快捷键：⌘+ ⌘− 是 Browser 页的缩放）。
+- **Go**：按左侧栏的顺序列出各页：Terminals、Dispatch ⌘0、Channels ⌘⇧M、Browser ⌘⇧B、Clash ⌘⇧K；然后是 `Next Page` ⌃⇥ / `Previous Page` ⌃⇧⇥、`Passwords` ⌘⇧L。
+- **Window**：系统的。**Help**：只留系统的搜索（应用没有帮助文档，默认那一项只会说“没有帮助”）。
+- **快捷键由谁接**：仍由原来的地方先接，包括主窗口的 `MainShortcut`、Terminals 页的 `TerminalsPageKey`、设置窗口和单独终端窗口各自的按键处理。它们在事件到达菜单之前就把键拿走了，所以同一个键不会被处理两次。只有没有窗口接的时候（比如设置窗口在前）才落到菜单上，做的还是同一件事。
+- **验证**：`-designPreview <目录> -designPreviewOnly menus` 把 AppKit 实际拿到的菜单逐项写进 `menus.txt`（标题、快捷键、是否变灰），用来检查菜单内容。没有截到真实打开着的菜单的图：在预览模式里弹出菜单没显示出来，那个办法已经撤掉。

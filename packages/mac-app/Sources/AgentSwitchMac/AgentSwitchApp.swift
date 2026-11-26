@@ -31,6 +31,8 @@ struct AgentSwitchApp: App {
             MenuBarIcon(level: delegate.model.overallLevel, waiting: delegate.model.waitingCount)
         }
         .menuBarExtraStyle(.window)
+        // The menus across the top of the screen (AppMenus.swift, user #584).
+        .commands { AppMenus(delegate: delegate) }
     }
 }
 
