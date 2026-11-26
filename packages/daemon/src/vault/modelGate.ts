@@ -181,7 +181,9 @@ export class ModelGate {
         hosts: [...new Set([...MODEL_HOSTS, ...settings.hosts, ...(own && own !== "127.0.0.1" && own !== "localhost" ? [own] : [])])],
         upstream: s.upstream,
         pairs: this.o.store.pairs(s.profile, this.o.roomsOf(id), more),
-        log: settings.log,
+        patterns: this.o.store.patterns(s.profile, this.o.roomsOf(id)),
+        // Written down when logs are on, and this terminal is one of those picked (none picked: every one).
+        log: settings.log && (settings.logTerminals.length === 0 || settings.logTerminals.includes(id)),
       };
     }
     child.stdin.write(`${JSON.stringify({ logDir: this.logDir, scopes })}\n`);

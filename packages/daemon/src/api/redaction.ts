@@ -8,10 +8,10 @@ import { RedactionError } from "../vault/words.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const Settings = z.object({
-  enabled: z.boolean(), username: z.boolean(), host: z.boolean(), log: z.boolean(),
+  enabled: z.boolean(), username: z.boolean(), host: z.boolean(), log: z.boolean(), logTerminals: z.array(z.string().max(64)).max(50),
   keepDays: z.number().int().min(0).max(365), hosts: z.array(z.string().max(253)).max(100),
 }).partial().strict();
-const AddWord = z.object({ value: z.string().min(1).max(4000), replace: z.string().max(200).optional(), restore: z.boolean().optional() }).strict();
+const AddWord = z.object({ value: z.string().min(1).max(4000), replace: z.string().max(200).optional(), restore: z.boolean().optional(), regex: z.boolean().optional() }).strict();
 
 export function mountRedaction(app: Hono, deps: ApiDeps): void {
   const off = { error: "替换词只在有终端的 AgentSwitch 服务上可用。" };
@@ -21,7 +21,7 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
   };
   // A word as the screens show it: its placeholder under no profile in particular is not one (each profile has its
   // own salt), so the screens get the word, its own replacement if any, and whether it goes back.
-  const shown = (w: { id: string; value: string; replace?: string; restore: boolean; addedAt: number }) => ({ id: w.id, value: w.value, ...(w.replace ? { replace: w.replace } : {}), restore: w.restore, addedAt: w.addedAt });
+  const shown = (w: { id: string; value: string; replace?: string; restore: boolean; regex?: boolean; addedAt: number }) => ({ id: w.id, value: w.value, ...(w.replace ? { replace: w.replace } : {}), restore: w.restore, ...(w.regex ? { regex: true } : {}), addedAt: w.addedAt });
 
   app.get("/redaction", (c) => {
     const r = deps.redaction;
@@ -46,7 +46,7 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       if (room !== undefined) deps.rooms?.get(room);   // a room there is
-      const { word, warning } = r.store.add({ value: body.data.value, ...(body.data.replace !== undefined ? { replace: body.data.replace } : {}), ...(body.data.restore !== undefined ? { restore: body.data.restore } : {}) }, room);
+      const { word, warning } = r.store.add({ value: body.data.value, ...(body.data.replace !== undefined ? { replace: body.data.replace } : {}), ...(body.data.restore !== undefined ? { restore: body.data.restore } : {}), ...(body.data.regex ? { regex: true } : {}) }, room);
       r.gate.changed();
       return c.json({ word: shown(word), warning }, 201);
     } catch (err) {

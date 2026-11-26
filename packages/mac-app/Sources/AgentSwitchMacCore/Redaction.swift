@@ -7,8 +7,24 @@ public struct RedactSettings: Codable, Equatable, Sendable {
     public var username: Bool
     public var host: Bool
     public var log: Bool
+    /// Only these terminals are written down; none: every terminal (user #595).
+    public var logTerminals: [String]
     public var keepDays: Int
     public var hosts: [String]
+
+    private enum CodingKeys: String, CodingKey { case enabled, username, host, log, logTerminals, keepDays, hosts }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        username = try c.decode(Bool.self, forKey: .username)
+        host = try c.decode(Bool.self, forKey: .host)
+        log = try c.decode(Bool.self, forKey: .log)
+        // A service from before #595 has none: every terminal.
+        logTerminals = try c.decodeIfPresent([String].self, forKey: .logTerminals) ?? []
+        keepDays = try c.decode(Int.self, forKey: .keepDays)
+        hosts = try c.decode([String].self, forKey: .hosts)
+    }
 }
 
 public struct RedactWord: Decodable, Equatable, Sendable, Identifiable {

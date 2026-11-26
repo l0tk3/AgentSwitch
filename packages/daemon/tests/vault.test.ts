@@ -125,6 +125,17 @@ describe("the model gateway as the service runs it", () => {
     rooms.t1 = [];
     gate.changed();
     expect(tables.at(-1)!.scopes.t1!.pairs.map((p) => p.value)).toEqual(["lkz", "Li Kaizhi"]);
+    // Logs on: every terminal, or only those picked (user #595).
+    store.setSettings({ log: true });
+    gate.changed();
+    expect(tables.at(-1)!.scopes.t1!.log).toBe(true);
+    expect(store.setSettings({ logTerminals: ["t9", "bad id!", "t9"] }).logTerminals).toEqual(["t9"]);
+    gate.changed();
+    expect(tables.at(-1)!.scopes.t1!.log).toBe(false);
+    store.setSettings({ logTerminals: ["t1"] });
+    gate.changed();
+    expect(tables.at(-1)!.scopes.t1!.log).toBe(true);
+    store.setSettings({ log: false, logTerminals: [] });
     gate.close("t1");
     expect(tables.at(-1)!.scopes).toEqual({});
     // Kept for a terminal held across a restart: its scope and port.

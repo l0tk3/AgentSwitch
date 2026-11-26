@@ -14,6 +14,8 @@ struct RedactionView: View {
     @State private var value = ""
     @State private var replace = ""
     @State private var logs: [RedactLog] = []
+    /// The terminals running now, to pick which are written down.
+    @State private var terminals: [TerminalInfo] = []
     @State private var logDir = ""
     @State private var cleanDays = 3
 
@@ -104,6 +106,7 @@ struct RedactionView: View {
     private func logSection(_ s: RedactionState) -> some View {
         Section {
             Toggle("Keep Logs", isOn: bind(\.log, "log"))
+            if s.settings.log { LabeledContent("Terminals") { logPicker(s.settings.logTerminals) } }
             Stepper("保留 \(s.settings.keepDays) 天", value: Binding(get: { s.settings.keepDays }, set: { d in Task { await patch(["keepDays": d]) } }), in: 0...365)
             ForEach(logs) { l in
                 HStack(spacing: 10) {
@@ -124,6 +127,34 @@ struct RedactionView: View {
         } header: {
             SectionLabel("Logs")
         }
+    }
+
+    /// Which terminals are written down: all, or the ones ticked (user #595). The running ones by name and folder; one
+    /// picked that is not running now stays ticked by its id.
+    private func logPicker(_ picked: [String]) -> some View {
+        let set = Set(picked)
+        let others = picked.filter { id in !terminals.contains { $0.id == id } }
+        return Menu {
+            Button { Task { await patch(["logTerminals": [String]()]) } } label: { if picked.isEmpty { Label("All Terminals", systemImage: "checkmark") } else { Text("All Terminals") } }
+            Divider()
+            ForEach(terminals, id: \.id) { t in
+                let on = set.contains(t.id)
+                Button {
+                    let next = on ? picked.filter { $0 != t.id } : picked + [t.id]
+                    Task { await patch(["logTerminals": next]) }
+                } label: {
+                    let words = "\(t.name.isEmpty ? t.id : t.name) · \(DisplayPath.short(t.workdir, home: NSHomeDirectory()))"
+                    if on { Label(words, systemImage: "checkmark") } else { Text(words) }
+                }
+            }
+            ForEach(others, id: \.self) { id in
+                Button { Task { await patch(["logTerminals": picked.filter { $0 != id }]) } } label: { Label(id, systemImage: "checkmark") }
+            }
+        } label: {
+            Text(picked.isEmpty ? "All Terminals" : picked.count == 1 ? "1 Terminal" : "\(picked.count) Terminals")
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .task { if RedactionDemo.current == nil { terminals = (try? await model.client.terminals().terminals) ?? [] } }
     }
 
     private func size(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
