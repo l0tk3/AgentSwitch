@@ -1006,6 +1006,9 @@ private struct RoomSheet: View {
     @State private var folder = ""
     @State private var agent = "claude-code"
     @State private var profile: [String: String] = [:]
+    /// The model and the thinking level for each agent; none: the agent's own.
+    @State private var modelOf: [String: String] = [:]
+    @State private var effortOf: [String: String] = [:]
     /// The search over the sessions to pick (2026-11-23, user: 和终端那里的搜索功能一样): by name, agent, model,
     /// profile and folder at once, and by what was said in them once typing pauses.
     @State private var query = ""
@@ -1122,8 +1125,23 @@ private struct RoomSheet: View {
     /// What is started on Create: the sessions added, and the one in the fields when it has a folder.
     private var starting: [RoomsModel.NewSession] {
         let typed = folder.trimmingCharacters(in: .whitespacesAndNewlines)
-        return fresh + (typed.isEmpty ? [] : [RoomsModel.NewSession(folder: typed, agent: agent, profile: chosenProfile)])
+        return fresh + (typed.isEmpty ? [] : [filled(typed)])
     }
+
+    private func filled(_ folder: String) -> RoomsModel.NewSession {
+        RoomsModel.NewSession(folder: folder, agent: agent, profile: chosenProfile, model: chosenModel, effort: chosenEffort)
+    }
+
+    /// The model picked for the agent, while the agent still lists it.
+    private var chosenModel: String? { modelOf[agent].flatMap { id in model.models[agent]?.contains { $0.id == id } == true ? id : nil } }
+
+    /// The levels the model picked takes (the agent's default model's where none is picked).
+    private var levels: [String] {
+        if let id = chosenModel { return model.models[agent]?.first { $0.id == id }?.efforts ?? [] }
+        return model.efforts[agent] ?? []
+    }
+
+    private var chosenEffort: String? { effortOf[agent].flatMap { levels.contains($0) ? $0 : nil } }
 
     /// The profile for the agent picked: nil where the agent has only the Mac's own.
     private var chosenProfile: String? {
@@ -1142,6 +1160,7 @@ private struct RoomSheet: View {
                     if let id = one.profile, let name = model.profiles[one.agent]?.profiles.first(where: { $0.id == id })?.name {
                         Text(name).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1)
                     }
+                    if let id = one.model { Text([ModelName.display(id), one.effort?.capitalized].compactMap { $0 }.joined(separator: " · ")).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1) }
                     Spacer(minLength: 4)
                     Button { fresh.removeAll { $0.id == one.id } } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 12) }.buttonStyle(.plain).foregroundStyle(Look.ink2).help("Remove")
                 }
@@ -1166,9 +1185,27 @@ private struct RoomSheet: View {
                     }
                     .labelsHidden().fixedSize()
                 }
+                Spacer(minLength: 0)
+            }
+            // The model and how hard it thinks on a row of their own: four menus and a button did not fit one.
+            HStack(spacing: 8) {
+                if let list = model.models[agent], !list.isEmpty {
+                    Picker("", selection: Binding(get: { chosenModel ?? "" }, set: { modelOf[agent] = $0.isEmpty ? nil : $0 })) {
+                        Text("Default Model").tag("")
+                        ForEach(list) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                if !levels.isEmpty {
+                    Picker("", selection: Binding(get: { chosenEffort ?? "" }, set: { effortOf[agent] = $0.isEmpty ? nil : $0 })) {
+                        Text("Default Effort").tag("")
+                        ForEach(levels, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
                 Spacer(minLength: 4)
                 Button {
-                    fresh.append(RoomsModel.NewSession(folder: folder.trimmingCharacters(in: .whitespacesAndNewlines), agent: agent, profile: chosenProfile))
+                    fresh.append(filled(folder.trimmingCharacters(in: .whitespacesAndNewlines)))
                     folder = ""
                 } label: { BracketLabel(word: "Add Another") }
                 .buttonStyle(BracketButtonStyle(size: 12))

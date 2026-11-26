@@ -825,7 +825,11 @@ final class RoomsModel {
         if sheet == .words { wordsSaid = nil; roomWords = nil; loadRoomWords() }
         guard sheet == .new || sheet == .add, !demo else { return }
         Task {
-            if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
+            if let list = try? await client().terminals() {
+                terminals = list.terminals.filter { $0.status != "exited" }
+                models = list.models
+                efforts = list.efforts
+            }
             if let all = try? await client().profiles() { profiles = all }
         }
     }
@@ -834,6 +838,9 @@ final class RoomsModel {
     /// name and topic changed.
     /// Each agent's profiles, for a session started from the sheet (user #504).
     private(set) var profiles: [String: AgentProfiles] = [:]
+    /// Each agent's models, and the thinking levels of its default one, for the same sheet (user #506).
+    private(set) var models: [String: [TerminalModelOption]] = [:]
+    private(set) var efforts: [String: [String]] = [:]
 
     /// A session to start and seat with the channel: where, which agent, under which profile.
     struct NewSession: Identifiable, Equatable {
@@ -841,6 +848,8 @@ final class RoomsModel {
         var folder: String
         var agent: String
         var profile: String?
+        var model: String?
+        var effort: String?
     }
 
     /// The sessions asked for, started (permissions bypassed, as a session an admin brings in) and seated in `room`;
@@ -849,7 +858,7 @@ final class RoomsModel {
         var problems: [String] = []
         for one in fresh {
             do {
-                let made = try await client().createTerminal(NewTerminalRequest(harness: one.agent, cwd: one.folder, mode: "bypass", profile: one.profile))
+                let made = try await client().createTerminal(NewTerminalRequest(harness: one.agent, cwd: one.folder, model: one.model, effort: one.effort, mode: "bypass", profile: one.profile))
                 try await client().seat(terminal: made.id, in: room)
             } catch { problems.append("\(one.folder)：\(Self.say(error))") }
         }
