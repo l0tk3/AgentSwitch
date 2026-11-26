@@ -102,6 +102,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    /// A folder dropped on the app's icon (user #472): the new-terminal panel, in that folder. A file: in its folder.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first(where: \.isFileURL) else { return }
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { return }
+        main.newTerminal(in: isFolder.boolValue ? url.path : url.deletingLastPathComponent().path)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
         if let directory = DesignPreview.directory {

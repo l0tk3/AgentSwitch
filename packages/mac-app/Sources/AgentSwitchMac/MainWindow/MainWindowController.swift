@@ -141,6 +141,14 @@ final class MainWindowController: NSObject {
         terminals?.newTerminal()
     }
 
+    /// The same, in a folder (one dropped on the app's icon).
+    func newTerminal(in folder: String) {
+        // The folder is this Mac's: the window comes back to it from another node's pages.
+        use(node: nil)
+        show(.terminals)
+        terminals?.newTerminal(in: folder)
+    }
+
     /// The terminals out in windows of their own changed: the page leaves them, or may show them again.
     func detachedChanged(_ ids: Set<String>) { terminals?.setDetached(ids) }
 

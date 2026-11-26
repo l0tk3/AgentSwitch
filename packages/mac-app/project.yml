@@ -60,6 +60,13 @@ targets:
         NSAppleEventsUsageDescription: AgentSwitch 在“终端”中运行执行器的登录命令（例如 claude auth login），登录由你在终端中完成。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # A folder dropped on the app's icon opens the new-terminal panel in it (user #472).
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Folder
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: None
+            LSItemContentTypes:
+              - public.folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.agentswitch.mac

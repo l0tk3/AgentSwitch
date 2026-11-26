@@ -294,19 +294,7 @@ struct PaneHeader: View {
                 .buttonStyle(.plain)
                 .help(shows ? "Hide Files ⌘⇧F" : "Show in Files ⌘⇧F")
             }
-            // The other view of the same session (docs/simple-view-v0.md §1): each pane has its own.
-            if info != nil, let state {
-                Button { model.focus(pane: pane); model.toggleSimple(pane: pane) } label: {
-                    Group {
-                        if look.isClassic { Image(systemName: state.simple ? "terminal" : "text.alignleft").font(.system(size: 10.5, weight: .medium)) }
-                        else { PixelSprite(rows: state.simple ? PixelArt.terminalWindow : PixelArt.toolbarRecord, pixel: 1, color: Look.ink2) }
-                    }
-                    .foregroundStyle(Look.ink2)
-                    .frame(width: 22, height: 20).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(state.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E")
-            }
+            // The other view of the session is on ⌘⇧E and in the status bar: its button here is gone (user #471).
             if !model.zoomed {
                 Button { model.closePane(pane) } label: {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Look.faint)
@@ -325,7 +313,7 @@ struct PaneHeader: View {
         // pane's edges; no bar on the others, and no line under any — the terminal runs on from its title.
         .background {
             if look.isClassic, focused {
-                RoundedRectangle(cornerRadius: Look.controlRadius, style: .continuous).fill(Color.signal.opacity(0.16)).padding(.horizontal, 3).padding(.vertical, 1)
+                RoundedRectangle(cornerRadius: Look.controlRadius, style: .continuous).fill(Look.hover).padding(.horizontal, 3).padding(.vertical, 1)
             }
         }
         .overlay(alignment: .top) { if focused, !look.isClassic { Rectangle().fill(Color.signal).frame(height: 2) } }

@@ -625,6 +625,9 @@ private struct RoomWriter: View {
     let room: Room
     @Environment(\.interfaceLook) private var look
 
+    /// The box at one line: `+` and the send button are centred on this height, at the row's foot (user #473).
+    private static let boxHeight = ComposeField.minHeight + 12
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let reply = model.replyTo, let quoted = room.messages.first(where: { $0.seq == reply }) {
@@ -660,17 +663,18 @@ private struct RoomWriter: View {
                 // `+`: files; in a room with tasks, the task this message is about too (user #438: `Task: —` under the
                 // box was in the way — it shows there only once a task is chosen).
                 if room.tasks.isEmpty || model.taskFilter != nil {
-                    Button { model.pickFiles() } label: { plus }
+                    Button { model.pickFiles() } label: { plus.frame(height: Self.boxHeight) }
                         .buttonStyle(.plain)
                         .help(model.uploading > 0 ? "正在上传…" : "Attach Files")
                 } else {
                     Menu {
                         Button("Attach Files…") { model.pickFiles() }
                         Menu("Task") { taskChoices }
-                    } label: { plus }
+                    } label: { plus.frame(height: Self.boxHeight) }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
+                    .frame(width: 30, height: Self.boxHeight)
                     .help(model.uploading > 0 ? "正在上传…" : "Attach Files, Task")
                 }
                 ComposeField(text: $model.draft, height: $model.draftHeight, focusRequests: model.focusRequests, insert: model.insert, label: "Message",
@@ -694,6 +698,7 @@ private struct RoomWriter: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .frame(height: Self.boxHeight)
                 .disabled(!model.canSend)
                 .help(ClassicWords.help("Send ↩", in: look))
             }

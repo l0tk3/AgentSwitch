@@ -42,6 +42,14 @@ struct TerminalCreatePanel: View {
             .containerRelativeFrame(.vertical, alignment: .center) { length, _ in max(length, 0) }
         }
         .scrollBounceBehavior(.basedOnSize)
+        // A folder dragged onto the panel is the folder (a file: the one it is in); this Mac's panel only (user #472).
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !model.client().isRemote, let url = urls.first(where: \.isFileURL) else { return false }
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { return false }
+            model.folderText = TerminalTree.tilde(isFolder.boolValue ? url.path : url.deletingLastPathComponent().path)
+            return true
+        }
         // Over a pane of the simple view's look, the panel takes it too.
         .background(model.focusedLight ? Look.ground : Color(nsColor: model.ground))
     }
