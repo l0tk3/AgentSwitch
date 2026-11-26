@@ -262,9 +262,11 @@ struct RoomMessageRow: View {
                 }
                 if !message.files.isEmpty, !message.deleted { files }
                 }
-                .padding(.horizontal, classic ? 11 : 0).padding(.vertical, classic ? 7 : 0)
+                // A box under what was said in both looks (user #621: the pixel look as layered as the classic): the
+                // classic look's round bubble; the pixel look's square one a ground a step up, yours one more.
+                .padding(.horizontal, classic ? 11 : 10).padding(.vertical, classic ? 7 : 6)
                 .background(RoundedRectangle(cornerRadius: classic ? Look.cardRadius : 0, style: .continuous)
-                    .fill(!classic ? Color.clear : seat?.isUser == true ? Color.signal.opacity(0.07) : Look.panel))
+                    .fill(seat?.isUser == true ? (classic ? Color.signal.opacity(0.07) : Look.raised) : Look.panel))
                 .padding(.top, classic && !row.continues ? 2 : 0)
                 failures
             }

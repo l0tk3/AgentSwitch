@@ -146,9 +146,9 @@ struct PasswordsPage: View {
     var body: some View {
         HStack(spacing: 0) {
             // The classic look: the list is a card that floats on the window's ground (docs/design-rules.md §2).
-            list.sideCard(leading: Look.panelGap, trailing: Look.panelGap, bottom: Look.panelGap).padding(.top, look.isClassic ? Look.panelGap : 0)
-                .frame(width: 300 + (look.isClassic ? 2 * Look.panelGap : 0))
-            HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
+            list.sideCard(leading: Look.panelGap, trailing: Look.panelGap, bottom: Look.panelGap).padding(.top, Look.panelGap)
+                .frame(width: 300 + 2 * Look.panelGap)
+            if look.isClassic { HairRule(color: .clear, vertical: true) }
             detail.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Look.ground)

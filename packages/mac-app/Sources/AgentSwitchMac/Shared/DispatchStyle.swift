@@ -17,10 +17,10 @@ enum Look {
     static let faint = Color.inkDim
     static let line = Color(nsColor: .barEdge)
     /// A card's ground.
-    static let panel = Color(nsColor: .dynamic(light: 0xECE8DF, dark: 0x0B0B0B, classicLight: 0xF5F6F8, classicDark: 0x17181C, name: "AgentSwitchDispatchPanel"))
+    static let panel = Color(nsColor: .dynamic(light: 0xEBE7DD, dark: 0x121212, classicLight: 0xF5F6F8, classicDark: 0x17181C, name: "AgentSwitchDispatchPanel"))
     /// What you said: a raised box (the signal colour is not for text backgrounds).
-    static let raised = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchRaised"))
-    static let hover = Color(nsColor: .dynamic(light: 0xE9E5DC, dark: 0x121212, classicLight: 0xE9EBF0, classicDark: 0x24252B, name: "AgentSwitchDispatchHover"))
+    static let raised = Color(nsColor: .dynamic(light: 0xDCD6C9, dark: 0x1F1F1F, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchRaised"))
+    static let hover = Color(nsColor: .dynamic(light: 0xE2DDD1, dark: 0x1A1A1A, classicLight: 0xE9EBF0, classicDark: 0x24252B, name: "AgentSwitchDispatchHover"))
     /// What you said, as its ground: the raised box of the pixel look; in the classic look a wash of the ink under
     /// ink text — as both agents' own desktop apps set a user's message (about 5% of the text's colour), no longer the
     /// accent's bubble with white text (docs/ui-v0.md §8, 2026-10-07).
@@ -78,6 +78,10 @@ enum Look {
     /// corners (`sideCard`). `sidebar` is such a card's ground; `chrome` what the put-away rail comes out on.
     static let chrome = Color(nsColor: .dynamic(light: 0xF3F4F7, dark: 0x191A1E, name: "AgentSwitchClassicChrome"))
     static let sidebar = Color(nsColor: .dynamic(light: 0xF3F4F7, dark: 0x191A1E, name: "AgentSwitchClassicSidebar"))
+    /// The pixel look's side columns (docs/ui-v0.md §9.2, user #621: 还是没有做出来和classic模式一样的层次感): a deck a
+    /// clear step off the window's ground, between it and what is raised on it (`raised`, a row chosen); in the
+    /// classic look the classic card's own ground.
+    static let deck = Color(nsColor: .dynamic(light: 0xE6E1D6, dark: 0x141414, classicLight: 0xF3F4F7, classicDark: 0x191A1E, name: "AgentSwitchPixelDeck"))
     /// The faint ring around a floating card.
     static let ring = Color(nsColor: .dynamic(light: 0xDFE1E6, dark: 0x2A2B31, name: "AgentSwitchClassicRing"))
 
@@ -118,7 +122,7 @@ extension View {
 
 extension View {
     /// A side column in the classic look (§8.1): a card that floats on the page — its own ground, round corners, a
-    /// faint ring and a soft shadow —, this far from what is beside it. In the pixel look a ground a step off the window's.
+    /// faint ring and a soft shadow —, this far from what is beside it. In the pixel look a square deck with a hard shadow.
     func sideCard(leading: CGFloat = 0, trailing: CGFloat = 0, bottom: CGFloat = 2) -> some View {
         modifier(SideCard(leading: leading, trailing: trailing, bottom: bottom))
     }
@@ -163,8 +167,15 @@ private struct SideCard: ViewModifier {
                 .padding(.trailing, trailing)
                 .padding(.bottom, bottom)
         } else {
-            // Two grounds (§9.2): the column a step off the window's, its edge the line beside it.
-            content.background(Look.panel)
+            // A deck that floats as the classic card does (§9.2): its own ground a clear step off the window's, a
+            // 1 pt frame, a hard shadow 3 pt down and right, the same room round it — square, no blur.
+            content
+                .background(Look.deck)
+                .overlay(Rectangle().strokeBorder(Look.line, lineWidth: 1))
+                .background(Rectangle().fill(Color.shadedShadow(dark: scheme == .dark)).offset(x: 3, y: 3))
+                .padding(.leading, leading)
+                .padding(.trailing, trailing)
+                .padding(.bottom, bottom + 2)
         }
     }
 }

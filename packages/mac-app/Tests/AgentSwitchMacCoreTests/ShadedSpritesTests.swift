@@ -79,7 +79,7 @@ final class ShadedSpritesTests: XCTestCase {
         let bar = [PixelArt.toolbarList, PixelArt.toolbarNew, PixelArt.toolbarFiles, PixelArt.toolbarSide, PixelArt.toolbarPeople, PixelArt.toolbarSettings]
         let rail = [PixelArt.railDispatch, PixelArt.railTerminals, PixelArt.railRooms, PixelArt.railBrowser, PixelArt.railClash, PixelArt.railPasswords]
         for rows in bar + rail { XCTAssertNotNil(ShadedSprite.standing(for: rows), rows.joined(separator: "/")) }
-        for sprite in [ShadedSprite.files, .side, .people, .passwords, .more] {
+        for sprite in [ShadedSprite.files, .side, .people, .passwords, .more, .search] {
             XCTAssertFalse(ShadedSprite.all.contains { $0.sprite == sprite })
             XCTAssertTrue(sprite.rows.allSatisfy { $0.count == sprite.width })
             XCTAssertLessThanOrEqual(sprite.width, 16)

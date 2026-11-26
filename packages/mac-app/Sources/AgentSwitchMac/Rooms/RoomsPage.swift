@@ -168,13 +168,14 @@ private struct RoomsColumns: View {
     var body: some View {
         HStack(spacing: 0) {
             if list {
-                RoomsList(model: model).frame(width: 236 + (look.isClassic ? Look.panelGap : 0))
-                HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
+                RoomsList(model: model).frame(width: 236 + Look.panelGap)
+                // The classic look's place kept as it was (a clear point); the pixel look's columns are decks now.
+                if look.isClassic { HairRule(color: .clear, vertical: true) }
             }
             center.frame(maxWidth: .infinity, maxHeight: .infinity)
             if state.roomsMembers, let room = model.room {
-                HairRule(color: look.isClassic ? .clear : Look.line, vertical: true)
-                RoomMembers(model: model, room: room).frame(width: 232 + (look.isClassic ? 2 * Look.panelGap : 0))
+                if look.isClassic { HairRule(color: .clear, vertical: true) }
+                RoomMembers(model: model, room: room).frame(width: 232 + 2 * Look.panelGap)
             }
         }
         .overlay { if model.sheet != nil { sheet } }
@@ -253,11 +254,16 @@ private struct NoticeBand: ViewModifier {
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
         } else {
+            // A card as in the classic look, in pixels (§9.2): square, a 1 pt frame in the amber, a hard shadow.
             content
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.waiting.opacity(0.1))
-                .overlay(alignment: .bottom) { HairRule(color: Look.line) }
+                .background(Color.waiting.opacity(0.12))
+                .background(Look.ground)
+                .overlay(Rectangle().strokeBorder(Color.waiting.opacity(0.45), lineWidth: 1))
+                .lifted()
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
         }
     }
 }
@@ -270,14 +276,16 @@ private struct RoomsList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            // The pixel look's brackets at 11 and closer together: at 12 the label and both buttons ran into each other
+            // in the column (user #620: 太挤).
+            HStack(spacing: look.isClassic ? 8 : 4) {
                 PartLabel("Channels").lineLimit(1).fixedSize()
-                Spacer(minLength: 4)
-                Button { model.open(.models) } label: { BracketLabel(word: "Models") }.buttonStyle(BracketButtonStyle(size: 12))
+                Spacer(minLength: 12)
+                Button { model.open(.models) } label: { BracketLabel(word: "Models") }.buttonStyle(BracketButtonStyle(size: look.isClassic ? 12 : 11))
                     .help("管理员会话拉人时，每个配置下哪些模型能用。")
-                Button { model.open(.new) } label: { BracketLabel(word: "New") }.buttonStyle(BracketButtonStyle(size: 12)).help("New Channel")
+                Button { model.open(.new) } label: { BracketLabel(word: "New") }.buttonStyle(BracketButtonStyle(size: look.isClassic ? 12 : 11)).help("New Channel")
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, look.isClassic ? 12 : 10)
             .frame(height: 40)
             // Three groups, each folded or open as it was left (user #488, #492): what waits for the user — the
             // 等你处理 entry's list, now rows here —, the dispatch desk, and the channels.
@@ -300,7 +308,6 @@ private struct RoomsList: View {
                 .padding(.bottom, 8)
             }
         }
-        .background(look.isClassic ? Color.clear : Look.ground)
         .sideCard(trailing: Look.panelGap)
         .task(id: model.attentionCount) { await model.loadAttention() }
     }
@@ -605,7 +612,11 @@ private struct RoomView: View {
                 Text(room.room.topic).font(.system(size: 12.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            Button { model.searching = true } label: { LookGlyph(glyph: "⌕", symbol: "magnifyingglass", size: 18).foregroundStyle(Look.ink).frame(width: 28, height: 28).contentShape(Rectangle()) }
+            // The pixel look's two as the bar's icons are drawn (§9.1; user #622: 这两个图标太小).
+            Button { model.searching = true } label: {
+                if look.isClassic { LookGlyph(glyph: "⌕", symbol: "magnifyingglass", size: 18).foregroundStyle(Look.ink).frame(width: 28, height: 28).contentShape(Rectangle()) }
+                else { PixelMenuLabel(sprite: .search) }
+            }
                 .buttonStyle(.plain).help("搜索\(task == nil ? "这个房间" : "这个任务")（⌘F）").keyboardShortcut("f", modifiers: .command)
             Menu {
                 Button(room.tasks.isEmpty ? "Tasks…" : "Tasks \(room.tasks(.done).count)/\(room.tasks.count)…") { model.open(.tasks) }
@@ -623,7 +634,8 @@ private struct RoomView: View {
                     Button("Dissolve Channel…", role: .destructive) { model.deleting = true }
                 }
             } label: {
-                LookGlyph(glyph: "⋯", symbol: "ellipsis", size: 18).foregroundStyle(Look.ink)
+                if look.isClassic { LookGlyph(glyph: "⋯", symbol: "ellipsis", size: 18).foregroundStyle(Look.ink) }
+                else { PixelMenuLabel(sprite: .more) }
             }
             .menuStyle(.borderlessButton)
             .tint(Look.ink)
@@ -956,7 +968,6 @@ private struct RoomMembers: View {
                 .padding(.bottom, 10)
             }
         }
-        .background(look.isClassic ? Color.clear : Look.ground)
         .sideCard(leading: Look.panelGap, trailing: Look.panelGap)
     }
 }

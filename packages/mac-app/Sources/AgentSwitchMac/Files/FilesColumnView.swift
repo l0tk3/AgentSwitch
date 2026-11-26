@@ -70,11 +70,9 @@ private struct FilesChrome: ViewModifier {
     @Environment(\.interfaceLook) private var look
 
     func body(content: Content) -> some View {
-        if !floating, look.isClassic {
-            // Beside the page it is a card as the page's own list is (§8.1).
+        if !floating {
+            // Beside the page it is a card as the page's own list is (§8.1; the pixel look's deck, §9.2).
             content.sideCard(leading: Look.panelGap, trailing: Look.panelGap)
-        } else if !floating {
-            content.overlay(alignment: .leading) { Rectangle().fill(Look.line).frame(width: 1) }
         } else if look.isClassic {
             let shape = UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 12, style: .continuous)
             content.clipShape(shape)

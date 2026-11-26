@@ -142,6 +142,11 @@ public struct ShadedSprite: Equatable, Sendable {
         "....W####m....", "...W#mmmm#d...", "...W#....#d...", "...W#....#d...", "WWWWWWWWWWWWW#", "W#mkkkkkkkkm#d",
         "W#kkkW##mkkk#d", "W#kkkW##mkkk#d", "W#kkkkW#kkkk#d", "W#kkkkW#kkkk#d", "W#mkkkkkkkkm#d", "#mmmmmmmmmmmmd",
     ])
+    /// Search (a room's head): a lens — its rim lit on the upper left, dark glass with a glint — and its handle.
+    public static let search = ShadedSprite([
+        "..WWWW#......", ".W#mmmm#d....", "W#kWWkkk#d...", "W#kWkkkkm#d..", "W#kkkkkkm#d..", "W#kkkkkkm#d..",
+        ".#mkkkkm#d...", "..#mmmm#dW#..", "....ddd..W##m", "..........##m", "...........md",
+    ])
     /// The bar's menu of what is done now and then (`⋯`): three raised keys.
     public static let more = ShadedSprite(["WW#..WW#..WW#", "W#m..W#m..W#m", "#md..#md..#md"])
 
