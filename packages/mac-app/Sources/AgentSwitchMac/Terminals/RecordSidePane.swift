@@ -25,6 +25,7 @@ struct RecordSidePane: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 18)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ThinScrollers())
         }
         .background(InterfaceLook.current.isClassic ? Color.clear : Look.ground)
     }
@@ -85,7 +86,7 @@ struct RecordSidePane: View {
         VStack(alignment: .leading, spacing: 5) {
             if let all = record.diffs[file.work] {
                 if let found = all.first(where: { $0.path == file.path }) {
-                    RecordFileDiff(file: found, header: false)
+                    RecordFileDiff(file: found, header: false, wraps: true)
                     if file.runs > 1 { Text("最近一次的改动；这个文件一共改了 \(file.runs) 次。").font(.system(size: Look.size(11, look))).foregroundStyle(Look.faint) }
                 } else {
                     Text("没有记录到这次改动的内容。").font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint)
@@ -115,5 +116,35 @@ struct RecordPlanRows: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// The scroll view this sits in draws its bar over the content, thin and only while scrolling, whatever the system's
+/// "show scroll bars" says: with "always", a wide grey track stood beside the record and in the side pane (user #477).
+struct ThinScrollers: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Finder() }
+    func updateNSView(_ view: NSView, context: Context) { (view as? Finder)?.apply() }
+
+    private final class Finder: NSView {
+        nonisolated(unsafe) private var watch: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+            if watch == nil {
+                watch = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.apply() }
+                }
+            }
+        }
+
+        func apply() {
+            DispatchQueue.main.async { [weak self] in
+                guard let scroll = self?.enclosingScrollView, scroll.scrollerStyle != .overlay else { return }
+                scroll.scrollerStyle = .overlay
+            }
+        }
+
+        deinit { if let watch { NotificationCenter.default.removeObserver(watch) } }
     }
 }

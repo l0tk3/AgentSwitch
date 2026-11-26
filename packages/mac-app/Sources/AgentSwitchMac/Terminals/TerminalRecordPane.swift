@@ -146,6 +146,7 @@ struct TerminalRecordPane: View {
                             .frame(maxWidth: Self.column, alignment: .leading)
                             .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 14)
                             .frame(maxWidth: .infinity)
+                            .background(ThinScrollers())
                         }
                         // The end is what matters: there when it opens, and following it while the reader is there.
                         // A record already read when its view comes up (the window opened again, a pane switched back
@@ -933,6 +934,8 @@ struct RecordFileDiff: View {
     let file: FileDiff
     /// Its path and lines in and out above the hunks (not under a row that already says them).
     var header = true
+    /// Long lines go on below, not off the side.
+    var wraps = false
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
@@ -946,18 +949,9 @@ struct RecordFileDiff: View {
                 .padding(.horizontal, 10).padding(.vertical, 7)
                 HairRule(color: Look.line)
             }
-            // Code keeps its lines: a long one scrolls sideways, with the whole file's hunks.
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(file.hunks.enumerated()), id: \.offset) { _, hunk in
-                        if !hunk.header.isEmpty { line(hunk.header, color: Look.ink2, ground: Look.code) }
-                        ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, text in
-                            line(text, color: text.hasPrefix("+") ? Color.ok : text.hasPrefix("-") ? Color.failed : Look.ink.opacity(0.78),
-                                 ground: text.hasPrefix("+") ? Color.ok.opacity(0.1) : text.hasPrefix("-") ? Color.failed.opacity(0.1) : .clear)
-                        }
-                    }
-                }
-            }
+            // Code keeps its lines: a long one scrolls sideways, with the whole file's hunks. In the side pane, which is
+            // narrow, a long line goes on below instead: sideways it showed a slice of each (user #477).
+            if wraps { lines } else { ScrollView(.horizontal, showsIndicators: false) { lines } }
             if file.clipped {
                 HairRule(color: Look.line)
                 Text("改动很长，只显示开头。").font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint).padding(.horizontal, 10).padding(.vertical, 5)
@@ -968,8 +962,21 @@ struct RecordFileDiff: View {
         .framed(Look.line, radius: Look.cardRadius)
     }
 
+    private var lines: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(file.hunks.enumerated()), id: \.offset) { _, hunk in
+                if !hunk.header.isEmpty { line(hunk.header, color: Look.ink2, ground: Look.code) }
+                ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, text in
+                    line(text, color: text.hasPrefix("+") ? Color.ok : text.hasPrefix("-") ? Color.failed : Look.ink.opacity(0.78),
+                         ground: text.hasPrefix("+") ? Color.ok.opacity(0.1) : text.hasPrefix("-") ? Color.failed.opacity(0.1) : .clear)
+                }
+            }
+        }
+    }
+
     private func line(_ text: String, color: Color, ground: Color) -> some View {
-        Text(text.isEmpty ? " " : text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(color).lineLimit(1).fixedSize()
+        Text(text.isEmpty ? " " : text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(color)
+            .lineLimit(wraps ? nil : 1).fixedSize(horizontal: !wraps, vertical: true)
             .padding(.horizontal, 10).padding(.vertical, 1.5)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(ground)

@@ -199,6 +199,7 @@ private struct ChromeGround: View {
 /// pages and what they have going on are the rail's, the trouble and the page's context the status bar's. Its empty
 /// part moves the window and a double click zooms, as a title bar does. All of it changes with the page, at once.
 struct MainBar: View {
+    @AppStorage("terminals.recordSide") private var recordSide = true
     let state: MainWindowState
     let head: TerminalHead
     let actions: MainBarActions
@@ -247,6 +248,9 @@ struct MainBar: View {
                             ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
                                                help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
                         }
+                        // The simple view's side pane (tasks, changed files), shown or hidden from the bar (user #477: no
+                        // handy way to open and close it).
+                        if head.simple { ToolbarPixelButton(rows: PixelArt.toolbarSide, help: recordSide ? "Hide Side Pane" : "Show Side Pane", lit: recordSide) { recordSide.toggle() } }
                         // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
                         ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
                         ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }
