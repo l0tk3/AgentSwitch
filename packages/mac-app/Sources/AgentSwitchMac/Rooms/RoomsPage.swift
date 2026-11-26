@@ -1001,6 +1001,11 @@ private struct RoomSheet: View {
     @State private var name = ""
     @State private var topic = ""
     @State private var picked: [String] = []
+    /// Sessions to start with the channel (user #504): the ones added, and the one being filled in.
+    @State private var fresh: [RoomsModel.NewSession] = []
+    @State private var folder = ""
+    @State private var agent = "claude-code"
+    @State private var profile: [String: String] = [:]
     /// The search over the sessions to pick (2026-11-23, user: 和终端那里的搜索功能一样): by name, agent, model,
     /// profile and folder at once, and by what was said in them once typing pauses.
     @State private var query = ""
@@ -1057,7 +1062,7 @@ private struct RoomSheet: View {
     private var ready: Bool {
         switch kind {
         case .new, .edit: !name.trimmingCharacters(in: .whitespaces).isEmpty
-        case .add: !picked.isEmpty
+        case .add: !picked.isEmpty || !starting.isEmpty
         case .notes, .tasks, .files, .models, .avatar, .words: false
         }
     }
@@ -1075,6 +1080,8 @@ private struct RoomSheet: View {
                 }
                 if kind != .edit {
                     if kind == .new { HairRule(color: Look.line) }
+                    newSession
+                    HairRule(color: Look.line)
                     PartLabel("Running Sessions")
                     if !model.terminals.isEmpty { searchLine }
                     if candidates.isEmpty {
@@ -1097,7 +1104,7 @@ private struct RoomSheet: View {
                 }
                 Spacer()
                 Button { model.sheet = nil } label: { BracketLabel(word: "Cancel", key: "esc") }.buttonStyle(BracketButtonStyle()).keyboardShortcut(.cancelAction)
-                Button { model.finish(name: name, topic: topic, picked: picked) } label: {
+                Button { model.finish(name: name, topic: topic, picked: picked, fresh: starting) } label: {
                     BracketLabel(word: kind == .new ? "Create" : kind == .add ? "Add" : "Save", key: "↩")
                 }
                 .buttonStyle(BracketButtonStyle(role: .primary)).keyboardShortcut(.defaultAction).disabled(!ready)
@@ -1109,6 +1116,72 @@ private struct RoomSheet: View {
         .roomFloat()
         .onAppear {
             if kind == .edit, let room = model.room { name = room.room.name; topic = room.room.topic }
+        }
+    }
+
+    /// What is started on Create: the sessions added, and the one in the fields when it has a folder.
+    private var starting: [RoomsModel.NewSession] {
+        let typed = folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fresh + (typed.isEmpty ? [] : [RoomsModel.NewSession(folder: typed, agent: agent, profile: chosenProfile)])
+    }
+
+    /// The profile for the agent picked: nil where the agent has only the Mac's own.
+    private var chosenProfile: String? {
+        guard let list = model.profiles[agent], list.several else { return nil }
+        return profile[agent].flatMap { id in list.profiles.first { $0.id == id }?.id } ?? list.offered?.id
+    }
+
+    /// A session started with the channel: its folder (typed, chosen, or dropped here), its agent, its profile.
+    private var newSession: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PartLabel("New Session")
+            ForEach(fresh) { one in
+                HStack(spacing: 8) {
+                    AgentSprite(harness: one.agent)
+                    Text(TerminalTree.tilde(one.folder)).mono(12.5).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.head)
+                    if let id = one.profile, let name = model.profiles[one.agent]?.profiles.first(where: { $0.id == id })?.name {
+                        Text(name).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    Button { fresh.removeAll { $0.id == one.id } } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 12) }.buttonStyle(.plain).foregroundStyle(Look.ink2).help("Remove")
+                }
+                .padding(.horizontal, 4)
+            }
+            HStack(spacing: 8) {
+                RoomField(prompt: "~/Folder", text: $folder)
+                if !model.client().isRemote {
+                    Button {
+                        if let url = FolderPanel.choose(message: "选择新会话所在的文件夹。", startingAt: nil) { folder = url.path }
+                    } label: { BracketLabel(word: "Choose…") }.buttonStyle(BracketButtonStyle(size: 12))
+                }
+            }
+            HStack(spacing: 8) {
+                Picker("", selection: $agent) {
+                    ForEach(TerminalListText.agents, id: \.id) { Text($0.name).tag($0.id) }
+                }
+                .labelsHidden().fixedSize()
+                if let list = model.profiles[agent], list.several {
+                    Picker("", selection: Binding(get: { chosenProfile ?? "" }, set: { profile[agent] = $0 })) {
+                        ForEach(list.profiles, id: \.id) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                Spacer(minLength: 4)
+                Button {
+                    fresh.append(RoomsModel.NewSession(folder: folder.trimmingCharacters(in: .whitespacesAndNewlines), agent: agent, profile: chosenProfile))
+                    folder = ""
+                } label: { BracketLabel(word: "Add Another") }
+                .buttonStyle(BracketButtonStyle(size: 12))
+                .disabled(folder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        // A folder dragged onto the sheet is the folder (a file: the one it is in); this Mac's only.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !model.client().isRemote, let url = urls.first(where: \.isFileURL) else { return false }
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { return false }
+            folder = isFolder.boolValue ? url.path : url.deletingLastPathComponent().path
+            return true
         }
     }
 

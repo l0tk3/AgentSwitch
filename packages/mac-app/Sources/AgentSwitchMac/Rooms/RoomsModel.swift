@@ -826,12 +826,37 @@ final class RoomsModel {
         guard sheet == .new || sheet == .add, !demo else { return }
         Task {
             if let list = try? await client().terminals() { terminals = list.terminals.filter { $0.status != "exited" } }
+            if let all = try? await client().profiles() { profiles = all }
         }
     }
 
     /// The sheet's primary button: a room made with the sessions picked, sessions added to the one on screen, or its
     /// name and topic changed.
-    func finish(name: String, topic: String, picked: [String]) {
+    /// Each agent's profiles, for a session started from the sheet (user #504).
+    private(set) var profiles: [String: AgentProfiles] = [:]
+
+    /// A session to start and seat with the channel: where, which agent, under which profile.
+    struct NewSession: Identifiable, Equatable {
+        let id = UUID()
+        var folder: String
+        var agent: String
+        var profile: String?
+    }
+
+    /// The sessions asked for, started (permissions bypassed, as a session an admin brings in) and seated in `room`;
+    /// what went wrong with any of them, in words.
+    private func start(_ fresh: [NewSession], in room: String) async -> [String] {
+        var problems: [String] = []
+        for one in fresh {
+            do {
+                let made = try await client().createTerminal(NewTerminalRequest(harness: one.agent, cwd: one.folder, mode: "bypass", profile: one.profile))
+                try await client().seat(terminal: made.id, in: room)
+            } catch { problems.append("\(one.folder)：\(Self.say(error))") }
+        }
+        return problems
+    }
+
+    func finish(name: String, topic: String, picked: [String], fresh: [NewSession] = []) {
         guard let kind = sheet else { return }
         sheet = nil
         guard !demo else { return }
@@ -842,13 +867,15 @@ final class RoomsModel {
                 case .new:
                     let made = try await client().makeRoom(name: name, topic: topic, terminals: picked)
                     selected = made.room.id
-                    problem = made.problems.isEmpty ? nil : made.problems.joined(separator: " ")
+                    let all = made.problems + (await start(fresh, in: made.room.id))
+                    problem = all.isEmpty ? nil : all.joined(separator: " ")
                 case .add:
                     guard let id else { break }
                     var problems: [String] = []
                     for terminal in picked {
                         do { try await client().seat(terminal: terminal, in: id) } catch { problems.append(Self.say(error)) }
                     }
+                    problems += await start(fresh, in: id)
                     problem = problems.isEmpty ? nil : problems.joined(separator: " ")
                 case .notes, .tasks, .files, .models, .avatar, .words: break
                 case .edit:
