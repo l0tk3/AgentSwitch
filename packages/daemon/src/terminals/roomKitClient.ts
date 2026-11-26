@@ -70,9 +70,10 @@ async function answer(m: Rpc): Promise<void> {
         serverInfo: { name: "agentswitch-chatroom", version: "1" },
       });
       return;
-    case "notifications/initialized": void watch(); return;
+    case "notifications/initialized": if (!outside) void watch(); return;
     case "ping": reply({}); return;
     case "tools/list": {
+      if (outside) { reply({ tools: [] }); return; }
       try {
         const res = await ask({ op: "tools" }, CALL_WAIT_MS);
         if (res.status === 200) known = String(res.body.version ?? "");
@@ -82,6 +83,7 @@ async function answer(m: Rpc): Promise<void> {
       return;
     }
     case "tools/call": {
+      if (outside) { reply({ content: [{ type: "text", text: "AgentSwitch's Chat Room is there only in an AgentSwitch terminal." }], isError: true }); return; }
       try {
         const res = await ask({ op: "call", name: String(m.params?.name ?? ""), args: m.params?.arguments && typeof m.params.arguments === "object" ? m.params.arguments : {} }, CALL_WAIT_MS);
         if (res.status !== 200) { reply({ content: [{ type: "text", text: typeof res.body.error === "string" ? `AgentSwitch's Chat Room: ${res.body.error}` : AWAY }], isError: true }); return; }
@@ -94,7 +96,11 @@ async function answer(m: Rpc): Promise<void> {
   }
 }
 
-if (!url || !id || !token) { process.stderr.write("AgentSwitch's Chatroom Kit runs inside an AgentSwitch terminal.\n"); process.exit(1); }
+/** `--quiet-outside`: where the agent's own configuration names this server for every start of it (Grok's config.toml,
+ *  Antigravity's mcp_config.json: neither takes a server for one start), a start outside an AgentSwitch terminal has
+ *  a server with no tools instead of one that fails. */
+const outside = !url || !id || !token;
+if (outside && !process.argv.includes("--quiet-outside")) { process.stderr.write("AgentSwitch's Chatroom Kit runs inside an AgentSwitch terminal.\n"); process.exit(1); }
 const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   if (!line.trim()) return;

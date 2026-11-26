@@ -782,3 +782,36 @@ describe("Grok's models and commands", () => {
     expect(terminalBinaries(targets, "", env({ GROK_BIN: join(root, "nowhere", "grok") })).grok).toBe(onPath);
   });
 });
+
+describe("Grok in a Chat Room, a trusted folder, and no update check (2026-11-26)", () => {
+  it("writes the kit's server into config.toml once, keeps the rest, and replaces its own table when it changes", async () => {
+    const { mkdtempSync, readFileSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { ensureGrokKit, grokKitTable, withGrokKit, trustInGrok } = await import("../src/terminals/grokHooks.js");
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-grok-kit-"));
+    writeFileSync(join(home, "config.toml"), '[ui]\nyolo = true\n\n[mcp_servers.other]\ncommand = "x"\n');
+    expect(ensureGrokKit(home, "/n/node", "/s/kit.js", {})).toBe(true);
+    const first = readFileSync(join(home, "config.toml"), "utf8");
+    expect(first).toContain('[ui]\nyolo = true\n\n[mcp_servers.other]\ncommand = "x"\n\n[mcp_servers.chatroom]\ncommand = "/n/node"\nargs = ["/s/kit.js","--quiet-outside"]\n');
+    // The terminal's variables are named, not written: Grok fills them from the environment it starts in.
+    expect(first).toContain('AGENTSWITCH_TERMINAL_HOOK_TOKEN = "${AGENTSWITCH_TERMINAL_HOOK_TOKEN:-}"');
+    expect(ensureGrokKit(home, "/n/node", "/s/kit.js", {})).toBe(true);
+    expect(readFileSync(join(home, "config.toml"), "utf8")).toBe(first);
+    // Another node (the app moved): its table alone is replaced, a table after it kept.
+    const moved = withGrokKit(`${first}\n[models]\ndefault = "grok-4.7"\n`, grokKitTable("/new/node", "/s/kit.js"));
+    expect(moved).toContain('command = "/new/node"');
+    expect(moved).not.toContain('"/n/node"');
+    expect(moved).toContain('\n[models]\ndefault = "grok-4.7"\n');
+    expect(ensureGrokKit(home, "/n/node", "/s/kit.js", { AGENTSWITCH_GROK_MCP: "0" })).toBe(false);
+    expect(ensureGrokKit(join(home, "never"), "/n/node", "/s/kit.js", {})).toBe(false);
+
+    // Trust: a folder added as Grok writes one; one the user said no to stays.
+    expect(trustInGrok(home, ["/w/a"], 1_784_342_606_000)).toBe("written");
+    expect(readFileSync(join(home, "trusted_folders.toml"), "utf8")).toBe('[folders."/w/a"]\ntrusted = true\ndecided_at = 1784342606\n');
+    expect(trustInGrok(home, ["/w/a"])).toBe("already");
+    writeFileSync(join(home, "trusted_folders.toml"), '[folders."/w/no"]\ntrusted = false\ndecided_at = 1\n');
+    expect(trustInGrok(home, ["/w/no"])).toBe("skipped");
+    expect(readFileSync(join(home, "trusted_folders.toml"), "utf8")).toContain("trusted = false");
+  });
+});

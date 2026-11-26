@@ -60,6 +60,9 @@ export type LauncherOptions = {
    *  is in the folder Grok keeps its own in (grokHooks.ts `ensureGrokHooks`); else it goes without and its status is
    *  read from its window title and its output. */
   readonly grokHooks?: () => boolean;
+  /** The Chatroom Kit's server is in Grok's config.toml (grokHooks.ts `ensureGrokKit`), looked for at each start;
+   *  absent or false: a Grok session has no room tools. */
+  readonly grokKit?: () => boolean;
   /** OpenCode's TUI attaches to a private server the service starts and watches (status, permission requests;
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
@@ -504,6 +507,12 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // them this terminal's is its environment — the three variables above, and the program to run.
         const hooked = opts.grokHooks?.() ?? false;
         if (hooked) { env[GROK_HOOK_NODE] = node; env[GROK_HOOK_SCRIPT] = script; }
+        // It does not look for a new version of its own at start, nor fetch one behind the session (user #460):
+        // Settings › Agents says when there is one.
+        env.GROK_DISABLE_AUTOUPDATER = "1";
+        // The Chatroom Kit: a table of ours in its config.toml, the terminal named by the environment it starts in.
+        opts.grokKit?.();
+        if (opts.trustedFolders) pretrust("grok", req.cwd, env, opts.trustedFolders());
         const args: string[] = [];
         // The model and the level are configuration of this one start (`GROK_CONFIG`, which Grok lays over its
         // config.toml for the process), not flags: started with `--model` or `--reasoning-effort`, Grok writes them

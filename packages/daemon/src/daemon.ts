@@ -66,7 +66,7 @@ import { isAllowedSource } from "./remote/address.js";
 import { listenRemote, type RemoteListener } from "./remote/server.js";
 import { mergeLogged } from "./models/discovery.js";
 import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
-import { ensureGrokHooks, grokHome } from "./terminals/grokHooks.js";
+import { ensureGrokHooks, ensureGrokKit, grokHome } from "./terminals/grokHooks.js";
 import { ModelOffers } from "./models/modelOffers.js";
 import { readOpenCodeVariants } from "./models/opencodeVariants.js";
 import { DeviceStore } from "./remote/deviceStore.js";
@@ -78,7 +78,7 @@ import { KeptPictures } from "./sessions/pictures.js";
 import { openCodeDeleter, type OpenCodeDelete } from "./sessions/opencode.js";
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type KeptTerminal, type Launcher, type TerminalHarness } from "./terminals/host.js";
-import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S, restoreCompanion } from "./terminals/launch.js";
+import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S, restoreCompanion, ROOM_KIT_SCRIPT } from "./terminals/launch.js";
 import { loadTrustList } from "./terminals/trustedFolders.js";
 import { holding } from "./terminals/held.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
@@ -478,6 +478,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         // Grok's hooks are a file of ours in its own folder (terminals/grokHooks.ts), looked for — and written again
         // where it is gone — as each Grok terminal starts.
         grokHooks: () => ensureGrokHooks(grokHome(), QUICK_HOOK_TIMEOUT_S),
+        // The Chatroom Kit's server in Grok's config.toml, under this service's node.
+        grokKit: () => ensureGrokKit(grokHome(), process.execPath, ROOM_KIT_SCRIPT),
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's

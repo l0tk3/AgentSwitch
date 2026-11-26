@@ -57,7 +57,7 @@ export type AttentionItem = {
 
 const TROUBLE_NOTICE = "trouble";
 /** Agents that list their tools once, at their start. */
-const LISTS_ONCE: ReadonlySet<string> = new Set(["codex", "opencode"]);
+const LISTS_ONCE: ReadonlySet<string> = new Set(["codex", "opencode", "grok"]);
 
 /** A terminal's state in the room's words. What its screen says of reaching its service again comes first: it is at
  *  work or resting all the same, and can not answer. */

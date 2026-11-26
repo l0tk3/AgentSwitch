@@ -17,6 +17,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { trustInGrok } from "./grokHooks.js";
 import type { TerminalHarness } from "./host.js";
 
 export const TRUSTED_FOLDERS_FILE = "trusted-folders.json";
@@ -139,12 +140,14 @@ export type TrustOutcome = "written" | "already" | "skipped";
  *  is on the list. Never throws. */
 export function pretrust(harness: TerminalHarness, cwd: string, env: Readonly<Record<string, string | undefined>>, trusted: readonly string[] | TrustList, log: (line: string) => void = (l) => console.error(l)): TrustOutcome | null {
   try {
-    if (harness !== "claude-code" && harness !== "codex") return null;
+    if (harness !== "claude-code" && harness !== "codex" && harness !== "grok") return null;
     const list: TrustList = "folders" in trusted ? trusted : { folders: trusted, only: [] };
     // A folder trusted by itself is its own root: nothing above it (its repository's root) is marked with it.
     const root = trustedRootOf(cwd, list.folders) ?? (trustedAlone(cwd, list.only) ? cwd : null);
     if (!root) return null;
     const keys = trustKeys(cwd, root);
+    // Grok (1.0.92): `<GROK_HOME or ~/.grok>/trusted_folders.toml`.
+    if (harness === "grok") return trustInGrok(env.GROK_HOME || join(env.HOME || homedir(), ".grok"), keys);
     const out = harness === "claude-code" ? trustInClaude(claudeConfigFile(env), keys) : trustInCodex(codexConfigFile(env), keys);
     if (out.note) log(`trusted folders: ${harness}: ${out.note}`);
     return out.outcome;

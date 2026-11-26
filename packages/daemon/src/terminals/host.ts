@@ -1575,7 +1575,8 @@ export class TerminalHost {
         const mail = this.opts.mail?.(s.id, true) ?? null;
         if (!mail) return null;
         this.setStatus(s, "working");
-        return s.harness === "codex" ? { decision: "block", reason: mail } : { hookSpecificOutput: { hookEventName: "Stop", additionalContext: mail } };
+        // Grok's Stop takes the same answer as Codex's (its docs: `{"decision":"block","reason"}`).
+        return s.harness === "codex" || s.harness === "grok" ? { decision: "block", reason: mail } : { hookSpecificOutput: { hookEventName: "Stop", additionalContext: mail } };
       }
       case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
       case "SubagentStop": if (agentId && s.subagents.delete(agentId)) this.doing(s); return null;
@@ -1725,7 +1726,7 @@ export class TerminalHost {
     const s = this.sessions.get(id);
     if (!s || s.status !== "idle" || s.pending.size || s.attention) return false;
     if (s.companion?.say && await s.companion.say(text).catch(() => false)) return true;
-    if (s.harness !== "codex" && s.harness !== "opencode") return false;
+    if (s.harness !== "codex" && s.harness !== "opencode" && s.harness !== "grok") return false;
     if (this.sessions.get(id) !== s || s.status !== "idle" || this.choicesNow(s) || !inputEmpty(screenRows(s.term, s.rows))) return false;
     this.write(id, replyBytes(text, this.bracketedPaste(id), true));
     return true;

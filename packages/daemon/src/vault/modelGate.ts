@@ -21,6 +21,8 @@ export const MODEL_HOSTS: readonly string[] = [
   "generativelanguage.googleapis.com", "api.moonshot.cn", "api.moonshot.ai", "api.x.ai", "api.groq.com", "api.mistral.ai",
   "open.bigmodel.cn", "dashscope.aliyuncs.com", "api.minimax.chat", "api.siliconflow.cn", "ark.cn-beijing.volces.com",
   "opencode.ai", "api.z.ai",
+  // Grok Build (1.0.92): its chat goes to its own proxy of the API.
+  "cli-chat-proxy.grok.com",
 ];
 
 export type GateScope = { readonly terminal: string; readonly profile: string; readonly upstream: string | null; readonly baseUrl?: string };

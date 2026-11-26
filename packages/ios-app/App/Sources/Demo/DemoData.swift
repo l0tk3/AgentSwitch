@@ -277,10 +277,13 @@ enum DemoData {
          "nodes": ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇯🇵 日本-03", "🇺🇸 美国家宽-01", "🇺🇸 美国-02", "🇸🇬 新加坡-01", "🇸🇬 新加坡-02", "🇬🇧 英国-01", "🇩🇪 德国-01", "🇰🇷 韩国-01"],
          "profiles": [["uid": "Lbw7BJYzpand", "name": "mine.yaml", "type": "local"], ["uid": "Ro3yUVdr9kT1", "name": "Other", "type": "remote"]],
          "settings": ["claude": ["nodes": ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇺🇸 美国家宽-01"]], "openai": ["nodes": ["🇺🇸 美国家宽-01", "🇸🇬 新加坡-01"]],
+                      "grok": ["nodes": ["🇺🇸 美国-02"]], "agy": ["nodes": ["🇯🇵 日本-03"]],
                       "direct": ["5.102.107.254"], "autoUpdateHours": 24,
                       "templates": ["domestic": ["on": true, "rules": NSNull()], "block": ["on": false, "rules": NSNull()]], "renameDefault": false, "dns": ["on": false, "text": NSNull()]],
          "services": ["claude": ["group": "Claude", "auto": "Claude自动选择", "live": true, "now": "Claude自动选择", "autoNow": "🇯🇵 日本家宽-01", "missing": []],
-                      "openai": ["group": "OpenAI", "auto": "OpenAI自动选择", "live": true, "now": "🇸🇬 新加坡-01", "autoNow": "🇺🇸 美国家宽-01", "missing": []]],
+                      "openai": ["group": "OpenAI", "auto": "OpenAI自动选择", "live": true, "now": "🇸🇬 新加坡-01", "autoNow": "🇺🇸 美国家宽-01", "missing": []],
+                      "grok": ["group": "Grok", "auto": "Grok自动选择", "live": true, "now": "Grok自动选择", "autoNow": "🇺🇸 美国-02", "missing": []],
+                      "agy": ["group": "Antigravity", "auto": "Antigravity自动选择", "live": true, "now": "Antigravity自动选择", "autoNow": "🇯🇵 日本-03", "missing": []]],
          "templates": ["domestic": ["on": true, "custom": false, "count": 169], "block": ["on": false, "custom": false, "count": 27]],
          "defaultGroup": "节点选择", "dns": ["on": false, "custom": false, "overridden": false], "active": true, "upToDate": true, "install": "", "fetchedAt": ago(1800)]
     }
@@ -297,6 +300,8 @@ enum DemoData {
     static let clashDelays: [ClashService: [String: Int?]] = [
         .claude: ["🇯🇵 日本家宽-01": 96, "🇯🇵 日本家宽-02": 142, "🇺🇸 美国家宽-01": 428, "🇯🇵 日本-03": 118, "🇺🇸 美国-02": nil, "🇸🇬 新加坡-01": 187],
         .openai: ["🇺🇸 美国家宽-01": 402, "🇸🇬 新加坡-01": 187],
+        .grok: ["🇺🇸 美国-02": 398],
+        .agy: ["🇯🇵 日本-03": 118],
     ]
 
     static var clashChecked: [ClashCheckRow] {
@@ -305,6 +310,10 @@ enum DemoData {
              "observed": ["outcome": "proxied", "rule": "RuleSet as-claude", "path": ["Claude", "Claude自动选择", "🇯🇵 日本家宽-01"], "exit": ["ip": "126.36.1.2", "loc": "JP"], "ms": 362], "ok": true],
             ["id": "openai", "title": "OpenAI", "host": "chatgpt.com", "expect": ["kind": "group", "group": "OpenAI"],
              "observed": ["outcome": "proxied", "rule": "RuleSet as-openai", "path": ["OpenAI", "🇸🇬 新加坡-01"], "exit": ["ip": "8.219.4.7", "loc": "SG"], "ms": 418], "ok": true],
+            ["id": "grok", "title": "Grok", "host": "grok.com", "expect": ["kind": "group", "group": "Grok"],
+             "observed": ["outcome": "proxied", "rule": "RuleSet as-grok", "path": ["Grok", "Grok自动选择", "🇺🇸 美国-02"], "exit": ["ip": "64.7.198.20", "loc": "US"], "ms": 398], "ok": true],
+            ["id": "agy", "title": "Antigravity", "host": "antigravity.google", "expect": ["kind": "group", "group": "Antigravity"],
+             "observed": ["outcome": "proxied", "rule": "RuleSet as-agy", "path": ["Antigravity", "Antigravity自动选择", "🇯🇵 日本-03"], "exit": ["ip": "126.36.1.2", "loc": "JP"], "ms": 118], "ok": true],
             ["id": "domestic", "title": "Domestic", "host": "www.baidu.com", "expect": ["kind": "direct"],
              "observed": ["outcome": "direct", "rule": "RuleSet as-domestic", "path": ["DIRECT"], "ms": 41], "ok": true],
         ])

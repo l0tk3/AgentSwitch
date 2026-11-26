@@ -92,5 +92,5 @@ public enum TrustChoice: Int, CaseIterable, Sendable {
     }
 
     /// The agents that ask about a folder themselves; the others are started without the question.
-    public static func asks(_ harness: String) -> Bool { harness == "claude-code" || harness == "codex" }
+    public static func asks(_ harness: String) -> Bool { harness == "claude-code" || harness == "codex" || harness == "grok" }
 }

@@ -34,10 +34,13 @@ class ProxyTests {
                "providers":[{"name":"tgyun","host":"sub.example:9888","updatedAt":1,"nodes":3}],"traffic":{"used":3221225472,"total":107374182400,"expire":1893456000000}},
      "nodes":["🇯🇵 日本家宽-01","🇯🇵 日本家宽-02","🇺🇸 美国-01"],
      "profiles":[{"uid":"Lbw7BJYzpand","name":"mine.yaml","type":"local","file":"Lbw7BJYzpand.yaml"}],
-     "settings":{"claude":{"nodes":["🇯🇵 日本家宽-01","gone"]},"openai":{"nodes":[]},"direct":["5.102.107.254"],"autoUpdateHours":24,
+     "settings":{"claude":{"nodes":["🇯🇵 日本家宽-01","gone"]},"openai":{"nodes":[]},"grok":{"nodes":["🇺🇸 美国-01"]},"agy":{"nodes":[]},
+                 "direct":["5.102.107.254"],"autoUpdateHours":24,
                  "templates":{"domestic":{"on":true,"rules":null},"block":{"on":false,"rules":["DOMAIN-SUFFIX,ads.example"]}},"renameDefault":false,"dns":{"on":false,"text":null}},
      "services":{"claude":{"group":"Claude","auto":"Claude自动选择","live":true,"now":"Claude自动选择","autoNow":"🇯🇵 日本家宽-01","missing":["gone"]},
-                 "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]}},
+                 "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]},
+                 "grok":{"group":"Grok","auto":"Grok自动选择","live":true,"now":"🇺🇸 美国-01","autoNow":"🇺🇸 美国-01","missing":[]},
+                 "agy":{"group":"Antigravity","auto":"Antigravity自动选择","live":true,"now":"Antigravity自动选择","autoNow":"🇯🇵 日本家宽-02","missing":[]}},
      "templates":{"domestic":{"on":true,"custom":false,"count":169},"block":{"on":false,"custom":true,"count":1}},
      "defaultGroup":null,"dns":{"on":false,"custom":false,"overridden":false},"active":true,"upToDate":false,"install":"","fetchedAt":null}
     """
@@ -57,6 +60,11 @@ class ProxyTests {
         assertEquals(true, view.state(ClashService.Claude)?.automatic)
         assertEquals(listOf("gone"), view.state(ClashService.Claude)?.missing)
         assertEquals(false, view.state(ClashService.Openai)?.live)
+        // Grok and Agy (2026-11-26, user #508): a service each, beside the first two and named for the agent.
+        assertEquals(listOf("Claude", "OpenAI", "Grok", "Antigravity"), ClashService.entries.map { it.title })
+        assertEquals(listOf("🇺🇸 美国-01"), view.settings[ClashService.Grok].nodes)
+        assertEquals(true, view.state(ClashService.Agy)?.automatic)
+        assertEquals("🇯🇵 日本家宽-02", view.state(ClashService.Agy)?.autoNow)
         assertEquals(true, view.state(ClashTemplate.Block)?.custom)
         assertEquals(listOf("DOMAIN-SUFFIX,ads.example"), view.settings.templates.block.rules)
         val source = assertNotNull(view.source)
@@ -92,6 +100,15 @@ class ProxyTests {
         settings = settings.copy(ownRules = true)
         val again = KitJson.decodeFromString(ClashSettings.serializer(), KitJson.encodeToString(ClashSettings.serializer(), settings))
         assertTrue(again.ownRules)
+
+        // Grok and Agy go back with the rest; a Mac from before them says nothing of them, which is none.
+        assertEquals(listOf("🇺🇸 美国-01"), sent["grok"]!!.jsonObject["nodes"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertTrue(sent["agy"]!!.jsonObject["nodes"]!!.jsonArray.isEmpty())
+        val oldSettings = decodeClash().let { KitJson.encodeToJsonElement(ClashSettings.serializer(), it.settings) }.jsonObject
+            .let { JsonObject(it - "grok" - "agy") }
+        val fromOld = KitJson.decodeFromJsonElement(ClashSettings.serializer(), oldSettings)
+        assertTrue(fromOld[ClashService.Grok].nodes.isEmpty() && fromOld[ClashService.Agy].nodes.isEmpty())
+        assertEquals(listOf("🇯🇵 日本家宽-01", "gone"), fromOld[ClashService.Claude].nodes)
     }
 
     @Test
@@ -106,6 +123,8 @@ class ProxyTests {
         val api = api(transport)
         api.selectClash(ClashService.Claude, node = null)
         api.selectClash(ClashService.Openai, node = "🇺🇸 美国-01")
+        api.selectClash(ClashService.Grok, node = "🇺🇸 美国-01")
+        api.selectClash(ClashService.Agy, node = null)
         api.setClashSource(link = "https://sub.example/a?token=s")
         api.setClashSourceVerge("Lbw7BJYzpand")
         api.removeClashSource()
@@ -116,13 +135,17 @@ class ProxyTests {
         assertTrue("b" in delays && delays["b"] == null)
         assertEquals("RuleSet as-claude → Claude → 日本家宽-02", rows.first().route)
         assertEquals("JP 126.36.1.2 · 362 ms", rows.first().seen)
-        assertEquals(listOf("POST /clash/select", "POST /clash/select", "POST /clash/source", "POST /clash/source", "DELETE /clash/source",
-            "POST /clash/update", "POST /clash/delays", "POST /clash/check"), transport.requests.map { "${it.method} ${it.path}" })
+        assertEquals(listOf("POST /clash/select", "POST /clash/select", "POST /clash/select", "POST /clash/select", "POST /clash/source",
+            "POST /clash/source", "DELETE /clash/source", "POST /clash/update", "POST /clash/delays", "POST /clash/check"),
+            transport.requests.map { "${it.method} ${it.path}" })
         fun body(n: Int) = assertNotNull(transport.requests[n].jsonBody)
         assertTrue(body(0)["node"] is JsonNull)
         assertEquals("🇺🇸 美国-01", body(1)["node"]!!.jsonPrimitive.content)
-        assertEquals(JsonObject(mapOf("link" to JsonPrimitive("https://sub.example/a?token=s"))), body(2))
-        assertEquals(JsonObject(mapOf("service" to JsonPrimitive("claude"), "scope" to JsonPrimitive("all"))), body(6))
+        assertEquals("grok", body(2)["service"]!!.jsonPrimitive.content)
+        assertEquals("agy", body(3)["service"]!!.jsonPrimitive.content)
+        assertTrue(body(3)["node"] is JsonNull)
+        assertEquals(JsonObject(mapOf("link" to JsonPrimitive("https://sub.example/a?token=s"))), body(4))
+        assertEquals(JsonObject(mapOf("service" to JsonPrimitive("claude"), "scope" to JsonPrimitive("all"))), body(8))
     }
 
     @Test

@@ -26,7 +26,7 @@
  *
  *  Measured 2026-11-11 with the user's Grok 1.0.77 (headless runs and its TUI in a pty; docs/terminal-v0.md §3). */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HookCall } from "./host.js";
 
@@ -162,4 +162,91 @@ export function grokTitle(raw: string): GrokTitle {
   // The spinner, then what it is doing now: neither is the session's name.
   if (working) parts.splice(0, 2);
   return { title: parts.join(" - ").trim(), working, attention };
+}
+
+/** The Chatroom Kit for Grok (docs/chatroom-v0.md §6, 2026-11-26). Grok takes a tool server from its config.toml, not
+ *  for one start: so, as with the hooks, one table of ours in its own file — `[mcp_servers.chatroom]` — whose server
+ *  is the kit's under the service's node. Which terminal it speaks for is the environment's: Grok fills `${VAR}` in a
+ *  server's `env` when it loads the file, so the three variables of the terminal reach the server by name and the
+ *  hook token is in no file. Started anywhere else the server has no tools (`--quiet-outside`). */
+export const GROK_KIT_SERVER = "chatroom";
+const KIT_HEADER = `[mcp_servers.${GROK_KIT_SERVER}]`;
+const KIT_VARS = ["AGENTSWITCH_TERMINAL_ID", "AGENTSWITCH_TERMINAL_URL", "AGENTSWITCH_TERMINAL_HOOK_TOKEN"] as const;
+
+/** The table as it is written: TOML's basic strings are JSON's. */
+export function grokKitTable(node: string, script: string): string {
+  const env = KIT_VARS.map((v) => `${v} = ${JSON.stringify(`\${${v}:-}`)}`).join(", ");
+  return [KIT_HEADER, `command = ${JSON.stringify(node)}`, `args = ${JSON.stringify([script, "--quiet-outside"])}`, `env = { ${env} }`, "enabled = true", "startup_timeout_sec = 20"].join("\n");
+}
+
+/** `text` with our table as `table`: the one there replaced (from its header to the next table's), else added at the end. */
+export function withGrokKit(text: string, table: string): string {
+  const lines = text.split("\n");
+  const at = lines.findIndex((l) => l.trim() === KIT_HEADER);
+  if (at >= 0) {
+    let end = at + 1;
+    while (end < lines.length && !/^\s*\[/.test(lines[end]!)) end++;
+    // The blank lines before the next table stay with it.
+    while (end > at + 1 && lines[end - 1]!.trim() === "") end--;
+    lines.splice(at, end - at, ...table.split("\n"));
+    return lines.join("\n");
+  }
+  const body = text.replace(/\n+$/, "");
+  return `${body}${body ? "\n\n" : ""}${table}\n`;
+}
+
+/** The kit's table is in `home`'s config.toml, written now when it was missing or another. False: not there and not
+ *  written (Grok never ran here, the file can not be written, or `AGENTSWITCH_GROK_MCP=0`): the session then has no
+ *  room tools. */
+export function ensureGrokKit(home: string | null, node: string, script: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!home || env.AGENTSWITCH_GROK_MCP === "0") return false;
+  const file = join(home, "config.toml");
+  try {
+    if (!existsSync(home)) return false;
+    const had = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const next = withGrokKit(had, grokKitTable(node, script));
+    if (next === had) return true;
+    const part = `${file}.agentswitch-${process.pid}.part`;
+    writeFileSync(part, next, { mode: 0o644 });
+    renameSync(part, file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Folders trusted once in AgentSwitch, for Grok (terminals/trustedFolders.ts): `<home>/trusted_folders.toml`,
+ *  `[folders."<path>"]` with `trusted = true` and when (seconds). One the user said no to (`trusted = false`) stays. */
+export function trustInGrok(home: string, keys: readonly string[], now: number = Date.now()): "written" | "already" | "skipped" {
+  const file = join(home, "trusted_folders.toml");
+  try {
+    if (!existsSync(home)) return "skipped";
+    const had = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const lines = had.split("\n");
+    let changed = false;
+    for (const key of keys) {
+      const header = `[folders.${JSON.stringify(key)}]`;
+      const at = lines.findIndex((l) => l.trim() === header || l.trim() === `[folders.'${key}']`);
+      if (at >= 0) {
+        let end = at + 1;
+        while (end < lines.length && !/^\s*\[/.test(lines[end]!)) end++;
+        const said = lines.slice(at + 1, end).find((l) => /^\s*trusted\s*=/.test(l));
+        if (said && /=\s*true\b/.test(said)) continue;
+        if (said) return "skipped";
+        lines.splice(at + 1, 0, "trusted = true", `decided_at = ${Math.floor(now / 1000)}`);
+        changed = true;
+        continue;
+      }
+      if (lines[lines.length - 1] === "") lines.pop();
+      lines.push(...(lines.length ? [""] : []), header, "trusted = true", `decided_at = ${Math.floor(now / 1000)}`, "");
+      changed = true;
+    }
+    if (!changed) return "already";
+    const part = `${file}.agentswitch-${process.pid}.part`;
+    writeFileSync(part, lines.join("\n"), { mode: 0o600 });
+    renameSync(part, file);
+    return "written";
+  } catch {
+    return "skipped";
+  }
 }

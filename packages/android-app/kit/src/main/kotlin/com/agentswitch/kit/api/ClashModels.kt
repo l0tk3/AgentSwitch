@@ -33,9 +33,18 @@ import kotlinx.serialization.json.jsonPrimitive
  * …` here is `settings.with(ClashService.Openai, ClashServiceNodes(…))`, and the same for a template.
  */
 enum class ClashService(val rawValue: String) {
-    Claude("claude"), Openai("openai");
+    Claude("claude"), Openai("openai"),
 
-    val title: String get() = if (this == Claude) "Claude" else "OpenAI"
+    /** `grok`, `agy` (2026-11-26, user #508): Grok Build and the Antigravity CLI have rules of their own. */
+    Grok("grok"), Agy("agy");
+
+    val title: String
+        get() = when (this) {
+            Claude -> "Claude"
+            Openai -> "OpenAI"
+            Grok -> "Grok"
+            Agy -> "Antigravity"
+        }
 }
 
 @Serializable
@@ -151,6 +160,8 @@ data class ClashDNSText(val text: String, val custom: Boolean)
 data class ClashSettings(
     val claude: ClashServiceNodes = ClashServiceNodes(),
     val openai: ClashServiceNodes = ClashServiceNodes(),
+    val grok: ClashServiceNodes = ClashServiceNodes(),
+    val agy: ClashServiceNodes = ClashServiceNodes(),
     val direct: List<String> = emptyList(),
     /** The subscription is fetched again after this many hours; 0: only when asked. */
     val autoUpdateHours: Int = 24,
@@ -164,11 +175,20 @@ data class ClashSettings(
      */
     val ownRules: Boolean = false,
 ) {
-    operator fun get(service: ClashService): ClashServiceNodes = if (service == ClashService.Claude) claude else openai
+    operator fun get(service: ClashService): ClashServiceNodes = when (service) {
+        ClashService.Claude -> claude
+        ClashService.Openai -> openai
+        ClashService.Grok -> grok
+        ClashService.Agy -> agy
+    }
 
     /** Swift's `subscript` setter. */
-    fun with(service: ClashService, nodes: ClashServiceNodes): ClashSettings =
-        if (service == ClashService.Claude) copy(claude = nodes) else copy(openai = nodes)
+    fun with(service: ClashService, nodes: ClashServiceNodes): ClashSettings = when (service) {
+        ClashService.Claude -> copy(claude = nodes)
+        ClashService.Openai -> copy(openai = nodes)
+        ClashService.Grok -> copy(grok = nodes)
+        ClashService.Agy -> copy(agy = nodes)
+    }
 
     companion object {
         /** The intervals offered (the service takes no other). */
@@ -176,12 +196,19 @@ data class ClashSettings(
     }
 }
 
-/** A Mac from before §7.11 says nothing of `ownRules`: off. Every other field is required, as in Swift. */
+/**
+ * A Mac from before §7.11 says nothing of `ownRules`: off; one from before `grok` and `agy` nothing of them: none.
+ * Every other field is required, as in Swift.
+ */
 object ClashSettingsSerializer : KSerializer<ClashSettings> {
     override val descriptor: SerialDescriptor = JsonElement.serializer().descriptor
 
     private fun <T> JsonObject.need(key: String, serializer: KSerializer<T>): T =
         KitJson.decodeFromJsonElement(serializer, this[key] ?: throw SerializationException("$key missing"))
+
+    /** A service from before them (a Mac not yet updated) has none. */
+    private fun JsonObject.orEmpty(key: String): ClashServiceNodes =
+        this[key]?.takeIf { it !is JsonNull }?.let { KitJson.decodeFromJsonElement(ClashServiceNodes.serializer(), it) } ?: ClashServiceNodes()
 
     override fun deserialize(decoder: Decoder): ClashSettings {
         val o = decoder.jsonObject("ClashSettings")
@@ -189,6 +216,8 @@ object ClashSettingsSerializer : KSerializer<ClashSettings> {
         return ClashSettings(
             claude = o.need("claude", ClashServiceNodes.serializer()),
             openai = o.need("openai", ClashServiceNodes.serializer()),
+            grok = o.orEmpty("grok"),
+            agy = o.orEmpty("agy"),
             direct = o.need("direct", ListSerializer(String.serializer())),
             autoUpdateHours = o.need("autoUpdateHours", Int.serializer()),
             templates = o.need("templates", ClashTemplates.serializer()),
@@ -201,6 +230,8 @@ object ClashSettingsSerializer : KSerializer<ClashSettings> {
     override fun serialize(encoder: Encoder, value: ClashSettings) = encoder.writeObject(
         "claude" to KitJson.encodeToJsonElement(ClashServiceNodes.serializer(), value.claude),
         "openai" to KitJson.encodeToJsonElement(ClashServiceNodes.serializer(), value.openai),
+        "grok" to KitJson.encodeToJsonElement(ClashServiceNodes.serializer(), value.grok),
+        "agy" to KitJson.encodeToJsonElement(ClashServiceNodes.serializer(), value.agy),
         "direct" to value.direct.toJson(),
         "autoUpdateHours" to JsonPrimitive(value.autoUpdateHours),
         "templates" to KitJson.encodeToJsonElement(ClashTemplates.serializer(), value.templates),

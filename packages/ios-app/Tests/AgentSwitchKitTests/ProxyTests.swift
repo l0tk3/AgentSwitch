@@ -13,10 +13,13 @@ final class ProxyTests: XCTestCase {
                "providers":[{"name":"tgyun","host":"sub.example:9888","updatedAt":1,"nodes":3}],"traffic":{"used":3221225472,"total":107374182400,"expire":1893456000000}},
      "nodes":["🇯🇵 日本家宽-01","🇯🇵 日本家宽-02","🇺🇸 美国-01"],
      "profiles":[{"uid":"Lbw7BJYzpand","name":"mine.yaml","type":"local","file":"Lbw7BJYzpand.yaml"}],
-     "settings":{"claude":{"nodes":["🇯🇵 日本家宽-01","gone"]},"openai":{"nodes":[]},"direct":["5.102.107.254"],"autoUpdateHours":24,
+     "settings":{"claude":{"nodes":["🇯🇵 日本家宽-01","gone"]},"openai":{"nodes":[]},"grok":{"nodes":["🇺🇸 美国-01"]},"agy":{"nodes":[]},
+                 "direct":["5.102.107.254"],"autoUpdateHours":24,
                  "templates":{"domestic":{"on":true,"rules":null},"block":{"on":false,"rules":["DOMAIN-SUFFIX,ads.example"]}},"renameDefault":false,"dns":{"on":false,"text":null}},
      "services":{"claude":{"group":"Claude","auto":"Claude自动选择","live":true,"now":"Claude自动选择","autoNow":"🇯🇵 日本家宽-01","missing":["gone"]},
-                 "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]}},
+                 "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]},
+                 "grok":{"group":"Grok","auto":"Grok自动选择","live":true,"now":"🇺🇸 美国-01","autoNow":"🇺🇸 美国-01","missing":[]},
+                 "agy":{"group":"Antigravity","auto":"Antigravity自动选择","live":true,"now":"Antigravity自动选择","autoNow":"🇯🇵 日本家宽-02","missing":[]}},
      "templates":{"domestic":{"on":true,"custom":false,"count":169},"block":{"on":false,"custom":true,"count":1}},
      "defaultGroup":null,"dns":{"on":false,"custom":false,"overridden":false},"active":true,"upToDate":false,"install":"","fetchedAt":null}
     """#
@@ -30,6 +33,11 @@ final class ProxyTests: XCTestCase {
         XCTAssertEqual(view.state(.claude)?.automatic, true)
         XCTAssertEqual(view.state(.claude)?.missing, ["gone"])
         XCTAssertEqual(view.state(.openai)?.live, false)
+        // Grok and Agy (2026-11-26, user #508): a service each, beside the first two and named for the agent.
+        XCTAssertEqual(ClashService.allCases.map(\.title), ["Claude", "OpenAI", "Grok", "Antigravity"])
+        XCTAssertEqual(view.settings[.grok].nodes, ["🇺🇸 美国-01"])
+        XCTAssertEqual(view.state(.agy)?.automatic, true)
+        XCTAssertEqual(view.state(.agy)?.autoNow, "🇯🇵 日本家宽-02")
         XCTAssertEqual(view.state(.block)?.custom, true)
         XCTAssertEqual(view.settings.templates.block.rules, ["DOMAIN-SUFFIX,ads.example"])
         let source = try XCTUnwrap(view.source)
@@ -67,6 +75,17 @@ final class ProxyTests: XCTestCase {
         settings.ownRules = true
         let again = try JSONDecoder().decode(ClashSettings.self, from: JSONEncoder().encode(settings))
         XCTAssertTrue(again.ownRules)
+
+        // Grok and Agy go back with the rest; a Mac from before them says nothing of them, which is none.
+        XCTAssertEqual((sent["grok"] as? [String: [String]])?["nodes"], ["🇺🇸 美国-01"])
+        XCTAssertEqual((sent["agy"] as? [String: [String]])?["nodes"], [String](), "none chosen, said as none")
+        let older = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.clash.utf8)) as? [String: Any])
+        var oldSettings = try XCTUnwrap(older["settings"] as? [String: Any])
+        oldSettings.removeValue(forKey: "grok")
+        oldSettings.removeValue(forKey: "agy")
+        let fromOld = try JSONDecoder().decode(ClashSettings.self, from: JSONSerialization.data(withJSONObject: oldSettings))
+        XCTAssertTrue(fromOld[.grok].nodes.isEmpty && fromOld[.agy].nodes.isEmpty)
+        XCTAssertEqual(fromOld[.claude].nodes, ["🇯🇵 日本家宽-01", "gone"])
     }
 
     /// Several subscriptions (docs/clash-v0.md §10): read as the Mac lists them, and each call as the service takes it.
@@ -125,6 +144,8 @@ final class ProxyTests: XCTestCase {
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
         _ = try await api.selectClash(.claude, node: nil)
         _ = try await api.selectClash(.openai, node: "🇺🇸 美国-01")
+        _ = try await api.selectClash(.grok, node: "🇺🇸 美国-01")
+        _ = try await api.selectClash(.agy, node: nil)
         _ = try await api.setClashSource(link: "https://sub.example/a?token=s")
         _ = try await api.setClashSource(verge: "Lbw7BJYzpand")
         _ = try await api.removeClashSource()
@@ -136,12 +157,16 @@ final class ProxyTests: XCTestCase {
         XCTAssertEqual(rows.first?.route, "RuleSet as-claude → Claude → 日本家宽-02")
         XCTAssertEqual(rows.first?.seen, "JP 126.36.1.2 · 362 ms")
         XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" },
-                       ["POST /clash/select", "POST /clash/select", "POST /clash/source", "POST /clash/source", "DELETE /clash/source", "POST /clash/update", "POST /clash/delays", "POST /clash/check"])
+                       ["POST /clash/select", "POST /clash/select", "POST /clash/select", "POST /clash/select", "POST /clash/source", "POST /clash/source",
+                        "DELETE /clash/source", "POST /clash/update", "POST /clash/delays", "POST /clash/check"])
         func body(_ n: Int) throws -> [String: Any] { try XCTUnwrap(transport.requests[n].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] }) }
         XCTAssertTrue(try body(0)["node"] is NSNull)
         XCTAssertEqual(try body(1)["node"] as? String, "🇺🇸 美国-01")
-        XCTAssertEqual(try body(2) as? [String: String], ["link": "https://sub.example/a?token=s"])
-        XCTAssertEqual(try body(6) as? [String: String], ["service": "claude", "scope": "all"])
+        XCTAssertEqual(try body(2)["service"] as? String, "grok")
+        XCTAssertEqual(try body(3)["service"] as? String, "agy")
+        XCTAssertTrue(try body(3)["node"] is NSNull)
+        XCTAssertEqual(try body(4) as? [String: String], ["link": "https://sub.example/a?token=s"])
+        XCTAssertEqual(try body(8) as? [String: String], ["service": "claude", "scope": "all"])
     }
 
     func testAMacThatKeepsProxiesToItselfShowsNothing() async throws {

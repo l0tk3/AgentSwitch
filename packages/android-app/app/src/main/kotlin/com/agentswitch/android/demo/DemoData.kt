@@ -448,6 +448,7 @@ object DemoData {
                 "settings" to mapOf(
                     "claude" to mapOf("nodes" to listOf("🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇺🇸 美国家宽-01")),
                     "openai" to mapOf("nodes" to listOf("🇺🇸 美国家宽-01", "🇸🇬 新加坡-01")),
+                    "grok" to mapOf("nodes" to listOf("🇺🇸 美国-02")), "agy" to mapOf("nodes" to listOf("🇯🇵 日本-03")),
                     "direct" to listOf("5.102.107.254"), "autoUpdateHours" to 24,
                     "templates" to mapOf("domestic" to mapOf("on" to true, "rules" to null), "block" to mapOf("on" to false, "rules" to null)),
                     "renameDefault" to false, "dns" to mapOf("on" to false, "text" to null),
@@ -455,6 +456,8 @@ object DemoData {
                 "services" to mapOf(
                     "claude" to mapOf("group" to "Claude", "auto" to "Claude自动选择", "live" to true, "now" to "Claude自动选择", "autoNow" to "🇯🇵 日本家宽-01", "missing" to emptyList<Any?>()),
                     "openai" to mapOf("group" to "OpenAI", "auto" to "OpenAI自动选择", "live" to true, "now" to "🇸🇬 新加坡-01", "autoNow" to "🇺🇸 美国家宽-01", "missing" to emptyList<Any?>()),
+                    "grok" to mapOf("group" to "Grok", "auto" to "Grok自动选择", "live" to true, "now" to "Grok自动选择", "autoNow" to "🇺🇸 美国-02", "missing" to emptyList<Any?>()),
+                    "agy" to mapOf("group" to "Antigravity", "auto" to "Antigravity自动选择", "live" to true, "now" to "Antigravity自动选择", "autoNow" to "🇯🇵 日本-03", "missing" to emptyList<Any?>()),
                 ),
                 "templates" to mapOf("domestic" to mapOf("on" to true, "custom" to false, "count" to 169), "block" to mapOf("on" to false, "custom" to false, "count" to 27)),
                 "defaultGroup" to "节点选择", "dns" to mapOf("on" to false, "custom" to false, "overridden" to false), "active" to true, "upToDate" to true, "install" to "", "fetchedAt" to ago(1800),
@@ -467,10 +470,12 @@ object DemoData {
     /** The same page after a setting was changed here (no Mac to keep it): [settings] is the encoded `ClashSettings`. */
     fun clash(settings: JsonElement): JsonObject = JsonObject(clashObject + ("settings" to settings))
 
-    /** Per service (`claude`, `openai`: the `ClashService` raw values), a node's delay in ms; null: it timed out. */
+    /** Per service (the `ClashService` raw values), a node's delay in ms; null: it timed out. */
     val clashDelays: Map<String, Map<String, Int?>> = mapOf(
         "claude" to mapOf("🇯🇵 日本家宽-01" to 96, "🇯🇵 日本家宽-02" to 142, "🇺🇸 美国家宽-01" to 428, "🇯🇵 日本-03" to 118, "🇺🇸 美国-02" to null, "🇸🇬 新加坡-01" to 187),
         "openai" to mapOf("🇺🇸 美国家宽-01" to 402, "🇸🇬 新加坡-01" to 187),
+        "grok" to mapOf("🇺🇸 美国-02" to 398),
+        "agy" to mapOf("🇯🇵 日本-03" to 118),
     )
 
     /** The rows of the Clash check, as JSON (the kit has no `ClashCheckRow` yet). */
@@ -484,6 +489,14 @@ object DemoData {
                 mapOf(
                     "id" to "openai", "title" to "OpenAI", "host" to "chatgpt.com", "expect" to mapOf("kind" to "group", "group" to "OpenAI"),
                     "observed" to mapOf("outcome" to "proxied", "rule" to "RuleSet as-openai", "path" to listOf("OpenAI", "🇸🇬 新加坡-01"), "exit" to mapOf("ip" to "8.219.4.7", "loc" to "SG"), "ms" to 418), "ok" to true,
+                ),
+                mapOf(
+                    "id" to "grok", "title" to "Grok", "host" to "grok.com", "expect" to mapOf("kind" to "group", "group" to "Grok"),
+                    "observed" to mapOf("outcome" to "proxied", "rule" to "RuleSet as-grok", "path" to listOf("Grok", "Grok自动选择", "🇺🇸 美国-02"), "exit" to mapOf("ip" to "64.7.198.20", "loc" to "US"), "ms" to 398), "ok" to true,
+                ),
+                mapOf(
+                    "id" to "agy", "title" to "Antigravity", "host" to "antigravity.google", "expect" to mapOf("kind" to "group", "group" to "Antigravity"),
+                    "observed" to mapOf("outcome" to "proxied", "rule" to "RuleSet as-agy", "path" to listOf("Antigravity", "Antigravity自动选择", "🇯🇵 日本-03"), "exit" to mapOf("ip" to "126.36.1.2", "loc" to "JP"), "ms" to 118), "ok" to true,
                 ),
                 mapOf(
                     "id" to "domestic", "title" to "Domestic", "host" to "www.baidu.com", "expect" to mapOf("kind" to "direct"),
