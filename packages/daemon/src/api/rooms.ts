@@ -375,7 +375,8 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     try {
       const id = c.req.param("id"), handle = c.req.param("handle").replace(/^@/, "").toLowerCase();
       const seat = rooms.get(id).seats.find((s) => s.handle === handle && s.left === undefined);
-      if (!seat?.terminal || seat.kind !== "session") throw new RoomError(404, `房间里没有 @${handle} 这个会话`);
+      const own = seat?.kind === "user";
+      if (!own && (!seat?.terminal || seat.kind !== "session")) throw new RoomError(404, `房间里没有 @${handle} 这个会话`);
       const change: { pixel?: PixelAvatar | null; classic?: ClassicAvatar | null } = {};
       if (body.data.pixel !== undefined) {
         const p = body.data.pixel === null ? null : pixelFrom(body.data.pixel);
@@ -387,7 +388,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
         if (typeof k === "string") throw new RoomError(400, k);
         change.classic = k;
       }
-      const avatar = rooms.setAvatar(seat.terminal, change);
+      const avatar = own ? rooms.setUserAvatar(change) : rooms.setAvatar(seat!.terminal!, change);
       deps.roomsChanged?.(id);
       return c.json({ avatar });
     } catch (err) { return refused(c, err); }

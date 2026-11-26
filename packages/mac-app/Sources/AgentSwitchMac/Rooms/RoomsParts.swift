@@ -25,7 +25,8 @@ struct RoomFaceView: View {
     var body: some View {
         let classic = look.isClassic
         Group {
-            if seat?.isUser == true {
+            // The user's own: `YOU`, until they choose one for this look (user #495).
+            if seat?.isUser == true, (classic ? seat?.avatar?.classic == nil : seat?.avatar?.pixel == nil) {
                 Text("YOU").font(.system(size: side * 0.38, weight: .bold, design: classic ? .default : .monospaced))
                     .foregroundStyle(classic ? Color.white : Look.ground)
                     .frame(width: side, height: side)
@@ -105,11 +106,13 @@ struct RoomClassicAvatar: View {
         let chosen = seat?.avatar?.classic
         let bg = Color.faces[((chosen?.bg ?? seat?.face?.colorIndex ?? 0) % 10 + 10) % 10]
         ZStack {
-            Circle().fill(chosen == nil ? bg : bg.opacity(0.28))
+            // None chosen (user #494, of six drawn: B): its initials in its colour on a light wash of the same — a
+            // solid disc under white letters was heavy with several in a row.
+            Circle().fill(bg.opacity(chosen == nil ? 0.2 : 0.28))
             if let chosen {
                 Text(chosen.emoji).font(.system(size: side * 0.58))
             } else {
-                Text(Self.initials(seat?.handle ?? "?")).font(.system(size: side * 0.4, weight: .semibold)).foregroundStyle(Color.white)
+                Text(Self.initials(seat?.handle ?? "?")).font(.system(size: side * 0.4, weight: .bold)).foregroundStyle(bg)
             }
         }
         .frame(width: side, height: side)

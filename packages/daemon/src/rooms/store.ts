@@ -16,6 +16,9 @@ import { avatarKeys, type Avatar } from "./avatars.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
 /** The most a session may say in one message: the rest belongs in a file. */
+/** The key the user's own avatar is kept under (sessions' are `s:` and `t:`). */
+const USER_AVATAR = "u:you";
+
 export const MAX_SESSION_TEXT = 800;
 export const MAX_ROOMS = 100, MAX_SEATS = 16, MAX_NAME = 60, MAX_TOPIC = 300, MAX_TEXT = 16_000;
 /** §9: the pinned notes, one text every member reads and writes; a message carries this many files at most. */
@@ -346,12 +349,28 @@ export class RoomStore {
 
   /** A seat's avatar (avatars.ts): its session's, whatever room; null: none chosen (its face and its initials). */
   avatarOf(seat: Seat): Avatar | null {
+    // The user's own (user #495), one for every room.
+    if (seat.kind === "user") {
+      const raw = this.db.avatar(USER_AVATAR);
+      if (raw) { try { return JSON.parse(raw) as Avatar; } catch { /* torn: as none */ } }
+      return null;
+    }
     if (seat.kind !== "session") return null;
     for (const key of avatarKeys({ session: seat.session?.id ?? null, terminal: seat.terminal ?? null })) {
       const raw = this.db.avatar(key);
       if (raw) { try { return JSON.parse(raw) as Avatar; } catch { /* torn: as none */ } }
     }
     return null;
+  }
+
+  /** The user's avatar changed, one look or both; null: back to `YOU`. */
+  setUserAvatar(change: { readonly pixel?: Avatar["pixel"]; readonly classic?: Avatar["classic"] }): Avatar {
+    let was: Avatar = { pixel: null, classic: null };
+    const raw = this.db.avatar(USER_AVATAR);
+    if (raw) { try { was = JSON.parse(raw) as Avatar; } catch { /* torn: as none */ } }
+    const next: Avatar = { pixel: change.pixel === undefined ? was.pixel : change.pixel, classic: change.classic === undefined ? was.classic : change.classic };
+    this.db.putAvatar(USER_AVATAR, JSON.stringify(next));
+    return next;
   }
 
   /** A session's avatar changed, one look or both: kept by its conversation (and its terminal, until the agent has

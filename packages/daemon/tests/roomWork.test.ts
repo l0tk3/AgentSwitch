@@ -1017,6 +1017,12 @@ describe("a session's avatar, its own in every room (2026-11-24)", () => {
     expect((await call("GET", `/rooms/${room.id}`)).body.seats.find((s: { handle: string }) => s.handle === "ui").avatar.pixel.id).toBe("f3");
     await call("PUT", `/rooms/${room.id}/seats/ui/avatar`, { pixel: null });
     expect((await call("GET", `/rooms/${room.id}`)).body.seats.find((s: { handle: string }) => s.handle === "ui").avatar.pixel).toBeNull();
+    // The user's own (user #495): one for every room, `YOU` again when put back.
+    expect((await call("PUT", `/rooms/${room.id}/seats/you/avatar`, { classic: { emoji: "🦉", bg: 3 } })).body.avatar.classic).toMatchObject({ emoji: "🦉", bg: 3 });
+    const mine = async (id: string) => (await call("GET", `/rooms/${id}`)).body.seats.find((s: { handle: string }) => s.handle === "you").avatar;
+    expect((await mine(other.id)).classic.emoji).toBe("🦉");
+    await call("PUT", `/rooms/${room.id}/seats/you/avatar`, { classic: null });
+    expect((await mine(room.id)).classic).toBeNull();
     expect((await call("GET", "/rooms/avatars")).body.art).toHaveLength(48);
   });
 });

@@ -279,18 +279,122 @@ private struct RoomsList: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
-            RoomAttentionEntry(model: model)
+            // Three groups, each folded or open as it was left (user #488, #492): what waits for the user — the
+            // 等你处理 entry's list, now rows here —, the dispatch desk, and the channels.
             ScrollView {
                 LazyVStack(spacing: look.isClassic ? 2 : 0) {
-                    ForEach(model.rooms) { room in
-                        RoomListRow(room: room, current: room.id == model.selected) { model.selected = room.id }
+                    if !mentions.isEmpty {
+                        RoomGroupHead(title: "Mentions", count: mentionCount, hot: true, folded: $mentionsFolded)
+                        if !mentionsFolded { ForEach(mentions) { item in RoomMentionRow(item: item) { item.open(model) } } }
                     }
+                    let desks = model.rooms.filter(\.desk)
+                    if !desks.isEmpty {
+                        RoomGroupHead(title: "Dispatch", count: desks.reduce(0) { $0 + $1.unread }, hot: desks.contains { $0.forYou }, folded: $dispatchFolded)
+                        if !dispatchFolded { rows(desks) }
+                    }
+                    let topics = model.rooms.filter { !$0.desk }
+                    RoomGroupHead(title: "Topics", count: topics.reduce(0) { $0 + $1.unread }, hot: topics.contains { $0.forYou }, folded: $topicsFolded)
+                    if !topicsFolded { rows(topics) }
                 }
                 .padding(.bottom, 8)
             }
         }
         .background(look.isClassic ? Color.clear : Look.ground)
         .sideCard(trailing: Look.panelGap)
+        .task(id: model.attentionCount) { await model.loadAttention() }
+    }
+
+    @AppStorage("rooms.fold.mentions") private var mentionsFolded = false
+    @AppStorage("rooms.fold.dispatch") private var dispatchFolded = false
+    @AppStorage("rooms.fold.topics") private var topicsFolded = false
+
+    private func rows(_ rooms: [RoomSummary]) -> some View {
+        ForEach(rooms) { room in
+            RoomListRow(room: room, current: room.id == model.selected) { model.selected = room.id }
+        }
+    }
+
+    /// What waits on the user's hand, a row each, then the channels with a message for the user and nothing else
+    /// waiting in them.
+    private var mentions: [RoomMention] {
+        let waiting = model.attention.map { item in RoomMention(id: item.id, room: item.roomName, line: item.line, open: { $0.open(attention: item) }) }
+        let held = Set(model.attention.map(\.room))
+        let said = model.rooms.filter { $0.forYou && $0.unread > 0 && !held.contains($0.id) }.map { room in
+            RoomMention(id: "said|\(room.id)", room: room.name, line: room.lastLine, open: { $0.selected = room.id })
+        }
+        return waiting + said
+    }
+
+    private var mentionCount: Int { mentions.count }
+}
+
+/// A row of `Mentions`: the channel, and under it who waits and for what.
+struct RoomMention: Identifiable {
+    let id: String
+    let room: String
+    let line: String
+    let open: @MainActor (RoomsModel) -> Void
+}
+
+/// A group's head in the channel list: its name, how much is new in it, and the mark that folds it.
+private struct RoomGroupHead: View {
+    let title: String
+    let count: Int
+    /// Something in it is for the user: the count in amber.
+    let hot: Bool
+    @Binding var folded: Bool
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Button { folded.toggle() } label: {
+            HStack(spacing: 6) {
+                LookGlyph(glyph: folded ? "▸" : "▾", symbol: folded ? "chevron.right" : "chevron.down", size: 9).foregroundStyle(Look.faint).frame(width: 10)
+                PartLabel(title)
+                Spacer(minLength: 4)
+                if count > 0 {
+                    if look.isClassic {
+                        Text("\(count)").font(.system(size: 10.5, weight: .bold)).foregroundStyle(hot ? Color.white : Look.ink2)
+                            .padding(.horizontal, 5).frame(minWidth: 17, minHeight: 17).background(Capsule().fill(hot ? Color.waiting : Look.raised))
+                    } else {
+                        Text("[\(count)]").code(11.5).foregroundStyle(hot ? Color.waiting : Look.ink2)
+                    }
+                }
+            }
+            .padding(.horizontal, look.isClassic ? 14 : 12)
+            .padding(.top, 10).padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(folded ? "Expand" : "Collapse")
+    }
+}
+
+private struct RoomMentionRow: View {
+    let item: RoomMention
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("@").font(.system(size: 14, weight: .regular, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Color.waiting).frame(width: 14)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.room).mono(13, weight: look.isClassic ? .semibold : .regular).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.tail)
+                    Text(item.line).font(.system(size: 11.5)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, look.isClassic ? 10 : 12)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: look.isClassic ? Look.controlRadius : 0).fill(hovering ? Look.hover : Color.clear))
+            .padding(.horizontal, look.isClassic ? 8 : 0)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(item.line)
     }
 }
 
@@ -546,7 +650,7 @@ private struct RoomView: View {
                         if room.messages.first?.seq == 1 { opening }
                         ForEach(model.rows) { row in
                             if let day = row.day { RoomDayLine(day: day) }
-                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { model.card = $0 }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: { model.onThisMac ? model.preview(file: $0) : model.fetch(file: $0, as: .preview) }, open: model.onThisMac ? nil : { model.fetch(file: $0, as: .open) }, saveAs: model.onThisMac ? nil : { model.fetch(file: $0, as: .saveAs) }, picture: model.onThisMac ? nil : { model.picture($0) }, task: { model.taskFilter = $0 },
+                            RoomMessageRow(row: row, room: room, actions: RoomRowActions(card: { if $0 == Room.you { model.chooseAvatar($0) } else { model.card = $0 } }, reply: { model.reply(to: $0) }, reveal: model.onThisMac ? { model.reveal($0) } : nil, preview: { model.onThisMac ? model.preview(file: $0) : model.fetch(file: $0, as: .preview) }, open: model.onThisMac ? nil : { model.fetch(file: $0, as: .open) }, saveAs: model.onThisMac ? nil : { model.fetch(file: $0, as: .saveAs) }, picture: model.onThisMac ? nil : { model.picture($0) }, task: { model.taskFilter = $0 },
                                                                                        jump: { model.go(to: $0) }, inTask: model.taskFilter != nil, lit: lit == row.id, poke: { model.poke($0) }, delete: { model.deletingMessage = $0 }))
                                 .id(row.id)
                         }
@@ -823,7 +927,7 @@ private struct RoomMembers: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(room.sessions) { seat in
-                        RoomMemberRow(seat: seat) { model.card = model.card == seat.handle ? nil : seat.handle }
+                        RoomMemberRow(seat: seat) { if seat.isUser { model.chooseAvatar(seat.handle) } else { model.card = model.card == seat.handle ? nil : seat.handle } }
                     }
                     if room.sessions.isEmpty {
                         Text("还没有会话。").font(.system(size: 12)).foregroundStyle(Look.faint).padding(.horizontal, 12).padding(.top, 10)
