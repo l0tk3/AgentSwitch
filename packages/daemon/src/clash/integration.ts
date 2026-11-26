@@ -143,7 +143,9 @@ export class ClashIntegration {
     // An app from before §7.11 says nothing of `ownRules`: it stays as it was.
     // An app from before §7.11 says nothing of `ownRules`, one from before §7.12 nothing of `applyNow`: as they were.
     const was = this.o.store.settings(), said = next && typeof next === "object" ? next as object : {};
-    const keep = { ...("ownRules" in said ? {} : { ownRules: was.ownRules }), ...("applyNow" in said ? {} : { applyNow: was.applyNow }) };
+    // One from before Grok's and Antigravity's rules says nothing of their nodes: as they were.
+    const keep = { ...("ownRules" in said ? {} : { ownRules: was.ownRules }), ...("applyNow" in said ? {} : { applyNow: was.applyNow }),
+      ...("grok" in said ? {} : { grok: was.grok }), ...("agy" in said ? {} : { agy: was.agy }) };
     const saved = this.o.store.save(cleanSettings({ ...said, ...keep }));
     // The one interval an app from before §10 sets is every subscription's.
     if (saved.autoUpdateHours !== was.autoUpdateHours) this.o.source.setAllHours(saved.autoUpdateHours);
@@ -194,7 +196,7 @@ export class ClashIntegration {
   async removeSubscription(id: string): Promise<ClashView> {
     const gone = new Set(this.o.source.remove(id));
     const settings = this.o.store.settings(), left = (names: readonly string[]) => names.filter((n) => !gone.has(n));
-    if (gone.size) this.o.store.save({ ...settings, claude: { nodes: left(settings.claude.nodes) }, openai: { nodes: left(settings.openai.nodes) } });
+    if (gone.size) this.o.store.save({ ...settings, ...Object.fromEntries(CLASH_SERVICES.map((s) => [s, { nodes: left(settings[s].nodes) }])) } as ClashSettings);
     return this.changed();
   }
 
@@ -207,7 +209,7 @@ export class ClashIntegration {
       this.o.source.rename(id, change.name);
       const now = new Map(this.o.source.rows().flatMap((row, i) => (before[i] && before[i]!.name !== row.name ? [[before[i]!.name, row.name] as const] : [])));
       const settings = this.o.store.settings(), follow = (names: readonly string[]) => names.map((n) => now.get(n) ?? n);
-      if (now.size) this.o.store.save({ ...settings, claude: { nodes: follow(settings.claude.nodes) }, openai: { nodes: follow(settings.openai.nodes) } });
+      if (now.size) this.o.store.save({ ...settings, ...Object.fromEntries(CLASH_SERVICES.map((s) => [s, { nodes: follow(settings[s].nodes) }])) } as ClashSettings);
     }
     if (change.hours !== undefined) this.o.source.setHours(id, change.hours);
     return this.changed();
@@ -251,7 +253,7 @@ export class ClashIntegration {
    *  subscription when it is fetched again stays, marked. */
   private forgetNodes(): void {
     const settings = this.o.store.settings();
-    if (settings.claude.nodes.length || settings.openai.nodes.length) this.o.store.save({ ...settings, claude: { nodes: [] }, openai: { nodes: [] } });
+    if (CLASH_SERVICES.some((s) => settings[s].nodes.length)) this.o.store.save({ ...settings, ...Object.fromEntries(CLASH_SERVICES.map((s) => [s, { nodes: [] }])) } as ClashSettings);
   }
 
   /** The routing check: a connection of each kind sent through the core, and what the core did with it. */
@@ -263,11 +265,11 @@ export class ClashIntegration {
     const settings = this.settings(), enabled = this.enabled(), document = this.document() ?? {};
     const deps: CheckDeps = { port, connections: () => controller.connections(), ...this.o.check };
     const has = (template: ClashTemplate, rule: string): boolean => templateOn(template, settings) && templateRules(template, settings).includes(rule);
-    const service = (s: ClashService, host: string) => ({ id: s, title: s === "claude" ? "Claude" : "OpenAI", host, far: true,
+    const service = (s: ClashService) => ({ id: s, title: SERVICE[s].title, host: SERVICE[s].host, far: true,
       expect: enabled[s] ? { kind: "group" as const, group: groupNames(document, s, settings).group } : null });
     const ports = this.o.proxyPorts?.() ?? new Map<string, number>();
     const wanted: { id: string; title: string; host: string; port?: number; far?: boolean; expect: ClashCheckRow["expect"] }[] = [
-      service("claude", "claude.ai"), service("openai", "chatgpt.com"),
+      ...CLASH_SERVICES.map((s) => service(s)),
       { id: "domestic", title: "Domestic", host: "www.baidu.com", expect: has("domestic", "DOMAIN-KEYWORD,baidu") ? { kind: "direct" } : null },
       { id: "china", title: "China by Address", host: "www.163.com", expect: has("domestic", "GEOIP,CN") ? { kind: "direct" } : null },
       { id: "block", title: "Ads", host: "ad.doubleclick.net", expect: has("block", "DOMAIN-SUFFIX,doubleclick.net") ? { kind: "reject" } : null },
@@ -409,7 +411,7 @@ export class ClashIntegration {
 
   private enabled(): Record<ClashService, boolean> {
     const settings = this.settings(), nodes = this.nodes();
-    return { claude: chosen("claude", settings, nodes).length > 0, openai: chosen("openai", settings, nodes).length > 0 };
+    return Object.fromEntries(CLASH_SERVICES.map((s) => [s, chosen(s, settings, nodes).length > 0])) as Record<ClashService, boolean>;
   }
 
   /** The subscriptions whose interval has passed fetched again, and the core told; whether any was. */
@@ -516,7 +518,7 @@ export class ClashIntegration {
       table: this.o.source.rows(), together: this.o.source.several(),
       profiles: (profiles?.profiles ?? []).filter((p) => p.from !== base),
       // As kept: with several subscriptions `together` says the rules are AgentSwitch's, whatever `ownRules` is.
-      settings: this.o.store.settings(), services: { claude: service("claude"), openai: service("openai") },
+      settings: this.o.store.settings(), services: Object.fromEntries(CLASH_SERVICES.map((s) => [s, service(s)])) as Record<ClashService, ClashServiceView>,
       templates: Object.fromEntries(CLASH_TEMPLATES.map((t) => [t, { on: templateOn(t, settings), custom: settings.templates[t].rules !== null, count: templateRules(t, settings).length }])) as ClashView["templates"],
       defaultGroup: info ? defaultGroup(document, settings) : null,
       dns: { on: settings.dns.on, custom: settings.dns.text !== null, overridden: vergeOwnDns(this.o.dir) },

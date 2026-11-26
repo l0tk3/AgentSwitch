@@ -4,9 +4,17 @@ import Foundation
 /// for OpenAI in their order, the addresses that go direct — and what the service found of Clash Verge and of the
 /// core it runs: whether it is on AgentSwitch's subscription, and what each service's group uses now.
 public enum ClashService: String, CaseIterable, Sendable {
-    case claude, openai
+    /// `grok`, `agy` (2026-11-26, user #508): Grok Build and the Antigravity CLI have rules of their own.
+    case claude, openai, grok, agy
 
-    public var title: String { self == .claude ? "Claude" : "OpenAI" }
+    public var title: String {
+        switch self {
+        case .claude: "Claude"
+        case .openai: "OpenAI"
+        case .grok: "Grok"
+        case .agy: "Antigravity"
+        }
+    }
 }
 
 public struct ClashServiceNodes: Codable, Equatable, Sendable {
@@ -102,6 +110,8 @@ public struct ClashDNSText: Decodable, Equatable, Sendable {
 public struct ClashSettings: Codable, Equatable, Sendable {
     public var claude: ClashServiceNodes
     public var openai: ClashServiceNodes
+    public var grok: ClashServiceNodes
+    public var agy: ClashServiceNodes
     public var direct: [String]
     /// The subscription is fetched again after this many hours; 0: only when asked.
     public var autoUpdateHours: Int
@@ -119,10 +129,12 @@ public struct ClashSettings: Codable, Equatable, Sendable {
     /// The intervals offered (the service takes no other).
     public static let updateHours = [0, 1, 6, 12, 24]
 
-    public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24,
+    public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), grok: ClashServiceNodes = .init(), agy: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24,
                 templates: ClashTemplates = .init(), renameDefault: Bool = false, dns: ClashDNSSetting = .init(), ownRules: Bool = false, applyNow: Bool = false) {
         self.claude = claude
         self.openai = openai
+        self.grok = grok
+        self.agy = agy
         self.direct = direct
         self.autoUpdateHours = autoUpdateHours
         self.templates = templates
@@ -132,13 +144,15 @@ public struct ClashSettings: Codable, Equatable, Sendable {
         self.applyNow = applyNow
     }
 
-    private enum CodingKeys: String, CodingKey { case claude, openai, direct, autoUpdateHours, templates, renameDefault, dns, ownRules, applyNow }
+    private enum CodingKeys: String, CodingKey { case claude, openai, grok, agy, direct, autoUpdateHours, templates, renameDefault, dns, ownRules, applyNow }
 
     /// A service from before §7.11 (another node not yet updated) says nothing of `ownRules`, one from before §7.12
     /// nothing of `applyNow`: off.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(claude: try c.decode(ClashServiceNodes.self, forKey: .claude), openai: try c.decode(ClashServiceNodes.self, forKey: .openai),
+                  // A service from before them (another node not yet updated) has none.
+                  grok: try c.decodeIfPresent(ClashServiceNodes.self, forKey: .grok) ?? .init(), agy: try c.decodeIfPresent(ClashServiceNodes.self, forKey: .agy) ?? .init(),
                   direct: try c.decode([String].self, forKey: .direct), autoUpdateHours: try c.decode(Int.self, forKey: .autoUpdateHours),
                   templates: try c.decode(ClashTemplates.self, forKey: .templates), renameDefault: try c.decode(Bool.self, forKey: .renameDefault),
                   dns: try c.decode(ClashDNSSetting.self, forKey: .dns), ownRules: try c.decodeIfPresent(Bool.self, forKey: .ownRules) ?? false,
@@ -146,8 +160,22 @@ public struct ClashSettings: Codable, Equatable, Sendable {
     }
 
     public subscript(service: ClashService) -> ClashServiceNodes {
-        get { service == .claude ? claude : openai }
-        set { if service == .claude { claude = newValue } else { openai = newValue } }
+        get {
+            switch service {
+            case .claude: claude
+            case .openai: openai
+            case .grok: grok
+            case .agy: agy
+            }
+        }
+        set {
+            switch service {
+            case .claude: claude = newValue
+            case .openai: openai = newValue
+            case .grok: grok = newValue
+            case .agy: agy = newValue
+            }
+        }
     }
 }
 

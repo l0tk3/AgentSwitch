@@ -19,7 +19,8 @@ const Service = z.object({ nodes: z.array(z.string().min(1).max(200)).max(32) })
 /** A template: on or off, and its rules if they are the user's own (lines as written; which of them is not a rule
  *  is said by the service). */
 const Template = z.object({ on: z.boolean(), rules: z.array(z.string().max(1000)).max(MAX_RULES * 2).nullable() });
-const Settings = z.object({ claude: Service, openai: Service, direct: z.array(z.string().min(1).max(200)).max(64),
+// `grok`, `agy`: optional — an app from before them sends settings without, and is taken to leave them as they are.
+const Settings = z.object({ claude: Service, openai: Service, grok: Service.optional(), agy: Service.optional(), direct: z.array(z.string().min(1).max(200)).max(64),
   autoUpdateHours: z.number().refine((n) => (UPDATE_HOURS as readonly number[]).includes(n)),
   templates: z.object({ domestic: Template, block: Template }), renameDefault: z.boolean(),
   dns: z.object({ on: z.boolean(), text: z.string().max(64 * 1024).nullable() }),

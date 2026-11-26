@@ -535,3 +535,10 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 - 做了：`clash/phone.ts`（正文）、`clash/phoneListener.ts`（监听）、上面的接口和两处页面；`tests/clashPhone.test.ts`。
 - 用用户真实的订阅各出了一份：48 个节点、6 个分组、213 条规则（Stash 版），没有指回 Mac 的地址，没有悬空的分组成员或规则去向。
 - **没验证**：Stash 和安卓上的 Clash 真的导入这份正文并能用；Stash 取订阅时的自称里带 `Stash`（按惯例推的，认不出时可用 `&for=stash`）；`clash://install-config` 在 iPhone 上由 Stash 接住。
+
+## Grok 与 Antigravity 的规则（2026-11-26，用户 #508）
+
+- 服务由两个变成四个：`claude`、`openai`、`grok`、`agy`。每个都有自己的节点选择、策略组（`Grok`、`Antigravity`）、自动选择组和规则集（`as-grok`、`as-agy`），做法与前两个完全相同；路由检查里各多一行（`grok.com`、`antigravity.google`）。
+- `as-grok`：`x.ai`、`grok.com` 两个后缀（接口 `cli-chat-proxy.grok.com`、`api.x.ai`，登录 `auth.x.ai`、`accounts.x.ai`，安装与更新清单都在其下）。
+- `as-agy`：`antigravity.google`、`antigravity.google.com`、`cloudcode-pa.googleapis.com`（含 `daily-`）、`aicode.googleapis.com`、`businessaicode.googleapis.com`、`generativelanguage.googleapis.com`、`aiplatform.googleapis.com`、`agentregistry.googleapis.com`、它的更新服务（关键字 `antigravity-cli-auto-updater`），以及 Google 的登录 `accounts.google.com`、`oauth2.googleapis.com`（精确匹配）。后两个是所有 Google 服务共用的：放进来是为了让 agy 的登录和接口从同一个节点出去，代价是别的 Google 登录也走这个节点。
+- 设置里多了 `grok`、`agy` 两项（`{nodes}`）。旧版应用（手机、别的节点）保存设置时不带这两项，服务保留原值。

@@ -13,7 +13,8 @@ import { looksUp } from "./rules.js";
 import { providerSlug, type SourceNode } from "./source.js";
 import { BLOCK_TEMPLATE, DNS_TEMPLATE, DOMESTIC_TEMPLATE } from "./templates.js";
 
-export const CLASH_SERVICES = ["claude", "openai"] as const;
+// `grok` and `agy` (2026-11-26, user #508): xAI's Grok Build and Google's Antigravity CLI have rules of their own.
+export const CLASH_SERVICES = ["claude", "openai", "grok", "agy"] as const;
 export type ClashService = (typeof CLASH_SERVICES)[number];
 export const CLASH_TEMPLATES = ["domestic", "block"] as const;
 export type ClashTemplate = (typeof CLASH_TEMPLATES)[number];
@@ -21,6 +22,8 @@ export type TemplateSetting = { readonly on: boolean; /** The user's own rules; 
 export type ClashSettings = {
   readonly claude: { /** Nodes by name, the first preferred. */ readonly nodes: readonly string[] };
   readonly openai: { readonly nodes: readonly string[] };
+  readonly grok: { readonly nodes: readonly string[] };
+  readonly agy: { readonly nodes: readonly string[] };
   /** Addresses (an IP or a host) that go direct. */
   readonly direct: readonly string[];
   /** The subscription is fetched again after this many hours; 0: only when asked. */
@@ -41,7 +44,7 @@ export type ClashSettings = {
    *  Clash Verge to fetch it (§7.12). Off unless the user turns it on: it changes what runs behind Clash Verge's back. */
   readonly applyNow: boolean;
 };
-export const EMPTY_SETTINGS: ClashSettings = { claude: { nodes: [] }, openai: { nodes: [] }, direct: [], autoUpdateHours: 24,
+export const EMPTY_SETTINGS: ClashSettings = { claude: { nodes: [] }, openai: { nodes: [] }, grok: { nodes: [] }, agy: { nodes: [] }, direct: [], autoUpdateHours: 24,
   templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false, dns: { on: false, text: null }, ownRules: false, applyNow: false };
 export const UPDATE_HOURS = [0, 1, 6, 12, 24] as const;
 export const BUILT_IN: Readonly<Record<ClashTemplate, readonly string[]>> = { domestic: DOMESTIC_TEMPLATE, block: BLOCK_TEMPLATE };
@@ -49,11 +52,21 @@ export const BUILT_IN: Readonly<Record<ClashTemplate, readonly string[]>> = { do
 /** Each service's names in Clash (the user's own file of 2026-10-08, docs/clash-v0.md §1), where its nodes are tried,
  *  and the domains it is reached at. The node set and the rule set have one name: they are two kinds of set. `own`: a
  *  word that names a subscription's own rules for it (a rule set `openai`, `…/OpenAI/OpenAI.yaml`; `GEOSITE,openai`). */
-export const SERVICE: Record<ClashService, { readonly group: string; readonly auto: string; readonly set: string; readonly probe: string; readonly domains: readonly string[]; readonly own: RegExp }> = {
-  claude: { group: "Claude", auto: "Claude自动选择", set: "as-claude", probe: "https://api.anthropic.com/",
+export const SERVICE: Record<ClashService, { readonly title: string; readonly host: string; readonly group: string; readonly auto: string; readonly set: string; readonly probe: string; readonly domains: readonly string[]; readonly own: RegExp }> = {
+  claude: { title: "Claude", host: "claude.ai", group: "Claude", auto: "Claude自动选择", set: "as-claude", probe: "https://api.anthropic.com/",
     domains: ["DOMAIN-KEYWORD,anthropic", "DOMAIN-SUFFIX,claude.ai", "DOMAIN-SUFFIX,claude.com", "DOMAIN-SUFFIX,claudeusercontent.com"], own: /^(claude|anthropic)$/i },
-  openai: { group: "OpenAI", auto: "OpenAI自动选择", set: "as-openai", probe: "https://api.openai.com/",
+  openai: { title: "OpenAI", host: "chatgpt.com", group: "OpenAI", auto: "OpenAI自动选择", set: "as-openai", probe: "https://api.openai.com/",
     domains: ["DOMAIN-KEYWORD,openai", "DOMAIN-SUFFIX,chatgpt.com", "DOMAIN-SUFFIX,chat.com", "DOMAIN-SUFFIX,sora.com", "DOMAIN-SUFFIX,oaistatic.com", "DOMAIN-SUFFIX,oaiusercontent.com"], own: /^(openai|chatgpt)$/i },
+  // Grok Build (1.0.92): its API at cli-chat-proxy.grok.com and api.x.ai, sign-in at auth.x.ai and accounts.x.ai,
+  // installs and change logs under x.ai.
+  grok: { title: "Grok", host: "grok.com", group: "Grok", auto: "Grok自动选择", set: "as-grok", probe: "https://api.x.ai/",
+    domains: ["DOMAIN-SUFFIX,x.ai", "DOMAIN-SUFFIX,grok.com"], own: /^(grok|xai|x\.ai)$/i },
+  // Antigravity CLI (1.5.17): its API (Cloud Code, Gemini, Vertex), its own sites and its updater; and Google's
+  // sign-in, which every Google service shares — with it here the sign-in leaves by the node the API does.
+  agy: { title: "Antigravity", host: "antigravity.google", group: "Antigravity", auto: "Antigravity自动选择", set: "as-agy", probe: "https://cloudcode-pa.googleapis.com/",
+    domains: ["DOMAIN-SUFFIX,antigravity.google", "DOMAIN-SUFFIX,antigravity.google.com", "DOMAIN-SUFFIX,cloudcode-pa.googleapis.com", "DOMAIN-SUFFIX,aicode.googleapis.com",
+      "DOMAIN-SUFFIX,businessaicode.googleapis.com", "DOMAIN-SUFFIX,generativelanguage.googleapis.com", "DOMAIN-SUFFIX,aiplatform.googleapis.com", "DOMAIN-SUFFIX,agentregistry.googleapis.com",
+      "DOMAIN-KEYWORD,antigravity-cli-auto-updater", "DOMAIN,accounts.google.com", "DOMAIN,oauth2.googleapis.com"], own: /^(antigravity|agy)$/i },
 };
 export const DIRECT_SET = "as-direct";
 /** The templates' rule sets: the domestic one in two — what a name alone decides, in front; what needs its address

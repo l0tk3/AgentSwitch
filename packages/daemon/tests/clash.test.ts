@@ -126,7 +126,7 @@ describe("the subscription AgentSwitch makes", () => {
     // The node set it named by link is fetched from AgentSwitch's copy; the rest of it is as written.
     expect(out["proxy-providers"].tgyun).toEqual({ type: "http", url: `http://127.0.0.1:4711/clash/providers/${providerSlug("tgyun")}.yaml?k=tok`, path: "./providers/tgyun.yaml",
       interval: 3600, "health-check": { enable: true, url: "https://www.gstatic.com/generate_204", interval: 300 }, proxy: "DIRECT" });
-    expect(Object.keys(out["rule-providers"])).toEqual(["as-direct", "as-claude", "as-openai", "as-domestic", "as-block", "as-domestic-ip"]);
+    expect(Object.keys(out["rule-providers"])).toEqual(["as-direct", "as-claude", "as-openai", "as-grok", "as-agy", "as-domestic", "as-block", "as-domestic-ip"]);
     expect(Object.keys(out["rule-providers"])).toEqual(RULE_SETS);
     expect(out["rule-providers"]["as-direct"]).toEqual({ type: "http", behavior: "classical", format: "yaml", url: "http://127.0.0.1:4711/clash/rules/as-direct.yaml?k=tok", path: "./ruleset/as-direct.yaml", interval: 86400, proxy: "DIRECT" });
     // No group by a made-up name anywhere.
@@ -247,7 +247,7 @@ rules:
   });
 
   it("says whether the core runs it, and whether it is the one made now", () => {
-    const want = { enabled: { claude: true, openai: false }, groups: ["Claude", "Manual"] };
+    const want = { enabled: { claude: true, openai: false, grok: false, agy: false }, groups: ["Claude", "Manual"] };
     const all = Object.fromEntries(RULE_SETS.map((name) => [name, 1]));
     const groups = [{ name: "GLOBAL" }, { name: "Claude" }, { name: "Manual" }, { name: "One of Clash Verge's own" }];
     expect(running(want, { ruleSets: {}, nodeSets: {}, groups })).toEqual({ active: false, current: false });
@@ -877,13 +877,13 @@ describe("Clash Integration over HTTP", () => {
       "www.baidu.com": { rule: "RuleSet", payload: "as-domestic", chains: ["DIRECT"] }, "www.163.com": { rule: "RuleSet", payload: "as-domestic-ip", chains: ["DIRECT"] },
       "ad.doubleclick.net": "reject", "5.102.107.254": { rule: "RuleSet", payload: "as-direct", chains: ["DIRECT"] } });
     const rows = (await call("POST", "/clash/check")).json.rows as { id: string; title: string; host: string; expect: unknown; observed: Record<string, unknown>; ok: boolean | null }[];
-    expect(rows.map((r) => [r.id, r.title, r.host, r.ok])).toEqual([["claude", "Claude", "claude.ai", true], ["openai", "OpenAI", "chatgpt.com", null], ["domestic", "Domestic", "www.baidu.com", true],
+    expect(rows.map((r) => [r.id, r.title, r.host, r.ok])).toEqual([["claude", "Claude", "claude.ai", true], ["openai", "OpenAI", "chatgpt.com", null], ["grok", "Grok", "grok.com", null], ["agy", "Antigravity", "antigravity.google", null], ["domestic", "Domestic", "www.baidu.com", true],
       ["china", "China by Address", "www.163.com", true], ["block", "Ads", "ad.doubleclick.net", true], ["direct:5.102.107.254", "5.102.107.254", "5.102.107.254", true], ["other", "Everything Else", "www.google.com", null]]);
     expect(rows[0]).toMatchObject({ expect: { kind: "group", group: "Claude" }, observed: { outcome: "proxied", rule: "RuleSet as-claude", path: ["Claude", "Claude自动选择", "🇯🇵 日本家宽-02"], exit: { ip: "203.0.113.9", loc: "JP" } } });
     // No node chosen for OpenAI: nothing is asked of it, and how it goes is shown all the same.
     expect(rows[1]).toMatchObject({ expect: null, observed: { outcome: "proxied", rule: "DomainSuffix chatgpt.com", path: ["OpenAI", "OpenAI自动选择", "🇺🇸 美国-01"], exit: { loc: "US" } } });
-    expect(rows[4]).toMatchObject({ expect: { kind: "reject" }, observed: { outcome: "rejected" } });
-    expect(rows[6]).toMatchObject({ expect: null, observed: { outcome: "proxied", rule: "Match", path: ["Manual", "🇸🇬 新加坡-01"] } });
+    expect(rows[6]).toMatchObject({ expect: { kind: "reject" }, observed: { outcome: "rejected" } });
+    expect(rows[8]).toMatchObject({ expect: null, observed: { outcome: "proxied", rule: "Match", path: ["Manual", "🇸🇬 新加坡-01"] } });
     // Rules that do not do their work: Claude leaves by another group, an ad gets through, a direct address is proxied.
     Object.assign(routes, { "claude.ai": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] }, "ad.doubleclick.net": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] },
       "5.102.107.254": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] }, "www.baidu.com": "silent" });
