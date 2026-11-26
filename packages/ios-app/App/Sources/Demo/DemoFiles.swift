@@ -9,7 +9,7 @@ import UIKit
 /// would see it (docs/files-v0.md §7.5).
 struct DemoFiles: MacFileSource {
     static let home = "/Users/me"
-    static let project = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+    static let project = "/Users/me/Projects/AgentSwitch"
     static let scopeFolder = project
 
     let scope: String?
@@ -106,7 +106,7 @@ struct DemoFiles: MacFileSource {
         dir("\(home)/Documents", ago(5000)); file("\(home)/Documents/plan.pdf", ago(5000), size: 1_240_000)
         dir("\(home)/Downloads", ago(9000)); file("\(home)/Downloads/dataset.zip", ago(9000), size: 182_000_000)
         dir("\(home)/Blog", ago(3000)); file("\(home)/Blog/index.md", ago(3000), text: "# 博客\n\n第一篇（示例）。\n")
-        dir("\(home)/Desktop/WorkSpace", ago(30)); dir("\(home)/Desktop/WorkSpace/Projects", ago(30))
+        dir("\(home)/Projects", ago(30))
         dir(project, ago(2))
         file("\(project)/.env", ago(7000), text: env, sensitive: "env")
         dir("\(project)/.git", ago(2), dim: true)

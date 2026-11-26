@@ -18,7 +18,7 @@ enum DemoData {
     static let workdir = WorkdirSetting(path: "/Users/me/AgentSwitch", defaultPath: "/Users/me/AgentSwitch")
 
     static var sessions: [SessionSummary] {
-        let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        let repo = "/Users/me/Projects/AgentSwitch"
         return [
             SessionSummary(harness: "claude-code", id: "c1", cwd: repo, title: "iPhone 端：编码会话列表和未读标记",
                            lastText: "列表按目录分组，进行中的会话 10 秒刷新一次。", updatedAt: ago(20), active: true, branch: "main", model: "claude-opus-5-5"),
@@ -29,15 +29,15 @@ enum DemoData {
             SessionSummary(harness: "claude-code", id: "c2", cwd: "/Users/me/Work/api", title: "给健康检查加缓存",
                            lastText: "缓存 30 秒，命中率 92%。", updatedAt: ago(26 * 3600)),
             // Folders inside folders the list shows (docs/terminal-v0.md §1 目录树的层级, 2026-10-03): one in the
-            // project, and Worktop with a session of its own over the folders in it.
+            // project, and Sandbox with a session of its own over the folders in it.
             SessionSummary(harness: "claude-code", id: "c3", cwd: repo + "/packages/secret-gate", title: "fill-value 的探针模板",
                            lastText: "探针模板固定在包里。", updatedAt: ago(5 * 3600)),
-            SessionSummary(harness: "claude-code", id: "c4", cwd: "/Users/me/Desktop/WorkSpace/Worktop", title: "整理工作目录",
+            SessionSummary(harness: "claude-code", id: "c4", cwd: "/Users/me/Sandbox", title: "整理工作目录",
                            lastText: "做完的项目搬到 Archived。", updatedAt: ago(30 * 3600)),
-            SessionSummary(harness: "codex", id: "x2", cwd: "/Users/me/Desktop/WorkSpace/Worktop/Codex", title: "给脚本加上重试",
+            SessionSummary(harness: "codex", id: "x2", cwd: "/Users/me/Sandbox/Codex", title: "给脚本加上重试",
                            lastText: "下载失败时指数退避重试三次。", updatedAt: ago(40 * 3600)),
-            SessionSummary(harness: "codex", id: "x3", cwd: "/Users/me/Desktop/WorkSpace/Worktop/培训/靶场", title: "靶场环境搭建",
-                           lastText: "docker compose 起三台靶机。", updatedAt: ago(50 * 3600)),
+            SessionSummary(harness: "codex", id: "x3", cwd: "/Users/me/Sandbox/练习/小游戏", title: "小游戏的打包脚本",
+                           lastText: "打成网页版，本地起服务就能玩。", updatedAt: ago(50 * 3600)),
         ]
     }
 
@@ -55,7 +55,7 @@ enum DemoData {
 
     /// The folders' git, after their names in the tree.
     static let git: [String: GitSummary] = [
-        "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch": GitSummary(branch: "main", changed: 5, ahead: 2),
+        "/Users/me/Projects/AgentSwitch": GitSummary(branch: "main", changed: 5, ahead: 2),
         "/Users/me/Work/api": GitSummary(branch: "feat/health", changed: 3, behind: 4),
     ]
 
@@ -71,7 +71,7 @@ enum DemoData {
     }
 
     static var terminalList: TerminalList {
-        let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        let repo = "/Users/me/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
         // `simplecompact`: while it compacts its context (docs/simple-view-v0.md §5.7).
@@ -131,7 +131,7 @@ enum DemoData {
         let dim = "\u{1b}[2m", off = "\u{1b}[0m", orange = "\u{1b}[38;5;209m", green = "\u{1b}[32m", bold = "\u{1b}[1m", cyan = "\u{1b}[36m"
         let lines = [
             "\(orange)✻\(off) \(bold)Claude Code\(off) \(dim)· Opus 5.5\(off)",
-            "\(dim)  ~/Desktop/WorkSpace/Projects/AgentSwitch\(off)",
+            "\(dim)  ~/Projects/AgentSwitch\(off)",
             "",
             "\(dim)>\(off) 给 iPhone 加终端标签页，列表按目录树排",
             "",
@@ -155,7 +155,7 @@ enum DemoData {
             "\(green)⏺\(off) 分屏的说明见这一页，也可以直接打开预览：",
             "  https://code.claude.com/docs/en/agent-teams.md#choo",
             "  se-a-display-mode",
-            "  ~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi",
+            "  ~/Projects/AgentSwitch/docs/desi",
             "  gn/concepts/split.html",
         ]
         let withLinks = ["terminallink", "terminalpath"].contains(UserDefaults.standard.string(forKey: "uiDemoScreen"))
@@ -197,7 +197,7 @@ enum DemoData {
     /// A session's record for the simple view (docs/simple-view-v0.md §2): what was said, two runs of work, a message
     /// typed while it worked; its task list and how full its context is.
     static func sessionRecord(harness: String, id: String) -> SessionRecord {
-        let summary = decode(SessionSummary.self, ["harness": harness, "id": id, "cwd": "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch", "title": "iPhone 终端标签页",
+        let summary = decode(SessionSummary.self, ["harness": harness, "id": id, "cwd": "/Users/me/Projects/AgentSwitch", "title": "iPhone 终端标签页",
                                                    "lastText": "", "updatedAt": ago(20), "startedAt": ago(1800), "active": true, "model": "claude-opus-5-5", "branch": "main"])
         let compact = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplecompact"
         let demo = UserDefaults.standard.string(forKey: "uiDemoScreen")

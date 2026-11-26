@@ -15,10 +15,10 @@ import UIKit
 enum TerminalsListProbe {
     static let home = "/Users/me"
     static let folders: [String] = {
-        var paths = ["", "/Desktop", "/Desktop/WorkSpace/Worktop", "/Desktop/WorkSpace/Worktop/培训", "/Desktop/WorkSpace/Worktop/培训/靶场"]
+        var paths = ["", "/Desktop", "/Sandbox", "/Sandbox/练习", "/Sandbox/练习/小游戏"]
         for p in ["harbor", "harbor/deploy", "lumen", "lumen/packages/api", "lumen/packages/web", "notes", "relay", "relay/cli",
                   "atlas", "atlas/ios", "atlas/server", "kiln", "quarry", "quarry/tools", "tidewater", "beacon", "beacon/docs", "ember"] {
-            paths.append("/Desktop/WorkSpace/Projects/" + p)
+            paths.append("/Projects/" + p)
         }
         paths += ["/Work/api", "/Work/api/scripts", "/Blog", "/Downloads/scratch"]
         return paths.map { home + $0 }
@@ -153,7 +153,7 @@ enum TerminalsListProbe {
         await drag(900)
         say("scrolled further \(place())")
         await pause(2)
-        UserDefaults.standard.set(folders.filter { $0.hasPrefix(home + "/Desktop/WorkSpace/Projects") && $0.split(separator: "/").count == 6 }.joined(separator: "\n"),
+        UserDefaults.standard.set(folders.filter { $0.hasPrefix(home + "/Projects") && $0.split(separator: "/").count == 4 }.joined(separator: "\n"),
                                   forKey: "terminals.folded")
         say("folded the projects \(place())")
         await pause(3)

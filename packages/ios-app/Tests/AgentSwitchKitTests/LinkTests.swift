@@ -102,7 +102,7 @@ final class LinkTests: XCTestCase {
         XCTAssertEqual(path("docs/design/concepts/split.html"), "\(workdir)/docs/design/concepts/split.html")
         XCTAssertEqual(path("packages/daemon/ui/terminal.js:1287"), "\(workdir)/packages/daemon/ui/terminal.js", "a place in the file is not its path")
         XCTAssertEqual(path("src/a.ts:12:5"), "\(workdir)/src/a.ts")
-        XCTAssertEqual(path("培训/靶场/说明.md"), "\(workdir)/培训/靶场/说明.md")
+        XCTAssertEqual(path("练习/小游戏/说明.md"), "\(workdir)/练习/小游戏/说明.md")
         for word in ["/help", "/compact", "//", "/", "~", "and/or", "text/plain", "1/2", "2026/10/03", "v2/3.1", "origin/main", "README.md", "a//b.md",
                      "https://example.com/a.html", "-/x.md"] {
             XCTAssertNil(path(word), "\(word) is not a path")
@@ -204,13 +204,13 @@ final class LinkTests: XCTestCase {
     func testAPathCutOverLinesKeepsItsOtherReadings() {
         // Filled to the width and too long for a line: surely one path.
         let cut = rows([
-            "⏺ Wrote /private/tmp/claude-501/-Users-me-Desktop-WorkSpace/0e3e5e94-d0e2-4f5b-b869-85d",
+            "⏺ Wrote /private/tmp/claude-501/-Users-me-Projects/0e3e5e94-d0e2-4f5b-b869-85d",
             "       7a3bb725b/scratchpad/out/agentswitch-browser.html",
         ])
         let one = TerminalLinks.find(rows: cut)
-        XCTAssertEqual(one.map(\.link), [.file("/private/tmp/claude-501/-Users-me-Desktop-WorkSpace/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b/scratchpad/out/agentswitch-browser.html")])
+        XCTAssertEqual(one.map(\.link), [.file("/private/tmp/claude-501/-Users-me-Projects/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b/scratchpad/out/agentswitch-browser.html")])
         XCTAssertEqual(one[0].spans.map(\.row), [0, 1])
-        XCTAssertEqual(one[0].alternates, [.file("/private/tmp/claude-501/-Users-me-Desktop-WorkSpace/0e3e5e94-d0e2-4f5b-b869-85d")])
+        XCTAssertEqual(one[0].alternates, [.file("/private/tmp/claude-501/-Users-me-Projects/0e3e5e94-d0e2-4f5b-b869-85d")])
         // A path that ends its line, the next line a new word: the path alone, the join only as another reading for
         // the Mac to tell.
         let ended = rows(["⏺ Wrote /Users/me/out/index.html", "  done"])
@@ -224,18 +224,18 @@ final class LinkTests: XCTestCase {
         // The path's row is not the widest of its paragraph (the address above is wider): whether it goes on is not sure,
         // so it is read alone, the join kept for the Mac to tell. The next row's own word (a relative path) also reads
         // as the whole, so a tap on either half finds it (files-v0 §12.4.2).
-        let workdir = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        let workdir = "/Users/me/Projects/AgentSwitch"
         let screen = rows([
             "⏺ 分屏的说明见这一页，也可以直接打开预览：",
             "  https://code.claude.com/docs/en/agent-teams.md#choo",
             "  se-a-display-mode",
-            "  ~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi",
+            "  ~/Projects/AgentSwitch/docs/desi",
             "  gn/concepts/split.html",
         ])
         let paths = TerminalLinks.find(rows: screen, workdir: workdir).filter { if case .file = $0.link { true } else { false } }
         XCTAssertEqual(paths.count, 2)
-        let whole = TappedLink.file("~/Desktop/WorkSpace/Projects/AgentSwitch/docs/design/concepts/split.html")
-        XCTAssertEqual(paths.first?.link, .file("~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi"))
+        let whole = TappedLink.file("~/Projects/AgentSwitch/docs/design/concepts/split.html")
+        XCTAssertEqual(paths.first?.link, .file("~/Projects/AgentSwitch/docs/desi"))
         XCTAssertEqual(paths.first?.alternates, [whole])
         XCTAssertEqual(paths.last?.link, .file("\(workdir)/gn/concepts/split.html"))
         XCTAssertEqual(paths.last?.alternates, [whole])
@@ -246,22 +246,22 @@ final class LinkTests: XCTestCase {
         // path and the size each wrapped in a column of its own, so the path's rest starts under its first cell — right
         // after another column's word, or a space from it — and the size's rest follows it.
         let screen = rows([
-            "  ›      ~/Desktop/WorkSpace/Scratch/classic-dark/send (554.4",
+            "  ›      ~/Documents/Samples/Scratch/classic-dark/send (554.4",
             "  [image]-before-after.png                             KB)",
             "",
-            "  ›      ~/Desktop/WorkSpace/Scratch/classic-dark/prob (298.3",
+            "  ›      ~/Documents/Samples/Scratch/classic-dark/prob (298.3",
             "  [image]e-real/after-terminals.png                    KB)",
             "",
-            "  ›       ~/Desktop/WorkSpace/Scratch/classic-dark/web (81.2K",
+            "  ›       ~/Documents/Samples/Scratch/classic-dark/web (81.2K",
             "  [image] /web-terminal-classic.png                    B)",
         ])
         let found = TerminalLinks.find(rows: screen, workdir: "/Users/me/Projects/AgentSwitch")
-        XCTAssertEqual(found.map(\.link), [.file("~/Desktop/WorkSpace/Scratch/classic-dark/send-before-after.png"),
-                                           .file("~/Desktop/WorkSpace/Scratch/classic-dark/probe-real/after-terminals.png"),
-                                           .file("~/Desktop/WorkSpace/Scratch/classic-dark/web/web-terminal-classic.png")],
+        XCTAssertEqual(found.map(\.link), [.file("~/Documents/Samples/Scratch/classic-dark/send-before-after.png"),
+                                           .file("~/Documents/Samples/Scratch/classic-dark/probe-real/after-terminals.png"),
+                                           .file("~/Documents/Samples/Scratch/classic-dark/web/web-terminal-classic.png")],
                        "each one path; what the next row holds before the path's column is no path of its own")
         XCTAssertEqual(found[0].spans, [span(0, 9..<54), span(1, 9..<26)], "both rows are the link's: a touch on either lands on it")
-        XCTAssertEqual(found[0].alternates, [.file("~/Desktop/WorkSpace/Scratch/classic-dark/send")], "the first row alone, should the Mac not have the whole")
+        XCTAssertEqual(found[0].alternates, [.file("~/Documents/Samples/Scratch/classic-dark/send")], "the first row alone, should the Mac not have the whole")
         XCTAssertEqual(found[2].spans, [span(6, 10..<54), span(7, 10..<35)])
         let cell = (width: 6.0, height: 12.0)
         XCTAssertEqual(TerminalLinks.hit(found, column: 14, row: 1.5, cell: cell, slop: 12)?.link, found[0].link, "on the second row")
@@ -269,12 +269,12 @@ final class LinkTests: XCTestCase {
 
         // Three rows: the middle one fills the column.
         let three = rows([
-            "  ›      ~/Desktop/WorkSpace/Scratch/classic-dark/send (1.2",
+            "  ›      ~/Documents/Samples/Scratch/classic-dark/send (1.2",
             "  [image]-before-after-with-a-very-long-name-that-goes MB)",
             "         -on.png",
         ])
         let long = TerminalLinks.find(rows: three)
-        XCTAssertEqual(long.map(\.link), [.file("~/Desktop/WorkSpace/Scratch/classic-dark/send-before-after-with-a-very-long-name-that-goes-on.png")])
+        XCTAssertEqual(long.map(\.link), [.file("~/Documents/Samples/Scratch/classic-dark/send-before-after-with-a-very-long-name-that-goes-on.png")])
         XCTAssertEqual(long[0].spans.map(\.row), [0, 1, 2])
     }
 

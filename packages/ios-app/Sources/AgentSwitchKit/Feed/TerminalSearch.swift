@@ -26,7 +26,7 @@ public enum TerminalSearch {
 
     public struct Folder: Sendable, Equatable, Identifiable {
         public let cwd: String
-        /// As the tree names it, under the names of the folders it sits in ("Worktop/Codex", "Worktop/培训/靶场").
+        /// As the tree names it, under the names of the folders it sits in ("Sandbox/Codex", "Sandbox/练习/小游戏").
         public let name: String
         public let git: GitSummary?
         public let nameHit: Bool
@@ -49,7 +49,7 @@ public enum TerminalSearch {
     }
 
     /// `said`: a session's words around the match, by `harness:id` (a terminal by the session it writes). Each folder
-    /// with terminals or sessions of its own, named by the folders it sits in ("Worktop/培训/靶场"): a match on a
+    /// with terminals or sessions of its own, named by the folders it sits in ("Sandbox/练习/小游戏"): a match on a
     /// folder's name keeps every folder under it as well.
     public static func run(_ tree: [TerminalTree.Folder], query: String, said: [String: String] = [:]) -> Result {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

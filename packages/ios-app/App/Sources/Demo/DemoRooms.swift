@@ -18,10 +18,10 @@ enum DemoRooms {
         return decode("""
         {"rooms":[
           {"id":"\(deskId)","name":"调度台","topic":"跟调度说要做什么","paused":false,"createdAt":0,"members":2,"faces":[],"desk":true,
-           "last":{"seq":9,"from":"dispatch","text":"@you 已经开了 2 个会话去做订阅页，进度在「手机订阅」里。","at":\(now - 60_000)},"unread":1,"forYou":true},
-          {"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":false,"createdAt":1,"members":7,"faces":[],
+           "last":{"seq":9,"from":"dispatch","text":"@you 已经开了 2 个会话去做订阅页，进度在「接口联调」里。","at":\(now - 60_000)},"unread":1,"forYou":true},
+          {"id":"\(roomId)","name":"接口联调","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":false,"createdAt":1,"members":7,"faces":[],
            "last":{"seq":38,"from":"daemon","text":"@you 两个版本都用真的 mihomo 内核验过了。","at":\(now - 120_000)},"unread":2,"forYou":true,"tasks":{"todo":3,"doing":1,"done":2},"attention":3},
-          {"id":"b1b2c3d4e5","name":"DayHub 发布","topic":"","paused":true,"createdAt":2,"members":3,"faces":[],
+          {"id":"b1b2c3d4e5","name":"demo-app 发布","topic":"","paused":true,"createdAt":2,"members":3,"faces":[],
            "last":{"seq":12,"from":"you","text":"@all 先停一下，等我看完迁移脚本","at":\(now - 3_600_000)},"unread":0,"forYou":false},
           {"id":"c1b2c3d4e5","name":"文档整理","topic":"把 v0 文档里过期的段落标出来","paused":false,"createdAt":3,"members":2,"faces":[],"last":null,"unread":0,"forYou":false,"rounds":7,"attention":1},
           {"id":"d1b2c3d4e5","name":"安卓 Classic","topic":"","paused":false,"createdAt":4,"members":3,"faces":[],
@@ -41,8 +41,8 @@ enum DemoRooms {
                "card":{"agent":"claude-code","name":"dispatch","cwd":"/Users/me/Projects","model":"claude-opus-5-5","profile":"Work","mode":"auto","node":null}}],
              "messages":[
               {"seq":7,"from":"you","to":[],"text":"手机上要能拉 Clash 订阅，iPhone 和安卓都做。","at":\(now - 900_000)},
-              {"seq":8,"from":"dispatch","to":["you"],"replyTo":7,"text":"@you 好。开了房间「手机订阅」，拉了 daemon、mac-app、ios-app、android 四个会话进去，先定接口。","at":\(now - 840_000)},
-              {"seq":9,"from":"dispatch","to":["you"],"text":"@you 已经开了 2 个会话去做订阅页，进度在「手机订阅」里。","at":\(now - 60_000)}]}
+              {"seq":8,"from":"dispatch","to":["you"],"replyTo":7,"text":"@you 好。开了房间「接口联调」，拉了 daemon、mac-app、ios-app、android 四个会话进去，先定接口。","at":\(now - 840_000)},
+              {"seq":9,"from":"dispatch","to":["you"],"text":"@you 已经开了 2 个会话去做订阅页，进度在「接口联调」里。","at":\(now - 60_000)}]}
             """)
         }
         guard id == roomId else { return nil }
@@ -56,7 +56,7 @@ enum DemoRooms {
         let paused = screen == "roompaused"
         let rounds = screen == "roomrounds" ? "7" : "null"
         return decode("""
-        {"room":{"id":"\(roomId)","name":"手机订阅","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":\(paused),"createdAt":1,"createdBy":"you","lastSeq":39,"readSeq":35,"rounds":\(rounds),"roundsLimit":6},
+        {"room":{"id":"\(roomId)","name":"接口联调","topic":"让手机上的 Stash 和 Clash 拉到适配的配置","paused":\(paused),"createdAt":1,"createdBy":"you","lastSeq":39,"readSeq":35,"rounds":\(rounds),"roundsLimit":6},
          "seats":[
           {"handle":"you","kind":"user","terminal":null,"face":null,"joinedAt":1,"addedBy":"you","canAdd":true,"byAgent":false,"left":null,"state":null,"card":null},
           \(seat("daemon", "#.#.# .###. ##.## .###. #.#.#", 0, "busy", agent: "claude-code", model: "claude-fable-5-2", profile: "Work", dot: "violet", canAdd: true)),
@@ -81,7 +81,7 @@ enum DemoRooms {
          "notes":{"text":"接口\\n- GET /clash 多一个 phone：on、listening、links、problem\\n- links 里局域网在前，Tailscale 在后\\n\\n待办\\n- [ ] 文档里的地址跟着改（@web）\\n- [x] 手机上去掉 PROCESS-NAME 规则","at":\(now - 1_300_000),"by":"daemon"},
          "folder":"\(folder)",
          "tasks":[
-          {"n":1,"title":"定下手机订阅的接口","state":"done","owner":"daemon","by":"you","createdAt":\(now - 90_000_000),"updatedAt":\(now - 86_000_000),"note":"GET /clash 多一个 phone，写进置顶笔记了"},
+          {"n":1,"title":"定下订阅接口","state":"done","owner":"daemon","by":"you","createdAt":\(now - 90_000_000),"updatedAt":\(now - 86_000_000),"note":"GET /clash 多一个 phone，写进置顶笔记了"},
           {"n":2,"title":"Mac 上的订阅卡片","detail":"局域网和 Tailscale 两个地址，局域网在前","state":"doing","owner":"mac-app","by":"daemon","createdAt":\(now - 86_000_000),"updatedAt":\(now - 1_500_000),"after":[1]},
           {"n":3,"title":"手机上去掉 PROCESS-NAME 规则","state":"done","owner":"daemon","by":"daemon","createdAt":\(now - 80_000_000),"updatedAt":\(now - 300_000)},
           {"n":4,"title":"iPhone 的订阅页","state":"blocked","owner":"ios-app","by":"you","createdAt":\(now - 70_000_000),"updatedAt":\(now - 600_000),"after":[1],"note":"等字段名：links 是数组还是对象"},
@@ -99,9 +99,9 @@ enum DemoRooms {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let made: RoomAttention = decode("""
         {"items":[
-          {"room":"\(roomId)","roomName":"手机订阅","kind":"permission","handle":"ios-app","terminal":"t-ios-app","text":"","at":\(now - 60_000)},
-          {"room":"\(roomId)","roomName":"手机订阅","kind":"question","handle":"ios-app","seq":37,"task":4,"text":"@you 订阅页的字段名还没定，links 是数组还是对象？定了我接着做。","at":\(now - 600_000)},
-          {"room":"\(roomId)","roomName":"手机订阅","kind":"blocked","handle":"ios-app","task":4,"text":"iPhone 的订阅页：等字段名：links 是数组还是对象","at":\(now - 610_000)},
+          {"room":"\(roomId)","roomName":"接口联调","kind":"permission","handle":"ios-app","terminal":"t-ios-app","text":"","at":\(now - 60_000)},
+          {"room":"\(roomId)","roomName":"接口联调","kind":"question","handle":"ios-app","seq":37,"task":4,"text":"@you 订阅页的字段名还没定，links 是数组还是对象？定了我接着做。","at":\(now - 600_000)},
+          {"room":"\(roomId)","roomName":"接口联调","kind":"blocked","handle":"ios-app","task":4,"text":"iPhone 的订阅页：等字段名：links 是数组还是对象","at":\(now - 610_000)},
           {"room":"c1b2c3d4e5","roomName":"文档整理","kind":"rounds","text":"7","at":\(now - 1_800_000)}]}
         """)
         return made.items
