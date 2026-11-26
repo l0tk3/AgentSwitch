@@ -1,190 +1,131 @@
 # AgentSwitch
 
-Run the AI coding agents on your Mac — Claude Code, Codex, OpenCode, pi — from your iPhone, and from one window on
-the Mac itself. AgentSwitch is the layer around them: it starts them, shows what they do, asks you when they need a
-yes, and keeps your passwords out of what they read.
-
-It leaves no trace in the agents. A session made here is the agent's own session, in the agent's own files, as if
-its own CLI had made it: you can stop using AgentSwitch at any point and carry on in the CLI, or in another tool.
-
-Early stage, one person's project. The design notes in `docs/` are in Chinese and most are marked as drafts; start
-with `docs/design-v0.md`.
-
-The product version is recorded in `VERSION`. Keep the Mac/iOS project versions, daemon package/lockfile and daemon
-reported version in sync; CI checks these and the release tag with `node packages/daemon/scripts/check-version.mjs`.
-Settings → General → App Updates checks the latest stable GitHub Release on request, without installing anything.
-
-CI keeps Mac and Linux build artifacts for seven days. To publish a permanent GitHub Release, push a version tag
-such as `v0.1.0` (`git tag v0.1.0` then `git push origin v0.1.0`). All CI tests and builds must pass before publishing.
-Tags such as `v0.1.0-beta.1` create prereleases. Releases contain the Apple Silicon Mac app ZIP, Linux x86_64 and
-aarch64 runtime tarballs, and `SHA256SUMS.txt`. The Mac app is ad-hoc signed, not notarized; no IPA or APK is published.
-A failed upload leaves a draft that can be completed by rerunning the job; rerunning a published release leaves it
-unchanged. Publishing never installs or switches the app on your machine.
+Run and watch your AI coding agents — **Claude Code, Codex, OpenCode, pi, Grok, Antigravity** — from one Mac app, an
+iPhone app and an Android app. Sessions stay the agents' own: stop using AgentSwitch and carry on in the CLI.
 
 <p align="center">
-  <img src="docs/readme/mac-terminals.jpg" width="100%" alt="The Terminals page on the Mac: a folder tree of sessions on the left, one session shown as a conversation on the right">
+  <img src="docs/readme/mac-terminals.jpg" width="100%" alt="Terminals on the Mac">
 </p>
 <p align="center">
-  <img src="docs/readme/phone-dispatch.jpg" width="19%" alt="iPhone: the Dispatch tab">
-  <img src="docs/readme/phone-terminals.jpg" width="19%" alt="iPhone: the Terminals tab, sessions by folder">
-  <img src="docs/readme/phone-simple.jpg" width="19%" alt="iPhone: a session in the simple view, a permission card at its end">
-  <img src="docs/readme/phone-browser.jpg" width="19%" alt="iPhone: watching Codex in the browser">
-  <img src="docs/readme/phone-clash.jpg" width="19%" alt="iPhone: the nodes for Claude and for OpenAI on the Clash page">
-</p>
-<p align="center"><sub>
-  The Mac's Terminals page; on the iPhone: Dispatch, Terminals, a session waiting for a permission, the browser, Clash.
-  Every picture here is the apps' own demo data, in the <code>Pixel</code> look; the same screens in
-  <code>Classic</code> are <a href="#two-looks">further down</a>.
-</sub></p>
-
-## What is in it
-
-| | on the Mac | on the iPhone |
-|---|---|---|
-| **Dispatch** — say what you want; a router picks the agent and the model, the task runs in the background, and dangerous steps wait for your approval (`docs/dispatch-v0.md`, `router-v0.md`, `loop-v0.md`, `threads-v0.md`) | main window, first page | `Dispatch` tab |
-| **Terminals** — the agents' own CLIs in terminals the service holds, so the same session is open on both screens; a folder tree, search, git, split panes, and a simple view that shows a session as a conversation (`docs/terminal-v0.md`, `simple-view-v0.md`) | `Terminals` page | `Terminals` tab |
-| **Browser** — one browser the service holds (Camoufox), which you and the agents share: a real window on the Mac, a live picture on the phone; take a tab over, hand it back (`docs/browser-v0.md`) | `Browser` page | `Browser` tab |
-| **Profiles** — several sign-ins for one agent, each with its own colour, its own proxy and its own browser; chosen where a terminal is made or a conversation resumed. Claude Code first (`docs/profiles-v0.md`) | Settings › Agents | a `Profile` row when making a terminal, `Resume As` on a conversation |
-| **Proxies** — Clash Integration (a separate way out for Claude and for OpenAI, on top of your own subscription, handed to Clash Verge), a profile's own proxy, the shared browser's proxy (`docs/clash-v0.md`) | `Clash` page, Settings › Agents, `Browser` page | Settings › Proxies |
-| **Credentials** — agents only ever see `enc:v1:` ciphertext; a local gate turns it into the value at the network layer or in a browser form, for the sites it was sealed for (`packages/secret-gate`, `docs/gate-service-v0.md`) | Settings › Keys | Settings › Ciphertexts |
-| **Agents** — the four CLIs installed, updated and switched between versions (`docs/agents-v0.md`) | Settings › Agents | — |
-
-Also: a Live Activity on the lock screen and in the Dynamic Island, the same card in the Mac's menu bar, usage of
-each agent's quota, a web console, and [two looks](#two-looks) for every screen (`Pixel`, `Classic`; `docs/ui-v0.md`).
-
-## A closer look
-
-**Terminals.** The picture at the top: every session of every agent, filed by the folder it runs in — running ones
-first, with their state, their sub-agents, and a lit dot in the colour of the profile they run under. A session opens
-as its real terminal or, as here, in the simple view: what you said, the answer set as Markdown, a run of tool calls
-folded into one line that opens onto the command and its output, what the turn changed, and a reply box that takes
-pictures and files. The same session can be picked up on the phone.
-
-**Dispatch.** One input box. The router hands each request to an agent and a model and says which; the task runs in
-the background, and what needs you — a question, a command to approve — is answered in place, from either screen.
-
-<p align="center">
-  <img src="docs/readme/mac-dispatch.jpg" width="100%" alt="The Dispatch page on the Mac: two tasks, one waiting on a question from Codex, one on an approval for Claude Code">
+  <img src="docs/readme/phone-terminals.jpg" width="19%" alt="iPhone: Terminals">
+  <img src="docs/readme/phone-simple.jpg" width="19%" alt="iPhone: a session in the simple view">
+  <img src="docs/readme/phone-rooms.jpg" width="19%" alt="iPhone: Rooms">
+  <img src="docs/readme/phone-room.jpg" width="19%" alt="iPhone: a chat room">
+  <img src="docs/readme/phone-browser.jpg" width="19%" alt="iPhone: the shared browser">
 </p>
 
-**Browser.** A browser the service holds. An agent's tab shows what it has just done, outlined on the page; `Take
-Over` makes the tab yours until you hand it back. A profile has a browser of its own, with its own
-sign-ins, leaving through its own proxy — the list on the left switches between them.
+## Features
+
+| | what it does | Mac | iPhone | Android |
+|---|---|---|---|---|
+| **Terminals** | The six agents' CLIs in terminals the service holds, open on every device at once. Split panes, folder tree, Files. | `Terminals` | tab | tab |
+| **Simple view** | A session as a conversation: answers, folded tool calls, changes, approval cards; context and 5h / 7d use; a side pane with tasks and the agent's browser tab. | `Terminals` | tab | tab |
+| **Chat Room** | Sessions of any agent, on any machine, in one channel: `@` each other, share tasks and files, ask you when needed. | `Chat Room` | `Rooms` | `Rooms` |
+| **Dispatch** | A standing session that takes a request, opens rooms and starts the sessions it needs. | `Dispatch` | tab | tab |
+| **Browser** | One shared browser (Camoufox) for you and the agents; take a tab over, hand it back. | `Browser` | tab | tab |
+| **Redaction** | Your words (plain or regex) become placeholders before model traffic leaves the Mac, and words again on the way back. | Settings | — | — |
+| **Profiles** | Several sign-ins per agent, each with its own proxy and browser. | Settings | ✓ | ✓ |
+| **Clash** | Separate node groups for Claude, OpenAI, Grok and Antigravity on top of your subscription. | `Clash` | Settings | Settings |
+| **Passwords** | A password book behind Touch ID. | ⌘⇧L | — | — |
+| **Agents, Add-Ons** | Install and update the CLIs; manage their MCP servers, skills and plugins. | Settings | — | — |
+| **Nodes** | Macs and Linux machines paired with each other; phones reach any of them. | Settings | ✓ | ✓ |
+
+Also: a Live Activity on the iPhone, a menu bar card and full menus on the Mac, and two looks — `Pixel` and `Classic`.
 
 <p align="center">
-  <img src="docs/readme/mac-browser.jpg" width="100%" alt="The Browser page on the Mac: Codex's last action outlined in a tab of a profile's own browser">
+  <img src="docs/readme/mac-rooms.jpg" width="100%" alt="Chat Room on the Mac">
 </p>
-
-**Clash.** Claude and OpenAI each get their own group of nodes on top of the subscription you already have, handed
-to Clash Verge without editing its files. The routing check sends one connection of each kind through the running
-core and says where it went — here, OpenAI is not going through its group yet.
-
 <p align="center">
-  <img src="docs/readme/mac-clash.jpg" width="100%" alt="The Clash page on the Mac: the routing check, one row per kind of traffic">
+  <img src="docs/readme/mac-simple.jpg" width="100%" alt="The simple view with its side pane">
+</p>
+<p align="center">
+  <img src="docs/readme/mac-browser.jpg" width="100%" alt="The shared browser">
+</p>
+<p align="center">
+  <img src="docs/readme/mac-redaction.jpg" width="49%" alt="Settings › Redaction">
+  <img src="docs/readme/mac-addons.jpg" width="49%" alt="Settings › Add-Ons">
+</p>
+<p align="center">
+  <img src="docs/readme/mac-clash.jpg" width="100%" alt="Clash">
 </p>
 
 ## Two looks
 
-Every screen comes in two looks: `Appearance` in Settings, on the Mac and on the iPhone, each device keeping its own
-choice. `Pixel`, in the pictures above, is drawn in squares, box-drawing characters and a fixed-width face. `Classic`
-is the same screens in the system's own shapes — round dots, rounded cards, SF Symbols, blue for the one thing to
-press. What is on a screen and what each control does are the same in both; a few short words differ (`Waiting` is
-`Needs You`, `Busy` is `Working`).
+`Pixel` (above) and `Classic` (below), switched in Settings on each device. Same screens, same controls.
 
 <p align="center">
-  <img src="docs/readme/mac-terminals-classic.jpg" width="100%" alt="The Terminals page on the Mac in the Classic look: the same folder tree and the same session as the picture at the top">
+  <img src="docs/readme/mac-terminals-classic.jpg" width="100%" alt="Terminals, Classic">
 </p>
 <p align="center">
-  <img src="docs/readme/mac-dispatch-classic.jpg" width="49%" alt="The Dispatch page on the Mac in the Classic look: the same two tasks, their question and approval cards rounded">
-  <img src="docs/readme/mac-browser-classic.jpg" width="49%" alt="The Browser page on the Mac in the Classic look: the same tab, Codex's last action outlined in blue">
+  <img src="docs/readme/mac-rooms-classic.jpg" width="49%" alt="Chat Room, Classic">
+  <img src="docs/readme/mac-simple-classic.jpg" width="49%" alt="Simple view, Classic">
 </p>
 <p align="center">
-  <img src="docs/readme/phone-dispatch-classic.jpg" width="19%" alt="iPhone, Classic look: the Dispatch tab">
-  <img src="docs/readme/phone-terminals-classic.jpg" width="19%" alt="iPhone, Classic look: the Terminals tab, sessions by folder">
-  <img src="docs/readme/phone-simple-classic.jpg" width="19%" alt="iPhone, Classic look: a session in the simple view, an approval card at its end">
-  <img src="docs/readme/phone-browser-classic.jpg" width="19%" alt="iPhone, Classic look: watching Codex in the browser">
-  <img src="docs/readme/phone-clash-classic.jpg" width="19%" alt="iPhone, Classic look: the nodes for Claude and for OpenAI on the Clash page">
+  <img src="docs/readme/phone-terminals-classic.jpg" width="19%" alt="iPhone, Classic: Terminals">
+  <img src="docs/readme/phone-simple-classic.jpg" width="19%" alt="iPhone, Classic: simple view">
+  <img src="docs/readme/phone-rooms-classic.jpg" width="19%" alt="iPhone, Classic: Rooms">
+  <img src="docs/readme/phone-room-classic.jpg" width="19%" alt="iPhone, Classic: a chat room">
+  <img src="docs/readme/phone-browser-classic.jpg" width="19%" alt="iPhone, Classic: browser">
 </p>
-<p align="center"><sub>
-  The same demo data in <code>Classic</code>: the Mac's Terminals, Dispatch and Browser pages, and the five iPhone
-  screens of the row at the top. The Mac's Clash page is a system form in both looks and differs only in its rail and
-  status bar, so it is shown once.
-</sub></p>
 
 ## How it fits together
 
 ```
-iPhone app ──HTTPS, pinned certificate, device token──▶ ┐
-            (same Wi-Fi, or Tailscale)                   │
-Mac app (menu bar + main window) ──HTTP, 127.0.0.1──▶ agentswitchd ──▶ Claude Code · Codex · OpenCode · pi
-   └ ships and supervises: Node, Python, the daemon, secret-gate     ├─ terminals it holds
-                                                                     ├─ the browser it holds
-                                                                     └─ secret-gate (decrypts at the edge)
+iPhone · Android ──HTTPS, pinned certificate──▶ ┐
+Mac app ──────────HTTP, 127.0.0.1─────────────▶ agentswitchd ──▶ the six agents
+other Macs, Linux nodes ◀──── paired ─────────▶ ┘   ├─ terminals, chat rooms, Dispatch
+                                                    ├─ the shared browser
+                                                    └─ model gateway, password vault
 ```
 
-The phone pairs once by QR code. After that it reaches a fixed list of routes and nothing else
-(`packages/daemon/src/remote/routes.ts`, `docs/app-v0.md` §2); a lost phone is removed on the Mac. What each entry
-point may and may not do with a secret is listed in `packages/secret-gate/BOUNDARY.md`.
+Phones pair once by QR code and reach only a fixed list of routes (`packages/daemon/src/remote/routes.ts`).
 
 ## Packages
 
-Each one stands alone — its own dependencies, tests and README — and they talk only over processes and the network.
-
 | package | what |
 |---|---|
-| `packages/daemon` | TypeScript service: task engine (SQLite, SSE, approvals), router, HTTP API, the remote listener for phones, terminals, the browser, profiles, Clash Integration, quota; CLI `bin/agentswitch` |
-| `packages/mac-app` | macOS app (SwiftUI): menu bar and main window; bundles Node, Python, the daemon and secret-gate and keeps them running; pairing, devices, keys, agents |
-| `packages/ios-app` | iPhone app (SwiftUI, iOS 17+): `AgentSwitchKit` (pairing, certificate pinning, sealing on the phone, event streams) and the screens |
-| `packages/secret-gate` | Python credential layer: keypairs, ciphertext and short references, the decrypting proxy, the browser fill gate, MCP tools for the agents |
-| `packages/linux` | a Linux machine as a node, without a window: the same runtime the Mac app bundles, a systemd user service, the command line in place of the app's screens |
+| `packages/daemon` | TypeScript service and CLI `bin/agentswitch` |
+| `packages/mac-app` | macOS app (SwiftUI); bundles Node, Python, the service and secret-gate |
+| `packages/ios-app` | iPhone app (SwiftUI, iOS 17+) |
+| `packages/android-app` | Android app (Kotlin, Compose, Android 10+) |
+| `packages/secret-gate` | Python: the model traffic gateway and the browser fill gate |
+| `packages/linux` | headless Linux node: the same runtime, a systemd user service |
 
 ## Build
 
-Needs an Apple Silicon Mac on macOS 14 or newer, Xcode with its iOS platform, and
-[xcodegen](https://github.com/yonaskolb/XcodeGen). The agents themselves are your own installs and sign-ins; the app
-finds them, or installs them for you.
+Apple Silicon Mac, macOS 14+, Xcode, [xcodegen](https://github.com/yonaskolb/XcodeGen); for Android, JDK 17 and the
+Android SDK. The agents are your own installs; the app can install them.
 
 ```bash
-# The Mac app: a self-contained AgentSwitch.app (downloads pinned Node and Python on the first run)
-cd packages/mac-app && scripts/build-app.sh          # → build/AgentSwitch.app
-
-# The iPhone app
-cd packages/ios-app
-scripts/build-sim.sh                                 # simulator
-TEAM=<your team ID> scripts/install-device.sh        # your iPhone; a free Apple ID works, for 7 days at a time
-
-# A Linux machine as a node (x86_64 or aarch64, systemd; packages/linux/README.md)
-packages/linux/scripts/install.sh                    # → ~/.local/share/agentswitch, a systemd user service
+cd packages/mac-app && scripts/build-app.sh                  # → build/AgentSwitch.app
+cd packages/ios-app && scripts/build-sim.sh                  # simulator
+cd packages/ios-app && TEAM=<team ID> scripts/install-device.sh
+cd packages/android-app && ./gradlew :app:assembleRelease    # → app/build/outputs/apk/release/
+packages/linux/scripts/install.sh                            # Linux node
 ```
 
-Open the Mac app, follow its first-run steps, and scan the pairing code with the iPhone app. Each package's README
-has the details: `packages/mac-app/README.md`, `packages/ios-app/README.md`, `packages/daemon/README.md`.
+Open the Mac app, follow its first-run steps, scan the pairing code with the phone.
 
 ## Test
 
-No test calls a real model. Scripts that do are under each package's `scripts/` and are run by hand.
-
 ```bash
-cd packages/daemon      && npm install && npm test   # vitest
+cd packages/daemon      && npm install && npm test
 cd packages/mac-app     && swift test
-cd packages/ios-app     && swift test                # AgentSwitchKit
+cd packages/ios-app     && swift test
+cd packages/android-app && ./gradlew :kit:test :app:testDebugUnitTest
 cd packages/secret-gate && .venv/bin/pytest
 ```
 
-CI (`.github/workflows/ci.yml`) runs these on every push and pull request, besides the vendored SwiftTerm's tests,
-and builds what ships: the Linux runtimes (each started once as a throw-away node), the Mac app
-(ad-hoc signed) and the iPhone app for the simulator. The runtimes and the Mac app are kept as the run's artifacts for
-a week.
+No test calls a real model. Screens can be drawn from demo data: Mac `-designPreview <dir>`, iPhone
+`-uiDemo YES -uiDemoScreen <name>`, Android `--ez uiDemo true --es uiDemoScreen <name>`.
 
-The screens can be looked at without a Mac service or a phone: the Mac app draws any page to a picture
-(`-designPreview <dir>`), the iPhone app opens on sample data (`-uiDemo YES -uiDemoScreen <name>`), and
-`docs/design/index.html` lists the demo pages the screens are built from.
+## Release
 
-## Where to read
+The version is in `VERSION` (1.0.0); `node packages/daemon/scripts/check-version.mjs` checks every package against it.
+CI (`.github/workflows/ci.yml`) runs all tests and builds on every push. A tag such as `v1.0.0` publishes a GitHub
+Release (`-beta.N` makes a prerelease) with the Apple Silicon Mac app ZIP, Linux x86_64 and aarch64 runtimes, and
+`SHA256SUMS.txt`. The Mac app is ad-hoc signed, not notarized; no IPA or APK is published.
 
-- `docs/design-v0.md` — the whole, and why
-- `docs/app-v0.md` — the two apps, pairing, what a phone can reach
-- `docs/ui-v0.md` — how the screens look and how they are worded
-- `docs/terminal-v0.md`, `docs/browser-v0.md`, `docs/profiles-v0.md`, `docs/clash-v0.md` — the parts above
-- `docs/design/` — the demo pages; `docs/showcase/` — every screen on one page
-- `CLAUDE.md` — the index of all design notes and the conventions the code follows
+## Docs
+
+Design notes are in `docs/` (Chinese); `CLAUDE.md` indexes them. Start with `docs/design-v0.md`.
