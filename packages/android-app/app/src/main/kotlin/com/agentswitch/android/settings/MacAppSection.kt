@@ -50,7 +50,7 @@ fun MacAppSection() {
             }),
         )
     }
-    FormSection("Mac App", footer = "安装时正在进行的任务将中断；新版本无法启动时将自动恢复至上一版本。") {
+    FormSection("Mac App") {
         val staged = update?.staged
         if (staged != null && !requested) {
             FormRow(first = true, onClick = { confirming = true }) {

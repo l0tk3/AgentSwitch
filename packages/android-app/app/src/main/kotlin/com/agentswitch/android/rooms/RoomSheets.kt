@@ -1,5 +1,6 @@
 package com.agentswitch.android.rooms
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import com.agentswitch.kit.api.createTerminal
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -219,7 +220,7 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
         }
         // What it says it is changing (§9): every path it named, and until when.
         if (!gone) model.detail?.claim(handle)?.let { claim ->
-            FormSection("Changing", footer = "${claim.why?.let { "原因：$it。" } ?: ""}这是它告诉其他成员的话，不是锁；到 ${RoomWords.time(claim.until)} 自动失效。") {
+            FormSection("Changing", footer = claim.why?.let { "原因：$it。" }) {
                 claim.paths.forEachIndexed { i, path ->
                     FormRow(first = i == 0) { Text(path, Modifier.weight(1f), color = Theme.ink, style = code(13), maxLines = 1, overflow = TextOverflow.MiddleEllipsis) }
                 }
@@ -230,7 +231,7 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
             }
         }
         if (!gone) {
-            FormSection(footer = if (seat.byAgent) "由别的会话拉起来的会话不能再拉人。" else "打开后，这个会话可以新建房间、拉会话进来，并读取拉人要用的清单。") {
+            FormSection(footer = if (seat.byAgent) "由别的会话拉起来的会话不能再拉人。" else null) {
                 val can = !seat.byAgent && !busy
                 fun set(on: Boolean) { scope.launch { busy = true; model.run(app.api) { it.setSeat(handle, model.id, on) }; busy = false } }
                 FormRow(Modifier.alpha(if (can) 1f else 0.4f), first = true, onClick = if (can) ({ set(!seat.canAdd) }) else null) {
@@ -281,7 +282,7 @@ private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit,
                 }
             }
             // What takes it out, in the order of how much they undo.
-            FormSection(footer = "踢出：会话继续运行，之后还能再拉进来。结束：同时关掉它的终端，对话记录留着，之后能恢复；有没做完的任务时它先写交接。") {
+            FormSection {
                 FormRow(dim, first = true, onClick = if (busy) null else ({ confirmRemove = true })) { Text("踢出", color = Theme.failed, style = plain(16)) }
                 FormRow(dim, onClick = if (busy) null else ({ confirmEnd = true })) { Text("结束", color = Theme.failed, style = plain(16)) }
             }
@@ -410,7 +411,7 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
                 FormRow(first = i == 0) {
                     RoomAgentMark(one.harness)
                     Text(one.cwd, Modifier.weight(1f), color = Theme.ink, style = mono(14), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                    Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "Remove") { fresh = fresh - one }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(17))
+                    Text("×", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "Remove") { fresh = fresh - one }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(17))
                 }
             }
             FormRow(first = fresh.isEmpty(), onClick = { nav.present("roomnewsession") { com.agentswitch.android.terminals.NewTerminalSheet(started = {}, forRoom = { fresh = fresh + it }) } }) {
@@ -418,7 +419,7 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
                 Text("›", color = Theme.inkDim, style = plain(18))
             }
         }
-        FormSection("Running Sessions", footer = "进了房间的会话可以收发房间消息；只有 @ 才唤醒它。") {
+        FormSection("Running Sessions") {
             if (terminals.isNotEmpty()) {
                 FormRow(first = true) {
                     if (LocalLook.current.isClassic) LookSymbolIcon(LookSymbol.Magnifier, side = 16.dp, color = Theme.inkDim)

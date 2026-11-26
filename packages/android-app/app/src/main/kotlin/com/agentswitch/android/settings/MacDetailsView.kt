@@ -102,7 +102,7 @@ fun MacDetailsView(profile: ServerProfile) {
             ActionRow("Choose Route Again") { model.reconnect() }
         }
         model.routeReport?.let { report ->
-            FormSection("Last Route Choice", footer = "${DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(report.at))} · 同时探测所有地址，按顺序选用第一个可用地址。") {
+            FormSection("Last Route Choice", footer = "${DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(report.at))}}") {
                 for ((i, probe) in report.reports.withIndex()) FormRow(first = i == 0) { RouteProbeRow(probe, Modifier.weight(1f)) }
             }
         }
@@ -116,7 +116,7 @@ fun MacDetailsView(profile: ServerProfile) {
             LabeledRow("Paired", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault()).format(Date(profile.pairedAt)))
         }
         workdir?.let { w ->
-            FormSection(footer = "未指定目录的任务在此目录下各自新建子目录。在 Mac 上修改。") {
+            FormSection {
                 FormRow(first = true) {
                     Text("Default Folder", color = Theme.ink, style = plain(16), maxLines = 1)
                     Text(PathDisplay.short(w.path), Modifier.weight(1f), color = Theme.secondaryInk, style = code(13), textAlign = TextAlign.End, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
@@ -124,7 +124,7 @@ fun MacDetailsView(profile: ServerProfile) {
                 w.problem?.let { NoteRow(it, color = Theme.waiting) }
             }
         }
-        FormSection("Certificate Fingerprint", footer = "与 Mac 上「配对」页显示的指纹一致，即为同一台 Mac。") {
+        FormSection("Certificate Fingerprint") {
             FormRow(first = true) { SelectionContainer { Text(ServerProfile.grouped(profile.fingerprint), color = Theme.ink, style = code(12)) } }
         }
     }
@@ -142,7 +142,7 @@ private fun TroubleshootingSection(profile: ServerProfile, lastCause: BringIntoV
     val demoOpen = LocalDemoScroll.current == "route"
     var causesOpen by remember { mutableStateOf<Boolean?>(if (demoOpen) true else null) }
     val open = causesOpen ?: (model.connection.endpoint == null)
-    FormSection("Troubleshooting", footer = "连接中断时会自动重试，无需停留在此页面。") {
+    FormSection("Troubleshooting") {
         val checks = Troubleshooting.checks(model.connection, model.routeReport?.reports, profile)
         for ((i, check) in checks.withIndex()) {
             FormRow(first = i == 0) {

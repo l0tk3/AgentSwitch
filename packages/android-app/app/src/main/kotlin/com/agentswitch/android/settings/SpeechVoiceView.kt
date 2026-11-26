@@ -1,5 +1,6 @@
 package com.agentswitch.android.settings
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import android.content.Intent
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,7 +40,7 @@ fun SpeechVoiceView() {
     DisposableEffect(Unit) { onDispose { speaker.stop() } }
     val chosen = speaker.chosenVoice()?.name
     SettingsPage("Voice", leading = { BarBack(rememberBack(), "Settings") }) {
-        FormSection(footer = "轻点声音以选择并试听。") {
+        FormSection {
             for ((i, voice) in speaker.installedVoices.withIndex()) {
                 FormRow(first = i == 0, onClick = { speaker.chooseVoice(voice); speaker.sample(voice) }) {
                     Text(if (chosen == voice.name) "<x>" else "< >", color = if (chosen == voice.name) Theme.signal else Theme.inkDim, style = mono(14))
@@ -50,7 +51,7 @@ fun SpeechVoiceView() {
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
-                        "Play", Modifier.clickable(role = Role.Button) { speaker.sample(voice) }.padding(6.dp).semantics { contentDescription = "试听 ${voice.name}" },
+                        "Play", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button) { speaker.sample(voice) }.padding(6.dp).semantics { contentDescription = "试听 ${voice.name}" },
                         color = Theme.signal, style = mono(12),
                     )
                 }

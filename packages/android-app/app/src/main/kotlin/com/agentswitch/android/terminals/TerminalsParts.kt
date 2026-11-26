@@ -1,5 +1,6 @@
 package com.agentswitch.android.terminals
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -143,7 +144,7 @@ fun ConnectionBanner(modifier: Modifier = Modifier) {
                     PixelSprite(PixelArt.square, pixel = 2.dp, color = Theme.waiting)
                     Text(phase.text, color = Theme.waiting, style = mono(12))
                     Spacer(Modifier.weight(1f))
-                    Text("Retry", Modifier.clickable(role = Role.Button) { model.reconnect() }.padding(horizontal = 6.dp, vertical = 4.dp), color = Theme.signal, style = mono(12))
+                    Text("Retry", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button) { model.reconnect() }.padding(horizontal = 6.dp, vertical = 4.dp), color = Theme.signal, style = mono(12))
                 }
                 if (phase == ConnectionPhase.Lost) {
                     Text("Mac 可能处于睡眠状态或已离线。请查看 Settings › Mac › Troubleshooting。", color = Theme.secondaryInk, style = plain(13))
@@ -154,7 +155,7 @@ fun ConnectionBanner(modifier: Modifier = Modifier) {
                 PixelSprite(PixelArt.square, pixel = 2.dp, color = Theme.failed)
                 Text(phase.text, color = Theme.failed, style = mono(12))
                 Spacer(Modifier.weight(1f))
-                Text("Pair Again", Modifier.clickable(role = Role.Button) { model.pairAgain() }.padding(horizontal = 6.dp, vertical = 4.dp), color = Theme.signal, style = mono(12))
+                Text("Pair Again", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button) { model.pairAgain() }.padding(horizontal = 6.dp, vertical = 4.dp), color = Theme.signal, style = mono(12))
             }
         ConnectionPhase.CertificateChanged ->
             Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -150,7 +150,6 @@ fun ProxiesSection() {
 
     FormSection(
         "Proxies",
-        footer = "Clash 为 Claude 和 OpenAI 单独选节点；浏览器和每个配置可以各有自己的代理。右边是它现在从哪里出去。",
     ) {
         var first = true
         overview.clash?.let { clash ->
@@ -315,7 +314,7 @@ fun ProxyFormView(target: ProxyTarget) {
         }
         FormSection(
             footer = ((if (current == null) (if (isBrowser) "浏览器现在直接从这台 Mac 出去。" else "这个配置现在从这台 Mac 自己的出口出去。") else "") +
-                (if (fingerprint == null) "" else "指纹在 Mac 上更换。")).ifEmpty { null },
+                "").ifEmpty { null },
         ) {
             FormRow(first = true) {
                 Text("Exit", color = Theme.ink, style = plain(16), maxLines = 1)
@@ -327,11 +326,7 @@ fun ProxyFormView(target: ProxyTarget) {
             problem?.let { FormNote(it, Theme.waiting) }
             if (current != null && target is ProxyTarget.Profile) FormButton("Check Exit", { run { check(it) } }, enabled = !busy)
         }
-        FormSection(
-            "Proxy",
-            footer = "可以把整条代理地址（http://用户名:密码@主机:端口）直接粘进 Server，用户名和密码会自己分到下面两栏。" +
-                (if (isBrowser) ProxyText.browserHint else ProxyText.profileHint) + ProxyText.passwordHint,
-        ) {
+        FormSection("Proxy") {
             FormRow(first = true) {
                 Text("Server", color = Theme.ink, style = plain(16), maxLines = 1)
                 RightField(
@@ -360,7 +355,7 @@ fun ProxyFormView(target: ProxyTarget) {
             FormButton(if (isBrowser) "Direct" else "No Proxy", { run { send(it, null) } }, enabled = !busy && current != null, destructive = true)
         }
         if (restartNeeded) {
-            FormSection(footer = ProxyText.restartHint + "重新启动后已打开的标签按网址恢复。") {
+            FormSection {
                 FormButton("Restart Browser", { run { show(it.restartBrowser(), resetDraft = false) } }, first = true, enabled = !busy)
             }
         }

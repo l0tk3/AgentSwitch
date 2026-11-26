@@ -96,7 +96,7 @@ fun SettingsTab() {
         val current = model.profile
         if (current != null) {
             val others = model.macs.servers.filter { it.fingerprint != current.fingerprint }
-            FormSection(footer = if (model.macs.servers.size > 1) "同一时间只连接一台 Mac。" else null) {
+            FormSection {
                 FormRow(first = true, onClick = { open(SettingsRoute.Mac) }) {
                     MacHeader(Modifier.weight(1f))
                     LookSymbolIcon(LookSymbol.ChevronRight, side = 13.dp, color = Theme.inkDim, bold = true)
@@ -112,12 +112,12 @@ fun SettingsTab() {
         if (connected) Column(Modifier.onGloballyPositioned { proxiesTop = it.positionInParent().y.toInt() }) { ProxiesSection() }
         FeedbackSection(open)
         if (connected) MacAppSection()
-        FormSection("Security", footer = "设备丢失时，可在 Mac 上移除此设备。") {
+        FormSection("Security") {
             ToggleRow("Unlock with ${lock.biometryName}", lock.enabled, first = true) { lock.setEnabled(it, activity) }
             lock.lastError?.let { NoteRow(it, color = Theme.failed) }
         }
         if (current != null) {
-            FormSection(footer = "删除此手机与这台 Mac 的配对。") {
+            FormSection {
                 ActionRow("Remove This Mac", first = true, color = Theme.failed) { confirmForget = true }
             }
         }
@@ -139,7 +139,6 @@ private fun AppearanceSection() {
     fun set(next: Int) { step = next.coerceIn(RecordTextSize.steps); settings.putFloat(RecordTextSize.key, step.toFloat()) }
     FormSection(
         "Appearance",
-        footer = "只换外观：图标、字体、按钮和提示的写法。功能、位置和操作不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Text Size 调整简略视图里对话文字的大小；终端里的字用两指捏合缩放。",
     ) {
         FormRow(first = true) {
             Segmented(looks.map { it.label }, looks.indexOf(settings.look), { settings.chooseLook(looks[it]) })
@@ -186,7 +185,7 @@ private fun FeedbackSection(open: (SettingsRoute) -> Unit) {
     val model = LocalAppModel.current
     val feedback = model.feedback
     val follower = model.follower
-    FormSection("Alerts & Voice", footer = "Read Aloud 开启时自动朗读终端的提问；Follow in Background 在有终端工作时让应用在后台保持连接，离开应用后仍能收到通知，这期间通知栏有一条常驻通知。") {
+    FormSection("Alerts & Voice") {
         ToggleRow("Sound", feedback.sound, first = true) { feedback.chooseSound(it) }
         ToggleRow("Haptics", feedback.haptics) { feedback.chooseHaptics(it) }
         ToggleRow("Sound in Silent Mode", feedback.audibleInSilent, enabled = feedback.sound) { feedback.chooseAudibleInSilent(it) }

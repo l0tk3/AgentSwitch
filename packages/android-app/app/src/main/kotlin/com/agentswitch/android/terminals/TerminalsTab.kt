@@ -1,5 +1,6 @@
 package com.agentswitch.android.terminals
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import com.agentswitch.android.design.ClassicIcon
 import com.agentswitch.android.design.ClassicIconKind
 import com.agentswitch.android.rooms.RoomArt
@@ -968,7 +969,7 @@ private fun SessionRowView(s: SessionSummary, last: Boolean, depth: Int, state: 
         }
         if (resumable && picking == null) {
             Box(
-                Modifier.clickable(enabled = opening == null, role = Role.Button) { state.scope.launch { state.resume(s) } }.padding(horizontal = 2.dp, vertical = 2.dp),
+                Modifier.minimumInteractiveComponentSize().clickable(enabled = opening == null, role = Role.Button) { state.scope.launch { state.resume(s) } }.padding(horizontal = 2.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 if (opening == s.id) BrailleSpinner(color = Theme.secondaryInk)
@@ -1018,7 +1019,7 @@ private fun SearchLine(state: TerminalsTabState) {
         )
         if (state.query.isNotEmpty()) {
             Box(
-                Modifier.clickable(role = Role.Button, onClickLabel = "清除搜索") { state.query = "" }.padding(horizontal = 2.dp, vertical = 2.dp),
+                Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "清除搜索") { state.query = "" }.padding(horizontal = 2.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) { LookGlyph("×", LookSymbol.XCircleFill, color = Theme.secondaryInk, size = 15, scale = 1f, bold = false) }
         }

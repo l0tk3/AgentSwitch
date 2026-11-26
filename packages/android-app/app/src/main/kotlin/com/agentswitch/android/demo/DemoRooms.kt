@@ -96,7 +96,8 @@ object DemoRooms {
         RoomMessage(seq = 1, from = RoomSeat.you, to = listOf("daemon", "web"), text = "@daemon @web 这周把登录做完。先定接口，任务我写在任务表里了，页面草图见图。", at = ago(280), files = listOf("$folder/sketch.jpg")),
         RoomMessage(seq = 2, from = "daemon", to = listOf("web", RoomSeat.you), replyTo = 1, text = "接口定好了 @web @you，见 `api.md`。T1 已完成，我接着做 T2。", at = ago(200), files = listOf("$folder/api.md")),
         RoomMessage(seq = 3, from = "web", to = listOf("daemon"), text = "@daemon 收到。我领了 T3，在改 `Login.tsx`，现在的样子见截图。", at = ago(50), files = listOf("$folder/screens/login.png"), task = 3),
-        RoomMessage(seq = 4, from = "daemon", text = "我在改 `src/auth/` 和 `login.ts`，改完之前先别动这两处。", at = ago(30), task = 2),
+        // A quick answer through its own /btw while busy (docs/chatroom-v0.md §13): `Aside` beside its name.
+        RoomMessage(seq = 4, from = "daemon", to = listOf(RoomSeat.you), replyTo = 3, text = "〔快速回答 · /btw〕我在改 `src/auth/` 和 `login.ts`，改完之前先别动这两处。", at = ago(30), task = 2, aside = true),
         RoomMessage(seq = 5, from = "docs", to = listOf(RoomSeat.you), text = "@you 旧 cookie 逻辑已标成废弃（T7），清单在共享文件夹的 `deprecations.md`。", at = ago(8), files = listOf("$folder/deprecations.md")),
     )
 

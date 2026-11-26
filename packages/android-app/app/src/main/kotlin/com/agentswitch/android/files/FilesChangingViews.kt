@@ -1,5 +1,6 @@
 package com.agentswitch.android.files
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -226,7 +227,7 @@ fun UploadRow(upload: FilesStore.Upload, stop: () -> Unit, retry: () -> Unit) {
             }
         }
         if (failed) {
-            Text("Retry", Modifier.clickable(role = Role.Button, onClick = retry).padding(horizontal = 6.dp, vertical = 8.dp), color = Theme.signal, style = if (classic) plain(15) else mono(12))
+            Text("Retry", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClick = retry).padding(horizontal = 6.dp, vertical = 8.dp), color = Theme.signal, style = if (classic) plain(15) else mono(12))
             Spacer(Modifier.width(4.dp))
         }
         Box(Modifier.heightIn(min = 30.dp).width(30.dp).clickable(role = Role.Button, onClickLabel = "Stop", onClick = stop), contentAlignment = Alignment.Center) {

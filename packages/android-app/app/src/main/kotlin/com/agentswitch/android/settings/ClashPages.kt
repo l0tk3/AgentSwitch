@@ -1,5 +1,6 @@
 package com.agentswitch.android.settings
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -133,8 +134,7 @@ private fun serviceFooter(view: ClashView, service: ClashService): String {
     if (nodes.all { it in state.missing }) {
         return "选的节点在现在这个订阅里一个都没有（标着 Gone）：${service.title} 的流量照订阅里原有的规则走。在 Nodes 里重新选几个；用不着的向左滑拿掉。"
     }
-    val groups = "Clash 里是两组：${state.auto} 按从上到下的顺序用第一个连得上的节点；${state.group} 决定 ${service.title} 的流量走哪里。"
-    return if (state.live) groups + "点一行就改用那一个。" else groups + "Clash Verge 用上 AgentSwitch 订阅之后，可以在这里点选用哪一个。"
+    return ""
 }
 
 /**
@@ -228,7 +228,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
     ) {
         LookSymbolIcon(LookSymbol.Magnifier, side = 16.dp, color = Theme.secondaryInk)
         PlainField(query, onChange, Modifier.weight(1f), placeholder = "Search", style = plain(16))
-        if (query.isNotEmpty()) Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "clear") { onChange("") }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
+        if (query.isNotEmpty()) Text("×", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "clear") { onChange("") }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
     }
 }
 
@@ -298,7 +298,7 @@ internal fun ClashTextScreen(clash: ClashModel, template: ClashTemplate?) {
         trailing = { if (saving) BrailleSpinner(Modifier.padding(end = 12.dp)) else BarWord("Save", { keep(text) }, enabled = loaded && text != initial) },
     ) {
         problem?.let { FormSection { FormNote(it, Theme.failed, first = true) } }
-        FormSection(footer = help) {
+        FormSection {
             BasicTextField(
                 text, { text = it }, Modifier.fillMaxWidth().heightIn(min = 320.dp),
                 textStyle = code(13).copy(color = Theme.ink), cursorBrush = SolidColor(Theme.signal),
@@ -307,7 +307,7 @@ internal fun ClashTextScreen(clash: ClashModel, template: ClashTemplate?) {
             )
         }
         if (custom) {
-            FormSection(footer = "丢掉你自己改的这一份，用回内置的模版。") {
+            FormSection {
                 FormButton("Use Built-In", { keep(null) }, first = true, enabled = !saving, destructive = true)
             }
         }
@@ -342,7 +342,6 @@ internal fun ClashSourceSheet(clash: ClashModel) {
         problem?.let { FormSection { FormNote(it, Theme.failed, first = true) } }
         FormSection(
             "Link",
-            footer = "Mac 现在就去取一次，之后按 Auto Update 的间隔再取。链接经这条加密的连接发给 Mac，由它保管，不留在这台手机上。",
         ) {
             FormRow(first = true) {
                 PlainField(
@@ -354,7 +353,7 @@ internal fun ClashSourceSheet(clash: ClashModel) {
         }
         val profiles = clash.view?.profiles ?: emptyList()
         if (profiles.isNotEmpty()) {
-            FormSection("From Clash Verge", footer = "Mac 的 Clash Verge 里已有的订阅：点一个拿过来用。") {
+            FormSection("From Clash Verge") {
                 profiles.forEachIndexed { i, profile ->
                     FormRow(first = i == 0, onClick = { use { it.setClashSourceVerge(profile.uid) } }) {
                         Text(profile.name, Modifier.weight(1f), color = Theme.ink, style = plain(16), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -363,7 +362,7 @@ internal fun ClashSourceSheet(clash: ClashModel) {
                 }
             }
         }
-        FormSection(footer = "一份 Clash 的 yaml 配置。文件不会自己更新。") {
+        FormSection {
             FormButton("Choose File…", { picker.launch(arrayOf("*/*")) }, first = true)
         }
     }

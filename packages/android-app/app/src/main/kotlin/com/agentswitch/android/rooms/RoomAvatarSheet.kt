@@ -1,5 +1,6 @@
 package com.agentswitch.android.rooms
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -108,7 +109,7 @@ fun RoomAvatarSheet(model: RoomPageModel, handle: String) {
             return@FormPage
         }
         // What it will look like in each look.
-        FormSection(footer = "头像跟着会话走：它在每个房间里都一样。像素风格显示像素头像，Classic 风格显示普通头像。") {
+        FormSection {
             FormRow(first = true) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val p = pixel
@@ -158,7 +159,7 @@ fun RoomAvatarSheet(model: RoomPageModel, handle: String) {
             }
         }
         val shown = if (tab == 0) current?.pixel != null || pixel != null else current?.classic != null || emoji != null
-        FormSection(footer = if (tab == 0) "Reset：像素头像回到这个座位自己的脸。" else "Reset：普通头像回到名字的首字母。") {
+        FormSection {
             FormRow(Modifier.alpha(if (shown && !busy) 1f else 0.4f), first = true, onClick = if (shown && !busy) ({
                 if (tab == 0) save(AvatarChoice.Reset, null) else save(null, AvatarChoice.Reset)
             }) else null) { Text("Reset", color = Theme.failed, style = plain(16)) }
@@ -185,7 +186,7 @@ private fun Cell(on: Boolean, pick: () -> Unit, content: @Composable () -> Unit)
     val classic = LocalLook.current.isClassic
     val shape = if (classic) RoundedCornerShape(10.dp) else RectangleShape
     Box(
-        Modifier.padding(3.dp).border(2.dp, if (on) Theme.signal else Color.Transparent, shape).clickable(role = Role.RadioButton, onClick = pick).padding(5.dp),
+        Modifier.padding(3.dp).border(2.dp, if (on) Theme.signal else Color.Transparent, shape).minimumInteractiveComponentSize().clickable(role = Role.RadioButton, onClick = pick).padding(5.dp),
         contentAlignment = Alignment.Center,
     ) { content() }
 }

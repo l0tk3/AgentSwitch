@@ -200,11 +200,11 @@ private fun TaskPage(model: RoomPageModel, n: Int, back: () -> Unit) {
         }
         // What this piece of work has cost the room (2026-11-24): wakes, characters, messages, calls.
         detail.taskStats(n)?.let { stats ->
-            FormSection("Room Cost", footer = "房间里为这个任务花的：唤醒几次、送进去多少字、几条消息、几次房间工具调用。token 要看各会话自己的用量。") {
+            FormSection("Room Cost") {
                 FormRow(first = true) { Text(stats.says, Modifier.weight(1f), color = Theme.ink, style = plain(15)) }
             }
         }
-        FormSection("Owner", footer = "点一个会话把任务交给它；再点一次收回。正在做的任务收回后回到 To Do。") {
+        FormSection("Owner") {
             OwnerRows(detail, task.owner, enabled = !busy) { handle ->
                 act { if (handle == null) it.setRoomTask(model.id, n, clearOwner = true) else it.setRoomTask(model.id, n, owner = handle) }
             }
@@ -265,7 +265,7 @@ private fun NewTaskPage(model: RoomPageModel, back: () -> Unit) {
             FormRow(first = true) { PlainField(title, { title = it }, Modifier.weight(1f), placeholder = "Title") }
             FormRow { PlainField(detail, { detail = it }, Modifier.weight(1f).heightIn(min = 80.dp, max = 200.dp), placeholder = "细节：要做成什么样、相关文件…（可不填）", style = plain(15), singleLine = false) }
         }
-        FormSection("Owner", footer = "可以不指定：任务留在 To Do，由会话自己领取。指定了也要等它领取才算开始。") {
+        FormSection("Owner") {
             OwnerRows(model.detail, owner, enabled = !working) { owner = it }
         }
         model.error?.let { Text(it, Modifier.padding(horizontal = Theme.Space.l, vertical = Theme.Space.m), color = Theme.failed, style = plain(13)) }
@@ -285,7 +285,7 @@ fun RoomFilesSheet(model: RoomPageModel) {
     val listed = model.files
     val folder = listed?.folder?.ifEmpty { null } ?: model.detail?.folder?.ifEmpty { null }
     FormPage("Files", leading = { BarWord("Done", { nav.pop() }, color = agentInk) }) {
-        FormSection("Shared Folder", footer = "在 Mac 上。成员之间交接的文件放在这里：报告、导出的数据、要对方看的东西。") {
+        FormSection("Shared Folder") {
             FormRow(first = true) { Text(folder ?: "—", Modifier.weight(1f), color = Theme.ink, style = code(13)) }
         }
         model.filesError?.let { Text(it, Modifier.padding(horizontal = Theme.Space.l, vertical = Theme.Space.m), color = Theme.failed, style = plain(13)) }

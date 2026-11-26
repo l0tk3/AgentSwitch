@@ -161,8 +161,7 @@ private fun SubscriptionSection(clash: ClashModel, view: ClashView, adding: () -
     val source = view.source
     FormSection(
         "Subscription",
-        footer = if (source == null) "AgentSwitch 从这个订阅出发，加上给 Claude 和 OpenAI 单独的分组，再交给 Clash Verge。链接由 Mac 保管，这里只显示它的主机名。"
-        else "换一个订阅会忘掉为 Claude 和 OpenAI 选过的节点。",
+        footer = if (source == null) null else "换一个订阅会忘掉为 Claude 和 OpenAI 选过的节点。",
     ) {
         if (source != null) {
             ValueRow("From", ClashText.origin(source), first = true)
@@ -205,7 +204,6 @@ private fun RulesSection(clash: ClashModel, view: ClashView) {
     val settings = view.settings
     FormSection(
         "Rules",
-        footer = "Only My Rules：订阅的分组和规则都不要，只留它的节点，其余走 Manual；国内模版跟着打开。规则模版打开就加进 Clash，关掉就拿走，都立刻生效。Only My Rules 和 DNS 改的是订阅正文，要 Clash Verge 重新取一次才生效。",
     ) {
         SwitchRow("Only My Rules", settings.ownRules, { on -> clash.change { it.copy(ownRules = on) } }, first = true)
         for (template in ClashTemplate.entries) {
@@ -252,7 +250,7 @@ private fun DirectSection(clash: ClashModel, view: ClashView, anchor: BringIntoV
             newDirect = ""
         }
     }
-    FormSection("Go Direct", footer = "这些地址不经任何节点，直接连出去。向左滑删除。") {
+    FormSection("Go Direct") {
         view.settings.direct.forEachIndexed { i, address ->
             SwipeRow({ clash.change { it.copy(direct = it.direct.filterIndexed { j, _ -> j != i }) } }) {
                 FormRow(first = i == 0) { Text(address, color = Theme.ink, style = code(14), maxLines = 1) }
@@ -302,7 +300,7 @@ private fun PhoneSection(clash: ClashModel, phone: com.agentswitch.kit.api.Clash
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RoutingSection(clash: ClashModel, view: ClashView, anchor: BringIntoViewRequester) {
-    FormSection("Routing Check", footer = "每一类流量各发一条连接，看 Mac 上的内核把它送去了哪里。") {
+    FormSection("Routing Check") {
         val rows = clash.checked ?: emptyList()
         rows.forEachIndexed { i, row ->
             FormRow(first = i == 0) {

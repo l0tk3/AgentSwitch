@@ -1,5 +1,6 @@
 package com.agentswitch.android.components
 
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,6 @@ fun ErrorText(message: String?, onClose: () -> Unit, modifier: Modifier = Modifi
     Row(modifier, verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         StatusSquare(Theme.failed, Modifier.padding(top = 5.dp))
         Text(message, Modifier.weight(1f), color = Theme.ink, style = plain(13))
-        Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "close", onClick = onClose).padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
+        Text("×", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "close", onClick = onClose).padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
     }
 }
