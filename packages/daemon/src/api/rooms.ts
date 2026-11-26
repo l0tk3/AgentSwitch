@@ -154,7 +154,9 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     return view;
   });
 
-  const roundsOf = (room: Room): number | null => { const n = rooms.rounds(room.id); return n >= room.roundsLimit ? n : null; };
+  // The rounds between sessions are no longer told (user #575, 2026-11-26: 这个提示完全没必要): always null, so no screen
+  // shows the notice, the list's mark or the attention row; the field stays for the screens that read it.
+  const roundsOf = (_room: Room): number | null => null;
 
   // 等你处理 (2026-11-24): what in a room waits on the user's hand — a member's screen asking (trust this folder,
   // or a list to choose from), a member waiting on a permission, a task stuck, a question put to the user and not

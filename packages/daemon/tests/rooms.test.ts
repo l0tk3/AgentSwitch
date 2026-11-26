@@ -244,26 +244,15 @@ function made() {
 }
 
 describe("sessions talking among themselves", () => {
-  it("counts their messages to one another since the user last spoke or said OK, and tells at the room's limit", async () => {
+  it("are not told to the user however many rounds go by (user #575)", async () => {
     const { call, store } = made();
     const id = (await call("POST", "/rooms", { name: "r", terminals: ["t1", "t2"] })).body.room.id as string;
     await call("PATCH", `/rooms/${id}`, { roundsLimit: 3 });
-    store.post(id, { from: "daemon", text: "@mac-app 1" });
-    store.post(id, { from: "mac-app", text: "@daemon 2" });
-    store.post(id, { from: "mac-app", text: "@you 只是告诉你" });   // to the user: not a round
-    store.post(id, { from: "daemon", text: "记一笔" });             // to nobody: not a round
+    for (const n of [1, 2, 3, 4]) store.post(id, { from: n % 2 ? "daemon" : "mac-app", text: `@${n % 2 ? "mac-app" : "daemon"} ${n}` });
     expect((await call("GET", `/rooms/${id}`)).body.room).toMatchObject({ rounds: null, roundsLimit: 3 });
-    store.post(id, { from: "daemon", text: "@mac-app 3" });
-    expect((await call("GET", `/rooms/${id}`)).body.room.rounds).toBe(3);
-    expect((await call("GET", "/rooms")).body.rooms[0].rounds).toBe(3);
-    // OK: counted from here again; nothing was stopped.
+    expect((await call("GET", "/rooms")).body.rooms[0].rounds).toBeNull();
+    expect((await call("GET", "/rooms/attention")).body.items.filter((i: { kind: string }) => i.kind === "rounds")).toEqual([]);
     expect((await call("POST", `/rooms/${id}/rounds/ok`)).status).toBe(200);
-    expect((await call("GET", `/rooms/${id}`)).body.room.rounds).toBeNull();
-    for (const n of [4, 5, 6]) store.post(id, { from: "daemon", text: `@mac-app ${n}` });
-    expect((await call("GET", `/rooms/${id}`)).body.room.rounds).toBe(3);
-    // A word from the user does the same.
-    await call("POST", `/rooms/${id}/messages`, { text: "继续" });
-    expect((await call("GET", `/rooms/${id}`)).body.room.rounds).toBeNull();
   });
 });
 
