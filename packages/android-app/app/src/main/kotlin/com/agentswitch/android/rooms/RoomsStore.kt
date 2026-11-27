@@ -52,6 +52,10 @@ class RoomsStore {
 
     private var etag: String? = null
 
+    /** Told of each list read from the Mac (null: none to show — another Mac, or one without Chat Room): the home
+     *  screen's Channels widget keeps its copy by it (widget/ChannelsFeed.kt). The sample screens' lists are not told. */
+    var onList: ((RoomList?) -> Unit)? = null
+
     /** Bumped by `reset` (another Mac): a read that started before it is dropped. */
     private var generation = 0
 
@@ -106,7 +110,7 @@ class RoomsStore {
         try {
             val fresh = api.rooms(etag)
             if (asked != generation) return
-            if (fresh != null) { list = fresh.first; etag = fresh.second }
+            if (fresh != null) { list = fresh.first; etag = fresh.second; onList?.invoke(fresh.first) }
             unsupported = false
             error = null
         } catch (e: CancellationException) {
@@ -117,6 +121,7 @@ class RoomsStore {
             list = RoomList(emptyList())
             etag = null
             error = null
+            onList?.invoke(null)
         } catch (e: Exception) {
             if (asked == generation) error = e.message ?: e.javaClass.simpleName
         }
@@ -160,6 +165,7 @@ class RoomsStore {
 
     fun reset() {
         generation += 1
+        if (list != null) onList?.invoke(null)
         list = null
         attention = null
         avatars = null

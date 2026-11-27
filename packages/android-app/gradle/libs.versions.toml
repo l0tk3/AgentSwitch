@@ -11,6 +11,8 @@ coreKtx = "1.18.0"
 termux = "v0.118.3"
 camerax = "1.6.1"
 zxing = "3.5.4"
+glance = "1.2.0"
+work = "2.11.2"
 junit = "6.0.1"
 
 [libraries]
@@ -26,6 +28,8 @@ androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "
 androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }

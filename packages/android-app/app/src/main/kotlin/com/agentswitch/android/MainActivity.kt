@@ -50,13 +50,14 @@ class MainActivity : ComponentActivity() {
         fastestDisplay()
         // Debug screens with nothing behind them (the iPhone's `-uiDemoScreen`): the shared parts, a terminal's screen.
         val screen = if (BuildConfig.DEBUG) intent.getStringExtra("uiDemoScreen") else null
-        if (screen == "design" || screen == "terminalscreen" || screen == "selfcheck") {
+        if (screen == "design" || screen == "terminalscreen" || screen == "selfcheck" || screen == "widget") {
             val look = InterfaceLook.load(intent.getStringExtra(InterfaceLook.key))
             setContent {
                 AgentSwitchTheme(look) {
                     when (screen) {
                         "terminalscreen" -> TerminalScreenDemo()
                         "selfcheck" -> KitSelfCheckScreen()
+                        "widget" -> com.agentswitch.android.demo.ChannelsWidgetDemo(classic = look.isClassic)
                         else -> DesignGallery(open = intent.getStringExtra("uiDemoOpen"))
                     }
                 }
@@ -64,6 +65,13 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (BuildConfig.DEBUG) intent.getStringExtra(InterfaceLook.key)?.let { app.settings.chooseLook(InterfaceLook.load(it)) }
+        // Debug builds: `--ez pinChannelsWidget true` asks the launcher to put a Channels widget on the home screen
+        // (its own "Add to home screen" prompt), so one can be placed from a computer.
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("pinChannelsWidget", false)) {
+            val widgets = getSystemService(android.appwidget.AppWidgetManager::class.java)
+            if (widgets?.isRequestPinAppWidgetSupported == true)
+                widgets.requestPinAppWidget(android.content.ComponentName(this, com.agentswitch.android.widget.ChannelsWidgetReceiver::class.java), null, null)
+        }
         // Screens with sample data and no Mac (the iPhone's `-uiDemo YES -uiDemoScreen <name>`), debug builds only:
         // `--ez uiDemo true [--es uiDemoScreen <name>]`.
         if (BuildConfig.DEBUG && (intent.getBooleanExtra("uiDemo", false) || intent.getStringExtra("uiDemo") == "YES")) {
@@ -117,6 +125,8 @@ class MainActivity : ComponentActivity() {
         // A notification's link: agentswitch://terminal/<id>.
         intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "terminal" }
             ?.pathSegments?.firstOrNull()?.takeIf { it.isNotEmpty() }?.let { app.model.openTerminal(it) }
+        // The Channels widget's blank space: agentswitch://rooms, the list of rooms.
+        intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "rooms" }?.let { app.model.tab = MainTab.Rooms }
         // A 等你处理 notification's link: agentswitch://room/<id>?task=&seq=&card=.
         intent?.data?.takeIf { it.scheme.equals(PairingLink.scheme, ignoreCase = true) && it.host == "room" }?.let { uri ->
             val id = uri.pathSegments.firstOrNull()?.takeIf { it.isNotEmpty() } ?: return@let

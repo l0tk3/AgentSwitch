@@ -75,6 +75,28 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- The home screen's Channels widget (docs/app-v0.md §6): drawn from the app's own copy of the rooms; set up
+             (which channels it shows) when placed, if the launcher asks, and again by its "reconfigure". -->
+        <receiver
+            android:name=".widget.ChannelsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/channels_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/channels_widget_info" />
+        </receiver>
+        <activity
+            android:name=".widget.ChannelsSetupActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.AgentSwitch">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

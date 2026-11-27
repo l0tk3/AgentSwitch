@@ -106,6 +106,9 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
+    // The home screen's Channels widget (docs/app-v0.md §6) and its refresh while the app is away.
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.work.runtime)
 
     testImplementation(kotlin("test-junit5"))
     testImplementation(libs.junit.jupiter)

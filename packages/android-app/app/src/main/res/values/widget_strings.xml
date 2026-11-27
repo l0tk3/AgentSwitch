@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The Channels widget in the launcher's list of widgets (docs/app-v0.md §6). -->
+    <string name="channels_widget_label">Channels</string>
+    <string name="channels_widget_description">Your AgentSwitch channels.</string>
+</resources>

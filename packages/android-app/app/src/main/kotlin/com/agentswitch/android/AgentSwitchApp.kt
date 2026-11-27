@@ -16,11 +16,12 @@ import com.agentswitch.android.terminals.RecordPictureStore
 import com.agentswitch.kit.connection.PathMonitoring
 import com.agentswitch.kit.connection.ServiceDiscovery
 import com.agentswitch.kit.storage.LocalStore
+import com.agentswitch.android.widget.ChannelsFeed
 import java.io.File
 
 /** The process: the one [AppModel] and the settings kept on this phone live as long as it does. */
 class AgentSwitchApp : Application() {
-    val settings: AppSettings by lazy { AppSettings(this) }
+    val settings: AppSettings by lazy { AppSettings(this).also { it.onLook = { ChannelsFeed.redraw(this) } } }
     val notifier: Notifier by lazy { Notifier(this) }
 
     /** What is in progress, as an ongoing notification, and the service that follows the Mac from behind meanwhile. */
@@ -35,6 +36,8 @@ class AgentSwitchApp : Application() {
             if (store == null) it.banner = "无法打开本地存储，配对信息将无法保存。"
             it.notifier = notifier
             it.follower = follower
+            // The home screen's Channels widget keeps its copy of the rooms by what is read (docs/app-v0.md §6).
+            it.rooms.onList = { list -> if (list != null) ChannelsFeed.save(this, list) else ChannelsFeed.forget(this) }
             it.start()
         }
     }

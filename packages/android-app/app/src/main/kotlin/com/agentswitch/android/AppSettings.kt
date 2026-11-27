@@ -17,9 +17,14 @@ class AppSettings(context: Context) {
     var look: InterfaceLook by mutableStateOf(InterfaceLook.load(prefs.getString(InterfaceLook.key, null)))
         private set
 
+    /** Told when the look changes (the home screen's widget draws in it). */
+    var onLook: (() -> Unit)? = null
+
     fun chooseLook(next: InterfaceLook) {
+        val changed = next != look
         look = next
         prefs.edit().putString(InterfaceLook.key, next.rawValue).apply()
+        if (changed) onLook?.invoke()
     }
 
     fun string(key: String): String? = prefs.getString(key, null)
