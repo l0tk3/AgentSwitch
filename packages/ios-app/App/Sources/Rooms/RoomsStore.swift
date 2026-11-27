@@ -67,7 +67,7 @@ final class RoomsStore {
         do {
             let fresh = try await api.rooms(etag: etag)
             guard asked == generation else { return }
-            if let fresh { list = fresh.list; etag = fresh.etag }
+            if let fresh { list = fresh.list; etag = fresh.etag; ChannelsWidgetFeed.save(fresh.list) }
             unsupported = false
             error = nil
             // Read again when the count changed — and when the list did while something waits: one item can take
@@ -86,6 +86,7 @@ final class RoomsStore {
 
     func reset() {
         generation += 1
+        ChannelsWidgetFeed.forget()
         list = nil
         etag = nil
         attention = []
@@ -97,7 +98,7 @@ final class RoomsStore {
 
     #if DEBUG
     /// The sample screens' rooms.
-    func show(_ list: RoomList, attention: [RoomAttentionItem] = []) { self.list = list; self.attention = attention; attentionAt = list.attention }
+    func show(_ list: RoomList, attention: [RoomAttentionItem] = []) { self.list = list; self.attention = attention; attentionAt = list.attention; ChannelsWidgetFeed.save(list) }
     #endif
 }
 

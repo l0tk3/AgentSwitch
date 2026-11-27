@@ -18,6 +18,16 @@ struct RootView: View {
         })
     }
 
+    /// `-uiDemoScreen widgets` or `widgetslock`: the Channels widget's views alone (ChannelsWidgetDemo).
+    private static var widgetsDemo: String? {
+        #if DEBUG
+        let s = UserDefaults.standard.string(forKey: "uiDemoScreen")
+        return UserDefaults.standard.bool(forKey: "uiDemo") && (s == "widgets" || s == "widgetslock") ? s : nil
+        #else
+        return nil
+        #endif
+    }
+
     @ViewBuilder
     private var content: some View {
         @Bindable var model = model
@@ -25,6 +35,10 @@ struct RootView: View {
         // can stay on top of the lock (a ZStack cover sits below sheets).
         if lock.locked {
             LockView().followsLook()
+        } else if Self.widgetsDemo != nil {
+            #if DEBUG
+            ChannelsWidgetDemo(lock: Self.widgetsDemo == "widgetslock")
+            #endif
         } else {
             Group {
                 if model.isPaired {

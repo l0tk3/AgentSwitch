@@ -37,9 +37,12 @@ targets:
       - path: App
         excludes:
           - Info.plist
+          - "*.entitlements"
           - "*.icon"
       # The app icon (docs/ui-v0.md §10): two layered Icon Composer documents the asset compiler draws from — the classic
       # one is the app's own, the pixel one its alternate (HomeIcon). ../mac-app/scripts/make-icons.swift writes them.
+      # The Channels widget's views, also drawn by the app's sample screen (ChannelsWidgetDemo).
+      - path: Widgets/ChannelsViews.swift
       - path: App/AppIcon.icon
         type: file
         buildPhase: resources
@@ -63,6 +66,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         PRODUCT_NAME: AgentSwitch
         INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/AgentSwitch.entitlements
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -85,6 +89,7 @@ targets:
       - path: Widgets
         excludes:
           - Info.plist
+          - "*.entitlements"
     dependencies:
       - package: AgentSwitchKit
         product: AgentSwitchLive
@@ -95,6 +100,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).widgets
         PRODUCT_NAME: AgentSwitchWidgets
         INFOPLIST_FILE: Widgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Widgets/AgentSwitchWidgets.entitlements
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES

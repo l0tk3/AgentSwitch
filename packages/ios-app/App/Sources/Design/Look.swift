@@ -27,7 +27,7 @@ private struct FollowsLook: ViewModifier {
             .onChange(of: scenePhase, initial: true) { _, phase in
                 if phase == .active { HomeIcon.follow(look) }
             }
-            .onChange(of: look) { _, look in HomeIcon.follow(look) }
+            .onChange(of: look) { _, look in HomeIcon.follow(look); ChannelsWidgetFeed.relook() }
     }
 }
 

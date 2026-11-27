@@ -108,6 +108,11 @@ struct AgentSwitchApp: App {
     private func open(_ url: URL) {
         if let id = LiveLink.terminalId(from: url) {
             model.openTerminal(id)
+        } else if let id = LiveLink.roomId(from: url) {
+            model.openRoom(id)
+        } else if LiveLink.isRooms(url) {
+            model.sheet = nil
+            model.tab = .rooms
         } else {
             model.receivePairingLink(url.absoluteString)
         }

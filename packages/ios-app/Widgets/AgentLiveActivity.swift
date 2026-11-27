@@ -11,6 +11,7 @@ import WidgetKit
 struct AgentSwitchWidgets: WidgetBundle {
     var body: some Widget {
         AgentLiveActivity()
+        ChannelsWidget()
     }
 }
 
