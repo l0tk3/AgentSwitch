@@ -24,6 +24,9 @@ export type ExitPoolOptions = {
   /** Another way to ask where an exit comes out (tests). */
   readonly probe?: (via: ForwarderAddress) => Promise<ExitInfo>;
   readonly log?: (line: string) => void;
+  /** What `key`'s browser and terminals reach straight, past its proxy (docs/profiles-v0.md §4.3); asked for every
+   *  request, so a change counts at once. */
+  readonly direct?: (key: string) => readonly string[];
 };
 
 type Exit = { readonly setting: string; readonly upstream: string | null; readonly forwarder: Forwarder };
@@ -45,6 +48,8 @@ export function checkedProxy(proxy: ProxySetting): ProxySetting {
 
 export class ExitPool {
   private readonly exits = new Map<string, Exit>();
+  /** `key`'s `Direct` rules as last read, and when: a page asks for many things at once, the file is read once. */
+  private readonly directs = new Map<string, { readonly at: number; readonly rules: readonly string[] }>();
 
   constructor(private readonly opts: ExitPoolOptions) {}
 
@@ -77,6 +82,7 @@ export class ExitPool {
         return exit.upstream;
       },
       ...(pin ? { pin } : {}),
+      ...(this.opts.direct ? { direct: () => this.directOf(key) } : {}),
       ...(this.opts.log ? { log: this.opts.log } : {}),
     });
     return forwarder;
@@ -112,6 +118,18 @@ export class ExitPool {
     const at = new URL(via.server);
     return `http://${encodeURIComponent(via.username)}:${encodeURIComponent(via.password)}@${at.host}`;
   }
+
+  /** `key`'s `Direct` rules, read again at most every couple of seconds — or at once after `directChanged`. */
+  private directOf(key: string): readonly string[] {
+    const was = this.directs.get(key), now = Date.now();
+    if (was && now - was.at < 2_000) return was.rules;
+    const rules = this.opts.direct!(key);
+    this.directs.set(key, { at: now, rules });
+    return rules;
+  }
+
+  /** `key`'s `Direct` rules were changed: its next request goes by the new ones. */
+  directChanged(key: string): void { this.directs.delete(key); }
 
   /** Requests and tunnels `key`'s forwarder has been asked for (0: nothing went through it yet, or it has none). */
   requests(key: string): number { return this.exits.get(key)?.forwarder.stats().requests ?? 0; }

@@ -180,6 +180,20 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     }
   });
 
+  // What a profile's browser and terminals reach straight, past its proxy (§4.3): its rules from now on, `null` the
+  // default (NetBird). Counts at the next request; nothing has to start again.
+  app.put("/profiles/:agent/:id/direct", async (c) => {
+    const agent = Agent.safeParse(c.req.param("agent"));
+    if (!agent.success) return c.json({ error: "no such agent" }, 404);
+    const body = await parseBody(c, z.object({ rules: z.array(z.string().max(300)).max(200).nullable() }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    const id = c.req.param("id");
+    try { store.setDirect(agent.data, id, body.data.rules); }
+    catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+    deps.exits?.directChanged(exitKey(agent.data, id));
+    return c.json({ agents: store.all() });
+  });
+
   // A profile's claude.ai session key (§3.4): a ciphertext sealed for claude.ai, put into the profile's own browser as
   // that site's sign-in cookie; null forgets it. It is asked of the gate at once, and one that is not a session key
   // is refused.

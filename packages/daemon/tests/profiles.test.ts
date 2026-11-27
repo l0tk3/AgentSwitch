@@ -15,6 +15,7 @@ import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
 import { DEFAULT_PROFILE, ProfileError, ProfileStore, grokAccount } from "../src/profiles/store.js";
+import { DEFAULT_DIRECT } from "../src/util/directRules.js";
 import { ApiKeyError, ApiKeys, listModels, nearModel, probeModels, unknownModel } from "../src/profiles/apiKeys.js";
 import { mountSessions } from "../src/api/sessions.js";
 import { mountTerminals } from "../src/api/terminals.js";
@@ -140,7 +141,7 @@ describe("the profile store", () => {
 
   it("has Default for every agent, the Mac's own; a new Claude Code profile is a folder with links and no account", () => {
     const { userHome, home, store } = world();
-    expect(store.all()["claude-code"]).toEqual({ current: DEFAULT_PROFILE, creatable: true, kinds: ["subscription", "api"], profiles: [{ id: "default", name: "Default", kind: "subscription", createdAt: 0, account: "me@example.com" }] });
+    expect(store.all()["claude-code"]).toEqual({ current: DEFAULT_PROFILE, creatable: true, kinds: ["subscription", "api"], profiles: [{ id: "default", name: "Default", kind: "subscription", createdAt: 0, direct: DEFAULT_DIRECT, account: "me@example.com" }] });
     // Codex has account profiles and ones that pay by a key; OpenCode and pi `Default` alone.
     expect(store.all().codex).toMatchObject({ current: "default", creatable: true, kinds: ["subscription", "api"], profiles: [{ id: "default" }] });
     expect(store.all().pi).toMatchObject({ creatable: false, kinds: [] });

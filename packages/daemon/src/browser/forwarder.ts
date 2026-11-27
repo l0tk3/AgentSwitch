@@ -6,7 +6,8 @@
  *  - AgentSwitch's own ports on this Mac are never reached, however the Mac is named (a loopback name or address, or a
  *    name that resolves to one);
  *  - everything else goes straight out, or to the upstream proxy the person set — which can change while the browser
- *    runs (§7.2 第 5 条); what stays on this Mac or its own network never goes to the upstream;
+ *    runs (§7.2 第 5 条); what stays on this Mac or its own network never goes to the upstream, nor what a profile's
+ *    `Direct` rules name (docs/profiles-v0.md §4.3);
  *  - only the browser it was started for is served: it is given a password made for this run.
  *
  *  What a page of whose tab may open (`file:`, the dev servers) is still the routes' and the host's to say. */
@@ -14,6 +15,7 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { RequestError, Server } from "proxy-chain";
+import { directMatch } from "../util/directRules.js";
 import { isLoopbackAddress, isLoopbackHost, OWN_PORT_REFUSAL } from "./rules.js";
 
 export type ForwarderOptions = {
@@ -24,6 +26,9 @@ export type ForwarderOptions = {
   /** The proxy what leaves this Mac goes to (`http://…`, `socks5://…`), or null: straight out. Asked for every request;
    *  throwing refuses the request (502). */
   readonly upstream?: () => string | null;
+  /** Where the browser goes straight, past the upstream (a profile's `Direct`, docs/profiles-v0.md §4.3): rules as
+   *  `directMatch` reads them. Asked for every request. */
+  readonly direct?: () => readonly string[];
   /** The addresses a name stands for (the system's by default). */
   readonly resolve?: (hostname: string) => Promise<readonly string[]>;
   readonly log?: (line: string) => void;
@@ -97,6 +102,7 @@ export class Forwarder {
       throw new RequestError(OWN_PORT_REFUSAL, 403);
     }
     if (isLocalDestination(hostname)) return { upstreamProxyUrl: null };
+    if (this.opts.direct && directMatch(hostname, this.opts.direct())) return { upstreamProxyUrl: null };
     // A proxy that is set but cannot be used (its password not to be had): nothing leaves, not straight either.
     let upstream: string | null;
     try { upstream = this.opts.upstream?.() ?? null; } catch (err) { throw new RequestError((err as Error).message, 502); }

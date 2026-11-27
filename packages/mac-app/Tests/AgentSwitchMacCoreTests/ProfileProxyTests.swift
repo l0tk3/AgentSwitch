@@ -216,4 +216,24 @@ final class ProfileBrowserTests: XCTestCase {
         XCTAssertEqual(own.browserPrefix, "/profile-browser/claude-code.abc123def0")
         XCTAssertEqual(client.browserPrefix, "")
     }
+
+    /// `Direct` (docs/profiles-v0.md §4.3): what the service says is read; a rule typed is tidied or refused as the
+    /// service would.
+    func testDirectRules() throws {
+        let agents = try JSONDecoder().decode([String: AgentProfiles].self, from: Data(#"""
+        {"codex":{"current":"default","creatable":true,"profiles":[
+          {"id":"default","name":"Default","kind":"subscription","createdAt":0,"direct":["netbird.io","*.netbird.io","*.netbird.cloud","100.64.0.0/10"]},
+          {"id":"abc123def0","name":"work","kind":"subscription","createdAt":1}]}}
+        """#.utf8))
+        let list = try XCTUnwrap(agents["codex"]).profiles
+        XCTAssertEqual(list[0].direct, ProfileDirect.defaults)
+        XCTAssertNil(list[1].direct)
+        XCTAssertEqual(ProfileDirect.rule(" NetBird.io. "), "netbird.io")
+        XCTAssertEqual(ProfileDirect.rule("*.netbird.cloud"), "*.netbird.cloud")
+        XCTAssertEqual(ProfileDirect.rule("100.64.0.0/10"), "100.64.0.0/10")
+        XCTAssertEqual(ProfileDirect.rule("10.1.2.3"), "10.1.2.3")
+        for bad in ["", "netbird", "*netbird.io", "a.*.io", "http://netbird.io", "netbird.io:443", "300.1.1.1", "10.0.0.0/33", "-x.io", "a b.io"] {
+            XCTAssertNil(ProfileDirect.rule(bad), bad)
+        }
+    }
 }

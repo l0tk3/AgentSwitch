@@ -261,6 +261,9 @@ public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     public let telemetry: Bool?
     public let isolated: Bool?
     public let workspace: String?
+    /// What its browser and terminals reach straight, past its proxy (docs/profiles-v0.md §4.3); nil from a service
+    /// before these rules.
+    public let direct: [String]?
     public var hasSessionKey: Bool { sessionKey == true }
     public var telemetryOff: Bool { telemetry == false }
     public var paysByKey: Bool { kind == "api" }
@@ -269,7 +272,8 @@ public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     /// Its colour as the screens draw it; nil for none, or one this app does not know yet.
     public var tint: ProfileColor? { color.flatMap(ProfileColor.init(rawValue:)) }
 
-    public init(id: String, name: String, kind: String = "subscription", account: String? = nil, proxy: BrowserProxy? = nil, exit: ProfileExit? = nil, color: String? = nil, sessionKey: Bool? = nil, device: String? = nil, api: ProfileApiInfo? = nil, telemetry: Bool? = nil, isolated: Bool? = nil, workspace: String? = nil) {
+    public init(id: String, name: String, kind: String = "subscription", account: String? = nil, proxy: BrowserProxy? = nil, exit: ProfileExit? = nil, color: String? = nil, sessionKey: Bool? = nil, device: String? = nil, api: ProfileApiInfo? = nil, telemetry: Bool? = nil, isolated: Bool? = nil, workspace: String? = nil, direct: [String]? = nil) {
+        self.direct = direct
         self.isolated = isolated
         self.workspace = workspace
         self.api = api
@@ -290,6 +294,39 @@ public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     public var way: String {
         guard let proxy else { return "This Mac" }
         return exit?.text ?? BrowserIdentityText.proxySite(proxy.server) ?? proxy.server
+    }
+}
+
+/// A profile's `Direct` rules (docs/profiles-v0.md §4.3).
+public enum ProfileDirect {
+    /// What the service gives a profile that has no rules of its own: NetBird's service and its peers.
+    public static let defaults = ["netbird.io", "*.netbird.io", "*.netbird.cloud", "100.64.0.0/10"]
+
+    /// A rule as typed, tidied as the service keeps it (lower case, no dot at the end); nil when it is not one —
+    /// a name, `*.` and a name, an IPv4 address, or an IPv4 CIDR. The service checks it again.
+    public static func rule(_ said: String) -> String? {
+        var r = said.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if r.hasSuffix(".") { r.removeLast() }
+        guard !r.isEmpty, r.count <= 253 else { return nil }
+        if let slash = r.firstIndex(of: "/") {
+            let base = String(r[..<slash]), bits = String(r[r.index(after: slash)...])
+            guard ipv4(base), let n = Int(bits), bits.count <= 2, n <= 32 else { return nil }
+            return "\(base)/\(n)"
+        }
+        if r.allSatisfy({ $0.isNumber || $0 == "." }) { return ipv4(r) ? r : nil }
+        let name = r.hasPrefix("*.") ? String(r.dropFirst(2)) : r
+        let labels = name.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return nil }
+        for label in labels {
+            guard (1...63).contains(label.count), label.first != "-", label.last != "-",
+                  label.allSatisfy({ ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" }) else { return nil }
+        }
+        return r
+    }
+
+    private static func ipv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy { !$0.isEmpty && $0.count <= 3 && $0.allSatisfy(\.isNumber) && Int($0)! <= 255 }
     }
 }
 
@@ -439,6 +476,15 @@ extension DaemonClient {
             enum Key: String, CodingKey { case server } }
         let body = try proxy.map { try JSONEncoder().encode($0) } ?? JSONEncoder().encode(None())
         return try profileExitReply(try await call("PUT", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/proxy", body: body, timeout: 30))
+    }
+
+    /// A profile's `Direct` rules from now on (docs/profiles-v0.md §4.3): names, `*.` and a name, IPv4 addresses and
+    /// CIDRs its browser and terminals reach straight; nil: back to the default (`ProfileDirect.defaults`).
+    public func setProfileDirect(agent: String, id: String, rules: [String]?) async throws -> [String: AgentProfiles] {
+        struct Body: Encodable { let rules: [String]?
+            func encode(to encoder: Encoder) throws { var c = encoder.container(keyedBy: Key.self); try c.encode(rules, forKey: .rules) }
+            enum Key: String, CodingKey { case rules } }
+        return try decode(ProfilesReply.self, try await call("PUT", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/direct", body: try JSONEncoder().encode(Body(rules: rules)))).agents
     }
 
     /// A profile's claude.ai session key from now on, a ciphertext sealed for claude.ai (nil: forgotten). Its own

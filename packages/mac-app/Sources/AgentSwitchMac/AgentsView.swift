@@ -395,11 +395,16 @@ struct ProfileProxySheet: View {
     @State private var exit: ProfileExit?
     @State private var problem: String?
     @State private var busy = false
+    /// Its `Direct` rules (docs/profiles-v0.md §4.3), saved as each one is added or removed; the one being typed.
+    @State private var direct: [String]
+    @State private var adding = ""
+    @State private var directProblem: String?
 
     init(agent: ProfileAgent, profile: AgentProfile, problem: String? = nil, done: @escaping ([String: AgentProfiles]) -> Void) {
         self.agent = agent
         self.profile = profile
         self.done = done
+        _direct = State(initialValue: profile.direct ?? ProfileDirect.defaults)
         _draft = State(initialValue: BrowserProxyDraft(profile.proxy))
         _exit = State(initialValue: profile.exit)
         _problem = State(initialValue: problem)
@@ -424,6 +429,7 @@ struct ProfileProxySheet: View {
             }
             .formStyle(.columns)
             if let said = draft.split().problem ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if profile.direct != nil { directRules }
             HStack {
                 Button("No Proxy") { apply(nil) }.disabled(busy || profile.proxy == nil)
                 if busy { ProgressView().controlSize(.small) }
@@ -434,6 +440,65 @@ struct ProfileProxySheet: View {
         }
         .padding(20)
         .frame(width: 460)
+    }
+
+    /// `Direct`: what is reached straight, past the proxy — one rule a line, each removable; a new one added with Return
+    /// or `Add`; `Reset` brings back the default (NetBird).
+    private var directRules: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Direct").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Reset") { saveDirect(nil) }.controlSize(.small).disabled(busy || direct == ProfileDirect.defaults)
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(direct.enumerated()), id: \.element) { index, rule in
+                    if index > 0 { Divider() }
+                    HStack {
+                        Text(rule).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                        Spacer()
+                        Button { saveDirect(direct.filter { $0 != rule }) } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless).help("Remove").disabled(busy)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                }
+                if !direct.isEmpty { Divider() }
+                HStack {
+                    TextField("Add", text: $adding, prompt: Text("*.example.com, 10.0.0.0/8")).textFieldStyle(.plain)
+                        .onSubmit(addDirect)
+                    Button("Add", action: addDirect).controlSize(.small).disabled(busy || ProfileDirect.rule(adding) == nil)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+            }
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+            if let said = directProblem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+        }
+    }
+
+    private func addDirect() {
+        guard let rule = ProfileDirect.rule(adding) else {
+            if !adding.trimmingCharacters(in: .whitespaces).isEmpty { directProblem = "不是可用的直连规则：\(adding.trimmingCharacters(in: .whitespaces))" }
+            return
+        }
+        guard !direct.contains(rule) else { adding = ""; return }
+        saveDirect(direct + [rule]) { adding = "" }
+    }
+
+    /// The rules from now on (nil: the default); they count at the browser's and the terminals' next request.
+    private func saveDirect(_ rules: [String]?, then: @escaping () -> Void = {}) {
+        let client = profileClient, agent = agent.id, id = profile.id
+        busy = true
+        directProblem = nil
+        Task {
+            do {
+                let agents = try await client.setProfileDirect(agent: agent, id: id, rules: rules)
+                done(agents)
+                direct = agents[agent]?.profiles.first { $0.id == id }?.direct ?? rules ?? ProfileDirect.defaults
+                then()
+            } catch { directProblem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+            busy = false
+        }
     }
 
     /// The proxy set (nil: none) and checked. With a problem the sheet stays, saying it; without, the exit is shown and

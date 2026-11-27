@@ -101,6 +101,7 @@ import { ExitPool } from "./browser/exits.js";
 import { claudeSignedIn, codexSignedIn } from "./terminals/signIn.js";
 import { ProfileBrowsers } from "./browser/fleet.js";
 import { exitKey, profileOfKey } from "./api/profiles.js";
+import { DEFAULT_DIRECT } from "./util/directRules.js";
 import type { BrowserHost } from "./browser/host.js";
 import { removeOwnBrowserFiles, sharedBrowser, sweepOwnBrowserFiles } from "./browser/setup.js";
 import { newEngineKit } from "./browser/engine/setup.js";
@@ -382,7 +383,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // forwarder when the profile has a proxy, straight out when it has none.
   const profiles = new ProfileStore({ home: cfg.home });
   { const old = profiles.removeOldSystemHomes(); if (old) console.error(`profiles: removed ${old} private home folders isolated profiles no longer use`); }
-  const exits = new ExitPool({ ownPorts, ...(opener ? { resolve: opener } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
+  const exits = new ExitPool({ ownPorts, ...(opener ? { resolve: opener } : {}), lookup: exitLookup(), log: (line) => console.error(line),
+    direct: (key) => { const p = profileOfKey(key); return p ? profiles.directOf(p.agent, p.id) : DEFAULT_DIRECT; } });
   const profileBrowsers = browser
     ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder,
           zone: () => { const p = profileOfKey(key); return p ? profiles.all()[p.agent].profiles.find((x) => x.id === p.id)?.exit?.timezone ?? null : null; },

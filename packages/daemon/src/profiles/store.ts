@@ -11,6 +11,7 @@
  *  rules. No account identity is copied into a new profile. See docs/profiles-v0.md for the isolation boundary. */
 
 import type { AddonPlace } from "./addons.js";
+import { DEFAULT_DIRECT, directRule } from "../util/directRules.js";
 import { changeClaudeCopies, claudeCopyOptions, claudeCopyState, prepareClaudeCopies, type ClaudeCopies, type ClaudeCopyList } from "./claudeCopies.js";
 import { randomBytes } from "node:crypto";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -71,7 +72,9 @@ export type Profile = { readonly id: string; readonly name: string; readonly kin
   /** The device Claude Code says it is under this profile (§3.5): the `userID` of its own file; absent till it has run. */
   readonly device?: string;
   /** Claude Code's telemetry is off under it (§3.7: `DISABLE_TELEMETRY`); absent: on, as Claude Code has it. */
-  readonly telemetry?: false };
+  readonly telemetry?: false;
+  /** What its browser and terminals reach straight, past its proxy (§4.3): its own rules, else `DEFAULT_DIRECT`. */
+  readonly direct?: readonly string[] };
 export type AgentProfiles = { readonly current: string; readonly profiles: readonly Profile[]; /** More than `Default` can be made for this agent. */ readonly creatable: boolean;
   /** The ways a new profile of this agent can sign in; empty where none can be made. */ readonly kinds: readonly ProfileKind[] };
 
@@ -80,7 +83,9 @@ type Stored = { current?: string; profiles?: { id: string; name: string; kind: P
   /** A claude.ai session key, a ciphertext of the gate's (§3.4), and whether the browser has yet to be given it. */
   sessionKey?: string; sessionKeyDue?: boolean;
   /** `false`: Claude Code's telemetry is off under it (§3.7). */
-  telemetry?: false }[] };
+  telemetry?: false;
+  /** Its `Direct` rules (§4.3) as set; absent: `DEFAULT_DIRECT`. */
+  direct?: string[] }[] };
 type File = { agents?: Partial<Record<ProfileAgent, Stored>> };
 
 export class ProfileError extends Error {
@@ -267,6 +272,25 @@ export class ProfileStore {
   setProxy(agent: ProfileAgent, id: string, proxy: ProfileProxy | null): void {
     this.ensureDefault(agent, id);
     this.change(agent, id, (p) => { const { proxy: _old, exit: _was, ...rest } = p; return proxy ? { ...rest, proxy } : rest; });
+  }
+
+  /** What `id` reaches straight, past its proxy (§4.3): its own rules, else the default (NetBird). */
+  directOf(agent: ProfileAgent, id: string): readonly string[] {
+    return this.read().agents?.[agent]?.profiles?.find((p) => p.id === id)?.direct ?? DEFAULT_DIRECT;
+  }
+
+  /** `id`'s `Direct` rules from now on (null: back to the default); each one checked, the same one kept once. */
+  setDirect(agent: ProfileAgent, id: string, rules: readonly string[] | null): readonly string[] {
+    const kept: string[] = [];
+    for (const said of rules ?? []) {
+      const rule = directRule(said);
+      if (!rule) throw new ProfileError("invalid", `不是可用的直连规则：${said.trim() || "（空）"}`);
+      if (!kept.includes(rule)) kept.push(rule);
+    }
+    if (kept.length > 100) throw new ProfileError("invalid", "直连规则最多 100 条。");
+    this.ensureDefault(agent, id);
+    this.change(agent, id, (p) => { const { direct: _was, ...rest } = p; return rules ? { ...rest, direct: kept } : rest; });
+    return this.directOf(agent, id);
   }
 
   /** `id`'s claude.ai session key, a ciphertext (§3.4), and whether its browser is still to be given it whatever it
@@ -549,12 +573,13 @@ export class ProfileStore {
     const stored = file.agents?.[agent] ?? {};
     // A proxy's password, a ciphertext, is not for the screens: they are told only that it has one.
     // Nor is a session key: only that there is one. Nor the key a profile pays by: only where it is sent.
-    const own: Profile[] = (stored.profiles ?? []).map(({ proxy, sessionKey, sessionKeyDue: _due, api, ...p }) => ({ ...p,
+    const own: Profile[] = (stored.profiles ?? []).map(({ proxy, sessionKey, sessionKeyDue: _due, api, direct, ...p }) => ({ ...p,
+      direct: direct ?? DEFAULT_DIRECT,
       ...(api ? { api: told(api) } : {}),
       ...(sessionKey ? { sessionKey: true as const } : {}),
       ...(proxy ? { proxy: { server: proxy.server, ...(proxy.username ? { username: proxy.username } : {}), sealed: Boolean(proxy.password) } } : {}),
       ...this.account(agent, p.id === DEFAULT_PROFILE ? null : join(this.dir, agent, p.id, "home")) }));
-    const profiles: Profile[] = [own.find((p) => p.id === DEFAULT_PROFILE) ?? { id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, ...this.account(agent, null) }, ...own.filter((p) => p.id !== DEFAULT_PROFILE)];
+    const profiles: Profile[] = [own.find((p) => p.id === DEFAULT_PROFILE) ?? { id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, direct: DEFAULT_DIRECT, ...this.account(agent, null) }, ...own.filter((p) => p.id !== DEFAULT_PROFILE)];
     return { current: profiles.some((p) => p.id === stored.current) ? stored.current! : DEFAULT_PROFILE, profiles, creatable: Boolean(PROFILE_KINDS[agent]), kinds: PROFILE_KINDS[agent] ?? [] };
   }
 
