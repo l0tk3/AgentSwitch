@@ -54,9 +54,9 @@ How likely that is with a picture of about 530 KB:
 
 Patterns such as six digits or eight hex characters match inside most pictures. Probe notes: room-files `agy-key/image-base64.md`.
 
-Now binary data goes on as it came, both ways, and the text beside it is replaced as ever (`opaque` and `is_blob` in `model_gate.py`).
+Now binary data goes on as it came, both ways, and the text beside it is replaced as ever (`through`, `opaque`, `is_data` and `is_blob` in `model_gate.py`).
 
-- **Fields left alone:**
+- **Fields that keep data.** A string in them is left alone when it is data: a `data:` URL, or base64 of any length. Anything else there is text and is replaced (user #78): a picture named by an address to fetch (`"image_url": "https://…/<name>/a.png"`), a path. Anthropic's `data` beside `"type": "base64"` and a stream's sound are left alone whatever they hold.
   - `image_url` (OpenAI Responses `input_image`, Chat Completions `{"image_url": {"url": …}}`);
   - `file_data` (`input_file`);
   - `input_audio`;
@@ -74,7 +74,7 @@ Now binary data goes on as it came, both ways, and the text beside it is replace
   - the picture arrived byte for byte, and the text beside it as a placeholder;
   - a generated picture holding the placeholder's letters came back unchanged, and the text came back as the word;
   - with the code before the change: the picture arrived as invalid base64, and the generated picture came back changed.
-- **Not covered:** text inside a picture (as before); a picture sent as a URL to fetch, which is left alone too; multipart bodies.
+- **Not covered:** text inside a picture, and the words inside a file sent as data (a PDF as base64): they leave as they are. A file's text an agent read and sent as text is replaced like any text, and so are a file's name and path. Multipart bodies are replaced as a whole text.
 
 ## Not yet
 

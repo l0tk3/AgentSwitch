@@ -325,3 +325,19 @@ def test_a_word_inside_json_that_is_itself_inside_a_string_is_replaced_in_its_es
     doc = json.loads(out)
     assert json.loads(doc["arguments"])["path"] == "/Users/h_abcdefghij/x"
     assert doc["text"] == "h_abcdefghij here"
+
+
+def test_a_picture_given_as_an_address_or_a_path_is_text_and_its_words_are_replaced():
+    # Only data is passed over: where a picture may also be named by an address to fetch, or a path, that is text.
+    word = Pair("Zq7w", "h_aaaaaaaaaa")
+    body = {"input": [{"type": "input_image", "image_url": "https://files.example/Zq7w/a.png"},
+                      {"type": "image_url", "image_url": {"url": "file:///Users/Zq7w/a.png", "detail": "auto"}},
+                      {"type": "input_file", "filename": "Zq7w.pdf", "file_data": "AAAAZq7wAAAA"},
+                      {"fileData": {"fileUri": "gs://b/Zq7w/a.png"}}, {"type": "input_text", "text": "/Users/Zq7w/a.png"}]}
+    out = json.loads(hide(json.dumps(body), (word,)))["input"]
+    assert out[0]["image_url"] == "https://files.example/h_aaaaaaaaaa/a.png"
+    assert out[1]["image_url"] == {"url": "file:///Users/h_aaaaaaaaaa/a.png", "detail": "auto"}
+    assert out[2] == {"type": "input_file", "filename": "h_aaaaaaaaaa.pdf", "file_data": "AAAAZq7wAAAA"}
+    assert out[3]["fileData"]["fileUri"] == "gs://b/h_aaaaaaaaaa/a.png" and out[4]["text"] == "/Users/h_aaaaaaaaaa/a.png"
+    back = Swapper((word,)).walk({"image_url": "https://files.example/h_aaaaaaaaaa/a.png", "file_data": "AAAAh_aaaaaaaaaaAAAA"})
+    assert back == {"image_url": "https://files.example/Zq7w/a.png", "file_data": "AAAAh_aaaaaaaaaaAAAA"}

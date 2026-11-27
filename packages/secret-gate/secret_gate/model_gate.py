@@ -165,16 +165,33 @@ def is_blob(s: str) -> bool:
     return len(s) >= BLOB_MIN and _BASE64.fullmatch(s) is not None
 
 
+def is_data(s: str) -> bool:
+    """A string standing where binary data is kept: a `data:` URL, or base64 of any length. Anything else there is
+    text and is replaced like any other: a picture given as an address to fetch, a path."""
+    return (s.startswith("data:") and ";base64," in s[:200]) or _BASE64.fullmatch(s) is not None
+
+
 def opaque(key: Any, value: Any, holder: Any) -> bool:
-    """Whether `value`, under `key` in the object `holder`, is left as it is: a field each protocol keeps binary data
-    in (Anthropic's `source` is `{"type": "base64", "data": …}`, a document's too), or a string that is data."""
-    if key in BLOB_KEYS:
-        return True
+    """Whether `value`, under `key` in the object `holder`, is left as it is whatever it holds: Anthropic's
+    `{"type": "base64", "data": …}` (a document's too), a piece of sound, or a string that is data by its look."""
     if key == "data" and isinstance(holder, dict) and holder.get("type") == "base64":
         return True
     if key == "delta" and isinstance(holder, dict) and str(holder.get("type") or "").endswith("audio.delta"):
         return True   # OpenAI Responses / Realtime: a piece of sound, as base64 (its transcript is `…transcript.delta`)
     return isinstance(value, str) and is_blob(value)
+
+
+def through(v: Any, key: Any, holder: Any, text: Any, blob: bool = False) -> Any:
+    """`v` with `text` applied to each string that is text. Under a field that keeps binary data (BLOB_KEYS) a string
+    is passed over when it is data (`is_data`: short base64 too); elsewhere when it is plainly data (`is_blob`)."""
+    if isinstance(v, str):
+        return v if (is_data(v) if blob else is_blob(v)) else text(v)
+    if isinstance(v, list):
+        return [through(x, None, v, text, blob) for x in v]
+    if isinstance(v, dict):
+        return {text(k) if isinstance(k, str) else k: x if opaque(k, x, v) else through(x, k, v, text, blob or k in BLOB_KEYS)
+                for k, x in v.items()}
+    return v
 
 
 def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (), learned: dict[str, str] | None = None) -> str:
@@ -220,26 +237,13 @@ def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (),
         return each(text)
     changed = False
 
-    def walk(v: Any) -> Any:
+    def text_of(v: str) -> str:
         nonlocal changed
-        if isinstance(v, str):
-            if is_blob(v):   # a list of pictures (Ollama's `images`), say
-                return v
-            out = each(v)
-            changed = changed or out != v
-            return out
-        if isinstance(v, list):
-            return [walk(x) for x in v]
-        if isinstance(v, dict):
-            out = {}
-            for k, x in v.items():
-                k2 = each(k) if isinstance(k, str) else k
-                changed = changed or k2 != k
-                out[k2] = x if opaque(k, x, v) else walk(x)
-            return out
-        return v
+        out = each(v)
+        changed = changed or out != v
+        return out
 
-    doc = walk(doc)
+    doc = through(doc, None, None, text_of)
     return json.dumps(doc, ensure_ascii=False, separators=(",", ":")) if changed else text
 
 
@@ -259,13 +263,7 @@ class Swapper:
 
     def walk(self, v: Any) -> Any:
         """ref -> value in a whole object; binary data (a picture the model made, as base64) is left as it came."""
-        if isinstance(v, str):
-            return v if is_blob(v) else self.whole(v)
-        if isinstance(v, list):
-            return [self.walk(x) for x in v]
-        if isinstance(v, dict):
-            return {k: x if opaque(k, x, v) else self.walk(x) for k, x in v.items()}
-        return v
+        return through(v, None, None, self.whole)
 
     def _hold(self, s: str) -> tuple[str, str]:
         best = 0
