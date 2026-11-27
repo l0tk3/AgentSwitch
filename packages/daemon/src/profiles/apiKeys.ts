@@ -3,7 +3,8 @@ import type { ClaudeCopies } from "./claudeCopies.js";
  *  is sent to, and handed to the agent of a terminal under that profile when it asks — Claude Code through its
  *  `apiKeyHelper`, Codex through its provider's `auth` command (terminals/launch.ts, terminals/hookClient.ts `key`). It
  *  is in no file and in no environment: the plaintext is in this process for the moment the gate hands it over, and in
- *  the agent that sends it.
+ *  the agent that sends it. Antigravity is the exception (§6.4): it reads its key from `GEMINI_API_KEY` and nowhere
+ *  else, so the key asked for at its start is in that one program's environment, and in what it runs.
  *
  *  A terminal is not behind the credential gate (§8): the agent holds this key as it would one typed into its own
  *  settings. What the gate adds is that the key at rest is a ciphertext, and that it opens for one address only. */
@@ -41,6 +42,9 @@ export type ApiKeysOptions = {
    *  address is asked for the models — as the agent under it sends the key; null for one with no proxy (asked straight
    *  from here). Absent: always straight. A profile not made yet has no proxy yet: asked straight, once. */
   readonly through?: (agent: ProfileAgent, id: string) => Promise<ProxyWay | null>;
+  /** The models the agent's own program names under a key, where those are not the address's names (Antigravity:
+   *  models/agyModels.ts `listAgyKeyModels`); null: the address's list stands. */
+  readonly own?: (agent: ProfileAgent) => Promise<readonly string[] | null>;
 };
 
 const MODELS_TIMEOUT_MS = 8_000;
@@ -50,7 +54,7 @@ const fetching = (via: ProxyWay | null | undefined): typeof fetch => (via ? (fet
 /** What an address said when asked for its models with a key: the models; that it refused the key (401, 403); that it
  *  has no list (404, or an answer without one); another status; or that it could not be reached at all. */
 export type ModelProbe =
-  | { readonly models: readonly string[] }
+  | { readonly models: readonly string[]; /** With the program's own names (Antigravity): the address itself listed none. */ readonly unlisted?: true }
   | { readonly refused: number }
   | { readonly unlisted: true }
   | { readonly status: number }
@@ -63,8 +67,10 @@ export async function probeModels(agent: ProfileAgent, baseUrl: string | undefin
   const fetchImpl = typeof via === "function" ? via : fetching(via);
   const base = (baseUrl ?? API_HOME[agent] ?? "").replace(/\/+$/, "");
   if (!base) return { unlisted: true };
-  const url = agent === "claude-code" ? `${base}/v1/models?limit=1000` : `${base}/models`;
-  const headers: Record<string, string> = agent === "claude-code" ? { "x-api-key": key, authorization: `Bearer ${key}`, "anthropic-version": "2023-06-01" } : { authorization: `Bearer ${key}` };
+  // Gemini's: `GET <base>/v1beta/models`, the key in `x-goog-api-key` as Antigravity sends it; `{ models: [{ name: "models/<id>" }] }`.
+  const url = agent === "claude-code" ? `${base}/v1/models?limit=1000` : agent === "agy" ? `${base}/v1beta/models?pageSize=1000` : `${base}/models`;
+  const headers: Record<string, string> = agent === "claude-code" ? { "x-api-key": key, authorization: `Bearer ${key}`, "anthropic-version": "2023-06-01" }
+    : agent === "agy" ? { "x-goog-api-key": key } : { authorization: `Bearer ${key}` };
   let res: Response;
   // No redirect is followed: node's fetch keeps `x-api-key` across one to another host (Authorization it drops), and
   // the key was sealed for this address alone. A 3xx is reported as the status it is.
@@ -74,9 +80,11 @@ export async function probeModels(agent: ProfileAgent, baseUrl: string | undefin
   if (res.status === 404) return { unlisted: true };
   if (!res.ok) return { status: res.status };
   try {
-    const data = ((await res.json()) as { data?: unknown }).data;
+    const body = (await res.json()) as { data?: unknown; models?: unknown };
+    const data = agent === "agy" ? body.models : body.data;
     if (!Array.isArray(data)) return { unlisted: true };
-    const ids = data.map((m) => (m && typeof m === "object" ? (m as { id?: unknown }).id : null)).filter((id): id is string => typeof id === "string");
+    const ids = data.map((m) => (m && typeof m === "object" ? (agent === "agy" ? (m as { name?: unknown }).name : (m as { id?: unknown }).id) : null))
+      .filter((id): id is string => typeof id === "string").map((id) => (agent === "agy" ? id.replace(/^models\//, "") : id)).filter(Boolean);
     return ids.length ? { models: ids } : { unlisted: true };
   } catch { return { unlisted: true }; }
 }
@@ -136,7 +144,7 @@ export class ApiKeys {
    *  refuses what works is no help. `force`: kept whatever the list. Not checked when the address lists none. */
   private async offered(agent: ProfileAgent, baseUrl: string | undefined, key: string, model: string | undefined, via: ProxyWay | null): Promise<void> {
     if (!model) return;
-    const list = await (this.o.models ?? listModels)(agent, baseUrl, key, via);
+    const list = (await this.o.own?.(agent).catch(() => null)) ?? await (this.o.models ?? listModels)(agent, baseUrl, key, via);
     if (list && !list.includes(model) && nearModel(model, list)) throw new ApiKeyError(unknownModel(model, list));
   }
 
@@ -170,7 +178,10 @@ export class ApiKeys {
     }
     if (!sealed) throw new ApiKeyError("没有 API key。");
     const plain = await this.open(agent, sealed, ask.baseUrl);
-    return (this.o.probe ?? probeModels)(agent, ask.baseUrl, plain, ask.profile ? await this.way(agent, ask.profile) : null);
+    const said = await (this.o.probe ?? probeModels)(agent, ask.baseUrl, plain, ask.profile ? await this.way(agent, ask.profile) : null);
+    // The address answered (its list, or none): the models to choose from are the program's own names where it has them.
+    if ("models" in said || "unlisted" in said) { const own = await this.o.own?.(agent).catch(() => null); if (own?.length) return { models: own, ...("unlisted" in said ? { unlisted: true as const } : {}) }; }
+    return said;
   }
 
   /** The key itself, for the agent of a terminal under `id` to send. */

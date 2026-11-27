@@ -104,6 +104,42 @@ public struct ProfileApiInfo: Decodable, Equatable, Sendable {
     }
 }
 
+/// What `POST /profiles/models` said: the models to choose from, or why there are none.
+public enum ProfileModelsAnswer: Decodable, Equatable, Sendable {
+    case models([String])
+    /// The address refused the key (401, 403).
+    case refused(Int)
+    /// The address keeps no list.
+    case unlisted
+    case status(Int)
+    case unreachable(String)
+
+    private enum Keys: String, CodingKey { case models, refused, unlisted, status, unreachable }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        if let list = try? c.decode([String].self, forKey: .models) { self = .models(list.filter { !$0.isEmpty }) }
+        else if let code = try? c.decode(Int.self, forKey: .refused) { self = .refused(code) }
+        else if (try? c.decode(Bool.self, forKey: .unlisted)) == true { self = .unlisted }
+        else if let code = try? c.decode(Int.self, forKey: .status) { self = .status(code) }
+        else { self = .unreachable((try? c.decode(String.self, forKey: .unreachable)) ?? "") }
+    }
+
+    /// The models, or nil with what to say instead.
+    public var models: [String]? { if case .models(let list) = self, !list.isEmpty { return list }; return nil }
+
+    /// What the sheet says when there is no list.
+    public var problem: String? {
+        switch self {
+        case .models(let list): list.isEmpty ? "这个地址没有列出模型，可以直接填写。" : nil
+        case .refused(let code): "地址拒绝了这个 API key（\(code)）。"
+        case .unlisted: "这个地址没有列出模型，可以直接填写。"
+        case .status(let code): "地址回答了 \(code)，没有列出模型。"
+        case .unreachable(let why): why.isEmpty ? "连不上这个地址。" : "连不上这个地址：\(why)"
+        }
+    }
+}
+
 /// A profile that pays by a key, as it is typed (docs/profiles-v0.md §3.6): its name when it is a new one, the key,
 /// another address than the vendor's own, a model. The key is sealed by this Mac's gate for the address's site before
 /// anything is sent.
@@ -123,6 +159,8 @@ public struct ApiKeyDraft: Equatable, Sendable {
         switch agent {
         case "claude-code": "https://api.anthropic.com"
         case "codex": "https://api.openai.com/v1"
+        // Antigravity CLI on the Gemini API (`modelProvider: gemini`): what `GOOGLE_GEMINI_BASE_URL` is when unset.
+        case "agy": "https://generativelanguage.googleapis.com"
         default: nil
         }
     }
@@ -446,6 +484,14 @@ extension DaemonClient {
     public func createKeyProfile(agent: String, name: String, ciphertext: String, baseUrl: String?, model: String?, telemetry: Bool? = nil, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil) async throws -> [String: AgentProfiles] {
         struct Body: Encodable { let agent: String; let name: String; let kind = "api"; let api: ApiBody; let telemetry: Bool?; let sharedSkills: [String]; let copyFromDefault: ClaudeProfileCopies? }
         return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, api: ApiBody(key: ciphertext, baseUrl: baseUrl, model: model), telemetry: telemetry, sharedSkills: sharedSkills, copyFromDefault: copyFromDefault)))).agents
+    }
+
+    /// The models to choose from for a key (`POST /profiles/models`): `ciphertext`, a key just sealed for the address's
+    /// site; nil: the one profile `id` keeps. What the address said, or, for Antigravity, the program's own model ids
+    /// under a key (what its `--model` takes).
+    public func profileModels(agent: String, id: String?, ciphertext: String?, baseUrl: String?) async throws -> ProfileModelsAnswer {
+        struct Body: Encodable { let agent: String; let profile: String?; let key: String?; let baseUrl: String? }
+        return try decode(ProfileModelsAnswer.self, try await call("POST", "/profiles/models", body: try JSONEncoder().encode(Body(agent: agent, profile: ciphertext == nil ? id : nil, key: ciphertext, baseUrl: baseUrl)), timeout: 30))
     }
 
     /// Claude Code's telemetry under a profile, for the terminals started under it from now on (§3.7).

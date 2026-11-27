@@ -106,7 +106,7 @@ Claude Code                              Codex
 | Grok 1.0.92 | `GROK_HOME`（默认 `~/.grok`） | `auth.json`（顶层一个 map，账号在其中一项的 `email` 里，只读这个字段）；目录里还有设置、信任的文件夹、会话、钩子 | 在那个目录里启动 `grok`，它自己开登录界面（浏览器），或 `GROK_HOME=<目录> grok login` |
 | Antigravity CLI 1.5.17 | 没有环境变量；只有 `HOME`，或隐藏的 `--gemini_dir` | 登录在系统钥匙串里，**只有一条**，换了目录还是同一个账号 | `agy` 里用浏览器登录 Google 账号 |
 
-五家都能靠环境变量换家目录，都不需要改它们的默认目录。**Antigravity 不行**（2026-11-26）：它的登录不跟目录走，换目录换不了账号，所以它只有 `Default`（`creatable: false`，没有账号信息，没有额度；Mac 的 Profiles 页照样列出它的 `Default`，没有 New Profile…），和 OpenCode、pi 现在一样；等它的登录能按目录分开再说。
+五家都能靠环境变量换家目录，都不需要改它们的默认目录。**Antigravity 不行**（2026-11-26）：它的登录不跟目录走，换目录换不了账号，所以账号只有 `Default` 那一个（没有账号信息，没有额度）；等它的登录能按目录分开再说。2026-11-27 起它可以另建**按 API key 付费的配置**（§6.4），所以 `creatable: true`、`kinds: ["api"]`：New Profile… 有了，里面没有“再登一个账号”。
 
 **家目录里的东西分三类**（以 Claude Code 为例，其余同理）：
 
@@ -582,6 +582,36 @@ Codex 0.163.0-alpha.5（服务管的那一份）；每项都在一次性的 `COD
 - **改名**：Profiles 页的行菜单里多一项 `Rename…`（`PUT /profiles/:agent/:id/name`、`ProfileStore.rename`），从这一版起对所有 agent 的配置都可用；规则同新建（1–40 字，同一个 agent 里重名拒绝；`Default` 不改名）。只在 Mac 上。
 - **没做**：API key 类（Grok 只建账号类）；`Continue As`（跨配置继续）；手机上新建与改名（照旧只在 Mac）；`elsewhere` 的检查仍只看默认目录的 `active_sessions.json`，在 AgentSwitch 之外用同一个 `GROK_HOME` 打开的会话查不出来。
 - **查过的**：服务的测试（空目录、`GROK_HOME`、账号只读 `email`、钩子与工具表写进配置目录、信任写进配置目录、配置目录的会话列出/读取/删除、改名）；真的 `grok` 1.0.92 在一个新配置下启动过（一次性的 `$AGENTSWITCH_HOME`、空的 `GROK_HOME`、没有账号、没有输入任何东西）：屏幕是它的登录页（`Approve in your browser to finish signing in`），钩子文件、`config.toml` 里的 `[mcp_servers.chatroom]` 和 `trusted_folders.toml` 的那个文件夹都写进了这个配置的目录，Grok 也在那里建了自己的文件。**没有查实的**：用真账号在新配置里登录（要用户自己点）；登录页开在这个配置自己的浏览器里（探针没有浏览器服务）；在装好的应用里点一遍新建/改名/删除。
+
+### 6.4 Antigravity 的 API key 配置：第一版（2026-11-27，聊天室 #1–#6）
+
+用户问 agy 能不能接 API。之前答“不能”是错的：不能的是 AgentSwitch，不是程序。
+
+**程序本身（agy 1.5.18，官方文档 + 实测，假 key、本机假接口、临时目录）：**
+
+- 设置里 `"modelProvider": "gemini"`，环境里 `GEMINI_API_KEY`，就不登录直接用；`GOOGLE_GEMINI_BASE_URL` 指到别的 Gemini 协议接口。只设环境变量不设 `modelProvider` 没有用。
+- `--settings` 里给 `modelProvider` 只对那一次启动生效，不写文件，谁也没被登出。和状态行、每次都问、deny 规则放在同一个 JSON 里都照常生效（实测：受保护文件的 `read_file` 和 `cat` 被拒，`echo` 被问，状态行报 `tool_confirmation_pending`）。
+- 请求：`POST <地址>/v1beta/models/<模型>:streamGenerateContent?alt=sse`，key 在 `X-Goog-Api-Key` 头里。一句话两次请求：一个小模型起标题（`gemini-3.1-flash-lite-preview`），一个回话。中转要两个都认。
+- **只接 Gemini 协议**。OpenAI、Anthropic 格式的接口不行。
+- **模型名是程序自己的**：`agy models` 在这个模式下打印的是另一份清单（`gemini-4-neon-high` 这样的 id），不问接口、不看 key。`--model` 只认这些 id；发给接口的名字是 id 去掉档位（`gemini-4-neon-high` → `gemini-4-neon`）；直接给接口上的名字（`gemini-3.1-pro-preview`、中转自己起的名字）会被程序拒绝（`not recognized as a known model or custom model in settings`）。设置里的 custom model 没有查。
+- 这个模式下状态行没有额度、没有账号邮箱。
+
+**AgentSwitch 怎么落：**
+
+- `PROFILE_KINDS.agy = ["api"]`，`API_HOME.agy = https://generativelanguage.googleapis.com`。建、改、删、换 key 都走 §3.6 的同一套路由和字段；key 存的是密文，为它要去的站点加密。
+- 这种配置**没有自己的目录**：和 `Default` 用同一个 `~/.gemini`（会话、设置、MCP、信任的文件夹都是共用的），只是这一次启动换了付费方式。Add-Ons 页里它没有自己的一行。
+- 开终端（`terminals/launch.ts`）：`--settings` 里加 `modelProvider: "gemini"`；地址不是 Google 自己的就给 `GOOGLE_GEMINI_BASE_URL`；模型是配置里的（开终端时另选的优先）。
+- **key 在环境变量里**。程序只从 `GEMINI_API_KEY` 读，没有 helper 命令、没有文件，所以 §3.6 那句“不在任何环境里”对 agy 不成立：终端是 `sh -c 'k="$(<hook 程序> key)" || exit 1; … GEMINI_API_KEY="$k" exec agy …'`，启动那一刻向服务要（和 Claude Code、Codex 要 key 是同一条 `/terminals/key`，凭终端的 hook 令牌），要不到就不启动。key 不在服务的环境里、不在启动参数里、不落文件；但在 agy 这个进程和**它跑的每条命令**的环境里（实测：agent 跑的命令读得到）。这是程序的限制。
+- **模型清单与检查**：`POST /profiles/models` 对 agy 仍然先拿 key 去问地址（key 被拒、连不上照实说），地址答了以后返回的是程序自己的 id（`listAgyKeyModels`），不是地址列的名字；建配置时模型拼错几个字符的那条检查也按这份 id。聊天室和新终端的模型菜单对 agy 的 key 配置一律用这份（Google 自己的地址也是）。
+- 模型网关（model-gate-v0）：`generativelanguage.googleapis.com` 本来就在它认的主机里，配置自己的地址也会加进去；agy 在这个模式下走 `HTTPS_PROXY`（实测，假代理）。
+
+**知道的毛病：**
+
+- 这台 Mac 从没开过 agy（没有 `~/.gemini`）时，第一次开会先出它自己的两屏：配色、服务条款。条款里“同意收集交互数据”默认是勾着的，要自己取消。
+- key 模式下它还会连 `play.googleapis.com`（设置里关了遥测也连），内容没查。
+- 一个 key 配置下开的 agy 和 Default 下开的 agy 写同一个会话目录，会话列表里分不出是哪种付费方式开的（终端自己的底栏有配置名）。
+
+**验证：**daemon `tests/agy.test.ts`（启动参数、包装脚本真的跑：有 key 进环境、没 key 不启动）、`tests/profiles.test.ts`（只能建 key 这一种、Gemini 的模型清单怎么问、模型名按程序的来）；Mac `ProfileApiKeyTests`。真程序在临时目录里对假接口跑过 `models`、`-p` 和交互界面。整条路在一个临时服务里走过一遍（`env -i`，三个临时目录，假 key 经它自己的 `/vault/seal` 封成密文）：建配置 201、`/profiles/models` 返回程序的 25 个 id、终端起来到 `idle`、发一句话假接口收到带假 key 的两次请求、屏幕上有回复、会话 id 读到；明文 key 只在 agy 进程的环境里。**没有验证**：真 key、真的官方接口或中转；经过模型网关的一整轮（临时服务里网关没开；key 模式下认不认网关的 CA 没测）；装好的应用里从头点一遍。
 
 ## 7. 官方 App 与调度
 

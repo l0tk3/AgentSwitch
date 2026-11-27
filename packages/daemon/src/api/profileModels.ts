@@ -53,7 +53,7 @@ export class ProfileModelLists {
     if (was && this.now() - was.at < KEEP_MS) return was.models;
     let models: string[] | null = null;
     try {
-      const res = await ask("POST", "/profiles/models", { agent, profile, baseUrl });
+      const res = await ask("POST", "/profiles/models", { agent, profile, ...(baseUrl ? { baseUrl } : {}) });
       const said = obj(res.body).models;
       if (res.status === 200 && Array.isArray(said)) models = said.filter((m): m is string => typeof m === "string" && !!m).slice(0, 200);
     } catch { /* unreachable: the profile's own model */ }
@@ -75,13 +75,17 @@ export class ProfileModelLists {
         const api = obj(p.api);
         const baseUrl = str(api.baseUrl) || undefined, model = str(api.model) || undefined;
         const base = { id, name, ...(model ? { model } : {}) };
-        if (str(p.kind) !== "api" || !elsewhereAddress(agent, baseUrl)) return { ...base, models: agentModels, source: "agent" };
-        const listed = await this.vendor(ask, agent, id, baseUrl!);
+        // Antigravity under a key has another list than signed in, at Google's own address too (`POST /profiles/models`
+        // answers with the program's names for it).
+        const keyed = agent === "agy" && str(p.kind) === "api";
+        if (str(p.kind) !== "api" || (!keyed && !elsewhereAddress(agent, baseUrl))) return { ...base, models: agentModels, source: "agent" };
+        const listed = await this.vendor(ask, agent, id, baseUrl ?? "");
+        const at = baseUrl ? { baseUrl } : {};
         if (listed?.length) {
           const ids = model && !listed.includes(model) ? [model, ...listed] : listed;
-          return { ...base, baseUrl: baseUrl!, models: ids.map((m) => ({ id: m, name: m })), source: "vendor" };
+          return { ...base, ...at, models: ids.map((m) => ({ id: m, name: m })), source: "vendor" };
         }
-        return { ...base, baseUrl: baseUrl!, models: model ? [{ id: model, name: model }] : [], source: "profile" };
+        return { ...base, ...at, models: model ? [{ id: model, name: model }] : [], source: "profile" };
       }));
       out[agent] = { current: str(of.current) || null, profiles: rows };
     }

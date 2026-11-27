@@ -103,6 +103,16 @@ function run(binary: string, args: readonly string[], timeoutMs: number, env?: N
   });
 }
 
+/** The models it offers under a Gemini API key (docs/profiles-v0.md §6.4): another list than the signed-in one, and
+ *  the program's own — it is printed without the address being asked and whatever the key (seen with 1.5.18: a made-up
+ *  key, a stand-in address that was asked nothing), so none of the profile's is given. These ids are what `--model`
+ *  takes; the name the address is sent is the id without its level (`gemini-4-neon-high` → `gemini-4-neon`), and a
+ *  name of the address's own is refused by the program ("not recognized as a known model"). */
+export async function listAgyKeyModels(binary: string, geminiDir?: string | null, timeoutMs = AGY_MODELS_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<AgyModelInfo[]> {
+  return parseAgyModels(await run(binary, [...(geminiDir ? [`--gemini_dir=${geminiDir}`] : []), "--settings", JSON.stringify({ modelProvider: "gemini" }), "models"], timeoutMs,
+    { ...(env ?? process.env), GEMINI_API_KEY: "list-only" }));
+}
+
 /** Antigravity's models as it offers them today. `geminiDir`: a home other than `~/.gemini` (tests, probes). */
 export async function listAgyModels(binary: string, geminiDir?: string | null, timeoutMs = AGY_MODELS_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<AgyModelInfo[]> {
   const list = parseAgyModels(await run(binary, [...(geminiDir ? [`--gemini_dir=${geminiDir}`] : []), "models"], timeoutMs, env));

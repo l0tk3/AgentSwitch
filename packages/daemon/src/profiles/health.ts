@@ -32,7 +32,8 @@ export class ProfileHealthChecks {
       const api = this.store.apiOf(agent, id);
       if (api) {
         const result = await this.apiKeys.models(agent, { profile: id, baseUrl: api.baseUrl });
-        if ("models" in result) return { status: "healthy", checkedAt, message: `连接与鉴权成功，返回 ${result.models.length} 个模型。`, windows: [] };
+        // Antigravity's own names stand in for a list the address did not give: nothing was confirmed by it.
+        if ("models" in result && !result.unlisted) return { status: "healthy", checkedAt, message: `连接与鉴权成功，返回 ${result.models.length} 个模型。`, windows: [] };
         if ("refused" in result) return { status: "unhealthy", checkedAt, message: `鉴权被拒绝（HTTP ${result.refused}）。`, windows: [] };
         if ("unlisted" in result) return { status: "unknown", checkedAt, message: "供应商未提供可用的模型列表，尚不能确认 API 健康。", windows: [] };
         return { status: "unhealthy", checkedAt, message: "status" in result ? `接口返回 HTTP ${result.status}。` : "无法连接 API，请检查地址和代理。", windows: [] };

@@ -145,6 +145,14 @@ describe("the profile store", () => {
     // Codex has account profiles and ones that pay by a key; OpenCode and pi `Default` alone.
     expect(store.all().codex).toMatchObject({ current: "default", creatable: true, kinds: ["subscription", "api"], profiles: [{ id: "default" }] });
     expect(store.all().pi).toMatchObject({ creatable: false, kinds: [] });
+    // Antigravity: `Default`, and profiles that pay by a key — no second account (its one sign-in is the keychain's).
+    expect(store.all().agy).toMatchObject({ creatable: true, kinds: ["api"], profiles: [{ id: "default" }] });
+    expect(() => store.create("agy", "Second", "subscription")).toThrow(/cannot sign in that way/);
+    const gem = store.create("agy", "Gemini key", "api", { key: "asv:1:abcdefghijklmnopqrstuvwx", baseUrl: "https://relay.example/gemini/", model: "gemini-4-neon-high" });
+    expect(gem).toMatchObject({ kind: "api", api: { baseUrl: "https://relay.example/gemini", model: "gemini-4-neon-high" } });
+    expect(JSON.stringify(store.all().agy)).not.toContain("asv:1:");
+    expect(store.homeOf("agy", gem.id)).toBeNull();
+    store.remove("agy", gem.id);
     expect(store.homeOf("claude-code", "default")).toBeNull();
 
     const work = store.create("claude-code", "  Work ", "subscription");
@@ -844,9 +852,33 @@ describe("a profile that pays by a key (§3.6)", () => {
     expect(unknownModel("totally-else", ["claude-opus-5-5"])).not.toContain("是不是");
   });
 
+  it("Antigravity's key profile is offered the program's own model names, not the address's (§6.4)", async () => {
+    const { store } = world();
+    const keys = new ApiKeys({ store, resolve: async () => ({ value: "made-up-key-1234" }),
+      probe: async () => ({ models: ["gemini-3.1-pro-preview"] }), models: async () => ["gemini-3.1-pro-preview"],
+      own: async (agent) => (agent === "agy" ? ["gemini-4-neon-high", "gemini-4-neon-low"] : null) });
+    const sealed = "asv:1:abcdefghijklmnopqrstuvwx";
+    expect(await keys.models("agy", { key: sealed })).toEqual({ models: ["gemini-4-neon-high", "gemini-4-neon-low"] });
+    expect(await keys.models("codex", { key: sealed })).toEqual({ models: ["gemini-3.1-pro-preview"] });
+    // A model a few characters off one of the program's is refused; the address's own name is not what it is held to.
+    await expect(keys.create("agy", "Typo", { key: sealed, model: "gemini-4-neon-hihg" })).rejects.toThrow(/是不是 gemini-4-neon-high/);
+    expect((await keys.create("agy", "Gem", { key: sealed, model: "gemini-4-neon-low" })).api).toEqual({ model: "gemini-4-neon-low" });
+    const silent = new ApiKeys({ store, resolve: async () => ({ value: "made-up-key-1234" }), probe: async () => ({ unlisted: true }), own: async () => ["x"] });
+    expect(await silent.models("agy", { key: sealed })).toEqual({ models: ["x"], unlisted: true });
+    // A refused key is still said as it is.
+    const refused = new ApiKeys({ store, resolve: async () => ({ value: "made-up-key-1234" }), probe: async () => ({ refused: 401 }), own: async () => ["x"] });
+    expect(await refused.models("agy", { key: sealed })).toEqual({ refused: 401 });
+  });
+
   it("says why an address gave no models: the key refused, no list, another status, not reached", async () => {
     const answer = (status: number, body = "") => (async () => new Response(body, { status })) as unknown as typeof fetch;
     expect(await probeModels("claude-code", undefined, "k", answer(200, JSON.stringify({ data: [{ id: "m1" }] })))).toEqual({ models: ["m1"] });
+    // Gemini's list, as Antigravity's key is sent: `x-goog-api-key`, `models/<id>`.
+    let asked: { url: string; headers: Record<string, string> } | null = null;
+    const gemini = (async (url: string, init: { headers: Record<string, string> }) => { asked = { url, headers: init.headers }; return new Response(JSON.stringify({ models: [{ name: "models/gemini-3.1-pro-preview" }, { name: "models/gemini-flash" }] })); }) as unknown as typeof fetch;
+    expect(await probeModels("agy", undefined, "k", gemini)).toEqual({ models: ["gemini-3.1-pro-preview", "gemini-flash"] });
+    expect(asked).toEqual({ url: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", headers: { "x-goog-api-key": "k" } });
+    expect(await probeModels("agy", "https://relay.example/g/", "k", answer(200, JSON.stringify({ data: [{ id: "m1" }] })))).toEqual({ unlisted: true });
     expect(await probeModels("claude-code", undefined, "k", answer(401))).toEqual({ refused: 401 });
     expect(await probeModels("codex", undefined, "k", answer(403))).toEqual({ refused: 403 });
     expect(await probeModels("codex", undefined, "k", answer(404))).toEqual({ unlisted: true });

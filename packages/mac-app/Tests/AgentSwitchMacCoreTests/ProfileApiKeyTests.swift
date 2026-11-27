@@ -8,6 +8,7 @@ final class ProfileApiKeyTests: XCTestCase {
         var draft = ApiKeyDraft()
         XCTAssertEqual(draft.site(agent: "claude-code"), "https://api.anthropic.com/")
         XCTAssertEqual(draft.site(agent: "codex"), "https://api.openai.com/")
+        XCTAssertEqual(draft.site(agent: "agy"), "https://generativelanguage.googleapis.com/", "Antigravity on the Gemini API")
         XCTAssertNil(draft.site(agent: "pi"), "no key for an agent that cannot pay by one here")
         draft.baseUrl = " https://Relay.example:8443/api/v1 "
         XCTAssertEqual(draft.site(agent: "codex"), "https://relay.example:8443/")
@@ -29,6 +30,13 @@ final class ProfileApiKeyTests: XCTestCase {
         XCTAssertFalse(draft.canSave(agent: "claude-code", new: true))
         XCTAssertNotNil(draft.problem(agent: "claude-code"))
 
+        // Antigravity: no address typed is Google's own, so a name and a key are enough.
+        var agy = ApiKeyDraft()
+        agy.name = "Gemini"
+        agy.key = "made-up-gemini-key-0001"
+        XCTAssertTrue(agy.canSave(agent: "agy", new: true))
+        XCTAssertNil(agy.cleanBaseUrl, "nothing sent: the service uses its own default")
+
         var kept = ApiKeyDraft(ProfileApiInfo(baseUrl: "https://relay.example/api", model: "m1"))
         let site = kept.site(agent: "claude-code")
         XCTAssertEqual(kept.model, "m1")
@@ -39,6 +47,19 @@ final class ProfileApiKeyTests: XCTestCase {
         XCTAssertFalse(kept.canSave(agent: "claude-code", new: false, keptSite: site), "another site: the key sealed for the old one does not go with it")
         kept.key = "sk-made-up-0002"
         XCTAssertTrue(kept.canSave(agent: "claude-code", new: false, keptSite: site))
+    }
+
+    func testWhatTheAddressSaidOfItsModels() throws {
+        func said(_ json: String) throws -> ProfileModelsAnswer { try JSONDecoder().decode(ProfileModelsAnswer.self, from: Data(json.utf8)) }
+        XCTAssertEqual(try said(#"{"models":["gemini-4-neon-high","gemini-4-neon-low"]}"#).models, ["gemini-4-neon-high", "gemini-4-neon-low"])
+        XCTAssertNil(try said(#"{"models":["gemini-4-neon-high"]}"#).problem)
+        XCTAssertNil(try said(#"{"models":[]}"#).models)
+        XCTAssertNotNil(try said(#"{"models":[]}"#).problem)
+        XCTAssertEqual(try said(#"{"refused":401}"#), .refused(401))
+        XCTAssertEqual(try said(#"{"unlisted":true}"#), .unlisted)
+        XCTAssertEqual(try said(#"{"status":500}"#), .status(500))
+        XCTAssertEqual(try said(#"{"unreachable":"timed out"}"#), .unreachable("timed out"))
+        XCTAssertNil(try said(#"{"refused":403}"#).models)
     }
 
     func testWhatTheServiceSaysOfOneAndOfTheWaysToSignIn() throws {

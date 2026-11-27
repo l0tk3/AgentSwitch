@@ -316,6 +316,10 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths, roomF
   };
 }
 
+/** Antigravity under a profile that pays by a key: `sh -c <this> sh <node> <hook script> <agy> <its arguments>`. The
+ *  key is asked of the service; without one nothing is started (the hook program has said why on the terminal). */
+export const AGY_KEYED = 'k="$("$1" "$2" key)" || exit 1; shift 2; GEMINI_API_KEY="$k" exec "$@"';
+
 export function agentLauncher(opts: LauncherOptions): Launcher {
   const node = opts.node ?? process.execPath;
   const script = opts.hookScript ?? HOOK_SCRIPT;
@@ -560,17 +564,26 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         opts.agyMcp?.();
         // Settings of this one start, never saved: its status line is the hook program (status, the conversation it
         // writes, its title, its model), and asking each time is stated — it starts in `auto` unless told.
-        const args = ["--settings", JSON.stringify(agySettings(req.mode, `${hookCommand} agy`, agyDenyRules(opts.protected, env.HOME ?? "")))];
+        // A profile that pays by a Gemini API key (docs/profiles-v0.md §6.4): `modelProvider: "gemini"` for this start
+        // (nobody is signed in or out; the Mac's own settings.json is not written), and the address when it is not
+        // Google's own.
+        const args = ["--settings", JSON.stringify({ ...agySettings(req.mode, `${hookCommand} agy`, agyDenyRules(opts.protected, env.HOME ?? "")), ...(req.api ? { modelProvider: "gemini" } : {}) })];
+        if (req.api?.baseUrl) env.GOOGLE_GEMINI_BASE_URL = req.api.baseUrl;
         // A home other than `~/.gemini` (AgentSwitch's own variable: tests, probes): the program's own flag for it.
         if (env[AGY_HOME_VAR]?.trim()) args.unshift(`--gemini_dir=${env[AGY_HOME_VAR]!.trim()}`);
         // The level is part of the model's id; without a model, `--effort` (harness/efforts.ts). Neither is saved.
-        const named = effortArgs("agy", req.effort, req.model);
+        const named = effortArgs("agy", req.effort, req.model ?? req.api?.model);
         if (named.model) args.push("--model", named.model);
         args.push(...named.args);
         if (req.mode === "bypass") args.push("--dangerously-skip-permissions");
         else if (req.mode === "auto") args.push("--mode", "auto");
         // The same conversation goes on (docs/terminal-v0.md §5). It has no flag for a fork (`/fork` in its screen).
         if (req.resume) args.push("--conversation", req.resume);
+        // The key: the program reads it from `GEMINI_API_KEY` in its environment and nowhere else (no helper command,
+        // no file: its documentation, and seen with 1.5.18). So it is asked of the service as the program starts —
+        // the hook program's `key`, as Claude Code's and Codex's ask — and is in the environment of that one program
+        // and of what it runs: not in the service's, not in the plan, not in a file.
+        if (req.api) return { file: "/bin/sh", args: ["-c", AGY_KEYED, "sh", node, script, file, ...args], env, hooks: true };
         return { file, args, env, hooks: true };
       }
     }

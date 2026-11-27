@@ -18,8 +18,9 @@ struct ProfileAgent: Identifiable, Hashable, Sendable {
     static let pi = ProfileAgent(AgentCLI.pi)
     /// Grok runs in AgentSwitch's terminals (docs/terminal-v0.md §3) but is not installed or updated by Agents.
     static let grok = ProfileAgent(id: "grok", title: "Grok")
-    /// Antigravity CLI: its sign-in is in the Mac's keychain, one for the Mac, so it has its `Default` only (the daemon
-    /// says it is not `creatable`: no New Profile…); shown so the page lists every agent (user #562).
+    /// Antigravity CLI: its Google sign-in is in the Mac's keychain, one for the Mac, so `Default` is the only account;
+    /// more profiles pay by a Gemini API key (the daemon's `kinds` is `api` alone: no Account / API Key choice).
+    /// Whether New Profile… is offered is the daemon's `creatable`, as for every agent (user #562).
     static let agy = ProfileAgent(id: "agy", title: "Antigravity")
     /// The page's agents, in order: the ones Agents looks after, then Grok and agy.
     static let shown: [ProfileAgent] = AgentCLI.allCases.map(ProfileAgent.init) + [.grok, .agy]
@@ -791,7 +792,7 @@ struct ProfileKeySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(profile.name) · API Key").font(.headline)
-            Form { ApiKeyFields(agent: agent, draft: $draft, kept: true) }.formStyle(.columns)
+            Form { ApiKeyFields(agent: agent, draft: $draft, kept: true, profileID: profile.id) }.formStyle(.columns)
             if let said = draft.problem(agent: agent.id, keptSite: keptSite) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
@@ -828,11 +829,64 @@ private struct ApiKeyFields: View {
     @Binding var draft: ApiKeyDraft
     /// It has a key already: the field may stay empty.
     let kept: Bool
+    /// The profile whose key is kept (`API Key…`); nil for a new one.
+    var profileID: String? = nil
+    @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    /// What `POST /profiles/models` offered for what is typed; nil until asked.
+    @State private var offered: [String]?
+    @State private var listing = false
+    @State private var listProblem: String?
+
+    /// Antigravity takes its own model ids under a key (`gemini-4-neon-high`), not the address's names.
+    private var modelPrompt: String { agent.id == "agy" ? "Optional · Antigravity 的模型 id" : "Optional" }
+    /// Something to ask the address with: a key typed, or the one kept while the site stays.
+    private var canList: Bool {
+        guard draft.problem(agent: agent.id) == nil, draft.site(agent: agent.id) != nil else { return false }
+        return !draft.cleanKey.isEmpty || profileID != nil
+    }
 
     var body: some View {
         SecureField("API Key", text: $draft.key, prompt: Text(kept ? "Kept" : ""))
         TextField("Base URL", text: $draft.baseUrl, prompt: Text(ApiKeyDraft.home(agent.id) ?? ""))
-        TextField("Model", text: $draft.model, prompt: Text("Optional"))
+            .help(agent.id == "agy" ? "Gemini API 的地址（Gemini 协议的接口）。留空即 Google 官方接口。" : "")
+        LabeledContent("Model") {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    TextField("Model", text: $draft.model, prompt: Text(modelPrompt)).labelsHidden()
+                    if let offered, !offered.isEmpty {
+                        Menu {
+                            ForEach(offered, id: \.self) { id in Button(id) { draft.model = id } }
+                        } label: { Image(systemName: "chevron.up.chevron.down") }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .help("Choose Model").accessibilityLabel("Choose Model")
+                    }
+                    Button(listing ? "Listing…" : "List Models", action: list).controlSize(.small).disabled(listing || !canList)
+                        .help(agent.id == "agy" ? "用这个 key 问一次地址；列出的是 Antigravity 在 key 模式下认的模型 id。" : "用这个 key 问一次地址有哪些模型，不生成内容。")
+                }
+                if let listProblem { Text(listProblem).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
+        }
+        .onChange(of: draft.baseUrl) { offered = nil; listProblem = nil }
+        .onChange(of: draft.key) { offered = nil; listProblem = nil }
+    }
+
+    private func list() {
+        let client = model.client(on: profileNodeID), agent = agent.id, draft = draft, id = profileID, node = profileNodeID
+        listing = true
+        listProblem = nil
+        Task {
+            do {
+                var ciphertext: String?
+                if !draft.cleanKey.isEmpty, let site = draft.site(agent: agent) {
+                    ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: node)
+                }
+                let answer = try await client.profileModels(agent: agent, id: id, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl)
+                offered = answer.models
+                listProblem = answer.problem
+            } catch { listProblem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+            listing = false
+        }
     }
 }
 

@@ -68,6 +68,7 @@ import { mergeLogged } from "./models/discovery.js";
 import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
 import { ensureGrokHooks, ensureGrokKit, grokHome } from "./terminals/grokHooks.js";
 import { AGY_HOME_VAR, agyGeminiDir, agyHome, ensureAgyMcp } from "./terminals/agy.js";
+import { listAgyKeyModels } from "./models/agyModels.js";
 import { ModelOffers } from "./models/modelOffers.js";
 import { readOpenCodeVariants } from "./models/opencodeVariants.js";
 import { DeviceStore } from "./remote/deviceStore.js";
@@ -401,7 +402,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // An address asked for its models with a profile's key is asked the way the profile's agent would send it: through
   // the forwarder of its proxy when it has one (docs/profiles-v0.md §4), straight out when it has none.
   const apiKeys = new ApiKeys({ store: profiles, ...(opener ? { resolve: opener } : {}),
-    through: async (agent, id) => { const proxy = profiles.proxyOf(agent, id); return proxy ? exits.address(exitKey(agent, id), proxy) : null; } });
+    through: async (agent, id) => { const proxy = profiles.proxyOf(agent, id); return proxy ? exits.address(exitKey(agent, id), proxy) : null; },
+    // Antigravity takes its own names for the models, not the address's (models/agyModels.ts).
+    own: async (agent) => (agent === "agy" && agentBinaries.agy ? (await listAgyKeyModels(agentBinaries.agy, process.env[AGY_HOME_VAR]?.trim() || null)).map((m) => m.id) : null) });
   const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(opener ? { resolve: opener } : {}),
     browser: (agent, id) => profileBrowsers?.get(`${agent}.${id}`)?.host ?? null });
   // The gate's ciphertexts kept from before are sealed anew under the vault's key, the gate opening each one last time.

@@ -189,6 +189,8 @@ enum DesignPreview {
                     try await renderSheet(ProfileNewSheet(agent: .claude, kinds: ["subscription", "api"]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-new-account.png"))
                     try await renderSheet(ProfileNewSheet(agent: .codex, kinds: ["subscription", "api"]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-new-codex.png"))
                     try await renderSheet(ProfileNewSheet(agent: .codex, kinds: ["api", "subscription"]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-new-codex-key.png"))
+                    // Antigravity pays by a Gemini key only: no Account / API Key choice, the three fields straight away.
+                    try await renderSheet(ProfileNewSheet(agent: .agy, kinds: ["api"]) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-new-agy.png"))
                     // Codex's (§6.2): the Mac's own signed in to ChatGPT, an account profile signed in, one not yet, one by a key.
                     let codexList = AgentProfiles(current: "default", profiles: [
                         AgentProfile(id: "default", name: "Default", account: "me@example.com"),

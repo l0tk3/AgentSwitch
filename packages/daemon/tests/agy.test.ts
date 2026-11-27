@@ -3,6 +3,7 @@
  *  others, its models and its Chat Room entry. Shapes as `agy` 1.5.17 wrote them on this Mac (a real turn that asked
  *  before a command; scripts/agy_terminal_probe.ts runs the real program). Nothing here starts it or reads `~/.gemini`. */
 
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -21,7 +22,7 @@ import { AGY_MCP_SERVER, agyDenyRules, agyInputEmpty, agyMcpEntry, agySettings, 
 import { slashCommands } from "../src/terminals/commands.js";
 import { elsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
 import { choicesOnScreen, TerminalHost, type Launcher } from "../src/terminals/host.js";
-import { agentLauncher, HOOK_SCRIPT } from "../src/terminals/launch.js";
+import { AGY_KEYED, agentLauncher, HOOK_SCRIPT } from "../src/terminals/launch.js";
 import { agySettingsFile, pretrust, trustInAgy } from "../src/terminals/trustedFolders.js";
 import { TARGETS_PATH } from "./helpers.js";
 
@@ -95,6 +96,27 @@ describe("an Antigravity terminal", () => {
     const moved = agentLauncher({ binaries: { agy: "/bin/agy" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, env: { PATH: "/usr/bin", AGENTSWITCH_AGY_HOME: "/x/gem" } })({ id: "a6", harness: "agy", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(moved.args[0]).toBe("--gemini_dir=/x/gem");
     expect(() => agentLauncher({ binaries: {}, hookUrl: () => "http://127.0.0.1:4711", stateDir, env: {} })({ id: "a7", harness: "agy", cwd: "/tmp", mode: "manual", hookToken: "tok" })).toThrow(/not installed/);
+    // Under a profile that pays by a key: Gemini's API for this start, the address when it is another's, the profile's
+    // model unless one is chosen, and the key asked of the service as the program starts — in no argument, and not in
+    // the environment the plan carries.
+    const keyed = launch({ id: "a9", harness: "agy", cwd: "/tmp", mode: "auto", hookToken: "tok", api: { name: "Gemini key", baseUrl: "https://relay.example/gemini", model: "gemini-4-neon-high" } });
+    expect(keyed.file).toBe("/bin/sh");
+    expect(keyed.args.slice(0, 6)).toEqual(["-c", AGY_KEYED, "sh", "/n/node", "/h/hook.js", "/bin/agy"]);
+    expect(JSON.parse(keyed.args[7]!)).toMatchObject({ modelProvider: "gemini", statusLine: { enabled: true } });
+    expect(keyed.args.slice(8)).toEqual(["--model", "gemini-4-neon-high", "--mode", "auto"]);
+    expect(keyed.env.GOOGLE_GEMINI_BASE_URL).toBe("https://relay.example/gemini");
+    expect(keyed.env.GEMINI_API_KEY).toBeUndefined();
+    const ownAddress = launch({ id: "a10", harness: "agy", cwd: "/tmp", model: "gemini-4-carbon-low", mode: "manual", hookToken: "tok", api: { name: "Gemini key", model: "gemini-4-neon-high" } });
+    expect(ownAddress.env.GOOGLE_GEMINI_BASE_URL).toBeUndefined();
+    expect(ownAddress.args.slice(8)).toEqual(["--model", "gemini-4-carbon-low"]);
+    // The Mac's own is as it was: no provider named.
+    expect(JSON.parse(plain.args[1]!).modelProvider).toBeUndefined();
+    // The wrapper itself: the key goes into the program's environment; without one nothing is started.
+    const say = (helper: string) => { try { return execFileSync("/bin/sh", ["-c", AGY_KEYED, "sh", "/bin/sh", helper, "/bin/sh", "-c", 'printf "%s|%s" "$GEMINI_API_KEY" "$1"', "x", "arg"], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch (err) { return `exit ${(err as { status: number }).status}`; } };
+    const helpers = tmp("helpers");
+    writeFileSync(join(helpers, "ok.sh"), 'echo "made-up-key"\n'); writeFileSync(join(helpers, "no.sh"), "exit 1\n");
+    expect(say(join(helpers, "ok.sh"))).toBe("made-up-key|arg");
+    expect(say(join(helpers, "no.sh"))).toBe("exit 1");
     expect(agySettings("auto", null)).toEqual({});
     // Its levels, and how one is named at a start.
     expect(effortArgs("agy", "high", undefined)).toEqual({ args: ["--effort", "high"], model: undefined });

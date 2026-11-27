@@ -4,7 +4,8 @@
  *  and a current profile that new terminals start under. Claude Code first (step 2); Codex has the ones that pay by a
  *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); Grok's sign in with an xAI
  *  account, each in a folder of its own (`GROK_HOME`, §6.3); OpenCode and pi have `Default` alone for now;
- *  Antigravity has `Default` alone for good while its one sign-in lives in the keychain (docs/profiles-v0.md).
+ *  Antigravity has one sign-in, in the keychain, whatever its folder: its `Default`, and besides it only profiles that
+ *  pay by a Gemini API key (§6.4, 2026-11-27), which run in the Mac's own folder (docs/profiles-v0.md).
  *
  *  New Claude profiles created through the API use private configuration and history; project folders remain user-selected. Skills are
  *  explicit read-only copies. Existing profiles retain their legacy links; Codex still uses its existing sharing
@@ -28,11 +29,12 @@ export type ProfileProxy = { readonly server: string; readonly username?: string
  *  address it is sent to; that address when it is not the vendor's own; the model it starts on when none is chosen. */
 export type ProfileApi = { readonly key: string; readonly baseUrl?: string | undefined; readonly model?: string | undefined };
 /** The vendor's own address for each agent that can pay by a key: where a key goes when the profile names no other. */
-export const API_HOME: Partial<Record<ProfileAgent, string>> = { "claude-code": "https://api.anthropic.com", codex: "https://api.openai.com/v1" };
+export const API_HOME: Partial<Record<ProfileAgent, string>> = { "claude-code": "https://api.anthropic.com", codex: "https://api.openai.com/v1", agy: "https://generativelanguage.googleapis.com" };
 /** The ways a profile of each agent can sign in (absent: `Default` alone). A Codex account profile has a home folder of
  *  its own (§6.2); one that pays by a key needs none. A Grok profile signs in with an xAI account and has a folder of its
- *  own (§6.3); it does not pay by a key here. */
-export const PROFILE_KINDS: Partial<Record<ProfileAgent, readonly ProfileKind[]>> = { "claude-code": ["subscription", "api"], codex: ["subscription", "api"], grok: ["subscription"] };
+ *  own (§6.3); it does not pay by a key here. An Antigravity profile pays by a key and nothing else: a second Google
+ *  account cannot be signed in beside the first (§6.4). */
+export const PROFILE_KINDS: Partial<Record<ProfileAgent, readonly ProfileKind[]>> = { "claude-code": ["subscription", "api"], codex: ["subscription", "api"], grok: ["subscription"], agy: ["api"] };
 const API_MODEL = /^[\w.:/@[\]-]{1,120}$/;
 
 /** An address a key is sent to, as kept: http(s), no account in it, no query, no trailing slash. Null: not one. */
