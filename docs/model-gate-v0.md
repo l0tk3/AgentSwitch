@@ -40,6 +40,42 @@ A word, global or a room's, can be a regular expression: tick `Regex` beside the
   The gateway reads patterns with `re.ASCII`, so `\d` and `\w` mean what they mean in JavaScript. A pattern it cannot compile is skipped and said on its stderr.
 - **Tests:** daemon `tests/redactRegex.test.ts`; secret-gate `tests/test_model_gate.py` (the `regex` part); Mac `RedactRegexTests`.
 
+## Pictures and files are not touched (2026-11-27, room #52–#70)
+
+A Codex session got `400 input_image image_url must be valid base64` on every turn. Its user name, a found word, stood by chance inside a picture's base64. The placeholder put in broke the picture, because `_` is not a base64 character. The provider refused the request, and the picture went out again, and broke again, with every later turn.
+
+How likely that is with a picture of about 530 KB:
+
+| Word | Pictures it breaks |
+|---|---|
+| 3 characters | nearly every one |
+| 4 characters | about one in thirty |
+| 5 characters or more | almost none |
+
+Patterns such as six digits or eight hex characters match inside most pictures. Probe notes: room-files `agy-key/image-base64.md`.
+
+Now binary data goes on as it came, both ways, and the text beside it is replaced as ever (`opaque` and `is_blob` in `model_gate.py`).
+
+- **Fields left alone:**
+  - `image_url` (OpenAI Responses `input_image`, Chat Completions `{"image_url": {"url": …}}`);
+  - `file_data` (`input_file`);
+  - `input_audio`;
+  - Gemini `inlineData` and `inline_data`;
+  - any `data` beside `"type": "base64"` (Anthropic's `source`, for images and documents);
+  - the base64 sound of a stream's `…audio.delta` event (its transcript is replaced as text).
+- **Strings left alone, wherever they stand:** a `data:…;base64,` URL, and a string of 256 characters or more made of nothing but base64 (a tool's output that is a picture, Ollama's `images`, a generated picture coming back).
+- **Words, like patterns, are replaced inside a JSON body's decoded strings and keys only.** Before, they were replaced in the body's raw text. Every form of a word (as it is, JSON-escaped, `\u`-escaped) is still looked for in each string: a tool call's arguments are JSON inside a string. A body that is not JSON is still replaced as a whole text.
+- **Tests:** secret-gate `tests/test_model_gate.py`:
+  - pictures, files and sound in each protocol, with words and with a pattern, out and back, streamed and whole;
+  - a request through the addon.
+
+  Both tests fail on the code before this change.
+- **Seen through the real gateway** (`secret-gate model-proxy`, a stand-in endpoint over plain HTTP) with a 400 KB picture holding the word:
+  - the picture arrived byte for byte, and the text beside it as a placeholder;
+  - a generated picture holding the placeholder's letters came back unchanged, and the text came back as the word;
+  - with the code before the change: the picture arrived as invalid base64, and the generated picture came back changed.
+- **Not covered:** text inside a picture (as before); a picture sent as a URL to fetch, which is left alone too; multipart bodies.
+
 ## Not yet
 
 - **Gateway account:** the gateway runs under the user's account. Moving it into the gate service's own account is the next step; the design stays the same.

@@ -250,3 +250,78 @@ def test_an_address_written_as_an_ip_is_opened_by_where_the_connection_goes(caps
     assert "203.0.113.7" in err and "refused" in err and "IP address mismatch" in err
     gate.tls_failed_server(NS(context=NS(client=NS(agentswitch_scope=None), server=failed.context.server), conn=failed.conn))
     assert capsys.readouterr().err == ""
+
+
+def test_pictures_and_files_go_on_as_they_came_and_the_words_beside_them_are_replaced():
+    # A word found by chance inside a picture's base64 broke it — a placeholder's `_` is not base64 — and the provider
+    # refused every later turn, the picture going out again each time (2026-11-27, room #52-#68: a Codex session, the
+    # user name replaced). Binary data is never touched, either way; the text beside it is replaced as ever.
+    from secret_gate.model_gate import ModelGate, is_blob, pattern_of
+
+    word = Pair("Zq7w", "h_aaaaaaaaaa")
+    long_b64 = "AAAAZq7wAAAA" * 30                     # valid base64 holding the word, longer than BLOB_MIN
+    short_b64 = "AAAAZq7wAAAA"                         # too short to be told by its look: told by where it stands
+    url = "data:image/png;base64," + short_b64
+    assert is_blob(url) and is_blob(long_b64) and not is_blob(short_b64) and not is_blob("say Zq7w " * 40)
+    bodies = {
+        "responses": {"input": [{"role": "user", "content": [{"type": "input_text", "text": "see Zq7w"},
+                                                             {"type": "input_image", "image_url": url},
+                                                             {"type": "input_file", "filename": "a.pdf", "file_data": short_b64}]}]},
+        "chat": {"messages": [{"role": "user", "content": [{"type": "text", "text": "see Zq7w"},
+                                                           {"type": "image_url", "image_url": {"url": url, "detail": "auto"}},
+                                                           {"type": "input_audio", "input_audio": {"data": short_b64, "format": "wav"}}]}]},
+        "anthropic": {"messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": short_b64}},
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": short_b64}},
+            {"type": "text", "text": "see Zq7w"}]}]},
+        "gemini": {"contents": [{"role": "user", "parts": [{"text": "see Zq7w"}, {"inlineData": {"mimeType": "image/png", "data": short_b64}},
+                                                           {"inline_data": {"mime_type": "image/png", "data": short_b64}}]}]},
+        "a tool's output": {"input": [{"type": "function_call_output", "output": "see Zq7w"},
+                                      {"type": "function_call_output", "output": long_b64}], "images": [long_b64]},
+    }
+    pats = tuple(p for p in (pattern_of({"pattern": r"Zq7\w", "salt": "00"}),) if p)
+    for kind, body in bodies.items():
+        for pairs, patterns in (((word,), ()), ((), pats)):
+            out = hide(json.dumps(body), pairs, patterns, {})
+            assert "see Zq7w" not in out, kind                                  # the text: replaced
+            assert out.count("Zq7w") == json.dumps(body).count("Zq7w") - 1, kind  # the data: all of it as it was
+    # through the addon, as a request
+    from mitmproxy.test import tflow
+    gate = ModelGate(Table.parse(json.dumps({"scopes": {"t": {"hosts": ["api.example"], "pairs": [{"value": "Zq7w", "ref": "h_aaaaaaaaaa"}]}}})), read_stdin=False)
+    f = tflow.tflow()
+    f.client_conn.agentswitch_scope = "t"
+    f.request.host = "api.example"
+    f.request.set_text(json.dumps(bodies["responses"]))
+    gate.request(f)
+    sent = json.loads(f.request.get_text())["input"][0]["content"]
+    assert sent[0]["text"] == "see h_aaaaaaaaaa" and sent[1]["image_url"] == url and sent[2]["file_data"] == short_b64
+
+
+def test_what_comes_back_puts_words_back_in_the_text_but_never_in_a_picture():
+    sw = Swapper((Pair("Zq7w", "QQQQ"),))
+    blob = "AAAAQQQQAAAA" * 30
+    whole = {"output": [{"type": "image_generation_call", "result": blob}, {"type": "message", "content": [{"type": "output_text", "text": "QQQQ"}]}]}
+    back = sw.walk(json.loads(json.dumps(whole)))
+    assert back["output"][0]["result"] == blob and back["output"][1]["content"][0]["text"] == "Zq7w"
+    # in a stream: a partial picture, a piece of sound, and the text beside them
+    ev = sw.event({"type": "response.image_generation_call.partial_image", "partial_image_b64": blob})
+    assert ev[-1]["partial_image_b64"] == blob
+    ev = sw.event({"type": "response.output_audio.delta", "delta": "AAAAQQQQ"})
+    assert ev[-1]["delta"] == "AAAAQQQQ"
+    ev = sw.event({"type": "response.output_text.delta", "item_id": "m", "output_index": 0, "content_index": 0, "delta": "QQQQ "})
+    assert ev[-1]["delta"] == "Zq7w "
+    g = Swapper((Pair("Zq7w", "QQQQ"),)).event({"candidates": [{"index": 0, "content": {"parts": [
+        {"text": "QQQQ "}, {"inlineData": {"mimeType": "image/png", "data": "AAAAQQQQAAAA"}}]}}]})
+    parts = g[-1]["candidates"][0]["content"]["parts"]
+    assert parts[0]["text"] == "Zq7w " and parts[1]["inlineData"]["data"] == "AAAAQQQQAAAA"
+
+
+def test_a_word_inside_json_that_is_itself_inside_a_string_is_replaced_in_its_escaped_form_too():
+    # A tool call's arguments: JSON in a string, written with \u escapes by some clients.
+    pairs = (Pair("张三丰", "h_abcdefghij"),)
+    inner = json.dumps({"path": "/Users/张三丰/x"})          # ASCII: the name stands as \uXXXX
+    assert "张三丰" not in inner
+    out = hide(json.dumps({"arguments": inner, "text": "张三丰 here"}), pairs)
+    doc = json.loads(out)
+    assert json.loads(doc["arguments"])["path"] == "/Users/h_abcdefghij/x"
+    assert doc["text"] == "h_abcdefghij here"

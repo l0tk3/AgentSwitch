@@ -21,7 +21,8 @@ Who is who: each terminal is a *scope*, named in the proxy credentials its launc
 
 The table comes on stdin, one JSON object a line, the whole table each time (`{"scopes": {...}, "logDir": ...}`):
 it is never written to disk here. Streams are rewritten as they come (SSE and WebSocket): a placeholder split over
-two pieces is put together first (`Swapper`), holding back at most one placeholder's length.
+two pieces is put together first (`Swapper`), holding back at most one placeholder's length. Binary data — a picture,
+a file, a sound as base64 — is never touched, either way (`opaque`).
 """
 
 from __future__ import annotations
@@ -142,15 +143,47 @@ def forms(value: str) -> list[str]:
     return list(dict.fromkeys(f for f in out if f))
 
 
+# Data that is not text: an image, a file, a sound, as base64. A word or a pattern is found in it by chance (a word of
+# three letters in nearly every picture of half a megabyte, one of four in one picture of thirty), and a placeholder
+# put in breaks it (`_` is not base64): the provider refused every later turn, the picture being sent again each time
+# (2026-11-27, AgentSwitch room #52-#68: a Codex session, its user name replaced). Such data goes on as it came, both
+# ways; the text beside it is replaced as ever.
+BLOB_KEYS = frozenset({
+    "image_url",                    # OpenAI Responses `input_image`, Chat Completions `{"image_url": {"url": …}}`
+    "file_data",                    # OpenAI `input_file`, Chat Completions `file`
+    "input_audio",                  # Chat Completions `{"data", "format"}`
+    "inlineData", "inline_data",    # Gemini `{"mimeType", "data"}`
+})
+BLOB_MIN = 256                      # a string this long, all base64, is data wherever it stands
+_BASE64 = re.compile(r"[A-Za-z0-9+/_-]+={0,2}", re.ASCII)
+
+
+def is_blob(s: str) -> bool:
+    """A string that is data, not text: a `data:…;base64,` URL, or a long run of nothing but base64."""
+    if s.startswith("data:") and ";base64," in s[:200]:
+        return True
+    return len(s) >= BLOB_MIN and _BASE64.fullmatch(s) is not None
+
+
+def opaque(key: Any, value: Any, holder: Any) -> bool:
+    """Whether `value`, under `key` in the object `holder`, is left as it is: a field each protocol keeps binary data
+    in (Anthropic's `source` is `{"type": "base64", "data": …}`, a document's too), or a string that is data."""
+    if key in BLOB_KEYS:
+        return True
+    if key == "data" and isinstance(holder, dict) and holder.get("type") == "base64":
+        return True
+    if key == "delta" and isinstance(holder, dict) and str(holder.get("type") or "").endswith("audio.delta"):
+        return True   # OpenAI Responses / Realtime: a piece of sound, as base64 (its transcript is `…transcript.delta`)
+    return isinstance(value, str) and is_blob(value)
+
+
 def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (), learned: dict[str, str] | None = None) -> str:
     """value -> ref, the longest value first (a value that is part of another is not split); then what each pattern
-    matches, each piece to its own placeholder — remembered in `learned` (ref -> value) to be put back."""
-    for p in sorted(pairs, key=lambda p: -len(p.value)):
-        for f in forms(p.value):
-            if f in text:
-                text = text.replace(f, p.ref)
-    if not patterns:
-        return text
+    matches, each piece to its own placeholder — remembered in `learned` (ref -> value) to be put back.
+
+    A JSON body is replaced in its strings (and keys) as they read, never in binary data (`opaque`); anything else as
+    a whole."""
+    ordered = sorted(pairs, key=lambda p: -len(p.value))
     placed = {p.ref for p in pairs} | set(learned or ())
 
     def swap(pat: Pattern, m: re.Match[str]) -> str:
@@ -167,28 +200,43 @@ def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (),
         return ref
 
     def each(s: str) -> str:
+        # Every form, in a decoded string too: a tool call's arguments are JSON inside a string, where a word that is
+        # not ASCII may stand as its \u escapes.
+        for p in ordered:
+            for f in forms(p.value):
+                if f in s:
+                    s = s.replace(f, p.ref)
         for pat in patterns:
             s = pat.regex.sub(lambda m, pat=pat: swap(pat, m), s)
         return s
 
-    # A JSON body: in its strings as they read, so that no match takes in a quote or a brace of the JSON itself;
-    # written again only when something was replaced.
+    # A JSON body: in its strings as they read, so that no match takes in a quote or a brace of the JSON itself and
+    # no data is touched; written again only when something was replaced.
     try:
         doc = json.loads(text)
     except ValueError:
+        return each(text)
+    if not isinstance(doc, (dict, list)):
         return each(text)
     changed = False
 
     def walk(v: Any) -> Any:
         nonlocal changed
         if isinstance(v, str):
+            if is_blob(v):   # a list of pictures (Ollama's `images`), say
+                return v
             out = each(v)
             changed = changed or out != v
             return out
         if isinstance(v, list):
             return [walk(x) for x in v]
         if isinstance(v, dict):
-            return {k: walk(x) for k, x in v.items()}
+            out = {}
+            for k, x in v.items():
+                k2 = each(k) if isinstance(k, str) else k
+                changed = changed or k2 != k
+                out[k2] = x if opaque(k, x, v) else walk(x)
+            return out
         return v
 
     doc = walk(doc)
@@ -210,12 +258,13 @@ class Swapper:
         return s
 
     def walk(self, v: Any) -> Any:
+        """ref -> value in a whole object; binary data (a picture the model made, as base64) is left as it came."""
         if isinstance(v, str):
-            return self.whole(v)
+            return v if is_blob(v) else self.whole(v)
         if isinstance(v, list):
             return [self.walk(x) for x in v]
         if isinstance(v, dict):
-            return {k: self.walk(x) for k, x in v.items()}
+            return {k: x if opaque(k, x, v) else self.walk(x) for k, x in v.items()}
         return v
 
     def _hold(self, s: str) -> tuple[str, str]:
@@ -249,7 +298,7 @@ class Swapper:
             for f in ("text", "partial_json", "thinking"):
                 if isinstance(o["delta"].get(f), str):
                     out.append((("a", o.get("index"), f), o["delta"], f))
-        elif t.endswith(".delta") and isinstance(o.get("delta"), str):               # OpenAI Responses
+        elif t.endswith(".delta") and isinstance(o.get("delta"), str) and not t.endswith("audio.delta"):   # OpenAI Responses
             out.append((("r", t, o.get("item_id"), o.get("output_index"), o.get("content_index")), o, "delta"))
         elif isinstance(o.get("choices"), list):                                     # Chat Completions
             for c in o["choices"]:
