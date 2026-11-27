@@ -17,14 +17,14 @@ enum Look {
     static let faint = Color.inkDim
     static let line = Color(nsColor: .barEdge)
     /// A card's ground.
-    static let panel = Color(nsColor: .dynamic(light: 0xEBE7DD, dark: 0x121212, classicLight: 0xF5F6F8, classicDark: 0x17181C, name: "AgentSwitchDispatchPanel"))
+    static let panel = Color(nsColor: .dynamic(light: 0xF3F1EC, dark: 0x121212, classicLight: 0xF5F6F8, classicDark: 0x17181C, name: "AgentSwitchDispatchPanel"))
     /// What you said: a raised box (the signal colour is not for text backgrounds).
-    static let raised = Color(nsColor: .dynamic(light: 0xDCD6C9, dark: 0x1F1F1F, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchRaised"))
-    static let hover = Color(nsColor: .dynamic(light: 0xE2DDD1, dark: 0x1A1A1A, classicLight: 0xE9EBF0, classicDark: 0x24252B, name: "AgentSwitchDispatchHover"))
+    static let raised = Color(nsColor: .dynamic(light: 0xEAE7E0, dark: 0x1F1F1F, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchRaised"))
+    static let hover = Color(nsColor: .dynamic(light: 0xEFEDE7, dark: 0x1A1A1A, classicLight: 0xE9EBF0, classicDark: 0x24252B, name: "AgentSwitchDispatchHover"))
     /// What you said, as its ground: the raised box of the pixel look; in the classic look a wash of the ink under
     /// ink text — as both agents' own desktop apps set a user's message (about 5% of the text's colour), no longer the
     /// accent's bubble with white text (docs/ui-v0.md §8, 2026-10-07).
-    static let said = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchSaid"))
+    static let said = Color(nsColor: .dynamic(light: 0xEDEAE3, dark: 0x151515, classicLight: 0xF0F1F4, classicDark: 0x1F2025, name: "AgentSwitchDispatchSaid"))
 
     /// The highest thinking level's own colour (docs/terminal-v0.md §1 “滑块”, 2026-10-07): violet, and the deeper blue
     /// its line begins in. Nothing else is this colour.
@@ -81,7 +81,7 @@ enum Look {
     /// The pixel look's side columns (docs/ui-v0.md §9.2, user #621: 还是没有做出来和classic模式一样的层次感): a deck a
     /// clear step off the window's ground, between it and what is raised on it (`raised`, a row chosen); in the
     /// classic look the classic card's own ground.
-    static let deck = Color(nsColor: .dynamic(light: 0xE6E1D6, dark: 0x141414, classicLight: 0xF3F4F7, classicDark: 0x191A1E, name: "AgentSwitchPixelDeck"))
+    static let deck = Color(nsColor: .dynamic(light: 0xF2F0EB, dark: 0x141414, classicLight: 0xF3F4F7, classicDark: 0x191A1E, name: "AgentSwitchPixelDeck"))
     /// The faint ring around a floating card.
     static let ring = Color(nsColor: .dynamic(light: 0xDFE1E6, dark: 0x2A2B31, name: "AgentSwitchClassicRing"))
 

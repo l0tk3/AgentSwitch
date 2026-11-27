@@ -63,7 +63,7 @@ extension NSColor {
     /// The Dispatch page's ground (ui-v0 §7.3): black, or the warm paper of the light look. In the classic look the
     /// content's ground is the window's (§8.1, 2026-11-26): white, or a near black beside the terminal's own; the
     /// bar, the rail and the status bar are drawn on it, the side columns float over it as cards.
-    static let dispatchGround = NSColor.dynamic(light: 0xF3F1EA, dark: 0x000000, classicLight: 0xFFFFFF, classicDark: 0x0D0E10, name: "AgentSwitchDispatchGround")
+    static let dispatchGround = NSColor.dynamic(light: 0xFAF9F6, dark: 0x000000, classicLight: 0xFFFFFF, classicDark: 0x0D0E10, name: "AgentSwitchDispatchGround")
     /// The bar's edge (`--ink4`); in the classic look the faint line inside the content.
-    static let barEdge = NSColor.dynamic(light: 0xD3CEC3, dark: 0x262524, classicLight: 0xE6E7EB, classicDark: 0x26272C, name: "AgentSwitchBarEdge")
+    static let barEdge = NSColor.dynamic(light: 0xDCD8CF, dark: 0x262524, classicLight: 0xE6E7EB, classicDark: 0x26272C, name: "AgentSwitchBarEdge")
 }

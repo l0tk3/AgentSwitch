@@ -85,8 +85,10 @@ enum MainWindowPreview {
     /// (`showcase-rooms`). The lights are the window's own, as AppKit draws them for a window not in front.
     static func renderShowcase(model: AppModel, into directory: URL) async throws {
         let look = InterfaceLook.current.isClassic ? "classic" : "pixel"
-        // Classic in the system's light, Pixel in its dark (user #708).
-        let light = NSAppearance(named: InterfaceLook.current.isClassic ? .aqua : .darkAqua)
+        // Classic in the system's light, Pixel in its dark (user #708); `-showcaseAppearance light|dark` either in either.
+        let asked = UserDefaults.standard.string(forKey: "showcaseAppearance")
+        let light = NSAppearance(named: asked.map { $0 == "light" } ?? InterfaceLook.current.isClassic ? .aqua : .darkAqua)
+        let shade = asked.map { "-\($0)" } ?? ""
         let terminals = TerminalsPagePreview.demoModel()
         let host = NSHostingView(rootView: TerminalsPageView(model: terminals))
         host.sizingOptions = []
@@ -101,7 +103,7 @@ enum MainWindowPreview {
         defer { putBack() }
         try await DesignPreview.settle()
         try await DesignPreview.settle()
-        try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: directory.appendingPathComponent("showcase-terminals-\(look).png"), pixelsWide: showcasePixels)
+        try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: directory.appendingPathComponent("showcase-terminals-\(look)\(shade).png"), pixelsWide: showcasePixels)
         terminals.stop()
         browser.stop()
         window.close()
@@ -109,7 +111,7 @@ enum MainWindowPreview {
         defer { RoomsDemo.instead = nil }
         showcasePixelsWide = showcasePixels
         defer { showcasePixelsWide = nil }
-        try await shot(model: model, page: .rooms, system: light, size: showcaseSize, to: directory.appendingPathComponent("showcase-rooms-\(look).png"))
+        try await shot(model: model, page: .rooms, system: light, size: showcaseSize, to: directory.appendingPathComponent("showcase-rooms-\(look)\(shade).png"))
     }
 
     /// `main-rooms`: the Chat Room page (docs/chatroom-v0.md §10) over a made-up room — its list, the timeline with a
