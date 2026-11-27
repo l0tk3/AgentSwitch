@@ -459,6 +459,8 @@ const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi", "grok", "agy"]
 const SUGGEST_MS = 200;
 /** What a terminal is doing while its agent compacts its context: the tool its `activity` names. */
 const COMPACT_TOOL = "Compact";
+/** The OSC Codex writes how its turn stands with (`state=working:app=codex`, TerminalHost.codexState). */
+const CODEX_STATE_OSC = 7501;
 /** Codex's server is asked how its Daybreak switch stands this long after its screen named it, and after the
  *  command that turns it was typed: this often, for this long. */
 const DAYBREAK_LOOK_MS = 400;
@@ -1086,7 +1088,10 @@ export class TerminalHost {
     if (s.agentSessionId) s.customName = this.opts.customTitle?.(s.harness, s.agentSessionId) ?? null;
     s.givenName = req.name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     // Codex's notifications (OSC 9) are only those for what waits for you (launch.ts CODEX_ATTENTION).
-    if (req.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
+    if (req.harness === "codex") {
+      s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
+      s.term.parser.registerOscHandler(CODEX_STATE_OSC, (data) => this.codexState(s, data));
+    }
     s.term.onTitleChange((t) => this.titleSet(s, t));
     this.sessions.set(id, s);
     let { args, env } = plan;
@@ -1231,7 +1236,10 @@ export class TerminalHost {
     s.resumedFrom = kept.resumedFrom; s.forked = kept.forked; s.ownSessionId = kept.ownSessionId; s.sessionByHook = kept.sessionByHook;
     s.profile = kept.profile; s.browserKey = kept.browserKey; s.given = kept.given; s.hold = kept.hold;
     s.device = this.device(s);
-    if (kept.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
+    if (kept.harness === "codex") {
+      s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
+      s.term.parser.registerOscHandler(CODEX_STATE_OSC, (data) => this.codexState(s, data));
+    }
     s.term.onTitleChange((t) => this.titleSet(s, t));
     if (kept.agentSessionId) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
     if (s.agentSessionId && s.customName) this.opts.onRename?.(s.harness, s.agentSessionId, s.customName);
@@ -2135,6 +2143,26 @@ export class TerminalHost {
     s.emit({ type: "exit", code });
     this.unpersist(s);
     this.ended(s.id, false);
+  }
+
+  /** Codex's own word on its turn, which it writes to the terminal (OSC 7501 `state=<state>:app=codex`; seen on 0.171,
+   *  docs/terminal-v0.md §3): `working`; `done` just after its Stop hook; `error` when the turn ended on an error — an
+   *  API's 400, say — and `idle` when it was interrupted (Esc). On those two neither its Stop hook nor its turn-end
+   *  `notify` comes, and the terminal stayed `working` until the next message (2026-11-27, user #55). They end the turn
+   *  here; `working` and `done` are left to the hooks (a Stop a room's message holds back goes on working, and `done`
+   *  only comes once it has really stopped). Only a terminal at work is ended: one that waits on an answer stays so. */
+  private codexState(s: Session, data: string): boolean {
+    const state = /^state=([a-z]+)/.exec(data)?.[1];
+    if ((state !== "error" && state !== "idle") || s.status !== "working") return true;
+    this.settleAll(s, "idle");
+    s.calls.clear();
+    this.noSubagents(s);
+    // An error is a turn that ended badly (as Claude Code's StopFailure; its words are in the record, record.ts); an
+    // interruption is no result to tell of (as Grok's StopCancelled).
+    if (state === "error") this.turnEnded(s, false, "这一轮出错结束", true);
+    else this.workDone(s);
+    this.setStatus(s, "idle");
+    return true;
   }
 
   /** A turn ended: from work (a repeated Stop, a start-up idle is none), or `always` (the program exited on an error). */

@@ -557,6 +557,16 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
   }
 }
 
+/** A Codex turn's error as a line of the record: `Error: <what the API said>`. Codex keeps the API's answer whole as
+ *  the message (`{"error": {"message": …}}`); the message inside is what is shown, else its first line. */
+export function codexError(error: unknown): string {
+  const said = str(obj(error).message).trim() || (typeof error === "string" ? error.trim() : "");
+  let text = said;
+  try { text = str(obj(obj(JSON.parse(said)).error).message).trim() || said; } catch { /* not JSON: as it is */ }
+  return `Error: ${firstLine(text, ERROR_CHARS) || "这一轮出错结束"}`;
+}
+const ERROR_CHARS = 300;
+
 function codexBuild(lines: readonly Line[], cwd: string): Builder {
   const b = new Builder();
   let folder = cwd;
@@ -581,6 +591,8 @@ function codexBuild(lines: readonly Line[], cwd: string): Builder {
     if (line.type !== "event_msg") continue;
     if (payload.type === "item_completed") codexItem(b, at, ts, payload, folder);
     else if (payload.type === "turn_aborted") b.note(at, ts, "Interrupted");
+    // A turn that ended on an error (an API's 400, say) says so only here: no answer, no item (Codex 0.171).
+    else if (payload.type === "task_complete" && payload.error) b.note(at, ts, codexError(payload.error));
     else if (payload.type === "token_count") {
       const info = obj(payload.info);
       const used = Number(obj(info.last_token_usage).total_tokens) || 0;

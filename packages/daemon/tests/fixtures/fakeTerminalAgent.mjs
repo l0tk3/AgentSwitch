@@ -67,6 +67,9 @@ async function handle(line) {
     process.stdout.write("\r\nwork done\r\n");
     return;
   }
+  // Codex's word on its turn as 0.171 writes it (OSC 7501): `state error` after an API's 400, `state idle` after Esc,
+  // `state done` after its Stop hook.
+  if (line.startsWith("state ")) { process.stdout.write(`\x1b]7501;state=${line.slice(6)}:app=codex\x1b\\`); return; }
   // Codex when its screen waits for you (an app's form, an approval): its notification (OSC 9), the title marker
   // blinking, and redraws while it waits; "answered" ends it.
   if (line === "form") {

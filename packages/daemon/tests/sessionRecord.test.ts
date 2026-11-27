@@ -12,7 +12,7 @@ import { mountSessions } from "../src/api/sessions.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { watchRecord } from "../src/api/terminals.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
-import { codexCitations, DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
+import { codexCitations, codexError, DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
 import { MESSAGE_CHARS } from "../src/sessions/types.js";
 import type { TerminalHost } from "../src/terminals/host.js";
 
@@ -317,6 +317,32 @@ describe("a Codex session's record", () => {
     const cited = `先看这个。\n\n:codex-file-citation{path="/Users/you/out/a.xlsx" purpose="output" artifact_kind="workbook"}\n\n:codex-file-citation{path="/Users/you/out/a.xlsx" purpose="output" artifact_kind="workbook"}\n再看 :codex-file-citation{path="/Users/you/notes.md" purpose="reference"} 这个。\n:codex-file-citation{path="relative/x.md" artifact_kind="document"}`;
     expect(codexCitations(cited)).toEqual({ text: "先看这个。\n\n再看  这个。", files: [{ path: "/Users/you/out/a.xlsx", kind: "workbook" }, { path: "/Users/you/notes.md" }] });
     expect(codexCitations("没有引用。\n\n\n还是没有。")).toEqual({ text: "没有引用。\n\n\n还是没有。", files: [] });
+  });
+
+  it("says a turn that ended on an error: the API's words, from the end of the turn (no answer, no item: Codex 0.171)", () => {
+    // As Codex 0.171 wrote it when the API answered 400 (2026-11-27, user #55: the short view showed only "Working").
+    const said = JSON.stringify({ error: { message: "Invalid 'input[2].content[1].image_url'. input_image image_url must be valid base64.", type: "invalid_request_error", code: "invalid_value" } });
+    const path = codexFile([
+      line({ timestamp: at(0), type: "session_meta", payload: { id: "x2", cwd: API, originator: "codex_cli_rs" } }),
+      line({ timestamp: at(0), type: "event_msg", payload: { type: "task_started", turn_id: "t1" } }),
+      x.item(1, { type: "UserMessage", id: "u1", content: [{ type: "text", text: "?" }] }),
+      line({ timestamp: at(3), type: "event_msg", payload: { type: "task_complete", turn_id: "t1", last_agent_message: null, error: { message: said, codex_error_info: "other" } } }),
+      // A turn that went well ends the same way, with no error: nothing is said of it.
+      x.item(10, { type: "UserMessage", id: "u2", content: [{ type: "text", text: "再试一次" }] }),
+      x.item(12, { type: "AgentMessage", id: "a1", phase: "final_answer", content: [{ type: "Text", text: "好了。" }] }),
+      line({ timestamp: at(14), type: "event_msg", payload: { type: "task_complete", turn_id: "t2", last_agent_message: "好了。", error: null } }),
+    ]);
+    const record = readRecord("codex", path, { cwd: API })!;
+    expect(kinds(record.items)).toEqual(["user", "note", "user", "answer"]);
+    expect(record.items[1]).toMatchObject({ type: "note", text: "Error: Invalid 'input[2].content[1].image_url'. input_image image_url must be valid base64." });
+  });
+
+  it("puts a Codex error in a line: the message inside the API's answer, else the first line; clipped; never empty", () => {
+    expect(codexError({ message: "stream disconnected before completion\nretrying" })).toBe("Error: stream disconnected before completion");
+    expect(codexError({ message: JSON.stringify({ error: { message: "quota exceeded" } }) })).toBe("Error: quota exceeded");
+    expect(codexError({ message: JSON.stringify({ detail: "x" }) })).toBe(`Error: ${JSON.stringify({ detail: "x" })}`);
+    expect(codexError({ message: "" })).toBe("Error: 这一轮出错结束");
+    expect(codexError({ message: "a".repeat(500) })).toHaveLength("Error: ".length + 300);
   });
 
   it("is its thread's items: what a command was for when it only looked, each file of a change, the plan and the usage", () => {

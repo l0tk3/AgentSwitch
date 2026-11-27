@@ -440,6 +440,48 @@ describe("terminal host", () => {
     expect(host.get(info.id)!.status).toBe("idle");
   });
 
+  it("ends a Codex turn its hooks never end: an error (no Stop comes) and an interruption, as Codex says them on its screen (OSC 7501)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    await until(() => host.get(info.id)!.title === "fake agent");
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown> = {}) => host.hook(info.id, token, { event, payload });
+    const status = () => host.get(info.id)!.status;
+    await hook("SessionStart");
+    // At rest, its word changes nothing and is no turn.
+    host.write(info.id, "state error\r");
+    await new Promise((r) => setTimeout(r, 150));
+    expect(host.lastTurn(info.id)).toBeNull();
+
+    // The API answered 400 (2026-11-27, user #55): no Stop, no notify; `state=error` ends the turn as a failed one.
+    await hook("UserPromptSubmit");
+    expect(status()).toBe("working");
+    host.write(info.id, "state working\r");
+    host.write(info.id, "state done\r");   // left to its Stop hook, which comes just before it
+    await new Promise((r) => setTimeout(r, 150));
+    expect(status()).toBe("working");
+    host.write(info.id, "state error\r");
+    await until(() => status() === "idle");
+    expect(host.lastTurn(info.id)).toMatchObject({ ok: false, line: "这一轮出错结束" });
+
+    // Interrupted (Esc): `state=idle`, nothing else; it rests, and that is no result to tell of.
+    await hook("UserPromptSubmit");
+    host.write(info.id, "state idle\r");
+    await until(() => status() === "idle");
+    expect(host.lastTurn(info.id)).toMatchObject({ ok: false, line: "这一轮出错结束" });
+
+    // One that waits on an answer is not ended by it.
+    await hook("UserPromptSubmit");
+    const answer = hook("PermissionRequest", { tool_name: "Bash", tool_input: { command: "ls" } });
+    await until(() => status() === "waiting");
+    host.write(info.id, "state idle\r");
+    await new Promise((r) => setTimeout(r, 150));
+    expect(status()).toBe("waiting");
+    host.closeAll();
+    await answer;
+  });
+
   it("reads Claude Code's compacting line off its screen, and nothing that only mentions it (2026-10-07)", () => {
     // As 2.1.292 draws it (scripts/claude_compact_probe.ts; the user's screenshot): a glyph that turns, the words, a clock.
     expect(compactingOnScreen(["❯ /compact", "✻ Compacting conversation… (1s)", "────", "❯ "])).toBe(true);
