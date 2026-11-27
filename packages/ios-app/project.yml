@@ -27,6 +27,19 @@ settings:
     # The app's bundle id; the widget extension's is derived from it. scripts/install-device.sh overrides this one
     # setting (not PRODUCT_BUNDLE_IDENTIFIER, which would give the extension the app's id too).
     APP_BUNDLE_ID: com.agentswitch.ios
+    # The app group the app and the widget share (the Channels widget's copy of the rooms, docs/app-v0.md §5). A free
+    # personal team signing from the command line gets no group registered, so on a device it is off unless
+    # USE_APP_GROUP=YES (a paid team; scripts/install-device.sh passes it on); the simulator always has it.
+    APP_GROUP: group.$(APP_BUNDLE_ID)
+    USE_APP_GROUP: NO
+    "USE_APP_GROUP[sdk=iphonesimulator*]": YES
+    APP_GROUP_YES: $(APP_GROUP)
+    APP_GROUP_NO: ""
+    APP_GROUP_IN_USE: $(APP_GROUP_$(USE_APP_GROUP))
+    APP_ENTITLEMENTS_YES: App/AgentSwitch.entitlements
+    APP_ENTITLEMENTS_NO: ""
+    WIDGET_ENTITLEMENTS_YES: Widgets/AgentSwitchWidgets.entitlements
+    WIDGET_ENTITLEMENTS_NO: ""
 
 targets:
   AgentSwitch:
@@ -66,7 +79,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         PRODUCT_NAME: AgentSwitch
         INFOPLIST_FILE: App/Info.plist
-        CODE_SIGN_ENTITLEMENTS: App/AgentSwitch.entitlements
+        CODE_SIGN_ENTITLEMENTS: $(APP_ENTITLEMENTS_$(USE_APP_GROUP))
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -100,7 +113,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).widgets
         PRODUCT_NAME: AgentSwitchWidgets
         INFOPLIST_FILE: Widgets/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Widgets/AgentSwitchWidgets.entitlements
+        CODE_SIGN_ENTITLEMENTS: $(WIDGET_ENTITLEMENTS_$(USE_APP_GROUP))
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES

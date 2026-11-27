@@ -106,7 +106,7 @@ set +e
 xcodebuild -project AgentSwitch.xcodeproj -scheme AgentSwitch -configuration Debug \
   -destination "platform=iOS,id=$UDID" -derivedDataPath "$DERIVED" -allowProvisioningUpdates \
   DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Development" PROVISIONING_PROFILE_SPECIFIER= \
-  APP_BUNDLE_ID="$BUNDLE_ID" build >"$LOG" 2>&1
+  APP_BUNDLE_ID="$BUNDLE_ID" USE_APP_GROUP="${USE_APP_GROUP:-NO}" build >"$LOG" 2>&1
 status=$?
 set -e
 grep -E "error:|\*\* BUILD" "$LOG" || true

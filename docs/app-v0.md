@@ -179,7 +179,7 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
   - 外观：跟着应用的外观（Pixel / Classic），配色用应用的；浅色和深色跟系统。
   - 数据从哪来：小组件不连 Mac。应用每次从 Mac 读到频道列表有变化、或者切换外观时，把一份快照写进 App Group 的共享目录（`group.<应用的 bundle id>`，`channels.json`；`ChannelsShelf`），再通知小组件重画。快照只有画出来要用的东西：频道名、条数、最后一句的说话人和第一行、时间；没有地址、令牌，也没有别的消息。换 Mac 或移除 Mac 时快照删掉。
   - 多久刷新：应用在前台时频道列表 3 秒读一次，在后台还能运行时 20 秒一次，有变化就写。应用被系统挂起后小组件停在最后一次的内容，时间照走（每 5 分钟重画一次）。要应用不开也能更新，得有推送，没做。
-  - 签名：App Group 要求应用和小组件两边的描述文件都带 App Groups 能力，不带就签不上。`install-device.sh` 带 `-allowProvisioningUpdates`，有 Xcode 账号时会自动给个人团队开通。
+  - 签名（2026-11-27）：App Group 要求应用和小组件的描述文件都带上这个组。用免费个人团队在命令行自动签名时，Xcode 给了 App Groups 能力，却没有注册我们的组（报 `doesn't match the entitlements file's value for application-groups`，换别的组 id 也一样）。所以组做成开关：`USE_APP_GROUP` 在模拟器上默认开，真机上默认关。关着的时候应用和小组件都不带这个组，照常能签能装，小组件只显示 `Open AgentSwitch`。有付费开发者账号时用 `USE_APP_GROUP=YES scripts/install-device.sh` 打开；组 id 是 `APP_GROUP`，默认 `group.<bundle id>`。
 
 ## 5b. Android 应用（2026-11-11）
 
@@ -215,7 +215,15 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
 - **做到哪了**（2026-11-12）：五个标签页都在；`kit` 整个移植完（测试 400 个）；在 Android 16 模拟器上用 `release` 包对着上面那个服务走过：配对、终端列表、新建终端、回复、权限卡片、通知与点通知回到终端、Dispatch 发任务、Files 浏览与预览、Browser 列表、Settings；后台跟随：发完回复立刻离开应用，服务启动、常驻通知出现，38 秒后应用没有被冻结，这一轮在 Mac 上结束时 `Done` 通知送到、服务自己结束。**真机**：三星 S26 Ultra（Android 17、One UI 9），手机上开着 Clash（FlClash）的 VPN——扫码、配对、终端列表与 Settings 的 `Connected · LAN` 都通了，上面两条就是在它上面找到并修掉的。真机上还没看过的：后台跟随会不会被三星的省电策略停掉、指纹解锁、其余各页。
 - **跟上 Mac 的聊天室**（2026-11-26，用户 #625：iPhone 和 Android 的应用 ui 别忘了优化）：频道列表分成 `Mentions`（等你处理的事一条一行，加上有人 @ 你而别无他事的频道；原来标题栏的「等你处理」入口去掉）、`Dispatch`、`Topics` 三组，各自可折叠，折叠与否记在手机上；经典外观里消息是圆角块，你自己的在强调色的淡底上；没选头像的成员是同色字母在同色淡底上（Mac 的 B 款）；你点自己的头像可以换头像（`PUT /rooms/:id/seats/you/avatar`，每个房间都是这一个），没选时仍是 `YOU`；成员用 `/btw` 回的话名字旁有 `Aside`；会话之间往返的提示（房间顶上那条、列表里的 `n Rounds`）删掉了；New Room 与 Add Sessions 里可以 `New Session`——和新建终端同一页选 agent、配置、模型、思考强度、文件夹，建房间（或加人）时启动、跳过权限确认、拉进房间；房间的输入框收键盘给的图片（剪贴板、截屏建议），和终端的回复框一样成为消息的附件。**没验证**：这些都没在模拟器或真机上看过（这台 Mac 上没有 Android 10 以上的模拟器），只过了编译和单元测试。
 - **跟上 Mac 的终端**（同日）：简略视图的头上、新建终端的格子里是各家 CLI 自己启动画面上的图标（Mac 的 `AgentLogoArt`，数据逐格照搬到 `kit/design/AgentLogoArt.kt`；经典外观在圆角浅底上，像素外观在方框里，格子里只有图）；回复框下面那行有了用量：只有上下文时照旧在右端（`Context 28%`），有 5h / 7d 时整行另起一行 `Context 28% · 5h 12% · 7d 84%`，到 80% 的那项琥珀色（`TerminalInfo.meter`、流里的 `meter`、记录里 Codex 的 `limits`，`RecordDisplay.usageLine`）。手机没有悬停，Mac 上停在上面看到的 token 数和重置时间这里不显示。Antigravity 本来就有（新建、查看、恢复、删除、标记）。**没验证**：同上，没在设备上看过。
-- **没做的**（iPhone 版有的，或这里该有的）：小组件。Android 16 的“实时更新”（状态栏上的小条，三星的 Now Bar）：常驻通知可以申请升成它，没有做。文字里链接的长按菜单（点链接能打开，长按出的 Copy / 在手机浏览器打开没有接上）。Dispatch 卡片上的文件行点开的是任务页，不是文件。终端与会话页的 `Show in Files` 去的是 Files 标签页，不是盖在当前页上的那一层（`MacFilesOverSheet` 写了没接）。Files 没有下拉刷新（每 3 秒自己重读）。终端屏幕的双指缩放没法用 adb 试，没验证。代码压缩（包现在约 40 MB）。上游 `99d2cfb` 之后 iPhone 端的改动（如果有）还没有跟。
+- **桌面小组件 Channels**（2026-11-27，用户 #763：安卓小组件也做一下；对照 iPhone 的同名小组件，§5）：
+  - 显示与 iPhone 相同：每个频道一行——频道名（调度台前面一个 `◆`，像素外观普通频道前 `#`，暂停的后面 `‖`）、最后一句是谁说的和它的第一行、多久以前、没看的条数（点名你的琥珀色）、等你处理的件数；头上是等你的总数。点某一行打开那个房间（`agentswitch://room/<id>`），点别处打开 Rooms 列表（`agentswitch://rooms`）。
+  - 尺寸：可以随意拉伸，放下时 4×2。窄的（宽不到 180 dp）只放一个频道、给它三行字；宽的按高度放得下几行就几行，最多 8 行（`channelsRows`，有测试）。
+  - 设置：放下时不必设，默认全部按最近；长按 › 重新配置（`ChannelsSetupActivity`）可选 `All, Most Recent First` / `Only Mentions` / `Chosen Channels`（自选时按点选的顺序）。每个小组件各记各的。
+  - 外观：跟着应用的外观（Pixel / Classic），改外观时小组件立即重画；浅色深色跟系统——颜色是“日 / 夜”一对，由桌面按系统的深浅挑，所以切深浅不用应用参与。像素的浅色用 ui-v0 §9.3 的新色板。
+  - 数据从哪来：小组件不连 Mac。它和应用在同一个进程里，应用每次从 Mac 读到频道列表有变化，就把一份快照写进应用自己的文件（`files/channels-widget.json`，`widget/ChannelsFeed.kt`；格式是 `kit/widget/ChannelsSnapshot.kt`，有测试），再让小组件重画。快照只有画出来要用的：频道名、条数、最后一句的说话人和第一行、时间；没有地址和令牌。换 Mac、移除 Mac、Mac 没有聊天室时快照删掉。示例屏幕的数据不写。
+  - 多久刷新：应用开着时跟着 Rooms 的读取（在 Rooms 页 3 秒一次，在别的页 20 秒一次）。应用不在时用 WorkManager 每 15 分钟一次（系统允许的最短间隔；省电时系统会推迟）：起应用自己的连接、读一次频道列表、有变化就写；连不上就停在最后一次，各行的“多久以前”照样往前走。只有放了至少一个小组件时才排这个任务，最后一个移走时取消。
+  - **没验证**：没装到设备上，也没真的放到桌面上（手机没接，模拟器只有 API 28）；只过了编译和单元测试。
+- **没做的**（iPhone 版有的，或这里该有的）：锁屏小组件（Android 没有对应的东西）。Android 16 的“实时更新”（状态栏上的小条，三星的 Now Bar）：常驻通知可以申请升成它，没有做。文字里链接的长按菜单（点链接能打开，长按出的 Copy / 在手机浏览器打开没有接上）。Dispatch 卡片上的文件行点开的是任务页，不是文件。终端与会话页的 `Show in Files` 去的是 Files 标签页，不是盖在当前页上的那一层（`MacFilesOverSheet` 写了没接）。Files 没有下拉刷新（每 3 秒自己重读）。终端屏幕的双指缩放没法用 adb 试，没验证。代码压缩（包现在约 40 MB）。上游 `99d2cfb` 之后 iPhone 端的改动（如果有）还没有跟。
 
 ## 6. 威胁模型的变化
 

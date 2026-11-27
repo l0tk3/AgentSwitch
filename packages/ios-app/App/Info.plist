@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>AgentSwitchAppGroup</key>
-	<string>group.$(APP_BUNDLE_ID)</string>
+	<string>$(APP_GROUP_IN_USE)</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
