@@ -158,11 +158,15 @@ BLOB_MIN = 256                      # a string this long, all base64, is data wh
 _BASE64 = re.compile(r"[A-Za-z0-9+/_-]+={0,2}", re.ASCII)
 
 
+PATH_MAX = 4096
+
+
 def pathlike(s: str) -> bool:
-    """Base64 by its letters, a path by its look: `/Users/name/Desktop/shot` has a `/` every few letters, data one in
-    sixty-four. A short piece of data taken for text by this is replaced only if a word stands in it, which in a short
-    one it hardly does."""
-    return s.count("/") * 16 > len(s)
+    """Base64 by its letters, a path by its look: `/Users/name/Desktop/shot` is short, has a `/` every few letters and
+    never two together. Data has one in sixty-four — or, a JPEG of text on white, one in eleven, with `//` all over it
+    (review #86: counting the slashes alone took such a screenshot for a path, and broke it again). A short piece of
+    data taken for text by this is replaced only if a word stands in it, which in a short one it hardly does."""
+    return len(s) <= PATH_MAX and "//" not in s and s.count("/") * 16 > len(s)
 
 
 def data_url(s: str) -> bool:

@@ -363,6 +363,10 @@ def test_what_the_review_found_a_number_a_text_that_begins_like_data_and_a_path_
     assert "alice" not in json.dumps(out) and out["image_url"] == "/Users/h_aaaaaaaaaa/Desktop/shot"
     # A JPEG's base64 begins with a slash too, and is data.
     jpeg = "/9j/4AAQSkZJRgABAQAAAQABAAD" + "aliceAAAA" * 40
+    # ... and a JPEG of text on white has a slash every eleven letters, two together all over it (review #86).
+    shot = "/9j/4AAQ" + "alice//AB/Cd/" * 400
+    assert shot.count("/") * 16 > len(shot) and is_data(shot) and is_blob(shot)
+    assert json.loads(hide(json.dumps({"inlineData": {"mimeType": "image/jpeg", "data": shot}, "images": [shot]}), (word,)))["images"] == [shot]
     assert is_data(jpeg) and is_blob(jpeg) and json.loads(hide(json.dumps({"image_url": jpeg, "t": jpeg}), (word,))) == {"image_url": jpeg, "t": jpeg}
 
 
