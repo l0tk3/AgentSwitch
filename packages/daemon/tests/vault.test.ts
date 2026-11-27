@@ -146,6 +146,26 @@ describe("the model gateway as the service runs it", () => {
     gate.stop();
   });
 
+  it("refuses a terminal when there are words to replace and no gateway to replace them; with none, or switched off, it starts as before", async () => {
+    const h = home();
+    const store = new RedactionStore(h, [Buffer.alloc(32, 7)], () => 1, WHO);
+    store.setSettings({ username: false });
+    const scope = { terminal: "t1", profile: "p", upstream: null };
+    // Its program is not there.
+    const none = new ModelGate({ home: h, bin: null, store, roomsOf: () => [] });
+    expect(await none.open(scope)).toBeNull();
+    store.add({ value: "Zebra-Probe-Word" });
+    await expect(none.open(scope)).rejects.toThrow(/找不到 secret-gate/);
+    await expect(none.open(scope)).rejects.toMatchObject({ name: "GateDown" });
+    // It is there and does not start (an old one without `model-proxy` ends at once).
+    const dead = new ModelGate({ home: h, bin: "/usr/bin/false", store, roomsOf: () => [] });
+    await expect(dead.open(scope)).rejects.toThrow(/没有启动起来/);
+    // Switched off: nothing is replaced, nothing is refused.
+    store.setSettings({ enabled: false });
+    expect(await none.open(scope)).toBeNull();
+    expect(await dead.open(scope)).toBeNull();
+  });
+
   it("lists its logs per terminal and day, and cleans them: all, or older than some days", () => {
     const h = home();
     const store = new RedactionStore(h, [Buffer.alloc(32, 6)], () => 1, WHO);

@@ -47,6 +47,12 @@ const portFree = (port: number): Promise<boolean> => new Promise((resolve) => {
 
 const hostOf = (url: string | undefined): string | null => { try { return url ? new URL(url).hostname.toLowerCase() : null; } catch { return null; } };
 
+/** The gateway cannot be had while there are words it should replace: no terminal is started. */
+export class GateDown extends Error {
+  override readonly name = "GateDown";
+  constructor(why: string) { super(`替换词的网关不可用：${why}。终端没有打开，否则设好的替换词会原样发给模型。修好网关，或在 Settings › Redaction 里关掉替换后再开。`); }
+}
+
 export class ModelGate {
   private child: ChildProcess | null = null;
   private port = 0;
@@ -146,10 +152,18 @@ export class ModelGate {
     });
   }
 
-  /** A terminal about to start: its scope, and what it is started with; null: it starts as before. */
+  /** A terminal about to start: its scope, and what it is started with; null: it starts as before (replacing is off).
+   *  Replacing on, words to replace, and no gateway to do it — its program not found, or it did not start: the
+   *  terminal is refused (`GateDown`), for started as before it sent every word as it is and said nothing (2026-11-27,
+   *  user room #34: seen with a secret-gate too old to have `model-proxy`). With nothing to replace it starts as before. */
   async open(scope: GateScope): Promise<GateWay | null> {
-    if (!this.enabled()) return null;
-    if (!(await this.ensure())) return null;
+    if (!this.o.store.settings().enabled) return null;
+    const up = this.o.bin !== null && await this.ensure();
+    if (!up) {
+      const rooms = this.o.roomsOf(scope.terminal);
+      if (!this.o.store.pairs(scope.profile, rooms, this.o.more?.() ?? []).length && !this.o.store.patterns(scope.profile, rooms).length) return null;
+      throw new GateDown(this.o.bin === null ? "找不到 secret-gate 程序" : "它没有启动起来（见服务日志里的 model gate 一行）");
+    }
     this.scopes.set(scope.terminal, scope);
     this.persist();
     this.send();

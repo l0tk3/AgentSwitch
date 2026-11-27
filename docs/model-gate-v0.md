@@ -46,3 +46,11 @@ A word, global or a room's, can be a regular expression: tick `Regex` beside the
 - **Password book:** built (`vault/passwords.ts`, `api/passwords.ts`). On the Mac it is a window of its own, opened from the padlock at the rail's foot or ⇧⌘L (`PasswordsWindowController`).
 - **Images:** text inside images and screenshots is not replaced.
 - **Remote nodes:** a remote node's words cannot be set from the Mac yet.
+
+## What was found with Antigravity's key profiles (2026-11-27, room #21–#34)
+
+Tried through the real gateway with a stand-in address (probe notes: room-files `agy-key/probe-findings.md` §7–§8). It works for a key profile: the words left as placeholders, came back as words, and `AGY_CA_CERT` is trusted under a key too. Three holes, none of them Antigravity's alone:
+
+- **A stream sent with `content-length` was cut short** when words were put back (a relay's; the vendors' own streams are chunked). Fixed: the length is not passed on, and an HTTP/1 answer is chunked. Seen before and after through the gateway; HTTP/2 has the unit test only.
+- **A terminal started without the gateway when the gateway was not there**, and every word left as it is, with nothing said (seen: a secret-gate too old to have `model-proxy`). Now (`ModelGate.open`, `GateDown`): replacing on, words or patterns to replace for that terminal, and no gateway (its program not found, or it did not start) → the terminal is not started, and the error says why and what to do (repair it, or switch replacing off in Settings › Redaction). With nothing to replace, or replacing off, it starts as before. The cost, accepted by the user: while the gateway is broken, no terminal with words to replace opens. A gateway that dies under a running terminal was already closed: the terminal's proxy is gone, so nothing leaves.
+- **An https address written as an IP** is passed through unread: a client sends no SNI for an IP, and the gateway opens a connection by its SNI. See below when fixed.
