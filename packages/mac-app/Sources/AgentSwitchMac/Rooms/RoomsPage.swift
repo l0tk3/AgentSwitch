@@ -682,6 +682,7 @@ private struct RoomView: View {
                 // showed a blank page and `↓ Latest`): held at the bottom, and sent there again once the rows on screen
                 // are laid out.
                 .defaultScrollAnchor(.bottom)
+                .modifier(PastTheEnd(proxy: proxy))
                 .onAppear { if let seq = model.jump { goTo(seq, proxy) } else { settle(proxy) } }
                 .onChange(of: room.room.id) { settle(proxy) }
                 .onChange(of: model.taskFilter) { proxy.scrollTo("end", anchor: .bottom) }
@@ -1355,4 +1356,24 @@ private struct FilesBackSheet: View {
 
     private static func word(_ f: RewindFile) -> String { f.unknown == true ? "无法恢复" : f.action == "remove" ? "删除" : "恢复" }
     private static func tint(_ f: RewindFile) -> Color { f.unknown == true ? .secondary : f.action == "remove" ? .red : .accentColor }
+}
+
+/// A lazy stack guesses the height of rows it has not laid out; when the rows it then measures come out shorter, the
+/// scroll view's content shrinks under a reader held at the bottom and leaves them past its end, on a blank page with
+/// `↓ Latest` (user #578, #723: 偶尔还是会白屏，得向上滑动才能解除). Seen from the scroll view's own geometry, and sent back
+/// to the last row at once.
+private struct PastTheEnd: ViewModifier {
+    let proxy: ScrollViewProxy
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { g in
+                g.contentSize.height > g.containerSize.height && g.contentOffset.y > g.contentSize.height - g.containerSize.height + 24
+            } action: { _, past in
+                if past { proxy.scrollTo("end", anchor: .bottom) }
+            }
+        } else {
+            content
+        }
+    }
 }
