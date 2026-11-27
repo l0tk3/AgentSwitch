@@ -1,6 +1,5 @@
 package com.agentswitch.android.settings
 
-import androidx.compose.material3.minimumInteractiveComponentSize
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -228,7 +227,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
     ) {
         LookSymbolIcon(LookSymbol.Magnifier, side = 16.dp, color = Theme.secondaryInk)
         PlainField(query, onChange, Modifier.weight(1f), placeholder = "Search", style = plain(16))
-        if (query.isNotEmpty()) Text("×", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "clear") { onChange("") }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
+        if (query.isNotEmpty()) Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "clear") { onChange("") }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
     }
 }
 

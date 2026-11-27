@@ -1,6 +1,5 @@
 package com.agentswitch.android.rooms
 
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -734,7 +733,7 @@ private fun ReadMark(readers: RoomReaders?, showMenu: (PixelBox) -> Unit, poke: 
         // 戳一下: what still waits for a busy member given to it now.
         if (poke != null) Text(
             if (poking) "戳…" else "戳一下",
-            Modifier.minimumInteractiveComponentSize().clickable(!poking, role = Role.Button, onClickLabel = "戳一下", onClick = poke).padding(horizontal = 4.dp, vertical = 2.dp),
+            Modifier.clickable(!poking, role = Role.Button, onClickLabel = "戳一下", onClick = poke).padding(horizontal = 4.dp, vertical = 2.dp),
             color = Theme.signal, style = mono(11), maxLines = 1,
         )
         if (readers != null) {
@@ -773,7 +772,7 @@ private fun RoomWriter(model: RoomPageModel, detail: RoomDetail, focus: FocusReq
                     if (classic) ClassicIcon(ClassicIconKind.Symbol("arrowshape.turn.up.left"), 14.dp, 13.dp, Theme.secondaryInk)
                     else PixelSprite(RoomArt.reply, pixel = 2.dp, color = Theme.secondaryInk)
                     Text("回复 ${RoomWords.who(model.message(n)?.from ?: "#$n")}", Modifier.weight(1f), color = Theme.secondaryInk, style = mono(12), maxLines = 1)
-                    Text("×", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "Close") { model.replyTo = null }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
+                    Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "Close") { model.replyTo = null }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(15))
                 }
             }
             // In `# 全部`, a message that begins with `T3` is about that task: said before it goes.

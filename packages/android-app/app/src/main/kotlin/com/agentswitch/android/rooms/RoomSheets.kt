@@ -1,6 +1,5 @@
 package com.agentswitch.android.rooms
 
-import androidx.compose.material3.minimumInteractiveComponentSize
 import com.agentswitch.kit.api.createTerminal
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -411,7 +410,7 @@ fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {
                 FormRow(first = i == 0) {
                     RoomAgentMark(one.harness)
                     Text(one.cwd, Modifier.weight(1f), color = Theme.ink, style = mono(14), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                    Text("×", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClickLabel = "Remove") { fresh = fresh - one }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(17))
+                    Text("×", Modifier.clickable(role = Role.Button, onClickLabel = "Remove") { fresh = fresh - one }.padding(horizontal = 6.dp), color = Theme.secondaryInk, style = mono(17))
                 }
             }
             FormRow(first = fresh.isEmpty(), onClick = { nav.present("roomnewsession") { com.agentswitch.android.terminals.NewTerminalSheet(started = {}, forRoom = { fresh = fresh + it }) } }) {

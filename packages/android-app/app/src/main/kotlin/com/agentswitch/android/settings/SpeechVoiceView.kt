@@ -1,6 +1,5 @@
 package com.agentswitch.android.settings
 
-import androidx.compose.material3.minimumInteractiveComponentSize
 import android.content.Intent
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,7 +50,7 @@ fun SpeechVoiceView() {
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
-                        "Play", Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button) { speaker.sample(voice) }.padding(6.dp).semantics { contentDescription = "试听 ${voice.name}" },
+                        "Play", Modifier.clickable(role = Role.Button) { speaker.sample(voice) }.padding(6.dp).semantics { contentDescription = "试听 ${voice.name}" },
                         color = Theme.signal, style = mono(12),
                     )
                 }
