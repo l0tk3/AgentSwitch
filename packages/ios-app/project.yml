@@ -36,10 +36,13 @@ settings:
     APP_GROUP_YES: $(APP_GROUP)
     APP_GROUP_NO: ""
     APP_GROUP_IN_USE: $(APP_GROUP_$(USE_APP_GROUP))
-    APP_ENTITLEMENTS_YES: App/AgentSwitch.entitlements
-    APP_ENTITLEMENTS_NO: ""
-    WIDGET_ENTITLEMENTS_YES: Widgets/AgentSwitchWidgets.entitlements
-    WIDGET_ENTITLEMENTS_NO: ""
+    APP_ENTITLEMENTS_YES: App/AgentSwitchGroup.entitlements
+    APP_ENTITLEMENTS_NO: App/AgentSwitch.entitlements
+    WIDGET_ENTITLEMENTS_YES: Widgets/AgentSwitchWidgetsGroup.entitlements
+    WIDGET_ENTITLEMENTS_NO: Widgets/AgentSwitchWidgets.entitlements
+    # Both always share a keychain group (`$(AppIdentifierPrefix)com.agentswitch.shared`, WidgetLink): a development
+    # profile allows every group under the team's prefix, so a free team signs it. The app's own group is listed
+    # first in its file, so what it keeps without naming a group stays where it was.
 
 targets:
   AgentSwitch:
@@ -104,6 +107,8 @@ targets:
           - Info.plist
           - "*.entitlements"
     dependencies:
+      - package: AgentSwitchKit
+        product: AgentSwitchKit
       - package: AgentSwitchKit
         product: AgentSwitchLive
       - package: AgentSwitchKit

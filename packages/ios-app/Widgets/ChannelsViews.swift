@@ -28,6 +28,8 @@ struct ChannelsEntry: TimelineEntry {
     let snapshot: ChannelsSnapshot?
     let choice: ChannelsSnapshot.Choice
     let chosen: [String]
+    /// Drawn in the classic look.
+    let classic: Bool
 
     func rows(_ limit: Int) -> [ChannelsSnapshot.Channel] {
         snapshot?.pick(choice, chosen: chosen, limit: limit) ?? []
@@ -42,7 +44,7 @@ struct ChannelsView: View {
     private var family: WidgetFamily { forced ?? given }
     @Environment(\.colorScheme) private var scheme
 
-    private var classic: Bool { entry.snapshot?.classic ?? false }
+    private var classic: Bool { entry.classic }
     private var palette: ChannelsPalette { ChannelsPalette(classic: classic, dark: scheme == .dark) }
 
     var body: some View {

@@ -18,8 +18,19 @@ enum ChannelsWidgetFeed {
         WidgetCenter.shared.reloadTimelines(ofKind: ChannelsShelf.kind)
     }
 
+    /// The widget's own way to the Mac (WidgetLink): written when it changes, and the widget drawn again.
+    static func link(_ link: WidgetLink) {
+        guard WidgetLinkStore.load() != link, WidgetLinkStore.save(link) else { return }
+        WidgetCenter.shared.reloadTimelines(ofKind: ChannelsShelf.kind)
+    }
+
+    static func unlink() { WidgetLinkStore.clear() }
+
     /// The look changed: the widget draws in the new one.
     static func relook() {
+        if let kept = WidgetLinkStore.load(), kept.classic != InterfaceLook.current.isClassic {
+            link(WidgetLink(fingerprint: kept.fingerprint, endpoints: kept.endpoints, token: kept.token, classic: InterfaceLook.current.isClassic))
+        }
         guard let kept = last ?? ChannelsShelf.read() else { return }
         let now = ChannelsSnapshot(channels: kept.channels, classic: InterfaceLook.current.isClassic)
         guard now.classic != kept.classic, ChannelsShelf.write(now) else { return }

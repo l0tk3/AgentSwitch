@@ -180,6 +180,10 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
   - 数据从哪来：小组件不连 Mac。应用每次从 Mac 读到频道列表有变化、或者切换外观时，把一份快照写进 App Group 的共享目录（`group.<应用的 bundle id>`，`channels.json`；`ChannelsShelf`），再通知小组件重画。快照只有画出来要用的东西：频道名、条数、最后一句的说话人和第一行、时间；没有地址、令牌，也没有别的消息。换 Mac 或移除 Mac 时快照删掉。
   - 多久刷新：应用在前台时频道列表 3 秒读一次，在后台还能运行时 20 秒一次，有变化就写。应用被系统挂起后小组件停在最后一次的内容，时间照走（每 5 分钟重画一次）。要应用不开也能更新，得有推送，没做。
   - 签名（2026-11-27）：App Group 要求应用和小组件的描述文件都带上这个组。用免费个人团队在命令行自动签名时，Xcode 给了 App Groups 能力，却没有注册我们的组（报 `doesn't match the entitlements file's value for application-groups`，换别的组 id 也一样）。所以组做成开关：`USE_APP_GROUP` 在模拟器上默认开，真机上默认关。关着的时候应用和小组件都不带这个组，照常能签能装，小组件只显示 `Open AgentSwitch`。有付费开发者账号时用 `USE_APP_GROUP=YES scripts/install-device.sh` 打开；组 id 是 `APP_GROUP`，默认 `group.<bundle id>`。
+  - 没有 App Group 时（免费个人团队装到真机就是这样）小组件自己去连 Mac（同日，用户 #789：小组件读不到应用的数据和外观）：
+    - 应用连上 Mac 后，把这台 Mac 的地址（正在用的排第一）、证书指纹、令牌和外观写进应用和小组件共用的钥匙串组（`团队前缀.com.agentswitch.shared`，`WidgetLink`）。开发描述文件本来就允许团队前缀下的所有组，免费团队也签得上，不用注册。这一项只存在本机，首次解锁后可读，因为小组件在锁屏时也要画。换 Mac 或移除 Mac 时删掉。应用自己的钥匙串组排在第一，所以令牌照旧存在原来的地方。
+    - 小组件按顺序试最多 4 个地址，每个等 6 秒，用钉住指纹的连接读一次频道列表，每 15 分钟一次（系统可能推迟）。
+    - 小组件编辑里加了 `Look`：`Same as App` / `Classic` / `Pixel`。`Same as App` 用应用写的外观，读不到时用 Classic。
 
 ## 5b. Android 应用（2026-11-11）
 

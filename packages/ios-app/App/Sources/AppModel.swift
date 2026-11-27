@@ -163,8 +163,17 @@ final class AppModel {
     }
 
     /// Clears what was fetched from the current Mac, before switching or removing it.
+    /// How the Channels widget reaches this Mac by itself (WidgetLink): its addresses, the one in use first, its
+    /// fingerprint, the token and the look, in the keychain group the widget shares.
+    private func shareWidgetLink() {
+        guard let profile, let token = try? vault.load(account: profile.tokenAccount) else { return }
+        ChannelsWidgetFeed.link(WidgetLink(fingerprint: profile.fingerprint, endpoints: WidgetLink.endpoints(of: profile, inUse: connection.endpoint),
+                                           token: token, classic: InterfaceLook.current.isClassic))
+    }
+
     private func resetSession() {
         session += 1
+        ChannelsWidgetFeed.unlink()
         connection = .idle
         connectionProgress = ConnectionProgress()
         routeReport = nil
@@ -226,6 +235,7 @@ final class AppModel {
         if state.endpoint != nil && !wasConnected {
             Task {
                 await refreshAddresses()
+                shareWidgetLink()
                 if let who = await fetch({ try await $0.me() }, quiet: true) { me = who }
             }
         }

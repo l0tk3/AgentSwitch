@@ -16,7 +16,7 @@ struct ChannelsWidgetDemo: View {
 
     var body: some View {
         let entry = { (choice: ChannelsSnapshot.Choice, chosen: [String]) in
-            ChannelsEntry(date: Date(), snapshot: snapshot, choice: choice, chosen: chosen)
+            ChannelsEntry(date: Date(), snapshot: snapshot, choice: choice, chosen: chosen, classic: snapshot?.classic ?? true)
         }
         ZStack {
             LinearGradient(colors: lock ? [Color(red: 0.16, green: 0.2, blue: 0.32), Color(red: 0.36, green: 0.24, blue: 0.3)] : scheme == .dark ? [Color(white: 0.16), Color(red: 0.12, green: 0.1, blue: 0.2)]
@@ -48,7 +48,7 @@ struct ChannelsWidgetDemo: View {
     }
 
     private func tile(_ entry: ChannelsEntry, _ family: WidgetFamily, width: CGFloat, height: CGFloat) -> some View {
-        let palette = ChannelsPalette(classic: entry.snapshot?.classic ?? false, dark: scheme == .dark)
+        let palette = ChannelsPalette(classic: entry.classic, dark: scheme == .dark)
         return ChannelsView(entry: entry, forced: family)
             .frame(width: width, height: height)
             .background(palette.ground)

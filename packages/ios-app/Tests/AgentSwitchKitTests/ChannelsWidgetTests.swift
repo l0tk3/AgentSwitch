@@ -64,3 +64,13 @@ final class ChannelsWidgetTests: XCTestCase {
         XCTAssertEqual(ChannelsSnapshot.line("  a   b  "), "a b")
     }
 }
+
+final class WidgetLinkTests: XCTestCase {
+    func testTheAddressInUseIsTriedFirstAndEachOnce() throws {
+        let json = #"{"name":"Mac","port":7443,"fingerprint":"ab","lan":["192.168.1.5","10.0.0.2"],"tailnet":["100.64.0.9"],"bonjour":"","deviceId":"d","pairedAt":0}"#
+        let profile = try JSONDecoder().decode(ServerProfile.self, from: Data(json.utf8))
+        let inUse = APIEndpoint(host: "10.0.0.2", port: 7443, kind: .bonjour)
+        XCTAssertEqual(WidgetLink.endpoints(of: profile, inUse: inUse).map(\.host), ["10.0.0.2", "192.168.1.5", "100.64.0.9"])
+        XCTAssertEqual(WidgetLink.endpoints(of: profile, inUse: nil).map(\.kind), [.lan, .lan, .tailnet])
+    }
+}
