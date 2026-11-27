@@ -186,3 +186,30 @@ def test_a_placeholder_already_there_is_not_matched_again():
     once = hide("v h_abcdefghij", (), pats, learned)
     ref = next(iter(learned))
     assert hide(once, (), pats, learned) == once and once == f"v {ref}"
+
+
+def test_a_stream_put_back_longer_is_not_cut_at_the_length_it_was_announced_with():
+    # A relay's SSE with `content-length` (2026-11-27, Antigravity on a relay): the value put back is longer than its
+    # placeholder, so the length the relay said no longer holds — it is not passed on, and an HTTP/1 answer is chunked.
+    from mitmproxy.test import tflow
+    from secret_gate.model_gate import ModelGate
+
+    def answered(version: str):
+        gate = ModelGate(Table.parse(json.dumps({"scopes": {"t": {"hosts": ["relay.example"], "pairs": [{"value": "AGSW-REAL-秘密", "ref": "h_7kq3m9x2pd"}]}}})), read_stdin=False)
+        f = tflow.tflow(resp=True)
+        f.client_conn.agentswitch_scope = "t"
+        f.request.host = "relay.example"
+        body = ('data: {"candidates":[{"content":{"parts":[{"text":"is h_7kq3m9x2pd"}]},"index":0}]}\n\n').encode()
+        f.response.http_version = version
+        f.response.headers["content-type"] = "text/event-stream"
+        f.response.headers["content-length"] = str(len(body))
+        gate.responseheaders(f)
+        out = f.response.stream(body) + f.response.stream(b"")
+        return f, out, body
+
+    f, out, body = answered("HTTP/1.1")
+    assert "content-length" not in f.response.headers and f.response.headers["transfer-encoding"] == "chunked"
+    assert len(out) > len(body)
+    assert json.loads(out.decode().split("data: ", 1)[1])["candidates"][0]["content"]["parts"][0]["text"] == "is AGSW-REAL-秘密"
+    f2, _, _ = answered("HTTP/2.0")
+    assert "content-length" not in f2.response.headers and "transfer-encoding" not in f2.response.headers

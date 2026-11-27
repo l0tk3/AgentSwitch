@@ -503,6 +503,13 @@ class ModelGate:
                     self.logs.write(self.table, name, "before", {"dir": "in", "url": url, "body": out.decode("utf-8", "replace")})
             return out
 
+        # What is put back is not the length that was announced: a stream sent with `content-length` (a relay's; the
+        # vendors' own are chunked) was cut short by the difference, and the agent read a broken last event
+        # (2026-11-27, seen with Antigravity on a relay). The length is not said; an HTTP/1 answer is chunked instead.
+        if "content-length" in flow.response.headers:
+            del flow.response.headers["content-length"]
+            if flow.response.http_version.upper().startswith("HTTP/1"):
+                flow.response.headers["transfer-encoding"] = "chunked"
         flow.response.stream = rewrite
 
     def response(self, flow: Any) -> None:
