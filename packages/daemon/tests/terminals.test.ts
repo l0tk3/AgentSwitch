@@ -471,15 +471,18 @@ describe("terminal host", () => {
     await until(() => status() === "idle");
     expect(host.lastTurn(info.id)).toMatchObject({ ok: false, line: "这一轮出错结束" });
 
-    // One that waits on an answer is not ended by it.
+    // One that waits on a permission, answered with Esc in Codex's own screen: `state=idle`, and Codex kills the hook.
+    // The request is settled and the terminal rests; the hook's closed request does not set it to work again
+    // (review #83: it stayed `working` for good).
     await hook("UserPromptSubmit");
     const answer = hook("PermissionRequest", { tool_name: "Bash", tool_input: { command: "ls" } });
     await until(() => status() === "waiting");
     host.write(info.id, "state idle\r");
-    await new Promise((r) => setTimeout(r, 150));
-    expect(status()).toBe("waiting");
-    host.closeAll();
+    await until(() => status() === "idle");
     await answer;
+    await new Promise((r) => setTimeout(r, 150));
+    expect(status()).toBe("idle");
+    host.closeAll();
   });
 
   it("reads Claude Code's compacting line off its screen, and nothing that only mentions it (2026-10-07)", () => {

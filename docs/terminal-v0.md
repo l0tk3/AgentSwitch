@@ -315,11 +315,11 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
     - `working`：开始干活；
     - `done`：正常结束，紧跟在 `Stop` 之后；
     - `error`：出错结束，没有 `Stop`。
-  - **服务只用其中两种，而且只在进行中时用：**
+  - **服务只用其中两种，在进行中时，或者有待批准的请求时用：**
     - `error`：这一轮算**失败**，回到空闲，最近一轮记作出错，和 Claude Code 的 `StopFailure` 一样。
     - `idle`：回到空闲，不算一轮结果，和 Grok 的 `StopCancelled` 一样。
   - **`working`、`done` 仍交给 hook：** 房间的消息挡住 `Stop` 时 Codex 会接着干，这时不会出 `done`。
-  - 等你作答（有待批准的请求）时不理会这些状态。
+  - **有待批准的请求时来了 `idle` / `error`**（review #83，实测）：这是你在 Codex 自己的屏幕上按 Esc 答掉了那次批准。Codex 随即杀掉 hook，hook 的请求一断，服务原来会把终端设回进行中，之后再没有东西让它结束。现在先把这些请求了结，再回到空闲。只有 Codex 的“需要你”通知（OSC 9）而没有请求的等待，不受这些状态影响。
   - 出错的那句话在会话记录里（simple-view-v0 §2 的 `note`）。
   - **旧版本没有它：** 0.162 测过不写，状态和以前一样会停在进行中。终端用的是哪个 Codex，看设置 › Agents。
 - **Codex 的伴随进程**（2026-10-07，Codex 0.162，`src/terminals/codexTerminal.ts`；用户：codex不能hook掉它的模型选择…吗 → 试试，一次都测试清楚）。Codex 没有“设成某个模型 / 强度”的命令，但它的 app-server 有 `thread/settings/update` 和 `model/list`，它的界面可以用 `--remote` 接到一个指定的 app-server 上。所以每个 Codex 终端现在是两个进程：服务先起这个终端自己的 `codex <配置参数> app-server --listen ws://127.0.0.1:<随机端口> --ws-auth capability-token --ws-token-file <终端目录下的文件>`，再起界面 `codex <界面参数> --remote ws://… --remote-auth-token-env AGENTSWITCH_CODEX_REMOTE_TOKEN`；换模型 / 强度时服务作为第二个客户端连上去（`harness/wsLines.ts`：Node 自带的 WebSocket 发不了认证头，自己写了握手和文本帧），找到界面所在的那个会话，调 `thread/settings/update`，界面自己跟着变（简略视图的做法见 simple-view-v0 §5.4）。

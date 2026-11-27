@@ -74,6 +74,12 @@ Now binary data goes on as it came, both ways, and the text beside it is replace
   - the picture arrived byte for byte, and the text beside it as a placeholder;
   - a generated picture holding the placeholder's letters came back unchanged, and the text came back as the word;
   - with the code before the change: the picture arrived as invalid base64, and the generated picture came back changed.
+- **After the review** (room #83, `review/r81-model-gate-codex-osc.md` in room-files):
+  - A word written as a JSON number (a phone number as a tool's argument) is replaced, and goes on as a string. Only a number that is the whole word: a word inside a number, or a pattern, leaves numbers alone (`max_tokens`).
+  - A `data:` URL is data only when everything after its comma is base64. A text that begins like one is text.
+  - A path is text though its letters are all base64's: a string with a `/` more often than every sixteen letters is not data (`pathlike`). A JPEG's base64 begins with `/9j/` and is still data.
+  - The forms of the words are worked out once a request, not once a string: a request of 20,000 messages and 60 words took 6.5 s, now 0.1 s.
+  - Left as it is, and rare: a string of 256 letters or more with no space, dot or slash in it (a long token) is taken for data, and a word inside it is not replaced.
 - **Not covered:** text inside a picture, and the words inside a file sent as data (a PDF as base64): they leave as they are. A file's text an agent read and sent as text is replaced like any text, and so are a file's name and path. Multipart bodies are replaced as a whole text.
 
 ## Not yet

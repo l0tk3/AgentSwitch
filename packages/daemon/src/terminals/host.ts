@@ -2150,10 +2150,13 @@ export class TerminalHost {
    *  API's 400, say — and `idle` when it was interrupted (Esc). On those two neither its Stop hook nor its turn-end
    *  `notify` comes, and the terminal stayed `working` until the next message (2026-11-27, user #55). They end the turn
    *  here; `working` and `done` are left to the hooks (a Stop a room's message holds back goes on working, and `done`
-   *  only comes once it has really stopped). Only a terminal at work is ended: one that waits on an answer stays so. */
+   *  only comes once it has really stopped). */
   private codexState(s: Session, data: string): boolean {
     const state = /^state=([a-z]+)/.exec(data)?.[1];
-    if ((state !== "error" && state !== "idle") || s.status !== "working") return true;
+    // A terminal at work; or one that waits on a permission of its hook's: the user answered it in Codex's own screen
+    // with Esc, Codex kills the hook, and the hook's closed request would set `working` again with nothing left to end
+    // it (review #83). A wait with no request of ours (OSC 9 alone) stays.
+    if ((state !== "error" && state !== "idle") || !(s.status === "working" || (s.status === "waiting" && s.pending.size > 0))) return true;
     this.settleAll(s, "idle");
     s.calls.clear();
     this.noSubagents(s);

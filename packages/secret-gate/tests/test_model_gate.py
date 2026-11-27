@@ -341,3 +341,35 @@ def test_a_picture_given_as_an_address_or_a_path_is_text_and_its_words_are_repla
     assert out[3]["fileData"]["fileUri"] == "gs://b/h_aaaaaaaaaa/a.png" and out[4]["text"] == "/Users/h_aaaaaaaaaa/a.png"
     back = Swapper((word,)).walk({"image_url": "https://files.example/h_aaaaaaaaaa/a.png", "file_data": "AAAAh_aaaaaaaaaaAAAA"})
     assert back == {"image_url": "https://files.example/Zq7w/a.png", "file_data": "AAAAh_aaaaaaaaaaAAAA"}
+
+
+def test_what_the_review_found_a_number_a_text_that_begins_like_data_and_a_path_without_a_dot():
+    # Review #83.
+    from secret_gate.model_gate import is_blob, is_data, pattern_of
+    word, phone = Pair("alice", "h_aaaaaaaaaa"), Pair("13800138000", "h_nnnnnnnnnn")
+    # A word written as a number goes on as its placeholder, a string; other numbers stay numbers, patterns or not.
+    pats = tuple(p for p in (pattern_of({"pattern": r"\d{6}", "salt": "00"}),) if p)
+    out = json.loads(hide(json.dumps({"max_tokens": 100000, "input": {"phone": 13800138000, "n": 7}}), (phone, Pair("100", "h_cccccccccc")), pats, {}))
+    assert out == {"max_tokens": 100000, "input": {"phone": "h_nnnnnnnnnn", "n": 7}}
+    # A text that only begins like a data URL is text.
+    said = "data:image/png;base64,iVBOR is how the file begins; written by alice"
+    assert not is_blob(said) and not is_data(said)
+    assert "alice" not in hide(json.dumps({"text": said, "image_url": said}), (word,))
+    assert Swapper((word,)).walk({"text": "data:text/plain;base64,aGk=\nby h_aaaaaaaaaa"})["text"].endswith("by alice")
+    # A path is text though every letter of it is base64's: a long one anywhere, a short one where a picture stands.
+    long_path = "/Users/alice/Projects" + "/deep/folder/of/work" * 20
+    assert len(long_path) >= 256 and not is_blob(long_path) and not is_data("/Users/alice/Desktop/shot")
+    out = json.loads(hide(json.dumps({"text": long_path, "image_url": "/Users/alice/Desktop/shot", "x": {"image_url": {"url": "/Users/alice/Pictures/screenshot_2026"}}}), (word,)))
+    assert "alice" not in json.dumps(out) and out["image_url"] == "/Users/h_aaaaaaaaaa/Desktop/shot"
+    # A JPEG's base64 begins with a slash too, and is data.
+    jpeg = "/9j/4AAQSkZJRgABAQAAAQABAAD" + "aliceAAAA" * 40
+    assert is_data(jpeg) and is_blob(jpeg) and json.loads(hide(json.dumps({"image_url": jpeg, "t": jpeg}), (word,))) == {"image_url": jpeg, "t": jpeg}
+
+
+def test_a_long_request_is_not_slow():
+    import time
+    pairs = tuple(Pair(f"word{i:03d}x", f"h_{i:010d}") for i in range(60))
+    body = json.dumps({"input": [{"role": "user", "content": [{"type": "input_text", "text": f"message {i} of many"}]} for i in range(20000)]})
+    t0 = time.perf_counter()
+    assert hide(body, pairs) == body
+    assert time.perf_counter() - t0 < 2.0     # 6.5 s before the forms were worked out once

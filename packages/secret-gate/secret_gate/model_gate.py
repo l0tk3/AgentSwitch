@@ -158,17 +158,31 @@ BLOB_MIN = 256                      # a string this long, all base64, is data wh
 _BASE64 = re.compile(r"[A-Za-z0-9+/_-]+={0,2}", re.ASCII)
 
 
+def pathlike(s: str) -> bool:
+    """Base64 by its letters, a path by its look: `/Users/name/Desktop/shot` has a `/` every few letters, data one in
+    sixty-four. A short piece of data taken for text by this is replaced only if a word stands in it, which in a short
+    one it hardly does."""
+    return s.count("/") * 16 > len(s)
+
+
+def data_url(s: str) -> bool:
+    """A `data:…;base64,` URL whose every letter after the comma is base64: a text that only begins like one is text."""
+    if not s.startswith("data:"):
+        return False
+    at = s.find(";base64,", 0, 200)
+    return at > 0 and _BASE64.fullmatch(s, at + 8) is not None
+
+
 def is_blob(s: str) -> bool:
-    """A string that is data, not text: a `data:…;base64,` URL, or a long run of nothing but base64."""
-    if s.startswith("data:") and ";base64," in s[:200]:
-        return True
-    return len(s) >= BLOB_MIN and _BASE64.fullmatch(s) is not None
+    """A string that is data, not text, wherever it stands: a `data:…;base64,` URL, or a long run of nothing but
+    base64 that is not a path."""
+    return data_url(s) or (len(s) >= BLOB_MIN and _BASE64.fullmatch(s) is not None and not pathlike(s))
 
 
 def is_data(s: str) -> bool:
-    """A string standing where binary data is kept: a `data:` URL, or base64 of any length. Anything else there is
-    text and is replaced like any other: a picture given as an address to fetch, a path."""
-    return (s.startswith("data:") and ";base64," in s[:200]) or _BASE64.fullmatch(s) is not None
+    """A string standing where binary data is kept: a `data:` URL, or base64 of any length that is not a path.
+    Anything else there is text and is replaced like any other: a picture given as an address to fetch, a path."""
+    return data_url(s) or (_BASE64.fullmatch(s) is not None and not pathlike(s))
 
 
 def opaque(key: Any, value: Any, holder: Any) -> bool:
@@ -181,16 +195,21 @@ def opaque(key: Any, value: Any, holder: Any) -> bool:
     return isinstance(value, str) and is_blob(value)
 
 
-def through(v: Any, key: Any, holder: Any, text: Any, blob: bool = False) -> Any:
+def through(v: Any, key: Any, holder: Any, text: Any, blob: bool = False, number: Any = None) -> Any:
     """`v` with `text` applied to each string that is text. Under a field that keeps binary data (BLOB_KEYS) a string
-    is passed over when it is data (`is_data`: short base64 too); elsewhere when it is plainly data (`is_blob`)."""
+    is passed over when it is data (`is_data`: short base64 too); elsewhere when it is plainly data (`is_blob`).
+    `number`: applied to a number as it is written; when it changes it, the number goes on as that string."""
     if isinstance(v, str):
         return v if (is_data(v) if blob else is_blob(v)) else text(v)
     if isinstance(v, list):
-        return [through(x, None, v, text, blob) for x in v]
+        return [through(x, None, v, text, blob, number) for x in v]
     if isinstance(v, dict):
-        return {text(k) if isinstance(k, str) else k: x if opaque(k, x, v) else through(x, k, v, text, blob or k in BLOB_KEYS)
+        return {text(k) if isinstance(k, str) else k: x if opaque(k, x, v) else through(x, k, v, text, blob or k in BLOB_KEYS, number)
                 for k, x in v.items()}
+    if number is not None and isinstance(v, (int, float)) and not isinstance(v, bool):
+        was = json.dumps(v)
+        now = number(was)
+        return v if now == was else now
     return v
 
 
@@ -216,13 +235,15 @@ def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (),
                 learned.pop(next(iter(learned)))
         return ref
 
+    # Every form, in a decoded string too: a tool call's arguments are JSON inside a string, where a word that is not
+    # ASCII may stand as its \u escapes. Worked out once: a long session's request has tens of thousands of strings.
+    subs = [(f, p.ref) for p in ordered for f in forms(p.value)]
+    whole = {p.value: p.ref for p in pairs}
+
     def each(s: str) -> str:
-        # Every form, in a decoded string too: a tool call's arguments are JSON inside a string, where a word that is
-        # not ASCII may stand as its \u escapes.
-        for p in ordered:
-            for f in forms(p.value):
-                if f in s:
-                    s = s.replace(f, p.ref)
+        for f, ref in subs:
+            if f in s:
+                s = s.replace(f, ref)
         for pat in patterns:
             s = pat.regex.sub(lambda m, pat=pat: swap(pat, m), s)
         return s
@@ -243,7 +264,16 @@ def hide(text: str, pairs: tuple[Pair, ...], patterns: tuple[Pattern, ...] = (),
         changed = changed or out != v
         return out
 
-    doc = through(doc, None, None, text_of)
+    def number_of(v: str) -> str:
+        # A word that is a number (a phone number as a tool's argument, written as one): replaced, and then a string.
+        # The word is kept from the model before the argument's type is. The whole number and words only: a word
+        # that is part of a number, or a pattern like six digits, would take `max_tokens` too.
+        nonlocal changed
+        ref = whole.get(v)
+        changed = changed or ref is not None
+        return v if ref is None else ref
+
+    doc = through(doc, None, None, text_of, number=number_of)
     return json.dumps(doc, ensure_ascii=False, separators=(",", ":")) if changed else text
 
 
