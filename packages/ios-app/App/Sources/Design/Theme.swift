@@ -35,23 +35,23 @@ enum Theme {
     static let done = Color(light: 0x3F8F00, dark: 0x9BE22D, classicLight: 0x34C759, classicDark: 0x30D158)
     static let failed = Color(light: 0xD7261B, dark: 0xFF4A3D, classicLight: 0xFF3B30, classicDark: 0xFF453A)
     /// The page under the conversation and a task: black, or paper in light mode.
-    static let base = Color(light: 0xF3F1EA, dark: 0x000000, classicLight: 0xF2F2F7, classicDark: 0x000000)
+    static let base = Color(light: 0xFAF9F6, dark: 0x000000, classicLight: 0xF2F2F7, classicDark: 0x000000)
     static let ink = Color(light: 0x151413, dark: 0xE9E6DF, classicLight: 0x1D1D1F, classicDark: 0xF2F2F7)
     static let inkDim = Color(light: 0xA29D93, dark: 0x4D4B48, classicLight: 0xA6A6AB, classicDark: 0x6C6C72)
     /// §7.3's 次 (second ink): the lower edge of a solid key cap, and the cap while it is pressed.
     static let secondaryInk = Color(light: 0x5F5B54, dark: 0x8D8A84, classicLight: 0x6E6E73, classicDark: 0xA2A2A8)
     /// 1 px lines: card frames, rules.
-    static let line = Color(light: 0xD3CEC3, dark: 0x262524, classicLight: 0xDCDCE0, classicDark: 0x38383A)
+    static let line = Color(light: 0xDCD8CF, dark: 0x262524, classicLight: 0xDCDCE0, classicDark: 0x38383A)
     /// What you said: a raised box, not a coloured bubble (the signal colour is not for text backgrounds) — in the
     /// classic look too, since 2026-10-07: a quiet grey under ink text, as both agents' own apps set a user's message.
     /// The pixel look's step a further shade up from `panel` (docs/ui-v0.md §9.2, user #621, #644; the Mac's values).
-    static let raised = Color(light: 0xDCD6C9, dark: 0x1F1F1F, classicLight: 0xE9E9EB, classicDark: 0x2C2C2E)
+    static let raised = Color(light: 0xEAE7E0, dark: 0x1F1F1F, classicLight: 0xE9E9EB, classicDark: 0x2C2C2E)
     /// A card's or a floating layer's own ground: in the pixel look a step off the page's (§9.2: the page `#000`, a
     /// card `#121212`, a deck `#141414`, raised `#1F1F1F`; light the other way round), as the Mac draws it.
-    static let panel = Color(light: 0xEBE7DD, dark: 0x121212, classicLight: 0xFFFFFF, classicDark: 0x1C1C1E)
+    static let panel = Color(light: 0xF3F1EC, dark: 0x121212, classicLight: 0xFFFFFF, classicDark: 0x1C1C1E)
     /// A group of rows that floats on the page (§9.2): the pixel look's deck, with a 1 pt frame and a hard shadow
     /// (`deck()`); the classic look's card.
-    static let deck = Color(light: 0xE6E1D6, dark: 0x141414, classicLight: 0xFFFFFF, classicDark: 0x1C1C1E)
+    static let deck = Color(light: 0xF2F0EB, dark: 0x141414, classicLight: 0xFFFFFF, classicDark: 0x1C1C1E)
     /// Code's ground (2026-10-03): a wash of ink, so a block or a span stands out on the page and in your raised box
     /// alike.
     static let code = ink.opacity(0.07)
@@ -64,7 +64,7 @@ enum Theme {
     /// the web page's hover). In the classic look the accent, with white on it.
     static let fill = Color(light: 0x151413, dark: 0xE9E6DF, classicLight: 0x007AFF, classicDark: 0x0A84FF)
     /// What is written on the primary button's fill.
-    static let onFill = Color(light: 0xF3F1EA, dark: 0x000000, classicLight: 0xFFFFFF, classicDark: 0xFFFFFF)
+    static let onFill = Color(light: 0xFAF9F6, dark: 0x000000, classicLight: 0xFFFFFF, classicDark: 0xFFFFFF)
     static let card = Color.clear
 }
 

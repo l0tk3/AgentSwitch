@@ -12,12 +12,12 @@ struct ChannelsPalette {
         return Color(.sRGB, red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
 
-    var ground: Color { pick(0xEBE7DD, 0x121212, 0xFFFFFF, 0x1C1C1E) }
-    var raised: Color { pick(0xDCD6C9, 0x1F1F1F, 0xF2F2F7, 0x2C2C2E) }
+    var ground: Color { pick(0xF3F1EC, 0x121212, 0xFFFFFF, 0x1C1C1E) }
+    var raised: Color { pick(0xEAE7E0, 0x1F1F1F, 0xF2F2F7, 0x2C2C2E) }
     var ink: Color { pick(0x151413, 0xE9E6DF, 0x1D1D1F, 0xF2F2F7) }
     var secondary: Color { pick(0x5F5B54, 0x8D8A84, 0x6E6E73, 0xA2A2A8) }
     var dim: Color { pick(0xA29D93, 0x4D4B48, 0xA6A6AB, 0x6C6C72) }
-    var line: Color { pick(0xD3CEC3, 0x262524, 0xDCDCE0, 0x38383A) }
+    var line: Color { pick(0xDCD8CF, 0x262524, 0xDCDCE0, 0x38383A) }
     var signal: Color { pick(0xE0106E, 0xFF2E88, 0x007AFF, 0x0A84FF) }
     var waiting: Color { pick(0xC27400, 0xFFB000, 0xFF9500, 0xFF9F0A) }
 }
