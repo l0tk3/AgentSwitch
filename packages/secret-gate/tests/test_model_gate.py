@@ -213,3 +213,40 @@ def test_a_stream_put_back_longer_is_not_cut_at_the_length_it_was_announced_with
     assert json.loads(out.decode().split("data: ", 1)[1])["candidates"][0]["content"]["parts"][0]["text"] == "is AGSW-REAL-秘密"
     f2, _, _ = answered("HTTP/2.0")
     assert "content-length" not in f2.response.headers and "transfer-encoding" not in f2.response.headers
+
+
+def test_an_address_written_as_an_ip_is_opened_by_where_the_connection_goes(capsys):
+    # No server name is sent for `https://<IP>/…` (a relay's): the connection is looked up by its CONNECT's address,
+    # opened when that is the profile's own, passed through when not; a server not believed there is refused, said
+    # once — never passed on unread (AgentSwitch room #33-#35).
+    from types import SimpleNamespace as NS
+
+    from mitmproxy.test import tflow
+    from secret_gate.model_gate import ModelGate
+
+    gate = ModelGate(Table.parse(json.dumps({"scopes": {"t": {"hosts": ["api.example", "203.0.113.7", "[2001:db8::5]"]}}})), read_stdin=False)
+    client = NS(agentswitch_scope="t")
+
+    def hello(sni, address, who=client):
+        d = NS(context=NS(client=who, server=NS(address=address, sni=None)), client_hello=NS(sni=sni), ignore_connection=False)
+        gate.tls_clienthello(d)
+        return not d.ignore_connection
+
+    assert hello(None, ("203.0.113.7", 443)) and hello(None, ("2001:db8::5", 8443)) and hello("api.example", ("198.51.100.1", 443))
+    assert not hello(None, ("198.51.100.1", 443)) and not hello(None, None) and not hello("github.com", ("203.0.113.7", 443))
+    assert not hello(None, ("203.0.113.7", 443), NS(agentswitch_scope=None))   # a connection of no terminal's
+
+    # What it carries is read and written there too: the request's host is the address.
+    f = tflow.tflow(resp=True)
+    f.client_conn.agentswitch_scope = "t"
+    f.request.host, f.request.headers["host"] = "203.0.113.7", "203.0.113.7:443"
+    assert gate.table.scopes["t"].opens(f.request.pretty_host)
+
+    # A server the gateway does not believe: the connection ends, and why is said.
+    failed = NS(context=NS(client=client, server=NS(sni="203.0.113.7", address=("203.0.113.7", 443))),
+                conn=NS(error="Certificate verify failed: IP address mismatch"))
+    gate.tls_failed_server(failed)
+    err = capsys.readouterr().err
+    assert "203.0.113.7" in err and "refused" in err and "IP address mismatch" in err
+    gate.tls_failed_server(NS(context=NS(client=NS(agentswitch_scope=None), server=failed.context.server), conn=failed.conn))
+    assert capsys.readouterr().err == ""

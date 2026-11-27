@@ -84,9 +84,10 @@ class Scope:
     def opens(self, host: str | None) -> bool:
         if not host:
             return False
-        host = host.lower().rstrip(".")
+        # An IPv6 address is written with brackets in a URL (the service's `hostOf`) and without them by the proxy.
+        host = host.lower().rstrip(".").strip("[]")
         for h in self.hosts:
-            h = h.lower()
+            h = h.lower().strip("[]")
             if h == host or (h.startswith("*.") and host.endswith(h[1:])):
                 return True
         return False
@@ -392,6 +393,11 @@ class Logs:
 
 # ---- the addon ----------------------------------------------------------------------------------------------------
 
+def address_host(address: Any) -> str | None:
+    """The host of a connection's address (`(host, port)`), or None when it has none."""
+    return str(address[0]) if isinstance(address, tuple) and address and address[0] else None
+
+
 def scope_of_auth(value: str | None) -> str | None:
     if not value or not value.lower().startswith("basic "):
         return None
@@ -458,8 +464,19 @@ class ModelGate:
 
     def tls_clienthello(self, data: Any) -> None:
         _, scope = self._scope(data.context.client)
-        if not (scope and scope.opens(data.client_hello.sni)):
+        # No server name is sent for an address written as an IP (`https://1.2.3.4/…`, a relay's): then the address
+        # the connection goes to (its CONNECT) is what is looked up — a profile's own address is in its hosts as it
+        # was written (AgentSwitch room #33-#35). Until 2026-11-27 such a connection was passed through unread.
+        if not (scope and scope.opens(data.client_hello.sni or address_host(data.context.server.address))):
             data.ignore_connection = True   # not the model's: passed through, never decrypted
+
+    def tls_failed_server(self, data: Any) -> None:
+        # A connection opened for its words whose server is not believed (an address as an IP whose certificate does
+        # not name it, say): it ends here, refused, and is never passed on unread instead. Said once a connection.
+        _, scope = self._scope(data.context.client)
+        if scope:
+            where = data.context.server.sni or address_host(data.context.server.address) or "?"
+            print(f"model gate: TLS with {where} failed, the connection is refused: {data.conn.error}", file=sys.stderr, flush=True)
 
     def request(self, flow: Any) -> None:
         name, scope = self._scope(flow.client_conn)
