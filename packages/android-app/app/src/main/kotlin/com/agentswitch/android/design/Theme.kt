@@ -76,9 +76,10 @@ class Palette(
         )
         val pixelLight = Palette(
             dark = false, signal = rgb(0xE0106E), busy = rgb(0x0086A8), waiting = rgb(0xC27400), done = rgb(0x3F8F00), failed = rgb(0xD7261B),
-            base = rgb(0xF3F1EA), ink = rgb(0x151413), inkDim = rgb(0xA29D93), secondaryInk = rgb(0x5F5B54), line = rgb(0xD3CEC3),
-            raised = rgb(0xDCD6C9), panel = rgb(0xEBE7DD), pixelShadow = rgb(0xCFC9BC), deck = rgb(0xE6E1D6), top = rgb(0x7A3CF0), topDeep = rgb(0x3B3FD8),
-            fill = rgb(0x151413), onFill = rgb(0xF3F1EA),
+            // Near white with a little warmth, the steps below it small (docs/ui-v0.md §9.3, 2026-11-27).
+            base = rgb(0xFAF9F6), ink = rgb(0x151413), inkDim = rgb(0xA29D93), secondaryInk = rgb(0x5F5B54), line = rgb(0xDCD8CF),
+            raised = rgb(0xEAE7E0), panel = rgb(0xF3F1EC), pixelShadow = rgb(0xCFC9BC), deck = rgb(0xF2F0EB), top = rgb(0x7A3CF0), topDeep = rgb(0x3B3FD8),
+            fill = rgb(0x151413), onFill = rgb(0xFAF9F6),
         )
         val classicDark = Palette(
             dark = true, signal = rgb(0x0A84FF), busy = rgb(0x0A84FF), waiting = rgb(0xFF9F0A), done = rgb(0x30D158), failed = rgb(0xFF453A),
