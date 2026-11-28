@@ -1097,7 +1097,8 @@ export class TerminalHost {
     }
     const s = new Session(id, req.harness, req.cwd, req.model ?? null, req.mode ?? "manual", hookToken, this.o.now(), req.cols ?? 120, req.rows ?? 36, this.o.scrollback);
     s.hooks = plan.hooks;
-    if (req.harness === "pi") { let done = () => {}; const through = new Promise<void>((r) => { done = r; }); s.starting = { through, done }; }
+    // (Only a pi whose extension is loaded can say it is through: one without is not waited for.)
+    if (req.harness === "pi" && plan.hooks) { let done = () => {}; const through = new Promise<void>((r) => { done = r; }); s.starting = { through, done }; }
     s.profile = req.profile ? { id: req.profile.id, name: req.profile.name, ...(req.profile.exit ? { exit: req.profile.exit } : {}), ...(req.profile.color ? { color: req.profile.color } : {}) } : null;
     s.browserKey = req.profile?.browserKey ?? null;
     s.device = this.device(s);
