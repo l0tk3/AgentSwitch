@@ -4,7 +4,14 @@
 
 const REMOTE = Symbol("agentswitch.remoteCaller");
 
-export type RemoteCaller = { readonly deviceId: string };
+/** `platform`: what the device said it is when it paired (`ios` for a phone; a node says `macos`, `linux`, `win32`:
+ *  nodes/nodes.ts `nodePlatform`). */
+export type RemoteCaller = { readonly deviceId: string; readonly platform?: string };
+
+/** A paired device that is another node, not a phone: what may set this node's replacement (api/redaction.ts). */
+export function fromNode(caller: RemoteCaller): boolean {
+  return caller.platform === "macos" || caller.platform === "linux" || caller.platform === "win32";
+}
 
 /** `env` plus the mark of a paired device. The original env is left as it is. */
 export function markRemote<E extends object>(env: E | undefined, caller: RemoteCaller): E & { readonly [REMOTE]: RemoteCaller } {

@@ -158,6 +158,16 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/passwords/import"],
   ["GET", "/passwords/generate"],
   ["POST", "/vault/seal"],
+  // This node's replacement, set from another node's Settings › Redaction (2026-11-28, user #89-#91): its switches and
+  // its words, a room's too. A paired node only, never a phone, and a new word only sealed (api/redaction.ts). The
+  // logs are not here: they hold the text as it was before the words were replaced.
+  ["GET", "/redaction"],
+  ["PATCH", "/redaction/settings"],
+  ["POST", "/redaction/words"],
+  ["DELETE", "/redaction/words/:wid"],
+  ["GET", "/rooms/:id/redaction/words"],
+  ["POST", "/rooms/:id/redaction/words"],
+  ["DELETE", "/rooms/:id/redaction/words/:wid"],
   ["PUT", "/rooms/:id/seats/:handle/avatar"],
   ["GET", "/rooms/models"],
   ["PUT", "/rooms/models/:agent/:profile"],

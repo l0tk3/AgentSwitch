@@ -64,6 +64,15 @@ final class RedactionRemoteTests: XCTestCase {
         } catch {
             XCTAssertEqual(RedactionRemote.problem(error), RedactionRemote.tooOld)
         }
+        // What an older node's remote listener really answers: a 404 with its own JSON.
+        let old = DaemonClient(port: 4711, transport: StubTransport { _ in (404, #"{"error":"not found"}"#) }).onNode("mini")
+        do {
+            _ = try await old.redaction()
+            XCTFail("a 404 is no answer")
+        } catch {
+            XCTAssertEqual(RedactionRemote.problem(error), RedactionRemote.tooOld)
+        }
         XCTAssertNil(RedactionRemote.problem(DaemonError.http(status: 400, message: "too short")), "a refusal says its own words")
+        XCTAssertNil(RedactionRemote.problem(DaemonError.http(status: 404, message: "没有这个房间。")), "a room that is not there is not an old node")
     }
 }

@@ -18,7 +18,7 @@ Feasibility check: room-files `feasibility-model-gateway.md`. Design: `design-re
 | Storage | `vault/words.enc` | AES-256-GCM.<br>The key is in the macOS Keychain (`VaultKey.swift`) and is handed to the service on its stdin (`AGENTSWITCH_VAULT_STDIN=1`).<br>Elsewhere it is `vault/key` (0600). |
 | Launch | `terminals/launch.ts` | `req.gate` sets the proxy variables (both cases) to the gateway, `NODE_EXTRA_CA_CERTS` to its CA, and `SSL_CERT_FILE` to Node's roots plus its CA; Antigravity (Go) is also given `AGY_CA_CERT` to the same CA — the name it reads, beside the system's own roots (measured 2026-11-26).<br>A profile's own proxy becomes the gateway's way on. |
 | Logs | `vault/model-gate/logs/<terminal>/<day>.{before,after}.jsonl` | **before:** what the agent sent and received (with the words).<br>**after:** what the provider received and sent.<br>Each entry is at most 1 MiB, each file at most 64 MiB. Off by default (`log`; user #398). `logTerminals`: only those terminals are written down, none = every terminal (user #595; Mac: Logs › Terminals, a menu of the running ones). Files are kept `keepDays` days (default 3).<br>`DELETE /redaction/logs[?days=N]` cleans them. |
-| API | `api/redaction.ts` | `GET /redaction`, `PATCH /redaction/settings`, `POST/DELETE /redaction/words`, `GET/POST/DELETE /rooms/:id/redaction/words`, `GET/DELETE /redaction/logs`.<br>Not on the remote allowlist. |
+| API | `api/redaction.ts` | `GET /redaction`, `PATCH /redaction/settings`, `POST/DELETE /redaction/words`, `GET/POST/DELETE /rooms/:id/redaction/words`, `GET/DELETE /redaction/logs`.<br>From another paired node (2026-11-28): everything but the logs, see "Another node's replacement". A phone: none of it. |
 | Mac | Settings › Redaction (`RedactionView.swift`) | Switches, words, room words, logs.<br>A log's button shows the file in the Finder (user #398). |
 
 `vault/` is read-denied to terminals and executors (`executors/protected.ts`).
@@ -88,7 +88,7 @@ Now binary data goes on as it came, both ways, and the text beside it is replace
 - **Gateway account:** the gateway runs under the user's account. Moving it into the gate service's own account is the next step; the design stays the same.
 - **Password book:** built (`vault/passwords.ts`, `api/passwords.ts`). On the Mac it is a window of its own, opened from the padlock at the rail's foot or ⇧⌘L (`PasswordsWindowController`).
 - **Images:** text inside images and screenshots is not replaced.
-- **Remote nodes:** a remote node's words cannot be set from the Mac yet.
+- **Remote nodes:** set from the Mac since 2026-11-28 (below); both sides need that version. A remote node's logs are still read on that node only.
 
 ## What was found with Antigravity's key profiles (2026-11-27, room #21–#34)
 
@@ -97,3 +97,17 @@ Tried through the real gateway with a stand-in address (probe notes: room-files 
 - **A stream sent with `content-length` was cut short** when words were put back (a relay's; the vendors' own streams are chunked). Fixed: the length is not passed on, and an HTTP/1 answer is chunked. Seen before and after through the gateway; HTTP/2 has the unit test only.
 - **A terminal started without the gateway when the gateway was not there**, and every word left as it is, with nothing said (seen: a secret-gate too old to have `model-proxy`). Now (`ModelGate.open`, `GateDown`): replacing on, words or patterns to replace for that terminal, and no gateway (its program not found, or it did not start) → the terminal is not started, and the error says why and what to do (repair it, or switch replacing off in Settings › Redaction). With nothing to replace, or replacing off, it starts as before. The cost, accepted by the user: while the gateway is broken, no terminal with words to replace opens. A gateway that dies under a running terminal was already closed: the terminal's proxy is gone, so nothing leaves.
 - **An https address written as an IP** (`https://1.2.3.4/…`, a relay's) was passed through unread: a client sends no server name for an IP, and the gateway opened a connection by that name alone. Fixed: with no name, the address the connection goes to (its CONNECT) is looked up in the terminal's hosts, where a profile's own address already is; brackets of an IPv6 address are dropped on both sides. Such a connection is then opened like any other, so its server's certificate must be believed (a public CA's, or one that names the IP): one that is not ends the connection with a line in the log (`TLS with … failed, the connection is refused`) and is never passed on unread. Seen through the gateway with a stand-in at an IP: believed → placeholders out, words back; not believed → nothing reached it.
+
+## Another node's replacement (2026-11-28, user #89-#91)
+
+Settings › Redaction on the Mac has a Node picker, as Profiles has. With a paired node picked, the page reads and sets that node's switches, words and rooms' words through `/nodes/<id>/…`; nothing falls back to this Mac.
+
+| | |
+|---|---|
+| Open to a paired node | `GET /redaction`, `PATCH /redaction/settings`, `POST /redaction/words`, `DELETE /redaction/words/:wid`, `GET/POST /rooms/:id/redaction/words`, `DELETE /rooms/:id/redaction/words/:wid` (`remote/routes.ts`). |
+| Not open | `GET/DELETE /redaction/logs` (404 from the remote listener), and `log`, `logTerminals`, `keepDays` in a `PATCH` (403). The logs hold the text as it was before the words were replaced; they are read on the node that wrote them. |
+| A phone | 403 on all of it. A device counts as a node by the platform it paired with (`macos`, `linux`, `win32`; a phone says `ios`). This keeps the page off the phones; it is not a wall against a paired device that lies about what it is — such a device already reaches the password book. |
+| A new word | The Mac first asks the node to seal it (`POST /vault/seal` → `asv:1:…`, as for a profile's API key), then sends `{"sealed": "asv:1:…", "replace"?, "regex"?}`. From another node `value` is refused (400). The word still travels to the node once, inside the paired TLS connection, to be sealed; what the sealed step keeps is the word out of the request that changes the list. |
+| An older node | Its remote listener answers `404 {"error":"not found"}`; the Mac says the node has to be updated first. |
+
+Not verified: against a real paired node on another machine (two throw-away services on one Mac were paired and driven through `/nodes/<id>/redaction…`).

@@ -157,7 +157,7 @@ export function createRemoteApp(deps: RemoteAppDeps): Hono<Env> {
   // Typing, scrolling and resizing are a line a minute each (requestLog.ts).
   app.all("*", async (c) => {
     const device = c.get("device");
-    const res = await deps.local.fetch(c.req.raw, markRemote(c.env, { deviceId: device.id }));
+    const res = await deps.local.fetch(c.req.raw, markRemote(c.env, { deviceId: device.id, platform: device.platform }));
     if (c.req.method !== "GET") {
       // A refusal with what the service said of it (its own words: no request body, no credential): "→ 409" alone
       // did not say which of the half-dozen refusals of a resume it was (2026-11-22).

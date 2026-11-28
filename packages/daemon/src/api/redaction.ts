@@ -1,9 +1,13 @@
 /** The words the model never sees (vault/words.ts) and the model traffic gateway's logs (vault/modelGate.ts):
- *  this Mac's own screens only — none of it is on the remote allowlist (remote/routes.ts), a word being what the
- *  user keeps from the model, and a log before the replacing holding them. */
+ *  this Mac's own screens, and — the switches and the words, not the logs — another paired node's Settings ›
+ *  Redaction (2026-11-28, user #89-#91; remote/routes.ts). A phone gets none of it. A word from another node comes
+ *  sealed under this node's vault key (`POST /vault/seal` first, as a profile's API key does), never as it is; the
+ *  logs stay this Mac's own, holding the text as it was before the words were replaced. */
 
 import type { Context, Hono } from "hono";
 import { z } from "zod";
+import { fromNode, remoteCaller } from "../core/caller.js";
+import { isVaultSealed } from "../vault/seal.js";
 import { RedactionError } from "../vault/words.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
@@ -11,7 +15,9 @@ const Settings = z.object({
   enabled: z.boolean(), username: z.boolean(), host: z.boolean(), log: z.boolean(), logTerminals: z.array(z.string().max(64)).max(50),
   keepDays: z.number().int().min(0).max(365), hosts: z.array(z.string().max(253)).max(100),
 }).partial().strict();
-const AddWord = z.object({ value: z.string().min(1).max(4000), replace: z.string().max(200).optional(), restore: z.boolean().optional(), regex: z.boolean().optional() }).strict();
+/** What is kept of the logs: this Mac's own to set. */
+const LOG_SETTINGS = ["log", "logTerminals", "keepDays"] as const;
+const AddWord = z.object({ value: z.string().min(1).max(4000).optional(), sealed: z.string().min(1).max(12_000).optional(), replace: z.string().max(200).optional(), restore: z.boolean().optional(), regex: z.boolean().optional() }).strict();
 
 export function mountRedaction(app: Hono, deps: ApiDeps): void {
   const off = { error: "替换词只在有终端的 AgentSwitch 服务上可用。" };
@@ -23,6 +29,18 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
   // own salt), so the screens get the word, its own replacement if any, and whether it goes back.
   const shown = (w: { id: string; value: string; replace?: string; restore: boolean; regex?: boolean; addedAt: number }) => ({ id: w.id, value: w.value, ...(w.replace ? { replace: w.replace } : {}), restore: w.restore, ...(w.regex ? { regex: true } : {}), addedAt: w.addedAt });
 
+  // Another node may; a phone may not. The logs are this Mac's own whoever asks.
+  const gatekeeper = async (c: Context, next: () => Promise<void>) => {
+    const caller = remoteCaller(c.env);
+    if (!caller) return next();
+    if (!fromNode(caller)) return c.json({ error: "替换设置在 Mac 上改，手机上不能改。" }, 403);
+    if (c.req.path.startsWith("/redaction/logs")) return c.json({ error: "日志只在这个节点自己的 Mac 上看。" }, 403);
+    return next();
+  };
+  app.use("/redaction", gatekeeper);
+  app.use("/redaction/*", gatekeeper);
+  app.use("/rooms/:id/redaction/*", gatekeeper);
+
   app.get("/redaction", (c) => {
     const r = deps.redaction;
     if (!r) return c.json(off, 503);
@@ -33,6 +51,7 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
     if (!r) return c.json(off, 503);
     const body = await parseBody(c, Settings);
     if (!body.ok) return c.json({ error: body.error }, 400);
+    if (remoteCaller(c.env) && LOG_SETTINGS.some((k) => body.data[k] !== undefined)) return c.json({ error: "日志的设置只在这个节点自己的 Mac 上改。" }, 403);
     const settings = r.store.setSettings(Object.fromEntries(Object.entries(body.data).filter(([, v]) => v !== undefined)));
     r.gate.changed();
     return c.json({ settings });
@@ -44,9 +63,19 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
     if (!r.store.settings().enabled) return c.json({ error: "替换词功能已关闭：先在「设置 › Redaction」打开。" }, 409);
     const body = await parseBody(c, AddWord);
     if (!body.ok) return c.json({ error: body.error }, 400);
+    // The word itself, or sealed by this node first (`POST /vault/seal`): another node sends it only sealed.
+    const { value: plain, sealed } = body.data;
+    if ((plain === undefined) === (sealed === undefined)) return c.json({ error: "value or sealed: one of them" }, 400);
+    if (plain !== undefined && remoteCaller(c.env)) return c.json({ error: "从别的节点加替换词要先加密（sealed）。" }, 400);
+    let value = plain ?? "";
+    if (sealed !== undefined) {
+      if (!deps.unseal || !isVaultSealed(sealed)) return c.json({ error: "sealed: 不是这个节点加密的内容。" }, 400);
+      try { value = deps.unseal(sealed); } catch { return c.json({ error: "sealed: 不是这个节点加密的内容。" }, 400); }
+      if (!value || value.length > 4000) return c.json({ error: "value: 1 to 4000 characters" }, 400);
+    }
     try {
       if (room !== undefined) deps.rooms?.get(room);   // a room there is
-      const { word, warning } = r.store.add({ value: body.data.value, ...(body.data.replace !== undefined ? { replace: body.data.replace } : {}), ...(body.data.restore !== undefined ? { restore: body.data.restore } : {}), ...(body.data.regex ? { regex: true } : {}) }, room);
+      const { word, warning } = r.store.add({ value, ...(body.data.replace !== undefined ? { replace: body.data.replace } : {}), ...(body.data.restore !== undefined ? { restore: body.data.restore } : {}), ...(body.data.regex ? { regex: true } : {}) }, room);
       r.gate.changed();
       return c.json({ word: shown(word), warning }, 201);
     } catch (err) {

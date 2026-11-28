@@ -59,13 +59,17 @@ public struct RedactionState: Decodable, Equatable, Sendable {
 
 /// Another node's replacement settings (2026-11-28, user #89-#91): what is said when they cannot be had.
 public enum RedactionRemote {
-    /// A node from before the routes were let through answers 404 to them.
+    /// A node from before the routes were let through answers 404 to them, in its remote listener's own words
+    /// (`{"error":"not found"}`: remote/app.ts) — a room or a word that is not there is said otherwise.
     public static let tooOld = "这个节点的 AgentSwitch 还不能远程设置替换：先把它更新到新版。"
 
     /// What to say of `error` on another node; nil: say it as for this Mac.
     public static func problem(_ error: Error) -> String? {
-        if case .notSupported = error as? DaemonError { return tooOld }
-        return nil
+        switch error as? DaemonError {
+        case .notSupported: return tooOld
+        case .http(status: 404, message: "not found"): return tooOld
+        default: return nil
+        }
     }
 }
 
