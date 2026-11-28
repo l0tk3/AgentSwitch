@@ -145,22 +145,38 @@ final class RoomsModel {
 
     // MARK: the room's replacement words (docs/model-gate-v0.md; user #343: in each room, only while the switch is on)
 
-    /// The global switch of Settings › Redaction: off, a room has no words to set. This Mac's rooms only.
+    /// The global switch of Settings › Redaction of the node the rooms are on: off, a room has no words to set. Another
+    /// node's rooms too, through it (2026-11-28, user #89-#91); a node too old for that answers nothing, and its rooms
+    /// have no `Words…`.
     private(set) var redactOn = false
     private(set) var roomWords: [RedactWord]?
     var wordsSaid: String?
     @ObservationIgnored private var redactLooked = Date.distantPast
+    /// The node `redactOn` was looked up on: another one is looked up at once.
+    @ObservationIgnored private var redactNode: String??
 
     func lookRedact() async {
-        guard onThisMac, !demo else { redactOn = demo; return }
+        guard !demo else { redactOn = demo; return }
+        if redactNode != .some(nodeId) { redactNode = .some(nodeId); redactOn = false; redactLooked = .distantPast }
         guard Date().timeIntervalSince(redactLooked) > 10 else { return }
         redactLooked = Date()
-        redactOn = (try? await client().redaction().settings.enabled) ?? false
+        let node = nodeId
+        let on = (try? await client().redaction().settings.enabled) ?? false
+        if node == nodeId { redactOn = on }
     }
 
     func loadRoomWords() {
         guard let id = selected else { return }
-        Task { roomWords = (try? await client().roomRedactWords(id)) ?? [] }
+        Task {
+            do { roomWords = try await client().roomRedactWords(id) }
+            catch { roomWords = []; wordsSaid = wordsProblem(error) }
+        }
+    }
+
+    /// What is said of a room's words that could not be had or set: on another node, that it is too old first.
+    private func wordsProblem(_ error: Error) -> String {
+        if nodeId != nil, let tooOld = RedactionRemote.problem(error) { return tooOld }
+        return (error as? CommandError)?.message ?? (error as? DaemonError)?.reason ?? error.localizedDescription
     }
 
     func addRoomWord(_ value: String, replace: String, regex: Bool = false) async -> Bool {
@@ -171,7 +187,7 @@ final class RoomsModel {
             roomWords = try await client().roomRedactWords(id)
             return true
         } catch {
-            wordsSaid = (error as? CommandError)?.message ?? error.localizedDescription
+            wordsSaid = wordsProblem(error)
             return false
         }
     }
@@ -180,7 +196,7 @@ final class RoomsModel {
         guard let id = selected else { return }
         Task {
             do { try await client().removeRedactWord(w.id, room: id); roomWords = try await client().roomRedactWords(id) }
-            catch { wordsSaid = (error as? CommandError)?.message ?? error.localizedDescription }
+            catch { wordsSaid = wordsProblem(error) }
         }
     }
 
