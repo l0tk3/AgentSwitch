@@ -708,6 +708,10 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const files = [...moved, ...local.map((t) => ({ name: byToken.get(t)!.path!.split("/").pop() ?? "", path: byToken.get(t)!.path!, size: sized(byToken.get(t)!.path!) }))];
     // Typed as a terminal types a dropped file: one word, whatever is in its name.
     const path = new Map([...staged.map((t, i): [string, string] => [t, moved[i]!.path]), ...local.map((t): [string, string] => [t, droppedPath(byToken.get(t)!.path!)])]);
+    // A pi just started puts what is entered back into its box and sends nothing ("Startup is still in progress"):
+    // it is written once pi takes it (host.ts `takesInput`; docs/terminal-v0.md §3).
+    await host.takesInput(id);
+    if (host.get(id)?.status === "exited") return c.json({ error: `terminal ${id} has ended` }, 409);
     try {
       // One of the agent's own commands: what its screen says to it is told to the record's screens (it is in no record).
       if (body.data.submit && /^\s*\//.test(text)) host.commanded(id);

@@ -479,6 +479,9 @@ const HOLD_MS = 50;
 const REDRAW_MS = 60;
 /** After a held terminal is taken up again: its replayed output has had time to come in before its program redraws. */
 const RESTORE_REDRAW_MS = 500;
+/** How long a message entered waits at most for a pi that is still starting (`takesInput`): pi fetches fd and rg on
+ *  its first run, which may take a while; one that never says it is through is written to after this all the same. */
+export const PI_START_MS = 20_000;
 const HOLD_LIMIT = 4096;
 const MAX_NAME = 80;
 /** What the agent says a step is for: a sentence. */
@@ -945,6 +948,10 @@ class Session {
   recordFile: string | null = null;
   /** A hook call of the agent's has named its session (Codex's turn-end notice names a thread, which may be a helper's). */
   sessionByHook = false;
+  /** A pi just started (2026-11-28, docs/terminal-v0.md §3): until its submit handler is set, a message entered is put
+   *  back into its input box with "Startup is still in progress" and never sent. Its extension's first call says it
+   *  is through (`started`); null: it takes what is entered. */
+  starting: { readonly through: Promise<void>; readonly done: () => void } | null = null;
   /** The session this terminal started (a new one, or a fork's): the only record closing it may delete. */
   ownSessionId: string | null = null;
   hooks = false;
@@ -1077,6 +1084,7 @@ export class TerminalHost {
     }
     const s = new Session(id, req.harness, req.cwd, req.model ?? null, req.mode ?? "manual", hookToken, this.o.now(), req.cols ?? 120, req.rows ?? 36, this.o.scrollback);
     s.hooks = plan.hooks;
+    if (req.harness === "pi") { let done = () => {}; const through = new Promise<void>((r) => { done = r; }); s.starting = { through, done }; }
     s.profile = req.profile ? { id: req.profile.id, name: req.profile.name, ...(req.profile.exit ? { exit: req.profile.exit } : {}), ...(req.profile.color ? { color: req.profile.color } : {}) } : null;
     s.browserKey = req.profile?.browserKey ?? null;
     s.device = this.device(s);
@@ -1628,6 +1636,8 @@ export class TerminalHost {
   async hook(id: string, token: string, said: HookCall, signal?: AbortSignal): Promise<HookAnswer> {
     const s = this.sessions.get(id);
     if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    // pi's extension calls only once pi has bound it, which it does after it sets its submit handler: through.
+    if (s.starting) this.started(s);
     // Grok's hooks are Claude Code's, in its own words for its tools and with its sub-agents as sessions of their
     // own: read here in the terms the rest of this reads (grokHooks.ts). Some of what it says the terminal does not follow.
     const call = s.harness === "grok" ? grokCall(said) : said;
@@ -2124,6 +2134,7 @@ export class TerminalHost {
     for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
     this.noSubagents(s);
     this.setStatus(s, "exited");
+    this.started(s);   // a message waiting for it is not written now: the route sees it ended
     s.emit({ type: "exit", code: 129 });
     this.ended(s.id, false, false);
   }
@@ -2140,6 +2151,7 @@ export class TerminalHost {
     for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
     this.noSubagents(s);
     this.setStatus(s, "exited");
+    this.started(s);   // a message waiting for it is not written now: the route sees it ended
     s.emit({ type: "exit", code });
     this.unpersist(s);
     this.ended(s.id, false);
@@ -2316,6 +2328,24 @@ export class TerminalHost {
       if (left.length) this.sentRests(s);
     }, this.o.sentRestMs);
     s.sentTimer.unref();
+  }
+
+  /** Resolves once terminal `id` takes a message entered: at once, but for a pi still starting (`Session.starting`),
+   *  whose extension's first call is waited for, `ms` at most — after which it is not waited for again. */
+  async takesInput(id: string, ms = PI_START_MS): Promise<void> {
+    const s = this.sessions.get(id);
+    const gate = s?.starting;
+    if (!s || !gate) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([gate.through, new Promise<void>((r) => { timer = setTimeout(r, ms); timer.unref?.(); })]);
+    clearTimeout(timer);
+    if (s.starting === gate) this.started(s);
+  }
+
+  private started(s: Session): void {
+    const gate = s.starting;
+    s.starting = null;
+    gate?.done();
   }
 
   /** The agent's own commands as its own list gives them, learned from a terminal running the same program

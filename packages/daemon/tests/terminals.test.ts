@@ -2151,6 +2151,38 @@ describe("terminal pieces", () => {
     expect(host.get(info.id)!.status).toBe("working");
   });
 
+  it("waits for a pi still starting before what is entered is written — its extension's first call says it takes it; 'ms' at most, then not again (docs/terminal-v0.md §3)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const pi = await host.spawn({ harness: "pi", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(pi.id)!.hookToken;
+    let through = false;
+    const waiting = host.takesInput(pi.id, 10_000).then(() => { through = true; });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(through).toBe(false);
+    await host.hook(pi.id, token, { event: "PiSession", payload: { session_id: "s1" } });
+    await waiting;
+    expect(through).toBe(true);
+    const t0 = Date.now();
+    await host.takesInput(pi.id, 10_000);
+    expect(Date.now() - t0).toBeLessThan(50);
+
+    // One whose extension never calls: waited for once, `ms` long.
+    const quiet = await host.spawn({ harness: "pi", cwd: tmpdir() });
+    const t1 = Date.now();
+    await host.takesInput(quiet.id, 120);
+    expect(Date.now() - t1).toBeGreaterThanOrEqual(100);
+    const t2 = Date.now();
+    await host.takesInput(quiet.id, 10_000);
+    expect(Date.now() - t2).toBeLessThan(50);
+
+    // Another agent is not waited for.
+    const claude = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const t3 = Date.now();
+    await host.takesInput(claude.id, 10_000);
+    expect(Date.now() - t3).toBeLessThan(50);
+  });
+
   it("keeps the file its agent's hooks name for the session, for that session only", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
