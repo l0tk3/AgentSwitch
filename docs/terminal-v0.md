@@ -26,7 +26,7 @@
 - 调度：现在的首页，不变。
 - 终端：列表 = AgentSwitch 持有的终端（等你处理的在最前，状态点：进行中 / 等你 / 空闲 / 已结束）+ 一组“Mac 上的其他会话”（现在「设置 › 编码会话」的只读列表搬到这里）。右上角“新建”：选执行器（Claude Code / Codex / OpenCode / pi）、目录（最近用过的目录 + 默认工作目录 + 手动输入）、模型（可选，默认用该执行器自己的默认）。
 - 终端页：SwiftTerm 实时显示（可滚动回看、可缩放）；底部回话框（多行，发送 = 粘贴进去再回车）；常用按键条（Esc、Tab、↑↓、Ctrl-C、回车）；有权限请求时上方出现卡片：请求原文 + 允许 / 拒绝（Claude Code 另有“本会话都允许”）。agent 出选择题（Claude Code 的 `AskUserQuestion`）时，卡片是问题卡：每题的问题和选项，选好后提交，没有允许 / 拒绝（2026-10-01，§3 “选择题”）。
-- **一轮的结果**（2026-09-30，assistant-v0 §4 “结果要提示”）：服务记下每个终端最近一轮怎么结束——`Stop` / `agent-turn-complete` / pi 的 `agent_end` / OpenCode 伴随进程从忙到空闲算完成（从进行中或等你转过来才算，重复的 `Stop` 不算两次）；Claude Code 的 `StopFailure`（会话配置里多注册这一个钩子）、Codex 屏幕上的 `state=error`（OSC 7501，见下）和进程非零退出算失败。只放在本机的 `GET /live` 里给 Mac 的实时活动（完成时带 agent 最后一段回答的开头，只在内存里，不入库、不进日志、不经远程，也不进终端列表）。
+- **一轮的结果**（2026-09-30，assistant-v0 §4 “结果要提示”）：服务记下每个终端最近一轮怎么结束——`Stop` / `agent-turn-complete` / pi 的 `agent_end` / OpenCode 伴随进程从忙到空闲算完成（从进行中或等你转过来才算，重复的 `Stop` 不算两次）；Claude Code 的 `StopFailure`（会话配置里多注册这一个钩子；说明取自它带的 `last_assistant_message`，400 时错误种类只有 `unknown`）、Codex 屏幕上的 `state=error`（OSC 7501，见下）、pi 的 `agent_end` 里最后一条回答停在出错上（扩展把 `errorMessage` 带上）、OpenCode 私有 server 事件流里的 `session.execution.failed`、Antigravity 会话文件里新写的出错步骤（见下）和进程非零退出算失败。只放在本机的 `GET /live` 里给 Mac 的实时活动（完成时带 agent 最后一段回答的开头，只在内存里，不入库、不进日志、不经远程，也不进终端列表）。
 - 提醒复用托管那一套：等你处理时提示音、实时活动一并显示终端的待处理项；在干活的终端也进实时活动（2026-09-30，assistant-v0 §4），显示它正在用的工具——服务从 `PreToolUse`（pi 是 `tool_call`）记下最近一次的工具和对象，回到空闲时清掉。Mac 菜单栏的实时活动（assistant-v0 §4，2026-09-30）同样列出等你的终端，权限请求在卡片上直接 allow / deny，没有请求 id 的“等你”（如 Codex 的表单）点 `[ open ]` 进终端窗口的那个终端。选择题（§3）在卡片上只写第一题的问题、按 `[ open ]` 进终端作答（`GET /live` 给它 `kind: "question"`、`answerable: false`），不出 allow / deny。
 - 「设置 › 编码会话」移除（内容在终端标签页里）。
 
@@ -325,6 +325,12 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
   - **有待批准的请求时来了 `idle` / `error`**（review #83，实测）：这是你在 Codex 自己的屏幕上按 Esc 答掉了那次批准。Codex 随即杀掉 hook，hook 的请求一断，服务原来会把终端设回进行中，之后再没有东西让它结束。现在先把这些请求了结，再回到空闲。只有 Codex 的“需要你”通知（OSC 9）而没有请求的等待，不受这些状态影响。
   - 出错的那句话在会话记录里（simple-view-v0 §2 的 `note`）。
   - **旧版本没有它：** 0.162 测过不写，状态和以前一样会停在进行中。终端用的是哪个 Codex，看设置 › Agents。
+- **接口出错时其他几家留下什么**（2026-11-28，用户 #125；假接口回 400，agy 1.5.18、OpenCode 2、pi 1.6.0、Claude Code 2.1.332 实测，不认屏幕文字）：
+  - **Antigravity：** 状态行从头到尾是 `idle`（400 回得太快，来不及说 `working`），从不报 `error`；transcript.jsonl 只有那句话。只有会话文件 `conversations/<id>.db` 的 `steps` 表多了一步 `step_type` 17，protobuf 里有错误的话（`Error 400, Message: …`）。服务在状态行每次说 `idle` 时看一眼这个会话最新的出错步骤（1 秒后再看一次：这一步有时在最后一次状态行之后才写进去），比这个终端开始和上次报过的都新，就把这一轮记作失败。
+  - **OpenCode：** 一轮几毫秒就结束，伴随进程每 500 毫秒一次的轮询看不到它忙过，所以服务以前什么都不知道。私有 server 的事件流有 `session.execution.failed`（带接口的 `error.message`），伴随进程把它交给终端，这一轮记作失败。Esc 是 `session.execution.interrupted`，不算失败。
+  - **pi：** `agent_end` 照样来，只是最后一条回答 `stopReason: "error"`。扩展把它的 `errorMessage` 随 `PiAgentEnd` 带上，这一轮记作失败。
+  - **Claude Code：** `StopFailure` 本来就来，只是说明取自 `last_assistant_message`。
+  - 出错的话都在会话记录里（simple-view-v0 §2 的 `note`）。
 - **Codex 的伴随进程**（2026-10-07，Codex 0.162，`src/terminals/codexTerminal.ts`；用户：codex不能hook掉它的模型选择…吗 → 试试，一次都测试清楚）。Codex 没有“设成某个模型 / 强度”的命令，但它的 app-server 有 `thread/settings/update` 和 `model/list`，它的界面可以用 `--remote` 接到一个指定的 app-server 上。所以每个 Codex 终端现在是两个进程：服务先起这个终端自己的 `codex <配置参数> app-server --listen ws://127.0.0.1:<随机端口> --ws-auth capability-token --ws-token-file <终端目录下的文件>`，再起界面 `codex <界面参数> --remote ws://… --remote-auth-token-env AGENTSWITCH_CODEX_REMOTE_TOKEN`；换模型 / 强度时服务作为第二个客户端连上去（`harness/wsLines.ts`：Node 自带的 WebSocket 发不了认证头，自己写了握手和文本帧），找到界面所在的那个会话，调 `thread/settings/update`，界面自己跟着变（简略视图的做法见 simple-view-v0 §5.4）。
   - **参数怎么分**（`splitCodexArgs`，逐条在真程序上试出来的）：`-c` 配置给 app-server——**钩子只给它**（接在 app-server 上的界面不跑钩子；信任仍按命令原文记在 `config.toml` 里，同一条命令不用重新信任）、`notify`、给命令用的网关环境、浏览器 MCP、权限档；`tui.*` 和启动时的推理强度只给界面；子命令（`resume` / `fork`）、`-m`、`-a`、跳过权限仍是界面的。**恢复 / 分叉是例外**：界面带着权限参数恢复会直接退出（`Permission overrides are not supported when resuming a remote task`），所以这时 `-a`、沙箱、跳过权限、权限档都改成 app-server 的配置（`approval_policy`、`sandbox_mode`…）。
   - **状态与确认卡照旧来自钩子**：伴随进程不报状态（`reportsStatus = false`），钩子没被信任时照旧猜。连接有令牌（没有或不对的回 401），令牌在界面的环境变量里、不在命令行上；app-server 只听本机。app-server 起不来就照原来的方式启动；`AGENTSWITCH_CODEX_TERMINAL=direct` 整个关掉。终端信息多一项 `sets`：屏幕能不能替它设模型与强度（这样启动的 Codex、有私有 server 的 OpenCode、Claude Code、pi 为真）。

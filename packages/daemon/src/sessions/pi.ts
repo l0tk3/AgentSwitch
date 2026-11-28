@@ -5,7 +5,7 @@
 
 import { basename } from "node:path";
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
-import { clipText, MESSAGE_CHARS, type SessionMessage } from "./types.js";
+import { clipText, errorNote, MESSAGE_CHARS, type SessionMessage } from "./types.js";
 
 export type PiFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly named?: true; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
 
@@ -69,10 +69,16 @@ export function piMessages(path: string, limit: number, chars = MESSAGE_CHARS): 
     const user = userText(line);
     if (user) { out.push({ role: "user", text: clipText(user, chars), ts }); continue; }
     if (role(line) !== "assistant") continue;
+    // A turn that ended on an error writes an answer with nothing in it, `stopReason: "error"` and what went wrong
+    // (`errorMessage`, pi 1.6.0: `400: {…}`); one you stopped, `aborted`. Notes of the record.
+    const stop = str(obj(line.message).stopReason);
     for (const part of parts(line)) {
       if (part.type === "text" && str(part.text).trim()) out.push({ role: "assistant", text: clipText(str(part.text), chars), ts });
       if (part.type === "toolCall") out.push({ role: "tool", tool: str(part.name), text: clipText(toolSummary(obj(part.arguments)), chars), ts });
     }
+    // What it had written before that stays above it.
+    if (stop === "error") out.push({ role: "note", text: errorNote(str(obj(line.message).errorMessage)), ts });
+    else if (stop === "aborted") out.push({ role: "note", text: "Interrupted", ts });
   }
   return out.slice(-limit);
 }

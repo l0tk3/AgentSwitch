@@ -34,7 +34,9 @@ export type SessionSummary = {
 };
 
 export type SessionMessage = {
-  readonly role: "user" | "assistant" | "tool";
+  /** `note`: what the agent's own file says of how a turn ended — an error (`Error: …`) or an interruption — for the
+   *  record alone (`recordFromMessages`); the messages a session is read as (`SessionMonitor.read`) leave it out. */
+  readonly role: "user" | "assistant" | "tool" | "note";
   readonly text: string;
   readonly ts: number;
   readonly tool?: string;
@@ -52,6 +54,25 @@ export function oneLine(text: string, limit: number): string {
   const s = text.replace(/\s+/g, " ").trim();
   return s.length > limit ? `${s.slice(0, limit - 1)}…` : s;
 }
+
+/** A record's note for a turn that ended on an error, from what the agent wrote of it: `Error: <what the API said>` —
+ *  the message inside the API's JSON where there is one (`400: {"error": {"message": …}}`), with the status before it
+ *  when the agent wrote one; else the first line as it is. */
+export function errorNote(said: string, limit = ERROR_CHARS): string {
+  const text = said.trim();
+  const at = text.indexOf("{");
+  let message = "";
+  if (at >= 0) {
+    try {
+      const v = JSON.parse(text.slice(at)) as { error?: { message?: unknown } | string; message?: unknown };
+      const m = typeof v.error === "object" && v.error ? v.error.message : typeof v.error === "string" ? v.error : v.message;
+      if (typeof m === "string" && m.trim()) message = `${/^\d{3}\b/.exec(text)?.[0] ?? ""} ${m.trim()}`.trim();
+    } catch { /* not JSON: as it is */ }
+  }
+  const line = (message || text).split("\n").find((l) => l.trim())?.trim() ?? "";
+  return `Error: ${oneLine(line, limit) || "这一轮出错结束"}`;
+}
+const ERROR_CHARS = 300;
 
 export function clipText(text: string, limit = MESSAGE_CHARS): string {
   const s = text.trim();

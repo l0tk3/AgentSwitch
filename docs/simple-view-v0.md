@@ -34,7 +34,7 @@
 | `user` | 你说的话；带的图片数；`queued`：发出时它正忙，还没读到 |
 | `answer` | 它的回答，Markdown 全文（不再截到 2000 字；超过 20000 字才截，标 `clipped`）。带 `thinking: true` 的是**它路上想的**（见下） |
 | `work` | 两段话之间的一段工作：用时，和一列**步骤** |
-| `note` | 一行说明：`Interrupted`、`Compacted` 等。Codex 一轮出错结束时是 `Error: <接口说的话>`（取自这一轮结尾 `task_complete` 的 `error`，没有回答也没有条目时只有这里写了；2026-11-27，用户 #55） |
+| `note` | 一行说明：`Interrupted`、`Compacted` 等。Codex 一轮出错结束时是 `Error: <接口说的话>`（取自这一轮结尾 `task_complete` 的 `error`，没有回答也没有条目时只有这里写了；2026-11-27，用户 #55）。其他几家也一样（2026-11-28，用户 #125，假接口回 400 实测）：Claude Code 自己写成回答的那条（`isApiErrorMessage`，`API Error: 400 …`）改记成 `Error: …`，不再算它的回答；pi 停在出错上的回答（`stopReason: "error"`，`errorMessage`）；OpenCode 这一轮结尾的 `idle` 行（`outcome: failed` 和接口的 `error`）；Antigravity 会话文件 `conversations/<id>.db` 里的出错步骤（`step_type` 17，transcript.jsonl 里没有）。OpenCode、pi 被 Esc 打断记 `Interrupted`。这些说明只进记录，会话的消息列表（`GET /sessions/<agent>/<id>`）里没有 |
 
 **步骤**：`read`（读文件）、`search`（搜索）、`list`（列目录）、`run`（跑命令）、`edit`（改文件，带增删行数）、`write`（新建文件）、`web`（联网）、`agent`（派子代理）、`todo`（更新任务清单）、`tool`（其他工具，写工具名）。每一步一行字（文件、命令、查询），`run` 带输出的末尾（至多 600 字），失败的标出。一步还可以带 `note`：**它自己说这一步是做什么的**（Claude Code 每条命令都带一句 `description`）。命令的全文和全部输出不在记录里，点开那一步时另取（§4）。
 

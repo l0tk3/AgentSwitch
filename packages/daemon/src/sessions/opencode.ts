@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 import { promisify } from "node:util";
 import { OWN_OPENCODE_AGENTS } from "../core/probes.js";
 import { obj, str } from "./jsonl.js";
-import { clipText, MESSAGE_CHARS, type SessionMessage } from "./types.js";
+import { clipText, errorNote, MESSAGE_CHARS, type SessionMessage } from "./types.js";
 
 export type OpenCodeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
 
@@ -66,10 +66,17 @@ export function openCodeSessions(path: string, limit: number): OpenCodeFacts[] {
  *  says where it stands (`at`: its row and its part), so the same one is the same one at the next read. */
 export function openCodeMessages(path: string, id: string, limit: number, chars = MESSAGE_CHARS): SessionMessage[] | null {
   return withDb(path, null as SessionMessage[] | null, (db) => {
-    const rows = db.prepare("SELECT seq, type, data, time_created FROM session_message WHERE session_id = ? AND type IN ('user', 'assistant') ORDER BY seq DESC LIMIT ?").all(id, limit * 3) as { seq: number; type: string; data: string; time_created: number }[];
+    const rows = db.prepare("SELECT seq, type, data, time_created FROM session_message WHERE session_id = ? AND type IN ('user', 'assistant', 'idle') ORDER BY seq DESC LIMIT ?").all(id, limit * 3) as { seq: number; type: string; data: string; time_created: number }[];
     const out: SessionMessage[] = [];
     for (const row of rows.reverse()) {
       const data = obj(parse(row.data)), base = Number(row.seq) * PARTS;
+      // How its turn ended (`idle`, OpenCode 2: `outcome` succeeded | failed | interrupted, with the API's `error`
+      // when it failed): a note of the record when it did not end well.
+      if (row.type === "idle") {
+        if (data.outcome === "failed") out.push({ role: "note", text: errorNote(str(obj(data.error).message)), ts: row.time_created, at: base });
+        else if (data.outcome === "interrupted") out.push({ role: "note", text: "Interrupted", ts: row.time_created, at: base });
+        continue;
+      }
       if (row.type === "user") {
         const text = str(data.text).split("\n\nUser environment context")[0]!.trim();
         if (text) out.push({ role: "user", text: clipText(text, chars), ts: row.time_created, at: base });

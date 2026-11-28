@@ -5,6 +5,7 @@
  *  in the terminal). */
 
 import { worthShowing } from "../sessions/titles.js";
+import { errorNote } from "../sessions/types.js";
 import type { Writing } from "../core/writing.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -270,6 +271,9 @@ export type CompanionLink = {
   subagents?(list: readonly { readonly id: string; readonly type: string; readonly name: string }[]): void;
   /** What it is writing now, where the companion hears it (Codex's server, OpenCode's): null once it is not. */
   writing?(writing: Writing | null): void;
+  /** Its turn ended on an error, where the companion hears it (OpenCode's `session.execution.failed`): what went wrong
+   *  (`Error: …`). The turn ends as a failed one. */
+  failed?(said: string): void;
 };
 
 /** pi's built-in tools under the names and fields the protected-path floor reads (Claude Code's); anything else, an
@@ -331,6 +335,9 @@ export type TerminalHostOptions = {
    *  profile (null: the Mac's own). Kept so the conversation goes on under the same one (docs/profiles-v0.md §3.3). */
   /** A turn of Claude Code's ended on an API error (StopFailure): a refusal among them (api/roomRewind.ts). */
   readonly failed?: (id: string) => void;
+  /** Antigravity: the latest error step of a conversation (sessions/agy.ts `agyErrors`), or null — how a turn that
+   *  ended on an error is known, its status line saying `idle` all along. */
+  readonly agyError?: (conversation: string) => { readonly at: number; readonly text: string } | null;
   /** The model traffic gateway (vault/modelGate.ts): a terminal about to start gets its way through it, or null. */
   readonly modelGate?: { open(scope: { terminal: string; /** The agent: a profile is one agent's. */ harness?: string; profile: string; upstream: string | null; baseUrl?: string }): Promise<{ proxy: string; ca: string; bundle: string } | null>; close(terminal: string): void };
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
@@ -459,6 +466,8 @@ const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi", "grok", "agy"]
 const SUGGEST_MS = 200;
 /** What a terminal is doing while its agent compacts its context: the tool its `activity` names. */
 const COMPACT_TOOL = "Compact";
+/** Antigravity: the second look for a turn's error step, this long after its status line said `idle` (host.agyFailed). */
+const AGY_ERROR_LOOK_MS = 1_000;
 /** The OSC Codex writes how its turn stands with (`state=working:app=codex`, TerminalHost.codexState). */
 const CODEX_STATE_OSC = 7501;
 /** Codex's server is asked how its Daybreak switch stands this long after its screen named it, and after the
@@ -920,6 +929,10 @@ class Session {
   modelAsked: { readonly model: string; readonly at: number } | null = null;
   /** Antigravity: when its status line was last read (`at`), and the model's name it gave then. */
   agyAt = 0;
+  /** Antigravity: when the last error step it was told of was written (ms); one before the terminal began is not its.
+   *  And the second look for one (`agyFailed`). */
+  agyErrorAt = 0;
+  agyLook: NodeJS.Timeout | null = null;
   meter: TerminalMeter | null = null;
   agyModel = "";
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
@@ -1041,7 +1054,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "modelNamed" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed" | "modelGate">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "mail" | "mailNow" | "prompted" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "modelNamed" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold" | "failed" | "agyError" | "modelGate">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1177,6 +1190,7 @@ export class TerminalHost {
       session: (id) => { if (id && id !== s.agentSessionId) this.reported(s, id); },
       subagents: (list) => this.subagentsAre(s, list),
       writing: (w) => this.writes(s, w),
+      failed: (said) => { this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, false, said, true); this.setStatus(s, "idle"); },
     });
   }
 
@@ -1706,7 +1720,10 @@ export class TerminalHost {
       case "SubagentStop": if (agentId && s.subagents.delete(agentId)) this.doing(s); return null;
       // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
       case "StopFailure": {
-        const error = [p.error, p.error_details].filter((x) => typeof x === "string" && x.trim()).join(": ");
+        // What it showed of it (`last_assistant_message`: `API Error: 400 …`, Claude Code 2.1.332) says more than the
+        // error's kind, which is `unknown` for a 400: as the record's note says it (record.ts).
+        const shown = typeof p.last_assistant_message === "string" ? p.last_assistant_message.trim().replace(/^API Error:\s*/i, "") : "";
+        const error = shown ? errorNote(shown) : [p.error, p.error_details].filter((x) => typeof x === "string" && x.trim()).join(": ");
         this.settleAll(s, "idle");
         this.noSubagents(s);
         this.turnEnded(s, false, error || "这一轮出错结束", true);
@@ -1784,7 +1801,14 @@ export class TerminalHost {
       // pi says which session it writes (read above from `session_id`, as from any call): nothing else changes.
       case "PiSession": return null;
       case "PiAgentStart": this.setStatus(s, "working"); return null;
-      case "PiAgentEnd": this.turnEnded(s, true, null); this.setStatus(s, "idle"); this.opts.mail?.(s.id, false); return null;
+      // A run that ended on the API's error says what pi wrote of it (piExtension.ts `runError`): a failed turn.
+      case "PiAgentEnd": {
+        const error = typeof p.error === "string" && p.error.trim() ? errorNote(p.error) : null;
+        this.turnEnded(s, !error, error);
+        this.setStatus(s, "idle");
+        this.opts.mail?.(s.id, false);
+        return null;
+      }
       // What it is writing: its extension's pieces of the part being written, the text so far; `done` once its
       // message ends (docs/simple-view-v0.md §5.14).
       case "PiWriting":
@@ -1835,6 +1859,8 @@ export class TerminalHost {
             // It leaves no program waiting: what a room has for it is typed in now that it rests (`say`).
             this.opts.mail?.(s.id, false);
           } else this.setStatus(s, "idle");
+          // A turn that ended on an error: the status line said `idle` (a 400 comes back before it says `working`).
+          this.agyFailed(s, true);
         }
         return null;
       }
@@ -2178,6 +2204,25 @@ export class TerminalHost {
     else this.workDone(s);
     this.setStatus(s, "idle");
     return true;
+  }
+
+  /** Antigravity at rest: did its last turn end on an error? Its conversation's file has an error step written since
+   *  the last one told of (and since the terminal began): the turn ends as a failed one, with the error's words. The
+   *  step is written within a moment of the error, about when the status line says `idle` (seen: in time for the
+   *  reading after it, which does not always come): looked at now and once more a moment later (`again`). */
+  private agyFailed(s: Session, again: boolean): void {
+    const id = s.agentSessionId;
+    if (!id || !this.opts.agyError) return;
+    const e = this.opts.agyError(id);
+    if (e && e.at > Math.max(s.createdAt, s.agyErrorAt)) {
+      s.agyErrorAt = e.at;
+      if (s.status === "working" || s.status === "waiting") return;   // a newer turn already runs: that one is not over
+      this.turnEnded(s, false, e.text, true);
+      return;
+    }
+    if (!again || s.agyLook) return;
+    s.agyLook = setTimeout(() => { s.agyLook = null; if (s.exitCode === null) this.agyFailed(s, false); }, AGY_ERROR_LOOK_MS);
+    s.agyLook.unref();
   }
 
   /** A turn ended: from work (a repeated Stop, a start-up idle is none), or `always` (the program exited on an error). */

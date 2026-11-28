@@ -2,7 +2,7 @@
  *  every tool call goes to the service first and is blocked when it touches a protected path; pi's own run events give
  *  the terminal's status — busy from `agent_start`; idle at `agent_settled` (nothing more will run: `agent_end` ends
  *  one run, and a retry, compaction or queued follow-up may start another; `agent_end` still counts for a pi without
- *  `agent_settled`); waiting for you while pi blocks on a question of its own (`ui_prompt_start` … `ui_prompt_end`).
+ *  `agent_settled`; an `agent_end` whose last answer stopped on an error says what it was); waiting for you while pi blocks on a question of its own (`ui_prompt_start` … `ui_prompt_end`).
  *  It also says which session pi writes — at `session_start` (pi's start, and `/new`, `/resume`, `/fork` typed in it)
  *  and with every call after — so the service knows a session open in one of its terminals (docs/terminal-v0.md §5:
  *  one writer; pi keeps no list or lock of its own to look at). It runs inside pi (`pi --extension <this file>`), so
@@ -62,12 +62,25 @@ export default function agentswitch(pi: Pi): void {
   const say = (event: string) => (_event: PiEvent, ctx?: PiContext) => { void call(event, session(ctx)).catch(() => undefined); };
   pi.on("session_start", say("PiSession"));
   pi.on("agent_start", say("PiAgentStart"));
-  pi.on("agent_end", say("PiAgentEnd"));
+  // A run that ended on the API's error (a 400, say) says so with it: what pi wrote of it (host: a failed turn).
+  pi.on("agent_end", (event, ctx) => { const error = runError(event); void call("PiAgentEnd", { ...session(ctx), ...(error ? { error } : {}) }).catch(() => undefined); });
   pi.on("agent_settled", say("PiAgentEnd"));
   pi.on("ui_prompt_start", say("PiWaiting"));
   pi.on("ui_prompt_end", say("PiAgentStart"));
   writing(pi);
   room(pi);
+}
+
+/** What went wrong where pi's run ended on an error: its last answer stopped so (`stopReason: "error"`) and says why
+ *  (`errorMessage`, pi 1.6.0: `400: {…}`); null for a run that ended otherwise. */
+export function runError(event: PiEvent): string | null {
+  const messages = Array.isArray(event.messages) ? (event.messages as unknown[]) : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = (messages[i] ?? {}) as Record<string, unknown>;
+    if (m.role !== "assistant") continue;
+    return m.stopReason === "error" ? (typeof m.errorMessage === "string" && m.errorMessage.trim() ? m.errorMessage.slice(0, 2000) : "error") : null;
+  }
+  return null;
 }
 
 /** Chat Room (docs/chatroom-v0.md §5, §6, §12). Two things run for as long as pi does, both asked of the service with

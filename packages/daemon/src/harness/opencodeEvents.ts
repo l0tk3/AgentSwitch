@@ -4,7 +4,8 @@
  *  endpoint nothing until 4.54 s). The shapes, as 2.0.25 sends them:
  *
  *    session.text.started|delta|ended       { data: { sessionID, assistantMessageID, ordinal, delta | text } }
- *    session.reasoning.started|delta|ended  the same, what it thinks on the way */
+ *    session.reasoning.started|delta|ended  the same, what it thinks on the way
+ *    session.execution.failed               { data: { sessionID, error: { type, message, status, response } } } */
 
 import type { Writing, WritingText } from "../core/writing.js";
 

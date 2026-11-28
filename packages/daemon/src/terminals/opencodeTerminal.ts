@@ -22,6 +22,13 @@ import { attachHeldServer, startHeldServer, type HoldPlace, type Holding, type S
 import type { Companion, CompanionLink } from "./host.js";
 import { WritingFeed, WritingText, type Writing } from "../core/writing.js";
 import { followEventStream, openCodeWriting } from "../harness/opencodeEvents.js";
+import { errorNote } from "../sessions/types.js";
+
+/** What `session.execution.failed` says went wrong, as a line of the record (`Error: <the API's message>`). */
+export function openCodeFailure(data: Readonly<Record<string, unknown>>): string {
+  const error = (data.error ?? {}) as Record<string, unknown>;
+  return errorNote(typeof error.message === "string" ? error.message : "");
+}
 
 /** Between two looks at the server: the status a screen shows is at most this late. */
 const POLL_MS = 500;
@@ -209,7 +216,7 @@ export class OpenCodeCompanion implements Companion {
   attach(link: CompanionLink): void {
     this.link = link;
     this.schedule(0);
-    if (link.writing) void this.followWriting(link.writing.bind(link));
+    if (link.writing || link.failed) void this.followWriting(link.writing?.bind(link) ?? (() => undefined));
   }
 
   /** What it is writing (docs/simple-view-v0.md §5.14): its server's event stream, whose pieces of an answer are there
@@ -229,6 +236,10 @@ export class OpenCodeCompanion implements Companion {
           if (w === null) feed.clear(); else if (w) feed.set(w);
           // A step ended: what it wrote is in its messages, and so in the record.
           if (event.type === "session.step.ended" || event.type === "session.execution.succeeded" || event.type === "session.execution.failed") { feed.clear(); written.reset(); }
+          // Its turn ended on an error (an API's 400, say; Esc is `session.execution.interrupted`): said here, with
+          // the API's message (OpenCode 2, seen 2026-11-28). Such a turn is over within milliseconds, between two of
+          // the looks: they never saw it run, and the terminal knew nothing of it.
+          if (event.type === "session.execution.failed") this.link?.failed?.(openCodeFailure((event.data ?? {}) as Json));
         }, ctl.signal);
       } catch { /* the server went, or the stream broke: looked at again */ }
       feed.clear();

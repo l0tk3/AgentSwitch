@@ -191,10 +191,12 @@ export class SessionMonitor {
   read(harness: SessionHarness, id: string, limit = 80, chars = MESSAGE_CHARS): { session: SessionSummary; messages: SessionMessage[] } | null {
     const session = this.find(harness, id);
     if (!session) return null;
-    if (harness === "opencode") { const messages = openCodeMessages(this.sources.opencodeDb, id, limit, chars); return messages && { session, messages }; }
+    // A record's notes (how a turn ended) are the record's: the messages are what was said, as before.
+    const said = (messages: SessionMessage[]) => messages.filter((m) => m.role !== "note");
+    if (harness === "opencode") { const messages = openCodeMessages(this.sources.opencodeDb, id, limit, chars); return messages && { session, messages: said(messages) }; }
     const path = this.files.get(`${harness}:${id}`);
     if (!path) return null;
-    return { session, messages: messagesOf(harness, path, limit, chars) };
+    return { session, messages: said(messagesOf(harness, path, limit, chars)) };
   }
 
   /** A session's record for the simple view (docs/simple-view-v0.md §2): Claude Code's and Codex's from their files,
@@ -212,7 +214,7 @@ export class SessionMonitor {
     // From the file that was opened, which a terminal of ours has though the list leaves its session out (a scratch
     // folder, nothing said yet): read through the list alone, such a terminal's simple view had no record (pi's and
     // Grok's; found with scripts/grok_terminal_probe.ts, 2026-11-11). OpenCode's are all in its one database.
-    const messages = harness === "opencode" ? this.read(harness, id, MAX_RECORD_LIMIT, Infinity)?.messages : path ? messagesOf(harness, path, MAX_RECORD_LIMIT, Infinity) : null;
+    const messages = harness === "opencode" ? openCodeMessages(this.sources.opencodeDb, id, MAX_RECORD_LIMIT, Infinity) : path ? messagesOf(harness, path, MAX_RECORD_LIMIT, Infinity) : null;
     return messages ? { session, record: recordFromMessages(messages, `u${session.updatedAt.toString(36)}`) } : null;
   }
 

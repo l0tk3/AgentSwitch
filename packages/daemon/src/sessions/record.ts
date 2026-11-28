@@ -393,6 +393,14 @@ function claudeBuild(lines: readonly Line[]): Builder {
       continue;
     }
     if (line.type !== "assistant") continue;
+    // A turn that ended on an API error (a 400, a rate limit, a refused key): Claude Code writes what went wrong as an
+    // answer of its own (`isApiErrorMessage`, `API Error: 400 …`, Claude Code 2.1.332). It is no answer of the
+    // model's: a note, as Codex's (codexError).
+    if (line.isApiErrorMessage === true) {
+      const said = parts(line).map((p) => (p.type === "text" ? str(p.text) : "")).join("\n").trim().replace(/^API Error:\s*/i, "");
+      b.note(at, ts, `Error: ${firstLine(said, ERROR_CHARS) || "这一轮出错结束"}`);
+      continue;
+    }
     const message = obj(line.message);
     const usage = obj(message.usage);
     const model = str(message.model);
@@ -866,6 +874,7 @@ export function recordFromMessages(messages: readonly SessionMessage[], rev: str
     const i = m.at ?? n;
     if (m.role === "user") b.user(i, m.ts, m.text);
     else if (m.role === "assistant") b.answer(i, m.ts, m.text);
+    else if (m.role === "note") b.note(i, m.ts, m.text);
     else { const kind = coarseKind(m.tool ?? ""); b.step(i, m.ts, { kind, text: firstLine(m.text), ...(kind === "tool" && m.tool ? { tool: m.tool } : {}) }); }
   });
   const names = ids(b.items);

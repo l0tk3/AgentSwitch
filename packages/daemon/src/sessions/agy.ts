@@ -10,15 +10,20 @@
  *  (`"CommandLine": "\"rm x.txt\""`) — and the line after it, `type: "GENERIC"`, is what the tool answered.
  *
  *  A conversation belongs to the folders it was started in (`workspace_uris`, `file://` addresses); the first is its
- *  folder. Sub-agents' conversations (`parent_conversation_id`) are left out of the list. */
+ *  folder. Sub-agents' conversations (`parent_conversation_id`) are left out of the list.
+ *
+ *  A turn that ended on an error (an API's 400, say) is in the transcript as the prompt alone, its status line says
+ *  `idle` all along (never `error`), and what went wrong is only on the screen and in the conversation's own file: a
+ *  step of its own in `conversations/<id>.db` (`steps`, `step_type` 17), whose protobuf payload has the error's words
+ *  (seen 2026-11-28 with agy 1.5.18 and a stand-in answering 400: `agyErrors`). */
 
 import { existsSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { obj, str, tailLines as tailOf, headLines as headOf, time, type Json } from "./jsonl.js";
-import { clipText, MESSAGE_CHARS, type SessionMessage } from "./types.js";
+import { clipText, errorNote, MESSAGE_CHARS, type SessionMessage } from "./types.js";
 
 export type AgyFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
 
@@ -149,6 +154,75 @@ export function agyFacts(home: string, id: string): AgyFacts | null {
   });
 }
 
+// ── A turn that ended on an error ───────────────────────────────────────────────────────────────────────────────────
+
+/** The step a turn that ended on an error leaves in the conversation's file (`steps.step_type`; agy 1.5.18). */
+const ERROR_STEP = 17;
+/** The error steps read, the latest last: more is not shown. */
+const ERRORS_READ = 50;
+
+export type AgyError = { /** Its step, the transcript's `step_index` beside it. */ readonly n: number; /** When it was written (ms). */ readonly at: number; readonly text: string };
+
+/** Protobuf's fields, as `[field, value]`: a number for a varint, bytes for anything length-delimited. Throws on what
+ *  is not protobuf. */
+function protoFields(b: Uint8Array): [number, number | Uint8Array][] {
+  const out: [number, number | Uint8Array][] = [];
+  let i = 0;
+  const varint = (): number => {
+    let v = 0, mul = 1;
+    for (let k = 0; k < 10; k++) {
+      if (i >= b.length) throw new Error("short");
+      const c = b[i++]!;
+      v += (c & 0x7f) * mul;
+      if (c < 0x80) return v;
+      mul *= 128;
+    }
+    throw new Error("varint");
+  };
+  while (i < b.length) {
+    const key = varint(), field = Math.floor(key / 8), wire = key % 8;
+    if (wire === 0) out.push([field, varint()]);
+    else if (wire === 2) { const n = varint(); if (i + n > b.length) throw new Error("short"); out.push([field, b.subarray(i, i + n)]); i += n; }
+    else if (wire === 1) i += 8;
+    else if (wire === 5) i += 4;
+    else throw new Error("wire");
+  }
+  return out;
+}
+const field = (b: Uint8Array, n: number): Uint8Array | null => { const f = protoFields(b).find(([k, v]) => k === n && typeof v !== "number"); return f ? (f[1] as Uint8Array) : null; };
+const number = (b: Uint8Array, n: number): number => { const f = protoFields(b).find(([k, v]) => k === n && typeof v === "number"); return f ? (f[1] as number) : 0; };
+
+/** An error step's words: `Error: 400 <the API's message>` where its detail has that shape (`… Error 400, Message: …,
+ *  Status: …`), else the detail without the program's own lead-in (`agent executor error: …: `), else its headline.
+ *  The payload (seen): 5 its metadata (1 when: seconds, nanos), 24 → 3 the error (1 headline, 2 detail, 7 status). */
+export function agyErrorOf(payload: Uint8Array): { at: number; text: string } | null {
+  try {
+    const error = field(field(payload, 24) ?? new Uint8Array(), 3);
+    if (!error) return null;
+    const words = (n: number) => { const b = field(error, n); return b ? new TextDecoder().decode(b).trim() : ""; };
+    const detail = words(2).split("\n")[0]!.trim(), headline = words(1);
+    const api = /\bError (\d{3}), Message: ([\s\S]*?)(?:, Status: [^,]*)?(?:, Details: .*)?$/.exec(detail);
+    const said = api ? `${api[1]} ${api[2]!.trim()}` : detail.replace(/^(?:[a-z][a-z ]*: )+/, "") || headline;
+    const when = field(field(payload, 5) ?? new Uint8Array(), 1);
+    const at = when ? number(when, 1) * 1000 + Math.floor(number(when, 2) / 1e6) : 0;
+    return { at, text: errorNote(said) };
+  } catch {
+    return null;
+  }
+}
+
+/** A conversation's error steps, the latest last (none where its file cannot be read). */
+export function agyErrors(home: string, id: string, limit = ERRORS_READ): AgyError[] {
+  if (!ID.test(id)) return [];
+  return withDb(join(home, "conversations", `${id}.db`), [] as AgyError[], (db) => {
+    const rows = db.prepare("SELECT idx, step_payload FROM steps WHERE step_type = ? ORDER BY idx DESC LIMIT ?").all(ERROR_STEP, limit) as { idx: number; step_payload: Uint8Array | null }[];
+    return rows.reverse().flatMap((r) => {
+      const e = r.step_payload ? agyErrorOf(r.step_payload) : null;
+      return e ? [{ n: Number(r.idx), ...e }] : [];
+    });
+  });
+}
+
 /** The last `limit` messages: prompts, replies, and a line for each step that is a tool's. */
 export function agyMessages(home: string, id: string, limit: number, chars = MESSAGE_CHARS): SessionMessage[] {
   return ID.test(id) ? agyMessagesIn(agyTranscript(home, id), limit, chars) : [];
@@ -174,7 +248,20 @@ export function agyMessagesIn(path: string, limit: number, chars = MESSAGE_CHARS
       out.push({ role: "tool", tool: type.toLowerCase(), text: clipText(str(line.content), chars), ts, ...where });
     }
   }
-  return out.slice(-limit);
+  return withErrors(out, path).slice(-limit);
+}
+
+/** The error steps of the conversation whose transcript is `path` (`<home>/brain/<id>/.system_generated/logs/…`), each
+ *  a note in its place among the transcript's steps (its step's number beside theirs); none before what was read. */
+function withErrors(out: SessionMessage[], path: string): SessionMessage[] {
+  const brain = dirname(dirname(dirname(dirname(path))));
+  const id = basename(dirname(dirname(dirname(path))));
+  if (basename(brain) !== "brain" || !ID.test(id)) return out;
+  const first = out.find((m) => m.at !== undefined)?.at ?? 0;
+  const errors = agyErrors(dirname(brain), id).filter((e) => e.n >= first);
+  if (!errors.length) return out;
+  const notes: SessionMessage[] = errors.map((e) => ({ role: "note", text: e.text, ts: e.at, at: e.n }));
+  return [...out, ...notes].map((m, i) => ({ m, i })).sort((a, b) => (a.m.at ?? -1) - (b.m.at ?? -1) || a.i - b.i).map((x) => x.m);
 }
 
 /** Whether its record is being written now: the index says when it was last touched, the transcript may be newer. */

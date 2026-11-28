@@ -68,6 +68,7 @@ import { mergeLogged } from "./models/discovery.js";
 import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
 import { ensureGrokHooks, ensureGrokKit, grokHome } from "./terminals/grokHooks.js";
 import { AGY_HOME_VAR, agyGeminiDir, agyHome, ensureAgyMcp } from "./terminals/agy.js";
+import { agyErrors } from "./sessions/agy.js";
 import { listAgyKeyModels } from "./models/agyModels.js";
 import { ModelOffers } from "./models/modelOffers.js";
 import { readOpenCodeVariants } from "./models/opencodeVariants.js";
@@ -513,6 +514,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       // (api/roomRewind.ts, user #288): nothing is handed it meanwhile.
       mail: (id, takes) => (!roomKit.has(id) ? null : seatRewind?.refused(id) ? null : roomDelivery.atTurnEnd(id, takes)),
       failed: (id) => { if (roomKit.has(id)) setTimeout(() => seatRewind?.refused(id), 800).unref(); },
+      // Antigravity's turn that ended on an error: in its conversation's own file alone (sessions/agy.ts).
+      agyError: (conversation) => agyErrors(agyHome(), conversation, 1)[0] ?? null,
       mailNow: (id) => (roomKit.has(id) ? roomDelivery.duringTurn(id) : null),
       prompted: (id, prompt) => roomDelivery.userTyped(id, prompt),
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
