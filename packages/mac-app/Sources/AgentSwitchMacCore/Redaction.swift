@@ -57,6 +57,18 @@ public struct RedactionState: Decodable, Equatable, Sendable {
     public let logDir: String
 }
 
+/// Another node's replacement settings (2026-11-28, user #89-#91): what is said when they cannot be had.
+public enum RedactionRemote {
+    /// A node from before the routes were let through answers 404 to them.
+    public static let tooOld = "这个节点的 AgentSwitch 还不能远程设置替换：先把它更新到新版。"
+
+    /// What to say of `error` on another node; nil: say it as for this Mac.
+    public static func problem(_ error: Error) -> String? {
+        if case .notSupported = error as? DaemonError { return tooOld }
+        return nil
+    }
+}
+
 public extension DaemonClient {
     func redaction() async throws -> RedactionState { try decode(RedactionState.self, try await call("GET", "/redaction", timeout: 10)) }
 
@@ -66,10 +78,12 @@ public extension DaemonClient {
         return try decode(Answer.self, try await call("PATCH", "/redaction/settings", body: patch, timeout: 10)).settings
     }
 
-    /// A word added (to a room's list when `room`), and the warning when its replacement goes one way only.
+    /// A word added (to a room's list when `room`), and the warning when its replacement goes one way only. On another
+    /// node (`onNode`) the word is first sealed by that node (`vaultSeal`, as a profile's key is) and only the
+    /// ciphertext goes in the request (2026-11-28, user #89-#91).
     func addRedactWord(_ value: String, replace: String?, regex: Bool = false, room: String? = nil) async throws -> (word: RedactWord, warning: String?) {
         struct Answer: Decodable { let word: RedactWord; let warning: String? }
-        var body: [String: Any] = ["value": value]
+        var body: [String: Any] = nodeId == nil ? ["value": value] : ["sealed": try await vaultSeal(value)]
         if regex { body["regex"] = true }
         if let replace, !replace.isEmpty { body["replace"] = replace }
         let path = room.map { "/rooms/\(DaemonClient.segment($0))/redaction/words" } ?? "/redaction/words"

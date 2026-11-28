@@ -8,6 +8,10 @@ import SwiftUI
 /// sides, and their cleaning.
 struct RedactionView: View {
     @Environment(AppModel.self) private var model
+    /// Another node's settings (2026-11-28, user #89-#91: the paired nodes' too); nil: this Mac's. Its logs stay there:
+    /// they hold the text as it was before the words were replaced, and are not shown here.
+    var node: String? = nil
+    private var client: DaemonClient { model.client(on: node) }
     @State private var state: RedactionState?
     @State private var problem: String?
     @State private var said: String?
@@ -27,7 +31,7 @@ struct RedactionView: View {
                 // Off: nothing of it is there to use (user #343), the rooms' words neither.
                 if state.settings.enabled {
                     words(state)
-                    logSection(state)
+                    if node == nil { logSection(state) }
                 }
             } else if let problem {
                 Text(problem).foregroundStyle(.secondary)
@@ -57,7 +61,7 @@ struct RedactionView: View {
                 Toggle("Replace This Computer's Name", isOn: bind(\.host, "host"))
             }
             if !s.gateway && s.settings.enabled {
-                Text("这台机器上没有找到网关程序，终端照常启动、不经过网关。").foregroundStyle(.orange)
+                Text(node == nil ? "这台机器上没有找到网关程序，终端照常启动、不经过网关。" : "这个节点上没有找到网关程序，它的终端照常启动、不经过网关。").foregroundStyle(.orange)
             }
         } header: {
             SectionLabel("Model Traffic")
@@ -163,7 +167,7 @@ struct RedactionView: View {
             Text(picked.isEmpty ? "All Terminals" : picked.count == 1 ? "1 Terminal" : "\(picked.count) Terminals")
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .task { if RedactionDemo.current == nil { terminals = (try? await model.client.terminals().terminals) ?? [] } }
+        .task { if RedactionDemo.current == nil { terminals = (try? await client.terminals().terminals) ?? [] } }
     }
 
     private func size(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
@@ -172,38 +176,45 @@ struct RedactionView: View {
 
     private func load() async {
         do {
-            let s = try await model.client.redaction()
+            let s = try await client.redaction()
             state = s
             problem = nil
-            let l = try await model.client.redactLogs()
+            guard node == nil else { return }
+            let l = try await client.redactLogs()
             logs = l.logs
             logDir = l.dir
         } catch {
-            problem = (error as? CommandError)?.message ?? error.localizedDescription
+            problem = explain(error)
         }
     }
 
+    /// What went wrong, in the page's words: on another node, one too old for these routes is said so.
+    private func explain(_ error: Error) -> String {
+        if node != nil, let tooOld = RedactionRemote.problem(error) { return tooOld }
+        return (error as? CommandError)?.message ?? (error as? DaemonError)?.reason ?? error.localizedDescription
+    }
+
     private func patch(_ p: [String: Any]) async {
-        do { _ = try await model.client.setRedaction(try JSONSerialization.data(withJSONObject: p)); await load() } catch { said = (error as? CommandError)?.message ?? error.localizedDescription }
+        do { _ = try await client.setRedaction(try JSONSerialization.data(withJSONObject: p)); await load() } catch { said = explain(error) }
     }
 
     private func add(_ v: String, _ r: String, room: String?) async {
         do {
-            let (_, warning) = try await model.client.addRedactWord(v.trimmingCharacters(in: .whitespaces), replace: r.trimmingCharacters(in: .whitespaces), regex: regex, room: room)
+            let (_, warning) = try await client.addRedactWord(v.trimmingCharacters(in: .whitespaces), replace: r.trimmingCharacters(in: .whitespaces), regex: regex, room: room)
             said = warning
             value = ""; replace = ""; regex = false
             await load()
         } catch {
-            said = (error as? CommandError)?.message ?? error.localizedDescription
+            said = explain(error)
         }
     }
 
     private func remove(_ w: RedactWord, room: String?) async {
-        do { try await model.client.removeRedactWord(w.id, room: room); await load() } catch { said = (error as? CommandError)?.message ?? error.localizedDescription }
+        do { try await client.removeRedactWord(w.id, room: room); await load() } catch { said = explain(error) }
     }
 
     private func clean(_ days: Int?) async {
-        do { let n = try await model.client.cleanRedactLogs(olderThan: days); said = "已删除 \(n) 个日志文件。"; await load() } catch { said = (error as? CommandError)?.message ?? error.localizedDescription }
+        do { let n = try await client.cleanRedactLogs(olderThan: days); said = "已删除 \(n) 个日志文件。"; await load() } catch { said = explain(error) }
     }
 
     /// A day's log shown where it is kept, in the Finder (user #398: 点击打开存储位置 而不是点击直接打开日志).

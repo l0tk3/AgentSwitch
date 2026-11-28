@@ -258,7 +258,7 @@ struct SettingsView: View {
         switch tab {
         case .pairing: PairingView()
         case .nodes: NodesView()
-        case .redaction: RedactionView()
+        case .redaction: RedactionSettingsView()
         case .agents: AgentsSettingsView()
         case .profiles: ProfilesSettingsView()
         case .addons: AddonsView()

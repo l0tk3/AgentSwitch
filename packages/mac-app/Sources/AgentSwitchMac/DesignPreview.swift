@@ -54,6 +54,14 @@ enum DesignPreview {
                         try await renderSettings(.redaction, model: model, appearance: NSAppearance(named: appearance), height: 1500,
                                                  to: directory.appendingPathComponent("settings-redaction\(suffix).png"))
                     }
+                    // With nodes paired: the Node picker; another node chosen — its switches and words, no logs (user #89-#91).
+                    model.loadDemoNodes()
+                    try await renderSettings(.redaction, model: model, appearance: NSAppearance(named: .aqua), height: 1500,
+                                             to: directory.appendingPathComponent("settings-redaction-nodes.png"))
+                    if let peer = model.nodes.nodes.first {
+                        try await renderSheet(RedactionSettingsView(node: peer.id).frame(width: 720, height: 900), model: model, appearance: NSAppearance(named: .aqua),
+                                              to: directory.appendingPathComponent("settings-redaction-node.png"))
+                    }
                     // Switched off: the switch alone (user #343).
                     if let d = RedactionDemo.current {
                         RedactionDemo.current = .init(state: d.state.turnedOff, logs: d.logs, rooms: d.rooms, roomWords: d.roomWords, said: nil)
