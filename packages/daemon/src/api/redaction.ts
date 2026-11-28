@@ -63,14 +63,15 @@ export function mountRedaction(app: Hono, deps: ApiDeps): void {
     if (!r.store.settings().enabled) return c.json({ error: "替换词功能已关闭：先在「设置 › Redaction」打开。" }, 409);
     const body = await parseBody(c, AddWord);
     if (!body.ok) return c.json({ error: body.error }, 400);
-    // The word itself, or sealed by this node first (`POST /vault/seal`): another node sends it only sealed.
+    // The word itself, or sealed by this node first (`POST /vault/seal` with `for: "redaction"`): another node sends
+    // it only sealed. What was sealed for anything else — a profile's key — does not open here: a word is shown again.
     const { value: plain, sealed } = body.data;
     if ((plain === undefined) === (sealed === undefined)) return c.json({ error: "value or sealed: one of them" }, 400);
     if (plain !== undefined && remoteCaller(c.env)) return c.json({ error: "从别的节点加替换词要先加密（sealed）。" }, 400);
     let value = plain ?? "";
     if (sealed !== undefined) {
       if (!deps.unseal || !isVaultSealed(sealed)) return c.json({ error: "sealed: 不是这个节点加密的内容。" }, 400);
-      try { value = deps.unseal(sealed); } catch { return c.json({ error: "sealed: 不是这个节点加密的内容。" }, 400); }
+      try { value = deps.unseal(sealed, "redaction"); } catch { return c.json({ error: "sealed: 不是这个节点加密的内容。" }, 400); }
       if (!value || value.length > 4000) return c.json({ error: "value: 1 to 4000 characters" }, 400);
     }
     try {

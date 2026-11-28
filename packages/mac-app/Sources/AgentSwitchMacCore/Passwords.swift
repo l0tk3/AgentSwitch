@@ -74,9 +74,12 @@ public extension DaemonClient {
 
     /// A secret sealed under the node's own vault key (packages/daemon/src/vault/seal.ts): what a profile keeps of
     /// its API key, a proxy's password or a session key, in place of a gate's ciphertext (user #369).
-    func vaultSeal(_ value: String) async throws -> String {
+    /// `use`: what it is sealed for, when it is to open as that alone (`redaction`: a replacement word).
+    func vaultSeal(_ value: String, for use: String? = nil) async throws -> String {
         struct A: Decodable { let token: String }
-        return try decode(A.self, try await call("POST", "/vault/seal", body: try JSONSerialization.data(withJSONObject: ["value": value]), timeout: 10)).token
+        var body = ["value": value]
+        if let use { body["for"] = use }
+        return try decode(A.self, try await call("POST", "/vault/seal", body: try JSONSerialization.data(withJSONObject: body), timeout: 10)).token
     }
 
     func generatePassword(length: Int = 20) async throws -> String {

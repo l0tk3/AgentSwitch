@@ -31,10 +31,10 @@ export type ApiDeps = {
   /** The words the model never sees, and the gateway that replaces them (vault/; api/redaction.ts). */
   /** A value sealed under the vault's key (vault/seal.ts): what a screen sends of a profile's API key, a proxy's
    *  password or a session key, in place of a gate's ciphertext. */
-  readonly seal?: (value: string) => string;
-  /** What `seal` made, opened again: a word another node sends for this one's replacement comes sealed
-   *  (api/redaction.ts). Throws when it is not this vault's. */
-  readonly unseal?: (token: string) => string;
+  readonly seal?: (value: string, use?: string) => string;
+  /** What `seal` made for `use`, opened again: a word another node sends for this one's replacement comes sealed
+   *  for `redaction` (api/redaction.ts). Throws when it is not this vault's, or was sealed for something else. */
+  readonly unseal?: (token: string, use: string) => string;
   /** The password book (vault/passwords.ts; api/passwords.ts). */
   readonly passwords?: import("../vault/passwords.js").PasswordBook;
   readonly redaction?: { readonly store: import("../vault/words.js").RedactionStore; readonly gate: import("../vault/modelGate.js").ModelGate };

@@ -229,7 +229,7 @@ describe("over HTTP (this Mac's screens only)", () => {
     const store = new RedactionStore(h, [key], () => 1, WHO);
     const gate = new ModelGate({ home: h, bin: null, store, roomsOf: () => [] });
     const app = new Hono();
-    mountRedaction(app, { redaction: { store, gate }, unseal: (t: string) => openValue([key], t), rooms: { get: (id: string) => { if (id !== "r1") throw Object.assign(new Error("no"), { status: 404 }); return {}; } } } as never);
+    mountRedaction(app, { redaction: { store, gate }, unseal: (t: string, use: string) => openValue([key], t, use), rooms: { get: (id: string) => { if (id !== "r1") throw Object.assign(new Error("no"), { status: 404 }); return {}; } } } as never);
     const as = (platform?: string) => async (method: string, path: string, body?: unknown) => {
       const res = await app.request(path, { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) }, markRemote({}, { deviceId: "d1", ...(platform ? { platform } : {}) }));
       return { status: res.status, json: (await res.json()) as Record<string, any> };
@@ -242,16 +242,21 @@ describe("over HTTP (this Mac's screens only)", () => {
     // The word as it is is refused; sealed by this node's key it is taken, and kept as the word.
     expect((await node("POST", "/redaction/words", { value: "project-falcon" })).status).toBe(400);
     expect(store.words()).toEqual([]);
-    const added = await node("POST", "/redaction/words", { sealed: sealValue(key, "project-falcon"), replace: "P" });
+    const added = await node("POST", "/redaction/words", { sealed: sealValue(key, "project-falcon", "redaction"), replace: "P" });
     expect(added).toMatchObject({ status: 201, json: { word: { value: "project-falcon", replace: "P" } } });
-    expect((await node("POST", "/rooms/r1/redaction/words", { sealed: sealValue(key, "room-word-1") })).status).toBe(201);
+    expect((await node("POST", "/rooms/r1/redaction/words", { sealed: sealValue(key, "room-word-1", "redaction") })).status).toBe(201);
     expect((await node("GET", "/rooms/r1/redaction/words")).json.words.map((w: { value: string }) => w.value)).toEqual(["room-word-1"]);
     expect((await node("DELETE", `/redaction/words/${added.json.word.id}`)).status).toBe(200);
     // Not this vault's, not sealed at all, both at once, too short once opened.
-    expect((await node("POST", "/redaction/words", { sealed: sealValue(Buffer.alloc(32, 1), "project-falcon") })).status).toBe(400);
+    expect((await node("POST", "/redaction/words", { sealed: sealValue(Buffer.alloc(32, 1), "project-falcon", "redaction") })).status).toBe(400);
     expect((await node("POST", "/redaction/words", { sealed: "project-falcon" })).status).toBe(400);
-    expect((await node("POST", "/redaction/words", { value: "project-falcon", sealed: sealValue(key, "project-falcon") })).status).toBe(400);
-    expect((await node("POST", "/redaction/words", { sealed: sealValue(key, "ab") })).status).toBe(400);
+    // What this node sealed for something else (a profile's key is sealed for no use): not opened as a word.
+    expect((await node("POST", "/redaction/words", { sealed: sealValue(key, "sk-a-profiles-api-key") })).status).toBe(400);
+    expect((await node("POST", "/redaction/words", { sealed: sealValue(key, "sk-a-profiles-api-key", "other") })).status).toBe(400);
+    expect(() => openValue([key], sealValue(key, "project-falcon", "redaction"))).toThrow();
+    expect(store.words()).toEqual([]);
+    expect((await node("POST", "/redaction/words", { value: "project-falcon", sealed: sealValue(key, "project-falcon", "redaction") })).status).toBe(400);
+    expect((await node("POST", "/redaction/words", { sealed: sealValue(key, "ab", "redaction") })).status).toBe(400);
     expect((await node("POST", "/redaction/words", {})).status).toBe(400);
     // The logs and what is kept of them: this Mac's own.
     expect((await node("GET", "/redaction/logs")).status).toBe(403);
@@ -263,7 +268,7 @@ describe("over HTTP (this Mac's screens only)", () => {
     for (const who of [as("ios"), as()]) {
       expect((await who("GET", "/redaction")).status).toBe(403);
       expect((await who("PATCH", "/redaction/settings", { enabled: false })).status).toBe(403);
-      expect((await who("POST", "/redaction/words", { sealed: sealValue(key, "project-falcon") })).status).toBe(403);
+      expect((await who("POST", "/redaction/words", { sealed: sealValue(key, "project-falcon", "redaction") })).status).toBe(403);
       expect((await who("GET", "/rooms/r1/redaction/words")).status).toBe(403);
       expect((await who("DELETE", "/rooms/r1/redaction/words/x")).status).toBe(403);
     }

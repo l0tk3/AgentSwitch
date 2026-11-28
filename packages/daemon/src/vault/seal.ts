@@ -8,19 +8,24 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 export const VAULT_PREFIX = "asv:1:";
 export const isVaultSealed = (token: string): boolean => token.startsWith(VAULT_PREFIX);
 
-export function sealValue(key: Buffer, value: string): string {
+/** `use`: what the value is sealed for, bound into it (GCM's associated data): one sealed for a use opens only when
+ *  that use is named, and one sealed for none only when none is — a profile's key cannot be opened as a replacement
+ *  word, which a screen is shown again, nor a word as a key (2026-11-28, review of user #89-#91). */
+export function sealValue(key: Buffer, value: string, use?: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", key, iv);
+  if (use) c.setAAD(Buffer.from(use, "utf8"));
   const body = Buffer.concat([c.update(value, "utf8"), c.final()]);
   return VAULT_PREFIX + Buffer.concat([iv, c.getAuthTag(), body]).toString("base64url");
 }
 
-export function openValue(keys: readonly Buffer[], token: string): string {
+export function openValue(keys: readonly Buffer[], token: string, use?: string): string {
   const blob = Buffer.from(token.slice(VAULT_PREFIX.length), "base64url");
   for (const key of keys) {
     try {
       const d = createDecipheriv("aes-256-gcm", key, blob.subarray(0, 12));
       d.setAuthTag(blob.subarray(12, 28));
+      if (use) d.setAAD(Buffer.from(use, "utf8"));
       return Buffer.concat([d.update(blob.subarray(28)), d.final()]).toString("utf8");
     } catch { /* the next key */ }
   }

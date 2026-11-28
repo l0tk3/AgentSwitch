@@ -29,6 +29,9 @@ final class RedactionRemoteTests: XCTestCase {
             "POST /nodes/mini/vault/seal", "POST /nodes/mini/redaction/words",
             "POST /nodes/mini/vault/seal", "POST /nodes/mini/rooms/r1/redaction/words",
         ])
+        // Sealed as a replacement word, which is all it then opens as.
+        let seal = try JSONSerialization.jsonObject(with: transport.requests[0].httpBody!) as! [String: Any]
+        XCTAssertEqual(seal["for"] as? String, "redaction")
         for i in [1, 3] {
             let body = try JSONSerialization.jsonObject(with: transport.requests[i].httpBody!) as! [String: Any]
             XCTAssertEqual(body["sealed"] as? String, "asv:1:SEALED")

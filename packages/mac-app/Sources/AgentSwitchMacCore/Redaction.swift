@@ -87,7 +87,7 @@ public extension DaemonClient {
     /// ciphertext goes in the request (2026-11-28, user #89-#91).
     func addRedactWord(_ value: String, replace: String?, regex: Bool = false, room: String? = nil) async throws -> (word: RedactWord, warning: String?) {
         struct Answer: Decodable { let word: RedactWord; let warning: String? }
-        var body: [String: Any] = nodeId == nil ? ["value": value] : ["sealed": try await vaultSeal(value)]
+        var body: [String: Any] = nodeId == nil ? ["value": value] : ["sealed": try await vaultSeal(value, for: "redaction")]
         if regex { body["regex"] = true }
         if let replace, !replace.isEmpty { body["replace"] = replace }
         let path = room.map { "/rooms/\(DaemonClient.segment($0))/redaction/words" } ?? "/redaction/words"
