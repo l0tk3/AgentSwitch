@@ -585,7 +585,7 @@ class ModelGate:
 
         said = False
 
-        def rewrite(chunk: bytes) -> bytes:
+        def rewrite(chunk: bytes) -> list[bytes]:
             # An event this could not read goes on as it came (what comes back holds placeholders at worst, never
             # a word the model was kept from), and the reason is said once: an agent whose stream is cut says only
             # "check any proxy or gateway" (user #448).
@@ -599,7 +599,12 @@ class ModelGate:
                     self.logs.write(self.table, name, "after", {"dir": "in", "url": url, "body": chunk.decode("utf-8", "replace")})
                 if out:
                     self.logs.write(self.table, name, "before", {"dir": "in", "url": url, "body": out.decode("utf-8", "replace")})
-            return out
+            # Nothing to send on yet (what was read holds no whole event: one bigger than a TLS record, a web search's
+            # results, comes in several reads) is no piece at all, not an empty one: mitmproxy writes an empty piece
+            # of a chunked answer as `0\r\n\r\n`, which is the end of the answer, and the agent read a stream that
+            # ended before its results (2026-11-28, user #129: "Streaming response ended before any complete data",
+            # "The search was cut off before any results arrived").
+            return [out] if out else []
 
         # What is put back is not the length that was announced: a stream sent with `content-length` (a relay's; the
         # vendors' own are chunked) was cut short by the difference, and the agent read a broken last event

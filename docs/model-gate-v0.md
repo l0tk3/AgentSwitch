@@ -111,3 +111,21 @@ Settings › Redaction on the Mac has a Node picker, as Profiles has. With a pai
 | An older node | Its remote listener answers `404 {"error":"not found"}`; the Mac says the node has to be updated first. |
 
 Not verified: against a real paired node on another machine (two throw-away services on one Mac were paired and driven through `/nodes/<id>/redaction…`).
+
+## A stream that was ended early (2026-11-28, user #129)
+
+Seen in Claude Code behind the gateway: "Streaming response ended before any complete data was received", and Web Search's "The search was cut off before any results arrived".
+
+- **Cause.** The stream function answered `b""` whenever one read from the provider held no whole event. mitmproxy writes each piece of an HTTP/1.1 chunked answer as a chunk, and an empty chunk is `0\r\n\r\n`: the end of the answer. The agent got a 200 that ended properly, without its last events. The gateway printed nothing, and its own logs looked whole.
+- **When.** An event bigger than one read: over TLS, anything past about 16 KB (a web search's results, a long tool call), or any event a relay hands on in small pieces. Measured against a made-up provider: a 60 KB `web_search_tool_result` was cut before the results every time; 12 KB events never; 20 KB events when the pieces came 0.5 ms or more apart.
+- **Since.** The first version of the gateway. 1b177232 (2026-11-27) made answers sent with `content-length` chunked too, so those were cut the same way from then.
+- **Fix.** Nothing to send is no piece at all (`[]`), never an empty one.
+
+Measured in the same round and not a cause: silences of up to 330 s inside a stream pass; requests of 5 MB and 20 MB are held 0.02–0.22 s; other streams stall at most 0.26 s meanwhile.
+
+Still open from that round:
+- 600 s with no byte either way closes the connection (mitmproxy's `tcp_timeout`); an answer that is not streamed and takes longer gets no response.
+- An answer the provider compresses although `identity` was asked for is not read (seen with gzip: nothing, or bytes that no longer unzip).
+- An event stream that is not labelled `text/event-stream` is held whole until it ends.
+- A provider that dies in the middle of an event reaches the agent as a proper end.
+- Not tested: a real provider, HTTP/2, OpenAI / Gemini / WebSocket streams.

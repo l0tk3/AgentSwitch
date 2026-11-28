@@ -204,7 +204,7 @@ def test_a_stream_put_back_longer_is_not_cut_at_the_length_it_was_announced_with
         f.response.headers["content-type"] = "text/event-stream"
         f.response.headers["content-length"] = str(len(body))
         gate.responseheaders(f)
-        out = f.response.stream(body) + f.response.stream(b"")
+        out = b"".join(f.response.stream(body) + f.response.stream(b""))
         return f, out, body
 
     f, out, body = answered("HTTP/1.1")
@@ -377,3 +377,26 @@ def test_a_long_request_is_not_slow():
     t0 = time.perf_counter()
     assert hide(body, pairs) == body
     assert time.perf_counter() - t0 < 2.0     # 6.5 s before the forms were worked out once
+
+
+def test_an_event_that_comes_in_several_reads_does_not_end_the_answer():
+    """User #129: an event bigger than one read (a web search's results) made the stream function answer b"", which
+    mitmproxy writes into a chunked answer as its end. Nothing to send is no piece at all."""
+    from mitmproxy.test import tflow
+    from secret_gate.model_gate import ModelGate
+
+    gate = ModelGate(Table.parse(json.dumps({"scopes": {"t": {"hosts": ["relay.example"], "pairs": [{"value": "project-falcon", "ref": "h_7kq3m9x2pd"}]}}})), read_stdin=False)
+    f = tflow.tflow(resp=True)
+    f.client_conn.agentswitch_scope = "t"
+    f.request.host = "relay.example"
+    f.response.headers["content-type"] = "text/event-stream"
+    gate.responseheaders(f)
+    big = "x" * 40_000
+    event = ('event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","content":[{"encrypted_content":"%s","title":"h_7kq3m9x2pd"}]}}\n\n' % big).encode()
+    pieces = [f.response.stream(event[i : i + 1400]) for i in range(0, len(event), 1400)]
+    assert all(isinstance(p, list) for p in pieces)
+    assert all(b for p in pieces for b in p), "no empty piece: it would be written as the end of a chunked answer"
+    assert [p for p in pieces[:-1] if p] == []
+    sent = b"".join(b for p in pieces for b in p) + b"".join(f.response.stream(b""))
+    assert big.encode() in sent and b"project-falcon" in sent and b"h_7kq3m9x2pd" not in sent
+
