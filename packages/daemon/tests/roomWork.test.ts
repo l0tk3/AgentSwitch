@@ -197,7 +197,16 @@ describe("a terminal's agent and the shared folders", () => {
     // Codex: one more writable folder. Claude Code: a rule in its settings, and not `--add-dir`, which made it ask
     // at every start whether the folder is trusted.
     const codex = make(files)({ id: "a-codex", harness: "codex", cwd: root, mode: "manual", hookToken: "t" }).args;
-    expect(codex[codex.indexOf("--add-dir") + 1]).toBe(files);
+    // Asking or auto: an entry of its permission profile. Not `--add-dir`: with the asking profile (read-only) Codex
+    // 0.171 refuses that and quits at once (user #125). Bypass has no profile, and takes the flag.
+    expect(codex).not.toContain("--add-dir");
+    expect(codex.find((a) => a.startsWith("permissions.agentswitch="))).toContain(`${JSON.stringify(files)} = "write"`);
+    const auto = make(files)({ id: "a-codex-auto", harness: "codex", cwd: root, mode: "auto", hookToken: "t" }).args;
+    expect(auto).not.toContain("--add-dir");
+    expect(auto.find((a) => a.startsWith("permissions.agentswitch="))).toContain(`${JSON.stringify(files)} = "write"`);
+    const bypass = make(files)({ id: "a-codex-bypass", harness: "codex", cwd: root, mode: "bypass", hookToken: "t" }).args;
+    expect(bypass[bypass.indexOf("--add-dir") + 1]).toBe(files);
+    expect(bypass.some((a) => a.startsWith("permissions.agentswitch="))).toBe(false);
     const claude = make(files)({ id: "a-claude", harness: "claude-code", cwd: root, mode: "manual", hookToken: "t" }).args;
     expect(claude).not.toContain("--add-dir");
     const settings = JSON.parse(readFileSync(claude[claude.indexOf("--settings") + 1]!, "utf8")) as { permissions: { allow: string[] } };

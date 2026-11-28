@@ -430,7 +430,11 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (browser) args.push(...codexBrowserArgs(browser));
         const kitScript = opts.roomKitScript ?? ROOM_KIT_SCRIPT;
         args.push(...codexRoomArgs(node, kitScript));
-        if (opts.roomFiles) args.push("--add-dir", opts.roomFiles);
+        // The rooms' shared folders, writable from the start. Asking or auto: an entry of the permission profile below
+        // (`codexPermissions`). `--add-dir` is for bypass alone: with the asking profile, which is read-only, Codex
+        // 0.171 refuses it ("the effective permissions do not allow additional writable roots") and quits — a terminal
+        // opened to ask closed at once (2026-11-28, user #125).
+        if (opts.roomFiles && req.mode === "bypass") args.push("--add-dir", opts.roomFiles);
         // The same server once more in a file of AgentSwitch's own, so Codex's hidden thread that names the session can
         // start (codexLayer.ts): without it no Codex session started here got a name.
         const codexHome = env.CODEX_HOME || (env.HOME ? join(env.HOME, ".codex") : "");
@@ -451,7 +455,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // With the hooks, the read-denied paths are the PreToolUse floor's (as for Claude Code), not the profile's: Codex
         // never lifts a deny entry, so with one an approved "outside the sandbox" still runs sandboxed, where no setuid
         // program (ps, top, sudo, ping) can start.
-        else args.push("-a", "on-request", ...codexPermissions(req.mode === "auto" ? ":workspace" : ":read-only", opts.protected, { denyReads: !hooked }));
+        else args.push("-a", "on-request", ...codexPermissions(req.mode === "auto" ? ":workspace" : ":read-only", opts.protected, { denyReads: !hooked, ...(opts.roomFiles ? { writable: [opts.roomFiles] } : {}) }));
         // `resume` goes on in the same conversation (Codex locks it against a second writer); `fork` starts a new one.
         // The folder is named (`-C`, the terminal's own): Codex does not ask whether to use the one the session ran in,
         // which may be gone (docs/terminal-v0.md §5).
@@ -618,9 +622,12 @@ export const CODEX_ATTENTION = ["-c", 'tui.notifications=["approval-requested","
 /** Codex's own permission profile for one terminal: asking or auto (`:read-only` / `:workspace`) with the protected
  *  paths on top, not writable, and (`denyReads`) the read-denied ones unreadable. Codex's sandbox enforces it, for the
  *  commands it runs sandboxed (not in bypass). A deny entry holds even for a command the user lets run outside the
- *  sandbox: Codex then keeps it sandboxed. */
-export function codexPermissions(base: ":read-only" | ":workspace", prot?: ProtectedPaths, o: { denyReads?: boolean } = {}): string[] {
+ *  sandbox: Codex then keeps it sandboxed.
+ *  `writable`: folders written without asking under either base (the rooms' shared folders); a protected path
+ *  inside one stays as protected. */
+export function codexPermissions(base: ":read-only" | ":workspace", prot?: ProtectedPaths, o: { denyReads?: boolean; writable?: readonly string[] } = {}): string[] {
   const filesystem: Record<string, string> = {};
+  for (const p of (o.writable ?? []).flatMap(rootSpellings)) filesystem[p] = "write";
   for (const p of (prot?.roots ?? []).flatMap(rootSpellings)) filesystem[p] = "read";
   if (o.denyReads ?? true) for (const p of (prot?.readDenied ?? []).flatMap(rootSpellings)) filesystem[p] = "deny";
   const profile = `{ extends = ${JSON.stringify(base)}, filesystem = ${tomlInline(filesystem)} }`;
