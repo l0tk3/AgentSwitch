@@ -129,3 +129,13 @@ Still open from that round:
 - An event stream that is not labelled `text/event-stream` is held whole until it ends.
 - A provider that dies in the middle of an event reaches the agent as a proper end.
 - Not tested: a real provider, HTTP/2, OpenAI / Gemini / WebSocket streams.
+
+## A terminal's own proxy was passed by (2026-11-28, found while looking into user #129)
+
+A scope's `upstream` — the proxy the terminal would have used without the gateway: its profile's forwarder, Clash — was never used. Every connection of such a terminal went straight out from the Mac, the models' and all the others the gateway passes through, from the gateway's first version (2026-11-25) on.
+
+- **Cause.** The proxy was named in mitmproxy's `server_connect` hook. mitmproxy decides how a connection is made (straight, or a tunnel through a proxy) before that hook, so naming it there did nothing. No test ran the proxy itself.
+- **Measured** (mitmproxy 12.2.3, the version in the Mac app; a forwarder that writes down what it is asked, a made-up target on 127.0.0.1): before, the forwarder was asked nothing in all four cases (https opened, https passed through, plain http opened and not) and the target was reached all the same. After, one `CONNECT` each.
+- **Fix.** The proxy is named when the terminal's `CONNECT` (or plain request) arrives; nothing is connected until what is in the tunnel is known (`connection_strategy = lazy`, set by the addon); the tunnel is then made through the proxy by the layer mitmproxy's own upstream mode uses (`next_layer`). A proxy that is not there is a 502 or a failed connection, never a connection straight out. A scope without a proxy goes straight out as before.
+- **Test.** `tests/test_model_gate_upstream.py` runs mitmdump with the addon.
+- **Not verified.** On the installed app with a real profile's forwarder or Clash; an `https://` or SOCKS upstream (only `http://` proxies are taken, as before).

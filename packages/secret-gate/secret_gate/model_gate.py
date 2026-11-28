@@ -516,23 +516,60 @@ class ModelGate:
         name = getattr(conn, "agentswitch_scope", None)
         return name, (self.table.scopes.get(name) if name else None)
 
+    def running(self) -> None:
+        # Nothing is connected for a CONNECT until what is in the tunnel is known: mitmproxy's default connects at
+        # once, straight to the address, before `next_layer` can send the tunnel on through a scope's proxy.
+        from mitmproxy import ctx
+        ctx.options.connection_strategy = "lazy"
+
+    def _via(self, conn: Any) -> tuple[str, tuple[str, int]] | None:
+        """The proxy a scope's connections go on through (`upstream`), as mitmproxy names one; None: straight out."""
+        _, scope = self._scope(conn)
+        if scope and scope.upstream:
+            u = urlsplit(scope.upstream)
+            if u.hostname and u.port:
+                return ("http", (u.hostname, u.port))
+        return None
+
     def http_connect(self, flow: Any) -> None:
         name = scope_of_auth(flow.request.headers.get("proxy-authorization"))
         flow.client_conn.agentswitch_scope = name
         flow.request.headers.pop("proxy-authorization", None)
+        # Where this tunnel goes on through, said before anything is connected (see `next_layer`).
+        via = self._via(flow.client_conn)
+        if via:
+            flow.server_conn.via = via
 
     def requestheaders(self, flow: Any) -> None:
         # Plain-http proxy requests carry the credentials on every request.
         if flow.request.method != "CONNECT" and getattr(flow.client_conn, "agentswitch_scope", None) is None:
             flow.client_conn.agentswitch_scope = scope_of_auth(flow.request.headers.get("proxy-authorization"))
         flow.request.headers.pop("proxy-authorization", None)
+        # A plain-http request: mitmproxy reads the flow's `via` when it makes the connection for it.
+        if flow.request.method != "CONNECT" and not flow.server_conn.connected:
+            via = self._via(flow.client_conn)
+            if via:
+                flow.server_conn.via = via
 
-    def server_connect(self, data: Any) -> None:
-        _, scope = self._scope(data.client)
-        if scope and scope.upstream:
-            u = urlsplit(scope.upstream)
-            if u.hostname and u.port:
-                data.server.via = ("http", (u.hostname, u.port))
+    def next_layer(self, data: Any) -> None:
+        """A tunnel (CONNECT) of a scope with an `upstream` goes on through that proxy, whatever is in it — a model's
+        TLS the gateway opens, or anything else it passes through unread.
+
+        Until 2026-11-28 the proxy was named in `server_connect`, which is too late: mitmproxy decides how a
+        connection is made before that hook, so every connection went straight out and the terminal's own proxy
+        (a profile's forwarder, Clash) was passed by — measured with a forwarder that saw no request at all. The
+        tunnel layer is what mitmproxy's own upstream mode puts here (`HttpStream.handle_connect_upstream`)."""
+        if data.layer is not None or not data.context.server.via or data.context.server.connected:
+            return
+        if self._via(data.context.client) != data.context.server.via:
+            return
+        from mitmproxy.proxy.layers.http import HttpStream
+        from mitmproxy.proxy.layers.http._upstream_proxy import HttpUpstreamProxy
+        layers = data.context.layers
+        # Right after the CONNECT was answered, once: the layer above is the stream that took the CONNECT.
+        if not layers or not isinstance(layers[-1], HttpStream) or any(isinstance(l, HttpUpstreamProxy) for l in layers):
+            return
+        data.layer = HttpUpstreamProxy.make(data.context, True)[0]
 
     def http_connect_upstream(self, flow: Any) -> None:
         _, scope = self._scope(flow.client_conn)
